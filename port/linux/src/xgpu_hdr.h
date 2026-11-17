@@ -326,7 +326,48 @@ struct xgpu_hdr_frame
 	int sdr_curve;
 	float full_frame;
 	float black;
+	/* display.hdr_gamut (#1124): "expanded" (1) or "srgb" (0, the picture
+	as it was); and the gamut the highlights are expanded into
+	(xgpu_hdr_gamut_target's: -1 sRGB's, 0 P3's, 1 BT.2020's) */
+	int gamut;
+	float gamut_target;
 };
+
+/* display.hdr_gamut "expanded" (#1124): what is past paper white (from
+it, smoothly to XGPU_HDR_GAMUT_REACH times it) has its chroma in Oklab
+scaled out, by up to 1 + XGPU_HDR_GAMUT_CHROMA, its hue and lightness
+kept, softly compressed (a shoulder from XGPU_HDR_GAMUT_KNEE of the room
+on) into the target's gamut and the peak; the room found by
+XGPU_HDR_GAMUT_STEPS halvings */
+#define XGPU_HDR_GAMUT_CHROMA 0.5f
+#define XGPU_HDR_GAMUT_REACH 4.0f
+#define XGPU_HDR_GAMUT_KNEE 0.75f
+#define XGPU_HDR_GAMUT_STEPS 12
+
+/* the gamut target (xgpu_hdr_frame.gamut_target) of a display's
+primaries (red, green, blue, white: x and y each; DXGI's), by the area of
+their triangle: sRGB's -1, P3's 0, BT.2020's 1, between them linearly; 0
+(P3: DCI-P3 at D65, Display P3's) where they are none or make no sense */
+static inline float xgpu_hdr_gamut_target(const float primaries[8])
+{
+	const float srgb = 0.11205f, p3 = 0.15200f, bt2020 = 0.21187f;
+	float area;
+
+	if (!primaries)
+		return 0.0f;
+	area = 0.5f * ((primaries[2] - primaries[0]) * (primaries[5] - primaries[1]) -
+		(primaries[4] - primaries[0]) * (primaries[3] - primaries[1]));
+	area = area < 0.0f ? -area : area;
+	if (!(area > 0.05f && area < 0.3f))
+		return 0.0f;
+	if (area <= p3)
+	{
+		float t = (area - p3) / (p3 - srgb);
+
+		return t < -1.0f ? -1.0f : t;
+	}
+	return area >= bt2020 ? 1.0f : (area - p3) / (bt2020 - p3);
+}
 
 /* display.hdr_peak_nits (#1122): the display's peak in nits, of the
 player's, these at most and least (0: the system's) */
@@ -599,6 +640,125 @@ static inline void xgpu_hdr_to_ui(float rgb[3], float ui)
 		rgb[channel] = xgpu_hdr_encoded(xgpu_hdr_linear(rgb[channel]) / ui);
 }
 
+/* Oklab (#1124), of linear sRGB and back */
+static inline void xgpu_hdr_oklab(const float rgb[3], float lab[3])
+{
+	float l = cbrtf(fmaxf(0.4122214708f * rgb[0] + 0.5363325363f * rgb[1] + 0.0514459929f * rgb[2], 0.0f));
+	float m = cbrtf(fmaxf(0.2119034982f * rgb[0] + 0.6806995451f * rgb[1] + 0.1073969566f * rgb[2], 0.0f));
+	float s = cbrtf(fmaxf(0.0883024619f * rgb[0] + 0.2817188376f * rgb[1] + 0.6299787005f * rgb[2], 0.0f));
+
+	lab[0] = 0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * s;
+	lab[1] = 1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * s;
+	lab[2] = 0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s;
+}
+
+static inline void xgpu_hdr_linear_of_oklab(const float lab[3], float rgb[3])
+{
+	float l = lab[0] + 0.3963377774f * lab[1] + 0.2158037573f * lab[2];
+	float m = lab[0] - 0.1055613458f * lab[1] - 0.0638541728f * lab[2];
+	float s = lab[0] - 0.0894841775f * lab[1] - 1.2914855480f * lab[2];
+
+	l = l * l * l;
+	m = m * m * m;
+	s = s * s * s;
+	rgb[0] = 4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s;
+	rgb[1] = -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s;
+	rgb[2] = -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s;
+}
+
+/* the matrix of linear sRGB to the gamut target's primaries (the target:
+xgpu_hdr_gamut_target's), rows; sRGB's itself to P3's, P3's to BT.2020's
+interpolated */
+static inline void xgpu_hdr_gamut_matrix(float target, float matrix[3][3])
+{
+	static const float p3[3][3] =
+	{
+		{ 0.822462f, 0.177538f, 0.0f },
+		{ 0.033194f, 0.966806f, 0.0f },
+		{ 0.017083f, 0.072397f, 0.910520f },
+	};
+	static const float wide[3][3] =
+	{
+		{ 0.627404f, 0.329283f, 0.043313f },
+		{ 0.069097f, 0.919540f, 0.011362f },
+		{ 0.016391f, 0.088013f, 0.895595f },
+	};
+	int row, column;
+
+	for (row = 0; row < 3; row++)
+	{
+		for (column = 0; column < 3; column++)
+		{
+			float identity = row == column ? 1.0f : 0.0f;
+
+			matrix[row][column] = target < 0.0f ? identity + (p3[row][column] - identity) * (1.0f + target) :
+				p3[row][column] + (wide[row][column] - p3[row][column]) * target;
+		}
+	}
+}
+
+/* a colour of Oklab within the target's gamut (its channels from 0 to the
+peak, to a hair) */
+static inline int xgpu_hdr_in_gamut(const float lab[3], float matrix[3][3], float peak)
+{
+	float rgb[3];
+	int row;
+
+	xgpu_hdr_linear_of_oklab(lab, rgb);
+	for (row = 0; row < 3; row++)
+	{
+		float value = matrix[row][0] * rgb[0] + matrix[row][1] * rgb[1] + matrix[row][2] * rgb[2];
+
+		if (value < -1.0e-5f * peak || value > peak * (1.0f + 1.0e-5f))
+			return 0;
+	}
+	return 1;
+}
+
+/* display.hdr_gamut "expanded" (#1124): one pixel's light (linear sRGB,
+over paper white, at most the peak), in place, past white (white: the
+UI's white or paper white, the brighter) its chroma scaled out in Oklab,
+its hue and lightness kept, softly into the target's gamut; under white
+exactly as it was */
+static inline void xgpu_hdr_gamut(float rgb[3], float peak, float white, float target)
+{
+	float most = fmaxf(rgb[0], fmaxf(rgb[1], rgb[2])), lab[3], matrix[3][3], low = 1.0f,
+		high = 1.0f + XGPU_HDR_GAMUT_CHROMA, room, scale, weight, tried[3];
+	int step;
+
+	weight = xgpu_hdr_smoothstep(white, XGPU_HDR_GAMUT_REACH * white, most);
+	if (!(weight > 0.0f))
+		return;
+	xgpu_hdr_oklab(rgb, lab);
+	if (!(sqrtf(lab[1] * lab[1] + lab[2] * lab[2]) >= 1.0e-6f))
+		return;
+	xgpu_hdr_gamut_matrix(target, matrix);
+	tried[0] = lab[0];
+	tried[1] = lab[1] * high;
+	tried[2] = lab[2] * high;
+	if (!xgpu_hdr_in_gamut(tried, matrix, peak))
+	{
+		for (step = 0; step < XGPU_HDR_GAMUT_STEPS; step++)
+		{
+			float middle = 0.5f * (low + high);
+
+			tried[1] = lab[1] * middle;
+			tried[2] = lab[2] * middle;
+			if (xgpu_hdr_in_gamut(tried, matrix, peak))
+				low = middle;
+			else
+				high = middle;
+		}
+		room = low;
+	}
+	else
+		room = high;
+	scale = xgpu_hdr_shoulder(1.0f + XGPU_HDR_GAMUT_CHROMA * weight, 1.0f + XGPU_HDR_GAMUT_KNEE * (room - 1.0f), room);
+	tried[1] = lab[1] * scale;
+	tried[2] = lab[2] * scale;
+	xgpu_hdr_linear_of_oklab(tried, rgb);
+}
+
 /* the encoding of one pixel's colour (the frame's values after the tone
 map and the HUD) for the display, in place: linear (by the SDR curve),
 times the UI's white, at most the peak, times paper white (and PQ's primaries and curve) */
@@ -614,11 +774,15 @@ static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *fr
 			rgb[channel] = rgb[channel] < 0.0f ? 0.0f : rgb[channel] > 1.0f ? 1.0f : rgb[channel];
 			continue;
 		}
-		light[channel] = xgpu_hdr_black(fminf(xgpu_hdr_sdr_light(rgb[channel], frame->sdr_curve) * ui, frame->peak) *
-			frame->paper_white, frame->black);
+		light[channel] = fminf(xgpu_hdr_sdr_light(rgb[channel], frame->sdr_curve) * ui, frame->peak);
 	}
 	if (frame->output == XGPU_HDR_OUTPUT_SDR)
 		return;
+	/* (display.hdr_gamut "expanded": past white, #1124) */
+	if (frame->gamut)
+		xgpu_hdr_gamut(light, frame->peak, ui > 1.0f ? ui : 1.0f, frame->gamut_target);
+	for (channel = 0; channel < 3; channel++)
+		light[channel] = xgpu_hdr_black(light[channel] * frame->paper_white, frame->black);
 	if (frame->output != XGPU_HDR_OUTPUT_PQ)
 	{
 		for (channel = 0; channel < 3; channel++)

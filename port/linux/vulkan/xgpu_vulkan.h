@@ -809,6 +809,12 @@ void xgpu_vulkan_hdr_peak_nits(int nits);
 system reports them (Windows' DXGI; 0 none), which the tone map and the
 encoding take with a peak of the player's (any thread) */
 void xgpu_vulkan_window_luminance(float black_nits, float full_frame_nits);
+/* display.hdr_gamut (#1124): the highlights' colours expanded past sRGB's
+(any thread) */
+void xgpu_vulkan_hdr_gamut(int expanded);
+/* the gamut the window's display's primaries make (xgpu_hdr_gamut_target:
+0, P3's, where the system says none; any thread) */
+void xgpu_vulkan_window_gamut(float target);
 /* the device's LUID (Windows' adapter's), 0 where it has none */
 int xgpu_vulkan_device_luid(unsigned char luid[8]);
 /* display.gamma (the stream's record, render thread): the setting, 1 for

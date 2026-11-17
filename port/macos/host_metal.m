@@ -194,6 +194,8 @@ static struct
 	_Atomic int hdr_sdr_curve;
 	/* display.hdr_peak_nits's (#1122; 0 the system's) */
 	_Atomic int hdr_peak_nits;
+	/* display.hdr_gamut's (#1124: 1 expanded) */
+	_Atomic int hdr_gamut;
 	_Atomic uint32_t edr_potential, edr_current;
 	BOOL layer_edr;
 	uint32_t edr_ticks;
@@ -408,6 +410,11 @@ void host_metal_hdr_sdr_curve(int curve)
 	atomic_store(&presentation.hdr_sdr_curve, curve);
 }
 
+void host_metal_hdr_gamut(int expanded)
+{
+	atomic_store(&presentation.hdr_gamut, expanded != 0);
+}
+
 void host_metal_hdr_peak_nits(int nits)
 {
 	atomic_store(&presentation.hdr_peak_nits, nits > 0 ? nits : 0);
@@ -454,6 +461,9 @@ void host_metal_hdr_frame(struct xgpu_hdr_frame *frame)
 			paper_white = current;
 		frame->output = XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
 		frame->sdr_curve = xgpu_hdr_sdr_curve_of(atomic_load(&presentation.hdr_sdr_curve), 1);
+		/* (display.hdr_gamut: EDR's colour space is Display P3's, #1124) */
+		frame->gamut = atomic_load(&presentation.hdr_gamut);
+		frame->gamut_target = 0.0f;
 		frame->paper_white = paper_white;
 		frame->peak = current / paper_white;
 		/* (the UI's white, no brighter than the display either) */
@@ -891,6 +901,8 @@ static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable
 		uniforms.hdr[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.ui;
 		uniforms.window[0] = (float)frame.sdr_curve;
 		uniforms.window[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 0.0f : frame.black;
+		uniforms.gamut[0] = frame.output != XGPU_HDR_OUTPUT_SDR && frame.gamut ? 1.0f : 0.0f;
+		uniforms.gamut[1] = frame.gamut_target;
 		[encoder setRenderPipelineState:presentation.edr_pipeline];
 		[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
 		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];

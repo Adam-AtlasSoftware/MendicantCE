@@ -880,6 +880,11 @@ static struct
 	them (Windows' DXGI: xgpu_vulkan_window_luminance; float bits, 0 none) */
 	int hdr_peak_nits;
 	uint32_t window_black, window_full_frame;
+	/* display.hdr_gamut (#1124; any thread), and the gamut the display's
+	primaries make (xgpu_hdr_gamut_target's, float bits; 0, P3's, where
+	the system says none) */
+	int hdr_gamut;
+	uint32_t window_gamut;
 	struct xgpu_vulkan_image *sharp_image;
 	void (*display_hdr)(int hdr, float headroom, float white_nits, int white_reported);
 	/* the frame's last pass (the options' encode: HDR's encoding,
@@ -6854,6 +6859,19 @@ void xgpu_vulkan_window_luminance(float black_nits, float full_frame_nits)
 	__atomic_store_n(&vk.window_full_frame, full_bits, __ATOMIC_RELEASE);
 }
 
+void xgpu_vulkan_hdr_gamut(int expanded)
+{
+	__atomic_store_n(&vk.hdr_gamut, expanded != 0, __ATOMIC_RELEASE);
+}
+
+void xgpu_vulkan_window_gamut(float target)
+{
+	uint32_t bits;
+
+	memcpy(&bits, &target, sizeof(bits));
+	__atomic_store_n(&vk.window_gamut, bits, __ATOMIC_RELEASE);
+}
+
 int xgpu_vulkan_device_luid(unsigned char luid[8])
 {
 	VkPhysicalDeviceIDProperties id;
@@ -7007,6 +7025,9 @@ void xgpu_vulkan_hdr_frame(struct xgpu_hdr_frame *frame)
 	/* (the UI's white over the system's SDR white as paper white's is: on
 	Linux relative to the compositor's, no brighter than the display) */
 	frame->ui = xgpu_hdr_ui_white((float)vk.hdr_ui_nits / sdr_white_nits(), setting, headroom);
+	/* (display.hdr_gamut "expanded", toward the display's primaries, #1124) */
+	frame->gamut = __atomic_load_n(&vk.hdr_gamut, __ATOMIC_ACQUIRE);
+	frame->gamut_target = float_of(__atomic_load_n(&vk.window_gamut, __ATOMIC_ACQUIRE));
 	/* (#1122: with a peak of the player's, the display's full-frame peak
 	in paper whites and its black in the output's units, where the system
 	reports them; the System peak's picture as it was) */

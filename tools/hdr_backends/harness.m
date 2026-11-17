@@ -129,6 +129,9 @@ struct post_uniforms
 	float bounds[4];
 	float hdr[4];
 	float window[4];
+	float panini[4];
+	float tangents[4];
+	float gamut[4];
 };
 
 static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target, id<MTLTexture> source,
@@ -276,7 +279,7 @@ static void post_test(NSString *dir)
 	white's; the seventh and eighth by gamma 2.2's SDR curve,
 	display.hdr_sdr_curve's; the last two with the display's black, #1122:
 	0.05 nits in scRGB's units, 0.1 in PQ's) */
-	static const struct xgpu_hdr_frame encodings[10] =
+	static const struct xgpu_hdr_frame encodings[12] =
 	{
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.02f, 4.0f },
@@ -288,6 +291,9 @@ static void post_test(NSString *dir)
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2, 0.0f, 0.05f / 80.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.1f / 10000.0f },
+		/* (display.hdr_gamut "expanded", #1124: into P3, into BT.2020) */
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.0f, 1, 0.0f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.0f, 1, 1.0f },
 	};
 	/* the tone map's UI white: none given (paper white's), and the UI's
 	white under and past paper white's */
@@ -441,7 +447,7 @@ static void post_test(NSString *dir)
 		}
 		printf("post: %d values not a number or infinite tone mapped finite\n", finite);
 	}
-	for (which = 0; which < 10; which++)
+	for (which = 0; which < 12; which++)
 	{
 		id<MTLTexture> source = texture_make(MTLPixelFormatRGBA16Float, VECTORS, MTLTextureUsageShaderRead);
 		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA32Float, VECTORS, MTLTextureUsageRenderTarget);
@@ -460,6 +466,8 @@ static void post_test(NSString *dir)
 		uniforms.hdr[3] = encodings[which].ui;
 		uniforms.window[0] = (float)encodings[which].sdr_curve;
 		uniforms.window[3] = encodings[which].black;
+		uniforms.gamut[0] = (float)encodings[which].gamut;
+		uniforms.gamut[1] = encodings[which].gamut_target;
 		post_draw(encode_pipeline, target, source, &uniforms);
 		[target getBytes:got bytesPerRow:VECTORS * 16 fromRegion:MTLRegionMake2D(0, 0, VECTORS, 1) mipmapLevel:0];
 		for (vector = 0; vector < VECTORS; vector++)

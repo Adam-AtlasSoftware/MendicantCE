@@ -662,6 +662,11 @@
 			<choice shown="3000 NITS" value="3000"/>
 			<choice shown="4000 NITS" value="4000"/>
 		</row>
+		<row key="hdr_gamut" kind="choice" setting="display.hdr_gamut" label="HIGHLIGHT COLORS" crumb="VIDEO › BRIGHTNESS" search_choices="srgb expanded" when="hdr">
+			<help>With HDR, Expanded lets the brightest colors, like plasma and needler shards, grow more vivid than sRGB, keeping their hue. sRGB keeps the picture as it is.</help>
+			<choice shown="SRGB" value="srgb"/>
+			<choice shown="EXPANDED" value="expanded"/>
+		</row>
 		<row key="hdr_highlight_boost" kind="choice" setting="display.hdr_highlight_boost" label="HIGHLIGHT BOOST" crumb="VIDEO › BRIGHTNESS" search_choices="low medium high max" when="hdr">
 			<help>With HDR, brighter lights of the game's own: the sun's flares, glows, glowing particles, vehicle lights and panels. Off keeps the picture as it is. The HUD and menus stay as they are.</help>
 			<choice shown="OFF" value="0"/>
@@ -670,7 +675,7 @@
 			<choice shown="HIGH" value="3"/>
 			<choice shown="MAX" value="4"/>
 		</row>
-		<section key="section_10" title="DISPLAY" when="hdr"/>
+		<section key="section_11" title="DISPLAY" when="hdr"/>
 		<row key="hdr_display" kind="status" label="DISPLAY PEAK" crumb="VIDEO › BRIGHTNESS" when="hdr">
 			<help>The brightest the display shows, and its SDR white, as the system reports them.</help>
 		</row>

@@ -42,7 +42,8 @@ highlights it cannot show.
   read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below),
   `display.hdr_sdr_curve` (`auto`, `srgb`, `2.2`: the shadows' curve, under
   "Choices"), `display.hdr_peak_nits` (the display's peak, below),
-  `display.hdr_highlight_boost` (the lights' gain, below).
+  `display.hdr_highlight_boost` (the lights' gain, below), `display.hdr_gamut`
+  (the highlights' colors, below).
   On a renderer that draws HDR (the menus' `platform="hdr"`), Video
   Setup's Brightness page has a row for each under its HDR section, and a
   DISPLAY PEAK row that shows the display's peak and SDR white as the
@@ -82,6 +83,20 @@ highlights it cannot show.
   `XGPU_HDR_EMITTER`), so a change makes those draws' pipelines again.
   Not boosted: contrails and particle systems' particles (unmarked), and
   an additive emitter that also writes alpha (blended in its shader).
+- **Highlight colors** (`display.hdr_gamut`, #1124): `srgb` (the default,
+  the picture as before) or `expanded`. The frame is sRGB's, so no color
+  past it exists; `expanded` makes the highlights more vivid on purpose.
+  In the encoding, a pixel whose brightest channel is past paper white
+  (or the UI's white, the brighter) has its chroma in Oklab scaled by up
+  to 1.5, from none at white to all of it at 4 times, its hue and
+  lightness kept. The room along its hue in the target gamut (and under
+  the peak) is found by 12 halvings, and the chroma is compressed softly
+  into it (a shoulder from three quarters of the room on): no flat patches,
+  no hue shift. The target: the display's primaries where DXGI reports
+  them (by their triangle's area, between sRGB's, P3's and BT.2020's,
+  never past BT.2020), Display P3 on macOS and iOS, DCI-P3 (D65)
+  elsewhere (`xgpu_hdr_gamut`). The swapchain's HDR metadata still names
+  sRGB's primaries.
 - **Fallback**: `auto` turns HDR on only on an HDR display; off, and on an
   SDR display, the frame is the 8-bit one, byte for byte. Highlights roll
   off under a soft shoulder to the display's peak (its EDR headroom, which

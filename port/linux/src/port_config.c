@@ -572,6 +572,11 @@ static const struct config_setting config_settings[] =
 		"reports a wrong one; 0 is the system's. Only the highlights change.\n"
 		"With a peak of your own, the display's full-frame peak and black,\n"
 		"where Windows reports them, shape the highlights and the shadows too." },
+	{ "display.hdr_gamut", _config_string, "\"srgb\"", "HALO_HDR_GAMUT", _environment_value, _platform_all,
+		"With HDR, \"expanded\" lets the brightest colors (plasma, needler\n"
+		"shards) grow more vivid than sRGB, toward the display's own gamut (P3\n"
+		"where it says none, never past BT.2020), keeping their hue; \"srgb\"\n"
+		"keeps the picture as it is. Colors at or under paper white never change." },
 	{ "display.hdr_highlight_boost", _config_integer, "0", "HALO_HDR_HIGHLIGHT_BOOST", _environment_value,
 		_platform_all,
 		"With HDR, how much brighter the game's own lights are, 0 to 4: the\n"

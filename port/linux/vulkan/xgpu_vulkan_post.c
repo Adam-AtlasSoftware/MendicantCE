@@ -807,6 +807,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_post_encode(struct xgpu_vulkan_image *imag
 	uniforms->window[1] = output->levels;
 	uniforms->window[2] = output->power > 0.0f ? output->power : 1.0f;
 	uniforms->window[3] = frame->black;
+	uniforms->gamut[0] = frame->gamut ? 1.0f : 0.0f;
+	uniforms->gamut[1] = frame->gamut_target;
 	draw.constants = draw.uniforms;
 	memset(&dynamic, 0, sizeof(dynamic));
 	dynamic.viewport[2] = dynamic.scissor[2] = (int32_t)output->width;

@@ -940,6 +940,12 @@ void xgpu_backend_sharp_upscale(int sharp)
 		record_value(XGPU_STREAM_SHARP_UPSCALE, sharp ? 1u : 0u);
 }
 
+void xgpu_backend_hdr_gamut(int value)
+{
+	if (stream.open)
+		record_value(XGPU_STREAM_HDR_GAMUT, (uint32_t)value);
+}
+
 void xgpu_backend_hdr_peak_nits(int value)
 {
 	if (stream.open)

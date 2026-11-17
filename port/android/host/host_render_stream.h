@@ -98,6 +98,9 @@ struct host_render_backend
 	/* display.hdr_peak_nits: the display's peak in nits (0 the
 	system's), from the next frame on */
 	void (*hdr_peak_nits)(void *context, uint32_t value);
+	/* display.hdr_gamut: the highlights' colours expanded (1) or not
+	(0), from the next frame on */
+	void (*hdr_gamut)(void *context, uint32_t value);
 	/* the game's renderer's category of the draws from now on
 	(XGPU_STREAM_CATEGORY's value), for the GPU's timing */
 	void (*category)(void *context, uint32_t category);

@@ -2459,6 +2459,29 @@ static void hdr_peak_nits_send(void)
 	sent = nits;
 }
 
+/* display.hdr_gamut (#1124): the backend's HDR encoding expands the
+highlights' colours ("expanded") or not ("srgb"), as it changes */
+static void hdr_gamut_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	const char *setting;
+	int expanded;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	setting = config_string("display.hdr_gamut");
+	expanded = setting && !strcmp(setting, "expanded");
+	if (expanded == sent)
+		return;
+	if (sent >= 0 || expanded)
+		platform_log("hdr: gamut %s", expanded ? "expanded" : "srgb");
+	xgpu_backend_hdr_gamut(expanded);
+	sent = expanded;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2715,6 +2738,8 @@ long halo_screen_commit(void)
 	hdr_sdr_curve_send();
 	/* (display.hdr_peak_nits) */
 	hdr_peak_nits_send();
+	/* (display.hdr_gamut) */
+	hdr_gamut_send();
 	/* display.shadow_resolution, if it has changed: the maps' entries at
 	the old scale are freed (render_targets_evict), new ones made at the new */
 	if (shadow_scale && shadow_scale_read_at != config_changes())

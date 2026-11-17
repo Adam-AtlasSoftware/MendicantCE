@@ -85,6 +85,9 @@ void host_metal_hdr_sdr_curve(int curve);
 /* display.hdr_peak_nits (#1122): the display's peak in nits, of the
 player's (0: EDR's own headroom), at most EDR's headroom */
 void host_metal_hdr_peak_nits(int nits);
+/* display.hdr_gamut (#1124): the highlights' colours expanded (1) into
+Display P3 */
+void host_metal_hdr_gamut(int expanded);
 /* the display's headroom stood in for (HALO_METAL_EDR_HEADROOM's: the tests,
 the replay) */
 void host_metal_hdr_override(float headroom);

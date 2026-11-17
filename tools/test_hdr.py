@@ -670,6 +670,92 @@ int main(void)
 		}
 	}
 	{
+		/* display.hdr_gamut (#1124): "srgb" (0) the encoding as it was; and
+		"expanded" leaves every colour at or under paper white bit for bit,
+		expands a highlight's chroma keeping its Oklab hue and lightness,
+		stays within the target's gamut and the peak (never past BT.2020),
+		the more chroma the brighter, and a target of the primaries */
+		static const float srgb_primaries[8] = { 0.64f, 0.33f, 0.30f, 0.60f, 0.15f, 0.06f, 0.3127f, 0.329f };
+		static const float p3_primaries[8] = { 0.68f, 0.32f, 0.265f, 0.69f, 0.15f, 0.06f, 0.3127f, 0.329f };
+		static const float bt2020_primaries[8] = { 0.708f, 0.292f, 0.17f, 0.797f, 0.131f, 0.046f, 0.3127f, 0.329f };
+		static const float none[8] = { 0.0f };
+		static const float targets[3] = { -1.0f, 0.0f, 1.0f };
+		struct xgpu_hdr_frame plain = { F, XGPU_HDR_OUTPUT_PQ, 203.0f / 10000.0f, 8.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 };
+		struct xgpu_hdr_frame wide = plain;
+		unsigned seed = 7;
+		int index, channel, outside = 0, hue_moved = 0, target;
+		float last_chroma = 0.0f;
+
+		wide.gamut = 1;
+		wide.gamut_target = 1.0f;
+		CHECK(fabsf(xgpu_hdr_gamut_target(srgb_primaries) + 1.0f) < 0.01f &&
+			fabsf(xgpu_hdr_gamut_target(p3_primaries)) < 0.01f &&
+			fabsf(xgpu_hdr_gamut_target(bt2020_primaries) - 1.0f) < 0.01f && xgpu_hdr_gamut_target(none) == 0.0f &&
+			xgpu_hdr_gamut_target(NULL) == 0.0f, "the targets of sRGB's, P3's, BT.2020's primaries and of none");
+		for (index = 0; index <= 255; index++)
+		{
+			float value = (float)index / 255.0f;
+			float a[3] = { value, value * 0.3f, value * 0.9f }, b[3] = { value, value * 0.3f, value * 0.9f };
+
+			xgpu_hdr_encode(a, &plain);
+			xgpu_hdr_encode(b, &wide);
+			CHECK(!memcmp(a, b, sizeof(a)), "expanded: %.3f, under paper white, encoded otherwise", value);
+		}
+		for (target = 0; target < 3; target++)
+		{
+			for (index = 0; index < 4000; index++)
+			{
+				float rgb[3], before[3], lab_before[3], lab_after[3], matrix[3][3], peak = 8.0f;
+
+				for (channel = 0; channel < 3; channel++)
+				{
+					seed = seed * 1103515245u + 12345u;
+					rgb[channel] = (float)((seed >> 8) & 0xffff) / 65535.0f * peak;
+					before[channel] = rgb[channel];
+				}
+				xgpu_hdr_gamut(rgb, peak, 1.0f, targets[target]);
+				xgpu_hdr_gamut_matrix(targets[target], matrix);
+				for (channel = 0; channel < 3; channel++)
+				{
+					float value = matrix[channel][0] * rgb[0] + matrix[channel][1] * rgb[1] + matrix[channel][2] * rgb[2];
+
+					outside += value < -1.0e-4f * peak || value > peak * 1.0001f;
+				}
+				xgpu_hdr_oklab(before, lab_before);
+				xgpu_hdr_oklab(rgb, lab_after);
+				if (sqrtf(lab_before[1] * lab_before[1] + lab_before[2] * lab_before[2]) > 0.02f)
+					hue_moved += fabsf(atan2f(lab_after[2], lab_after[1]) - atan2f(lab_before[2], lab_before[1])) > 1.0e-3f ||
+						fabsf(lab_after[0] - lab_before[0]) > 1.0e-3f * lab_before[0];
+			}
+		}
+		CHECK(!outside, "%d channels out of the target's gamut or past the peak", outside);
+		CHECK(!hue_moved, "%d hues or lightnesses moved", hue_moved);
+		for (index = 0; index <= 40; index++)
+		{
+			/* (a plasma bolt's blue, brighter: its chroma rising, more than
+			sRGB's past white) */
+			float scale = 1.0f + (float)index * 0.1f;
+			float rgb[3] = { 0.02f * scale, 0.15f * scale, 1.0f * scale }, lab[3], chroma;
+
+			xgpu_hdr_gamut(rgb, 8.0f, 1.0f, 0.0f);
+			xgpu_hdr_oklab(rgb, lab);
+			chroma = sqrtf(lab[1] * lab[1] + lab[2] * lab[2]) / lab[0];
+			CHECK(chroma >= last_chroma - 1.0e-4f, "a bolt at %.1f: its chroma %.4f fell from %.4f", scale, chroma,
+				last_chroma);
+			if (index == 40)
+			{
+				float plain_rgb[3] = { 0.02f * scale, 0.15f * scale, 1.0f * scale }, plain_lab[3];
+
+				xgpu_hdr_oklab(plain_rgb, plain_lab);
+				CHECK(chroma > 1.1f * sqrtf(plain_lab[1] * plain_lab[1] + plain_lab[2] * plain_lab[2]) / plain_lab[0],
+					"a bright bolt more vivid: %.4f", chroma);
+				CHECK(fminf(rgb[0], fminf(rgb[1], rgb[2])) < 0.0f, "past sRGB (a channel under 0): %.4f %.4f %.4f",
+					rgb[0], rgb[1], rgb[2]);
+			}
+			last_chroma = chroma;
+		}
+	}
+	{
 		/* the final write's dither (#1108): its noise within [-1, 1],
 		about 0 on average and triangular (variance 1/6) over a screen's
 		pixels; a code moved by at most a level, black and white exact; no
@@ -879,5 +965,10 @@ def test_glsl_constants():
     # (the dither's noise: the same interleaved gradient noise)
     for constant in ("52.9829189", "0.06711056", "0.00583715"):
         assert constant in glsl and constant in header, constant
+    # (#1124: the gamut's chroma, reach, knee and halvings)
+    assert f"1.0 + {macro('XGPU_HDR_GAMUT_CHROMA'):g} * weight" in glsl
+    assert f"smoothstep(white, {macro('XGPU_HDR_GAMUT_REACH'):.1f} * white" in glsl
+    assert f"1.0 + {macro('XGPU_HDR_GAMUT_KNEE'):g} * (room - 1.0)" in glsl
+    assert re.search(r"#define XGPU_HDR_GAMUT_STEPS 12\b", header) and "step < 12;" in glsl
     # (#1122: the black lift's reach)
     assert f"{macro('XGPU_HDR_BLACK_REACH'):.1f} * black" in glsl

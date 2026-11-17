@@ -1329,6 +1329,9 @@ PAGES = {
             ("PEAK BRIGHTNESS", "display.hdr_peak_nits", PEAKS,
              "With HDR, the brightest your display shows, in nits, for a display that reports a wrong peak. "
              "System uses the one it reports. Only the highlights change.", "hdr"),
+            ("HIGHLIGHT COLORS", "display.hdr_gamut", [("SRGB", "srgb"), ("EXPANDED", "expanded")],
+             "With HDR, Expanded lets the brightest colors, like plasma and needler shards, grow more vivid than "
+             "sRGB, keeping their hue. sRGB keeps the picture as it is.", "hdr"),
             ("HIGHLIGHT BOOST", "display.hdr_highlight_boost",
              [("OFF", "0"), ("LOW", "1"), ("MEDIUM", "2"), ("HIGH", "3"), ("MAX", "4")],
              "With HDR, brighter lights of the game's own: the sun's flares, glows, glowing particles, vehicle "

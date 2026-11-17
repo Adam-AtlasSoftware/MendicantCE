@@ -1498,6 +1498,13 @@ static void stream_hdr(void *context, const struct xgpu_stream_hdr *record)
 		(void)xgpu_metal_post_prepare_hdr(XGPU_METAL_FORMAT_D24S8, 0);
 }
 
+/* display.hdr_gamut: the encoding's gamut */
+static void stream_hdr_gamut(void *context, uint32_t value)
+{
+	(void)context;
+	host_metal_hdr_gamut((int)value);
+}
+
 /* display.hdr_peak_nits: the encoding's peak */
 static void stream_hdr_peak_nits(void *context, uint32_t value)
 {
@@ -2055,6 +2062,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.gamma = stream_gamma;
 		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
 		backend.hdr_peak_nits = stream_hdr_peak_nits;
+		backend.hdr_gamut = stream_hdr_gamut;
 		backend.category = stream_category;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
