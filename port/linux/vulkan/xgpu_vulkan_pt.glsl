@@ -48,7 +48,7 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
 {
     uvec2 pages, charts, vpages, table, tiles, indirect, sun, masks;
     uvec2 bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
-    uvec2 sums, stats, meter, counters, unused2[4];
+    uvec2 sums, stats, meter, counters, tree, lamps_out, unused2[2];
     vec4 camera[4];
     vec4 last_camera[4];
     ivec4 corners;
@@ -915,6 +915,139 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
 }
 
+/* ---------- the reference's lamps by a light tree as well as the grid
+
+job.tree: a binary tree of the bake's lamps, built on the host
+(xgpu_vulkan_pt.c's tree_node), job.extra.w its nodes; each node 16 floats:
+its box's corners (6), its power (its lamps' luminance by area), its two
+children (float bits; 0 a leaf), its parent, a leaf's lamp, the leaf's
+triangle's normal and plane (the normal by a corner); after the nodes, each
+lamp's leaf. A node's importance at a point p facing n (after Conty Estevez
+and Kulla 2018's for a cluster of lights, without its emitters' cone): its
+power by the receiver's cosine bound (the best cosine to n over the cone
+from p to the node's bounding sphere) over the distance squared to its
+middle, never nearer than the sphere's radius; a leaf's nought where p is
+clearly behind its triangle. A lamp whose light can reach p (in front of
+it, above p's surface) has every ancestor's importance above nought, so its
+probability is too. The reference takes a lamp from the grid's mixture
+(lamp_pick) or from the tree, half and half, its probability the two's mean:
+one sample of a mixture, unbiased, and near the better of the two where the
+other misses a lamp. The grid's lists, made from a cell's few points, can
+miss a lamp near a surface of the cell and leave it to the level's power
+(one pick in thousands): round 1's references in a10's corridors were a dim
+wall under dense fireflies. */
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Tree
+{
+    float v[];
+};
+bool tree_on() { return job.tree != uvec2(0u) && job.extra.w >= 1.0; }
+float tree_importance(uint node, vec3 p, vec3 n)
+{
+    Tree t = Tree(job.tree);
+    uint b = node * 16u;
+    vec3 lo = vec3(t.v[b], t.v[b + 1u], t.v[b + 2u]), hi = vec3(t.v[b + 3u], t.v[b + 4u], t.v[b + 5u]);
+    if (floatBitsToUint(t.v[b + 7u]) == 0u &&
+        dot(vec3(t.v[b + 11u], t.v[b + 12u], t.v[b + 13u]), p) - t.v[b + 14u] < -1.0e-4)
+        return 0.0;
+    vec3 d = 0.5 * (lo + hi) - p;
+    float r2 = 0.25 * dot(hi - lo, hi - lo), dist2 = dot(d, d), bound = 1.0;
+    if (dist2 > r2)
+    {
+        float cos_u = sqrt(max(1.0 - r2 / dist2, 0.0)), sin_u = sqrt(min(r2 / dist2, 1.0));
+        float cos_i = dot(n, d) * inversesqrt(dist2), sin_i = sqrt(max(1.0 - cos_i * cos_i, 0.0));
+        bound = cos_i >= cos_u ? 1.0 : max(cos_i * cos_u + sin_i * sin_u, 0.0);
+    }
+    return t.v[b + 6u] * bound / max(dist2, max(r2, 1.0e-8));
+}
+/* a node's chance of its left child (by their importances; by their powers
+where both are nought: none of their lamps reaches p, any choice is right) */
+float tree_left(uint left, uint right, vec3 p, vec3 n)
+{
+    Tree t = Tree(job.tree);
+    float il = tree_importance(left, p, n), ir = tree_importance(right, p, n);
+    if (il + ir > 0.0)
+        return il / (il + ir);
+    return t.v[left * 16u + 6u] / max(t.v[left * 16u + 6u] + t.v[right * 16u + 6u], 1.0e-30);
+}
+uint tree_pick(vec3 p, vec3 n, out float probability)
+{
+    Tree t = Tree(job.tree);
+    uint node = 0u;
+    probability = 1.0;
+    for (int depth = 0; depth < 48; depth++)
+    {
+        uint b = node * 16u, left = floatBitsToUint(t.v[b + 7u]);
+        if (left == 0u)
+            return floatBitsToUint(t.v[b + 10u]);
+        uint right = floatBitsToUint(t.v[b + 8u]);
+        float pl = tree_left(left, right, p, n);
+        if (rnd() < pl)
+        {
+            node = left;
+            probability *= pl;
+        }
+        else
+        {
+            node = right;
+            probability *= 1.0 - pl;
+        }
+    }
+    probability = 0.0;
+    return 0u;
+}
+float tree_probability(uint lamp, vec3 p, vec3 n)
+{
+    Tree t = Tree(job.tree);
+    uint node = floatBitsToUint(t.v[uint(job.extra.w) * 16u + lamp]);
+    float probability = 1.0;
+    for (int depth = 0; depth < 48 && node != 0u; depth++)
+    {
+        uint parent = floatBitsToUint(t.v[node * 16u + 9u]);
+        uint left = floatBitsToUint(t.v[parent * 16u + 7u]), right = floatBitsToUint(t.v[parent * 16u + 8u]);
+        float pl = tree_left(left, right, p, n);
+        probability *= node == left ? pl : 1.0 - pl;
+        node = parent;
+    }
+    return probability;
+}
+/* lamp_pick's probability of a given lamp at p (its mixture: the cell's seen
+list by GRID_SEEN, its near by GRID_NEAR, the rest by power; the same
+arithmetic, tools/test_prism_pt.py checks it against lamp_pick's text) */
+float grid_probability(vec3 p, uint l)
+{
+    int cell = grid_cell(p);
+    Uints g = Uints(s.grid);
+    uint seen_at = uint(max(cell, 0)), seen = cell >= 0 ? min(g.v[seen_at], 64u) : 0u;
+    uint near_at = seen_at + 1u + 2u * seen, near = cell >= 0 ? min(g.v[near_at], 64u) : 0u;
+    float share_seen = seen > 0u && !term_off(32u) ? GRID_SEEN : 0.0;
+    float share_near = near > 0u && !term_off(32u) ? (seen > 0u ? GRID_NEAR : GRID_SEEN + GRID_NEAR) : 0.0;
+    float probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);
+    if (seen > 0u)
+        probability += share_seen * list_probability(seen_at, seen, l);
+    if (near > 0u)
+        probability += share_near * list_probability(near_at, near, l);
+    return probability;
+}
+uint reference_lamp_pick(vec3 p, vec3 n, out float probability)
+{
+    if (!tree_on())
+        return lamp_pick(p, probability);
+    uint l;
+    float from_grid, from_tree;
+    if (rnd() < 0.5)
+    {
+        l = lamp_pick(p, from_grid);
+        from_tree = tree_probability(l, p, n);
+    }
+    else
+    {
+        l = tree_pick(p, n, from_tree);
+        from_grid = grid_probability(p, l);
+    }
+    probability = 0.5 * from_grid + 0.5 * from_tree;
+    return l;
+}
+
 /* the reference's lights at the pixel: resampled importance as lights_ris,
 but each candidate's shadow traced and its visibility in its target, so the
 kept sample is a seen one and a pixel that sees a lamp through a gap is not
@@ -935,7 +1068,7 @@ void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int d
         for (int c = 0; c < lamp_count; c++)
         {
             float probability;
-            uint lamp = lamp_pick(p, probability);
+            uint lamp = reference_lamp_pick(p, g.normal, probability);
             if (probability <= 0.0)
                 continue;
             uint at = lamp * 16u;
@@ -1166,7 +1299,7 @@ vec3 hit_lamps(vec3 p, vec3 n, vec3 o, int candidates)
     for (int c = 0; c < candidates; c++)
     {
         float probability;
-        uint lamp = lamp_pick(p, probability);
+        uint lamp = reference_lamp_pick(p, n, probability);
         if (probability <= 0.0)
             continue;
         uint at = lamp * 16u;
@@ -2282,4 +2415,30 @@ void main()
         stats.v[gl_WorkGroupID.x * 4u + 2u] = partial[0].z;
         stats.v[gl_WorkGroupID.x * 4u + 3u] = partial[0].w;
     }
+}
+
+//@pass lamps
+layout(local_size_x = 256) in;
+/* the bake's lamps copied for the host (its light tree, xgpu_vulkan_pt.c):
+job.lamps_out's first word their count, then from its 16th each lamp's 16
+floats (the bake's: its corners, radiance, area, cumulative power);
+parameters.x the most the buffer holds */
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer LampsOut
+{
+    float v[];
+};
+void main()
+{
+    s = Scene(push.scene);
+    job = Job(push.job);
+    uint index = gl_GlobalInvocationID.x;
+    uint count = min(s.counts.z, push.parameters.x);
+    LampsOut o = LampsOut(job.lamps_out);
+    if (index == 0u)
+        o.v[0] = uintBitsToFloat(count);
+    if (index >= count)
+        return;
+    Floats f = Floats(s.lamps);
+    for (uint k = 0u; k < 16u; k++)
+        o.v[16u + index * 16u + k] = f.v[index * 16u + k];
 }

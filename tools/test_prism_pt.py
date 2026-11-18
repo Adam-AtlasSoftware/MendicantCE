@@ -26,7 +26,7 @@ def test_shaders_are_their_glsl():
 
 def test_the_glsl_has_every_pass_and_shares_the_bakes_scene():
     text = GLSL.read_text()
-    for name in ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats"):
+    for name in ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats", "lamps"):
         assert f"//@pass {name}\n" in text
     # (the bake's own functions, not copies: the scene traced and the bake made by one estimator)
     for used in ("lamp_pick(", "lamp_direction(", "lamp_visible(", "domes_at(", "fixture_light(", "fixtures_ris(",
@@ -346,3 +346,88 @@ def test_the_guided_bounce_is_unbiased_whatever_the_guide(guide_kind):
     if guide_kind == "right":
         plain = [light(rng, rng.random()) for _ in range(40000)]
         assert np.var(samples) < 0.2 * np.var(plain)
+
+
+def _lamps(rng, count):
+    """made-up lamp triangles (the bake's 16 floats: corners, radiance, area) scattered in a room"""
+    lamps = np.zeros((count, 16))
+    for k in range(count):
+        a0 = rng.uniform(-10.0, 10.0, 3)
+        e1, e2 = rng.normal(0.0, 0.4, 3), rng.normal(0.0, 0.4, 3)
+        lamps[k, 0:3], lamps[k, 3:6], lamps[k, 6:9] = a0, a0 + e1, a0 + e2
+        lamps[k, 9:12] = rng.uniform(0.2, 20.0, 3)
+        lamps[k, 12] = 0.5 * np.linalg.norm(np.cross(e1, e2))
+    return lamps
+
+
+def test_the_light_tree_is_a_distribution_that_misses_no_lamp_that_lights_a_point():
+    """the reference's light tree: at any point its lamps' probabilities sum to 1, its pick's probability is the one
+    its walk up from the leaf finds, and every lamp whose triangle a point is in front of and whose corners are not
+    all below the point's surface has a probability above nought (the bounds hold its light)"""
+    rng = np.random.default_rng(23)
+    lamps = _lamps(rng, 37)
+    nodes, leaf = model.tree_build(lamps)
+    assert len(nodes) == 2 * len(lamps) - 1
+    for _ in range(40):
+        p = rng.uniform(-11.0, 11.0, 3)
+        n = rng.standard_normal(3)
+        n /= np.linalg.norm(n)
+        probabilities = np.array([model.tree_probability(nodes, leaf, k, p, n) for k in range(len(lamps))])
+        assert probabilities.sum() == pytest.approx(1.0, abs=1e-9)
+        for _ in range(5):
+            lamp, probability = model.tree_pick(rng, nodes, p, n)
+            assert probability == pytest.approx(probabilities[lamp], rel=1e-9)
+        for k, lamp in enumerate(lamps):
+            corners = lamp[:9].reshape(3, 3)
+            ne = np.cross(corners[1] - corners[0], corners[2] - corners[0])
+            ne /= np.linalg.norm(ne)
+            in_front = ne @ (p - corners[0]) > 1e-6
+            above = ((corners - p) @ n > 0.0).any()
+            if in_front and above:
+                assert probabilities[k] > 0.0
+
+
+def test_the_references_lamp_mixture_is_unbiased():
+    """a lamp from the grid's mixture or the tree, half and half, its probability the two's mean: the estimate of a
+    sum over the lamps (each one's light at the point) is the sum, with a grid that misses the brightest lamp as the
+    grid's lists can"""
+    rng = np.random.default_rng(29)
+    lamps = _lamps(rng, 25)
+    nodes, leaf = model.tree_build(lamps)
+    p, n = np.array([0.5, -1.0, 2.0]), np.array([0.0, 0.0, 1.0])
+    light = np.array([model.tree_importance(nodes, int(leaf[k]), p, n) for k in range(len(lamps))])
+    light *= rng.uniform(0.3, 1.0, len(lamps))
+    grid = rng.uniform(0.0, 1.0, len(lamps))
+    grid[int(np.argmax(light))] = 0.0
+    grid = 0.95 * grid / grid.sum() + 0.05 * lamps[:, 12] / lamps[:, 12].sum()
+    mixed = 0.5 * grid + 0.5 * np.array([model.tree_probability(nodes, leaf, k, p, n) for k in range(len(lamps))])
+    # (the exact expectation and spread of one sample, and a simulation of the picks themselves)
+    assert (mixed * light / mixed).sum() == pytest.approx(light.sum())
+    spread = np.sqrt(max((light * light / mixed).sum() - light.sum() ** 2, 0.0))
+    count = 20_000
+    estimates = np.empty(count)
+    for i in range(count):
+        if rng.random() < 0.5:
+            k = int(rng.choice(len(lamps), p=grid))
+        else:
+            k, _ = model.tree_pick(rng, nodes, p, n)
+        estimates[i] = light[k] / mixed[k]
+    assert abs(estimates.mean() - light.sum()) <= 4.0 * spread / np.sqrt(count)
+    # (and far quieter than the grid alone, which misses the brightest lamp but by power)
+    grid_alone = np.sqrt(max((light * light / grid).sum() - light.sum() ** 2, 0.0))
+    assert spread < 0.5 * grid_alone
+
+
+def test_the_grids_probability_mirrors_lamp_pick():
+    """grid_probability (the reference's mixture's) is lamp_pick's own arithmetic, line for line, so that the mixture's
+    probability is the grid's: the bake's lamp_pick must still read as it did when grid_probability was written"""
+    bake = (ROOT / "port/linux/vulkan/xgpu_vulkan_bake_glsl.inc").read_text()
+    pt = GLSL.read_text()
+    for line in ("float share_seen = seen > 0u && !term_off(32u) ? GRID_SEEN : 0.0;",
+                 "float share_near = near > 0u && !term_off(32u) ? (seen > 0u ? GRID_NEAR : GRID_SEEN + GRID_NEAR) : 0.0;",
+                 "uint near_at = seen_at + 1u + 2u * seen, near = cell >= 0 ? min(g.v[near_at], 64u) : 0u;",
+                 "probability += share_seen * list_probability(seen_at, seen, l);",
+                 "probability += share_near * list_probability(near_at, near, l);"):
+        assert line in bake and line in pt, line
+    assert "probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);" in bake
+    assert "float probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);" in pt

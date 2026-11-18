@@ -11,6 +11,8 @@ can check them without a GPU:
   mirror_normal      the G-buffer's object normal turned from the eye, mirrored about the plane square to it
   ggx_weight         the GGX visible-normals sample's weight (Fresnel by G2 / G1), as ggx_sample computes it
   cone_sample        a direction of a dome's cone (the bake's cone_dir), for its next-event estimate
+  tree_build         the reference's light tree as xgpu_vulkan_pt.c's tree_node builds it
+  tree_importance, tree_pick, tree_probability  the GLSL's walk of it
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
   atrous_step        an a-trous step's weights: the 3 x 3 kernel, the plane, the normal, the instance, the luminance
 """
@@ -272,3 +274,87 @@ def guided_bounce(rng, sample_direction, light, guide, candidates=8, floor=0.002
     if kept is None:
         return 0.0
     return light(rng, kept) / kept_w * (total / candidates)
+
+
+def tree_build(lamps):
+    """xgpu_vulkan_pt.c's tree_node over lamps (an (n, 16) array: corners, radiance, area, ...): a list of node dicts
+    (lo, hi, power, left, right, parent, lamp, normal, plane) and each lamp's leaf"""
+    lamps = np.asarray(lamps, float)
+    nodes = []
+    middles = (lamps[:, 0:3] + lamps[:, 3:6] + lamps[:, 6:9]) / 3.0
+
+    def node(order, parent):
+        index = len(nodes)
+        corners = lamps[order][:, :9].reshape(-1, 3)
+        power = float(((lamps[order][:, 9:12] @ np.array([0.2126, 0.7152, 0.0722])) * lamps[order][:, 12]).sum())
+        entry = {"lo": corners.min(0), "hi": corners.max(0), "power": power, "left": 0, "right": 0, "parent": parent,
+                 "lamp": 0, "normal": np.zeros(3), "plane": 0.0}
+        nodes.append(entry)
+        if len(order) == 1:
+            lamp = lamps[order[0]]
+            n = np.cross(lamp[3:6] - lamp[0:3], lamp[6:9] - lamp[0:3])
+            n = n / np.linalg.norm(n)
+            entry.update(lamp=int(order[0]), normal=n, plane=float(n @ lamp[0:3]))
+            return index
+        m = middles[order]
+        axis = int(np.argmax(m.max(0) - m.min(0)))
+        order = sorted(order, key=lambda i: (middles[i, axis], i))
+        half = len(order) // 2
+        entry["left"] = node(order[:half], index)
+        entry["right"] = node(order[half:], index)
+        return index
+
+    node(list(range(len(lamps))), 0)
+    leaf = np.zeros(len(lamps), int)
+    for k, entry in enumerate(nodes):
+        if entry["left"] == 0:
+            leaf[entry["lamp"]] = k
+    return nodes, leaf
+
+
+def tree_importance(nodes, k, p, n):
+    entry = nodes[k]
+    if entry["left"] == 0 and float(entry["normal"] @ p) - entry["plane"] < -1.0e-4:
+        return 0.0
+    lo, hi = entry["lo"], entry["hi"]
+    d = 0.5 * (lo + hi) - p
+    r2 = 0.25 * float((hi - lo) @ (hi - lo))
+    dist2 = float(d @ d)
+    bound = 1.0
+    if dist2 > r2:
+        cos_u = np.sqrt(max(1.0 - r2 / dist2, 0.0))
+        sin_u = np.sqrt(min(r2 / dist2, 1.0))
+        cos_i = float(n @ d) / np.sqrt(dist2)
+        sin_i = np.sqrt(max(1.0 - cos_i * cos_i, 0.0))
+        bound = 1.0 if cos_i >= cos_u else max(cos_i * cos_u + sin_i * sin_u, 0.0)
+    return entry["power"] * bound / max(dist2, r2, 1.0e-8)
+
+
+def tree_left(nodes, left, right, p, n):
+    il, ir = tree_importance(nodes, left, p, n), tree_importance(nodes, right, p, n)
+    if il + ir > 0.0:
+        return il / (il + ir)
+    return nodes[left]["power"] / max(nodes[left]["power"] + nodes[right]["power"], 1e-30)
+
+
+def tree_pick(rng, nodes, p, n):
+    k, probability = 0, 1.0
+    while nodes[k]["left"] != 0:
+        left, right = nodes[k]["left"], nodes[k]["right"]
+        pl = tree_left(nodes, left, right, p, n)
+        if rng.random() < pl:
+            k, probability = left, probability * pl
+        else:
+            k, probability = right, probability * (1.0 - pl)
+    return nodes[k]["lamp"], probability
+
+
+def tree_probability(nodes, leaf, lamp, p, n):
+    k, probability = int(leaf[lamp]), 1.0
+    while k != 0:
+        parent = nodes[k]["parent"]
+        left, right = nodes[parent]["left"], nodes[parent]["right"]
+        pl = tree_left(nodes, left, right, p, n)
+        probability *= pl if k == left else 1.0 - pl
+        k = parent
+    return probability

@@ -74,6 +74,10 @@ between its noise's measures, the fewest it sums, the gates' frames' width
 #define REFERENCE_MEASURE 32u
 #define REFERENCE_LEAST 256u
 #define GATE_WIDTH 960.0
+/* the reference's light tree (xgpu_vulkan_pt.glsl's Tree): the lamps the
+copy holds at most, a node's floats */
+#define LAMPS_MOST 65536u
+#define TREE_NODE_FLOATS 16u
 /* the passes timed, the timestamps a frame (a begin and each pass's end),
 the frames' slots of them */
 #define TIMED 5u
@@ -89,6 +93,7 @@ enum
 	PASS_COMPOSITE,
 	PASS_REFERENCE,
 	PASS_REFERENCE_STATS,
+	PASS_LAMPS,
 	PASSES
 };
 
@@ -165,7 +170,7 @@ struct pt_job
 {
 	VkDeviceAddress pages, charts, vpages, table, tiles, indirect, sun, masks;
 	VkDeviceAddress bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
-	VkDeviceAddress sums, stats, meter, counters, unused[4];
+	VkDeviceAddress sums, stats, meter, counters, tree, lamps_out, unused[2];
 	float camera[4][4];
 	float last_camera[4][4];
 	int32_t corners[4];
@@ -245,6 +250,13 @@ static struct
 	uint64_t ref_stats_serial, ref_sums_serial;
 	uint32_t ref_stats_frames, ref_stats_groups;
 	double ref_noise, ref_noise_hdr;
+	/* the reference's light tree: the bake's lamps' copy for the host (its
+	submission, the scene's generation it is of), the tree (its nodes) and
+	the generation it was built for */
+	struct pt_buffer lamps_readback, tree;
+	uint64_t lamps_serial;
+	uint32_t lamps_generation, tree_generation, tree_nodes;
+	int tree_failed;
 	char ref_path[XGPU_RT_REFERENCE_PATH];
 	int logged_first, logged_no_bake;
 } pt;
@@ -448,6 +460,7 @@ static int make(void)
 		!pipeline_make(PASS_ATROUS, xgpu_vulkan_pt_atrous_words, xgpu_vulkan_pt_atrous_count) ||
 		!pipeline_make(PASS_COMPOSITE, xgpu_vulkan_pt_composite_words, xgpu_vulkan_pt_composite_count) ||
 		!pipeline_make(PASS_REFERENCE, xgpu_vulkan_pt_reference_words, xgpu_vulkan_pt_reference_count) ||
+		!pipeline_make(PASS_LAMPS, xgpu_vulkan_pt_lamps_words, xgpu_vulkan_pt_lamps_count) ||
 		!pipeline_make(PASS_REFERENCE_STATS, xgpu_vulkan_pt_reference_stats_words,
 		xgpu_vulkan_pt_reference_stats_count))
 	{
@@ -814,6 +827,178 @@ static int reference_take(const struct xgpu_stream_scene_view *view, uint64_t sc
 	return 1;
 }
 
+/* ---------- the reference's light tree
+
+A binary tree of the bake's lamps (xgpu_vulkan_pt.glsl's Tree: the
+reference picks a lamp from the grid's mixture or from it, half and half),
+built here from a copy of the bake's lamps (the pass "lamps") once a scene's
+generation: each node its lamps' box, power (luminance by area), children
+and parent, a leaf its lamp and its triangle's plane; the lamps split at the
+middle of their middles' widest axis, half and half. */
+
+static const float *tree_lamps;
+static int tree_axis;
+
+static float lamp_middle(const float *lamp, int axis)
+{
+	return (lamp[axis] + lamp[3 + axis] + lamp[6 + axis]) / 3.0f;
+}
+
+static int tree_compare(const void *a, const void *b)
+{
+	uint32_t ia = *(const uint32_t *)a, ib = *(const uint32_t *)b;
+	float ma = lamp_middle(tree_lamps + (size_t)ia * 16, tree_axis);
+	float mb = lamp_middle(tree_lamps + (size_t)ib * 16, tree_axis);
+
+	if (ma != mb)
+		return ma < mb ? -1 : 1;
+	return ia < ib ? -1 : ia > ib ? 1 : 0;
+}
+
+static void float_bits(float *to, uint32_t value)
+{
+	memcpy(to, &value, sizeof(value));
+}
+
+/* the node over order[first .. first + count) (lamps' indices), its parent's
+index (the root's its own, unused); its index */
+static uint32_t tree_node(float *nodes, uint32_t *node_count, uint32_t *order, uint32_t first, uint32_t count,
+	uint32_t parent)
+{
+	uint32_t index = (*node_count)++, k, left, right;
+	float *node = nodes + (size_t)index * TREE_NODE_FLOATS;
+	float lo[3], hi[3], middle_lo[3], middle_hi[3], power = 0.0f, widest = -1.0f;
+	int axis, corner, split = 0;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		lo[axis] = middle_lo[axis] = 1.0e30f;
+		hi[axis] = middle_hi[axis] = -1.0e30f;
+	}
+	for (k = 0; k < count; k++)
+	{
+		const float *lamp = tree_lamps + (size_t)order[first + k] * 16;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			float m = lamp_middle(lamp, axis);
+
+			for (corner = 0; corner < 3; corner++)
+			{
+				lo[axis] = fminf(lo[axis], lamp[corner * 3 + axis]);
+				hi[axis] = fmaxf(hi[axis], lamp[corner * 3 + axis]);
+			}
+			middle_lo[axis] = fminf(middle_lo[axis], m);
+			middle_hi[axis] = fmaxf(middle_hi[axis], m);
+		}
+		power += (0.2126f * lamp[9] + 0.7152f * lamp[10] + 0.0722f * lamp[11]) * lamp[12];
+	}
+	memset(node, 0, TREE_NODE_FLOATS * sizeof(float));
+	memcpy(node, lo, sizeof(lo));
+	memcpy(node + 3, hi, sizeof(hi));
+	node[6] = power;
+	float_bits(node + 9, parent);
+	if (count == 1)
+	{
+		const float *lamp = tree_lamps + (size_t)order[first] * 16;
+		float e1[3], e2[3], n[3], length;
+
+		for (axis = 0; axis < 3; axis++)
+		{
+			e1[axis] = lamp[3 + axis] - lamp[axis];
+			e2[axis] = lamp[6 + axis] - lamp[axis];
+		}
+		n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+		n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+		n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		length = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		if (length > 0.0f)
+		{
+			n[0] /= length;
+			n[1] /= length;
+			n[2] /= length;
+		}
+		float_bits(node + 7, 0u);
+		float_bits(node + 8, 0u);
+		float_bits(node + 10, order[first]);
+		memcpy(node + 11, n, sizeof(n));
+		node[14] = n[0] * lamp[0] + n[1] * lamp[1] + n[2] * lamp[2];
+		return index;
+	}
+	for (axis = 0; axis < 3; axis++)
+		if (middle_hi[axis] - middle_lo[axis] > widest)
+		{
+			widest = middle_hi[axis] - middle_lo[axis];
+			split = axis;
+		}
+	tree_axis = split;
+	qsort(order + first, count, sizeof(uint32_t), tree_compare);
+	left = tree_node(nodes, node_count, order, first, count / 2, index);
+	right = tree_node(nodes, node_count, order, first + count / 2, count - count / 2, index);
+	node = nodes + (size_t)index * TREE_NODE_FLOATS;
+	float_bits(node + 7, left);
+	float_bits(node + 8, right);
+	return index;
+}
+
+/* the lamps' copy read once the GPU made it: the tree built and given to
+the GPU (a buffer the host writes: its nodes, then each lamp's leaf) */
+static void tree_collect(void)
+{
+	const float *copy = (const float *)pt.lamps_readback.mapped;
+	uint32_t count, node_count = 0, *order, k;
+	float *nodes;
+
+	if (!pt.lamps_serial || xgpu_vulkan_completed() < pt.lamps_serial || !copy)
+		return;
+	pt.lamps_serial = 0;
+	memcpy(&count, copy, sizeof(count));
+	if (count == 0 || count > LAMPS_MOST)
+	{
+		pt.tree_generation = pt.lamps_generation;
+		pt.tree_nodes = 0;
+		return;
+	}
+	nodes = (float *)malloc(((size_t)count * 2 - 1) * TREE_NODE_FLOATS * sizeof(float) + (size_t)count * 4);
+	order = (uint32_t *)malloc((size_t)count * sizeof(uint32_t));
+	if (!nodes || !order)
+	{
+		free(nodes);
+		free(order);
+		pt.tree_failed = 1;
+		return;
+	}
+	for (k = 0; k < count; k++)
+		order[k] = k;
+	tree_lamps = copy + 16;
+	tree_node(nodes, &node_count, order, 0, count, 0);
+	/* (each lamp's leaf, after the nodes) */
+	for (k = 0; k < node_count; k++)
+	{
+		uint32_t left, lamp;
+
+		memcpy(&left, nodes + (size_t)k * TREE_NODE_FLOATS + 7, 4);
+		memcpy(&lamp, nodes + (size_t)k * TREE_NODE_FLOATS + 10, 4);
+		if (left == 0 && lamp < count)
+			float_bits(nodes + (size_t)node_count * TREE_NODE_FLOATS + lamp, k);
+	}
+	buffer_free(&pt.tree);
+	if (!buffer_make((VkDeviceSize)node_count * TREE_NODE_FLOATS * 4 + (VkDeviceSize)count * 4, 1, &pt.tree))
+	{
+		free(nodes);
+		free(order);
+		pt.tree_failed = 1;
+		host_logf(HOST_LOG_WARN, "prism pt: no memory for the reference's light tree");
+		return;
+	}
+	memcpy(pt.tree.mapped, nodes, (size_t)node_count * TREE_NODE_FLOATS * 4 + (size_t)count * 4);
+	pt.tree_nodes = node_count;
+	pt.tree_generation = pt.lamps_generation;
+	host_logf(HOST_LOG_INFO, "prism pt: the reference's light tree: %u lamps, %u nodes", count, node_count);
+	free(nodes);
+	free(order);
+}
+
 /* ---------- the frame */
 
 /* the exposure's settings from the last RT_FRAME, as Raster's frame takes
@@ -933,6 +1118,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	times_collect();
 	reference_noise_collect();
 	reference_write();
+	tree_collect();
 	if (!xgpu_vulkan_bake_lookup(&lookup))
 	{
 		if (!pt.logged_no_bake)
@@ -998,6 +1184,12 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->sums = pt.sums.address;
 	job->stats = pt.stats.address;
 	job->counters = slot_buffer->address + JOB_COUNTERS_OFFSET;
+	/* (the reference's light tree, where it is built for this scene) */
+	if (pt.tree_nodes && pt.tree_generation == lookup.generation && pt.tree.buffer)
+	{
+		job->tree = pt.tree.address;
+		job->extra[3] = (float)pt.tree_nodes;
+	}
 	memcpy(job->camera, view->now, sizeof(job->camera));
 	memcpy(job->last_camera, (view->flags & XGPU_SCENE_VIEW_HISTORY) ? view->last : view->now, sizeof(job->last_camera));
 	memcpy(job->corners, view->corners, sizeof(job->corners));
@@ -1141,6 +1333,17 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		stops; its means drawn */
 		int adding = !pt.ref_stopped && pt.ref_count < pt.ref_frames;
 
+		/* (the light tree for this scene: the bake's lamps copied for the host
+		to build it, once a generation) */
+		if (!pt.tree_failed && !pt.lamps_serial && pt.tree_generation != lookup.generation &&
+			(pt.lamps_readback.buffer || buffer_make((VkDeviceSize)(LAMPS_MOST + 1) * 64, 1, &pt.lamps_readback)))
+		{
+			job->lamps_out = pt.lamps_readback.address;
+			dispatch(commands, PASS_LAMPS, scene, slot_buffer->address, LAMPS_MOST, 0, 0, 0, (LAMPS_MOST + 255) / 256, 1);
+			pt.lamps_serial = xgpu_vulkan_serial();
+			pt.lamps_generation = lookup.generation;
+			barrier(commands);
+		}
 		if (adding)
 		{
 			pt.ref_count++;
@@ -1264,7 +1467,8 @@ void xgpu_vulkan_pt_shutdown(void)
 		&pt.sun_a, &pt.sun_b, &pt.out, &pt.reservoir_point[0], &pt.reservoir_point[1], &pt.reservoir_info[0],
 		&pt.reservoir_info[1],
 	};
-	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback };
+	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
+		&pt.tree };
 
 	if (!pt.made)
 		return;
