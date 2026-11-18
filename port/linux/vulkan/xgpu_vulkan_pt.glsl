@@ -65,10 +65,10 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
     vec4 exposure;
 };
 Job job;
-/* (the light pass's lamps by their diffuse light alone: a glossy pixel whose
-reflection's ray takes their specular light by meeting their faces, as the
-reference's glossy pixels do) */
-bool lamps_diffuse_only = false;
+/* (the light pass's lamps' specular light shared by multiple importance
+sampling between ReSTIR DI and the reflection's GGX ray (lamp_mis_nee): a
+pixel whose reflection is traced) */
+bool lamps_mis = false;
 /* (hit_light_n's last triangle met on the level, else 0xffffffff) */
 uint hit_light_triangle = 0xffffffffu;
 
@@ -300,6 +300,39 @@ vec3 ggx(Surface g, vec3 l)
     vec3 f0 = f0_of(g);
     vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);
     return min(distribution * visibility, 64.0) * fresnel * nl;
+}
+
+/* the density over directions of ggx_sample's reflection l (GGX's visible
+normals: G1(v) D(m) / (4 v.n), Heitz 2018), its alpha as ggx_sample's */
+float ggx_pdf(Surface g, vec3 l)
+{
+    float nv = dot(g.normal, g.eye), nl = dot(g.normal, l);
+    if (nv <= 1.0e-4 || nl <= 0.0)
+        return 0.0;
+    vec3 h = normalize(l + g.eye);
+    float nh = max(dot(g.normal, h), 0.0);
+    float alpha = max(g.roughness * g.roughness, 1.0e-3), a2 = alpha * alpha;
+    float dd = nh * nh * (a2 - 1.0) + 1.0;
+    float distribution = a2 / (PI * dd * dd);
+    float g1v = 2.0 * nv / (nv + sqrt(a2 + (1.0 - a2) * nv * nv));
+    return g1v * distribution / (4.0 * nv);
+}
+/* a lamp's specular light's share taken by next-event estimation (ReSTIR
+DI) where the reflection's ray is traced too (lamps_mis): the power
+heuristic between the GGX ray's density toward the lamp and the lamp's own
+density were it picked alone (1 over the solid angle it subtends, its area
+by its cosine over the distance squared). The reflection's ray takes the
+rest (1 minus it) where it meets the lamp's face: any such pair of weights
+that sum to 1 at every direction keeps the light unbiased, and this one
+gives a lamp wider than the lobe to the ray (a mirror's highlight, which a
+point on the lamp rarely finds) and a lamp narrower than the lobe to the
+lamp's point (a rough floor's, which the ray rarely meets) */
+float lamp_mis_nee(Surface g, vec3 l, float solid)
+{
+    if (!lamps_mis)
+        return 1.0;
+    float pb = ggx_pdf(g, l), q = 1.0 / max(solid, 1.0e-8);
+    return q * q / (q * q + pb * pb);
 }
 
 /* ---------- the bake's lookups (Raster's, xgpu_vulkan_bake_glsl.inc's raster pass) */
@@ -765,7 +798,8 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         float ce = dot(ne, -l);
         if (ce <= 0.0)
             return false;
-        parts(g, l, radiance * c, lamps_diffuse_only, dif, spe);
+        parts(g, l, radiance * c, false, dif, spe);
+        spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * ce / d2);
         float geometry = ce / d2;
         dif *= geometry;
         spe *= geometry;
@@ -836,7 +870,8 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
             if (c_ <= 0.0)
                 continue;
             vec3 dif, spe;
-            parts(g, l, radiance * c_, lamps_diffuse_only, dif, spe);
+            parts(g, l, radiance * c_, false, dif, spe);
+            spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * max(dot(ne, -l), 0.0) / max(d * d, 1.0e-8));
             float target = luma(dif) + luma(spe);
             float w = target * inverse_pdf / probability / float(lamp_count);
             if (!(w > 0.0) || isinf(w))
@@ -1880,15 +1915,15 @@ void main()
 
     vec3 noisy_d = vec3(0.0), noisy_s = vec3(0.0), clean_d = vec3(0.0), clean_s = vec3(0.0);
     vec3 share = specular_share(g);
-    /* (a glossy pixel, its reflection traced (under REFERENCE_GLOSSY and the
-    profile's ray roughness): the lamps' specular light by that ray meeting
-    their faces, their diffuse light alone by ReSTIR DI, as the reference
-    splits them, so each lamp's specular light is counted once. By next-event
-    estimation a narrow lobe's lamp highlight is found by few candidate
-    points and then held by the firefly clamp: round 2's a10 corridor floor
-    beyond the door windows lacked R's lamp strips' reflections (G5's second
-    pose)) */
-    bool glossy = g.roughness < REFERENCE_GLOSSY && g.roughness <= job.settings.y && indirect_on;
+    /* (a pixel whose reflection is traced (under the profile's ray
+    roughness): the lamps' specular light shared between ReSTIR DI and that
+    ray meeting their faces by multiple importance sampling (lamp_mis_nee).
+    By next-event estimation alone a narrow lobe's lamp highlight is found by
+    few candidate points and then held by the firefly clamp: round 2's a10
+    corridor floor beyond the door windows lacked R's lamp strips'
+    reflections (G5's second pose); by the ray alone a semi-glossy wall's
+    pool of a small lamp's light is met by few rays (G4's second pose)) */
+    bool glossy = g.roughness <= job.settings.y && indirect_on;
     if (direct_on)
     {
         /* the domes, the lamps, the fixtures, the dynamic lights */
@@ -1897,9 +1932,9 @@ void main()
         noisy_d += domes_at(o, g.normal, m);
         vec3 ld, ls;
         seed_for(pixel, frame, 3u);
-        lamps_diffuse_only = glossy;
+        lamps_mis = glossy;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
-        lamps_diffuse_only = false;
+        lamps_mis = false;
         noisy_d += ld;
         noisy_s += ls;
         /* the sky's floor (the units' rig: unoccluded, as the bake adds it;
@@ -1935,8 +1970,23 @@ void main()
             if (dot(weight, weight) > 0.0)
             {
                 vec3 met = hit_light(o, r, 300.0, true, hd);
-                if (glossy && direct_on && hit_light_triangle != 0xffffffffu)
-                    met += lamp_met(hit_light_triangle, r);
+                if (glossy && direct_on && hit_light_triangle != 0xffffffffu && hd > 0.0)
+                {
+                    vec3 lamp = lamp_met(hit_light_triangle, r);
+                    if (dot(lamp, lamp) > 0.0)
+                    {
+                        uint t = hit_light_triangle;
+                        vec3 e = cross(corner(t, 1u) - corner(t, 0u), corner(t, 2u) - corner(t, 0u));
+                        float area = 0.5 * length(e);
+                        float ce = abs(dot(normalize(e), r));
+                        /* (the solid angle from the pixel's point, as the
+                        lamp's sample measures it) */
+                        vec3 to = o + r * hd - g.point;
+                        lamps_mis = true;
+                        met += lamp * (1.0 - lamp_mis_nee(g, r, area * ce / max(dot(to, to), 1.0e-8)));
+                        lamps_mis = false;
+                    }
+                }
                 noisy_s += weight * met;
             }
         }
