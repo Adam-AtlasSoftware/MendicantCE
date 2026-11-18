@@ -90,6 +90,7 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_VIEW_SHIFT 8
 #define PHASE_RASTER 0x10000ul
 #define PHASE_RASTER_MATERIALS 0x20000ul
+#define PHASE_RASTER_OBJECTS_VOLUME 0x40000ul
 
 /* xgpu_stream.h's SCENE_MATERIAL's families, flags and scalars, and
 GBUFFER_DRAW's flags */
@@ -151,7 +152,7 @@ the nodes an instance sends (xgpu_stream.h's XGPU_SCENE_INSTANCE_NODES) */
 static struct
 {
 	unsigned long settings_read;
-	boolean wanted, raster, raster_materials;
+	boolean wanted, raster, raster_materials, raster_objects_volume;
 	unsigned long view;
 	/* the window's phase sent last (0 none: the light) */
 	unsigned long phase;
@@ -197,6 +198,11 @@ static void settings_read(
 	whole, for the materials milestone) */
 	value = config_string("display.prism_raster_composition");
 	prism_deferred.raster_materials = value && !strcmp(value, "materials");
+	/* (display.prism_raster_objects: "classic", the default, an object never
+	lit under the light CE gives its pixel; "volume" the irradiance volume's
+	light alone) */
+	value = config_string("display.prism_raster_objects");
+	prism_deferred.raster_objects_volume = value && !strcmp(value, "volume");
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
@@ -687,7 +693,8 @@ void prism_deferred_phase(
 		break;
 	default:
 		value = PHASE_RESOLVE | (prism_deferred.view << PHASE_VIEW_SHIFT) | (prism_deferred.raster ? PHASE_RASTER : 0) |
-			(prism_deferred.raster && prism_deferred.raster_materials ? PHASE_RASTER_MATERIALS : 0);
+			(prism_deferred.raster && prism_deferred.raster_materials ? PHASE_RASTER_MATERIALS : 0) |
+			(prism_deferred.raster && prism_deferred.raster_objects_volume ? PHASE_RASTER_OBJECTS_VOLUME : 0);
 		break;
 	}
 	prism_deferred.phase = value;

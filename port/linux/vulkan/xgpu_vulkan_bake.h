@@ -35,7 +35,7 @@ SCENE_VIEW's cameras of the pass; the bake's view (XGPU_GBUFFER_VIEW_BAKE_*,
 to give (CE's frame stays) */
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
-	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int *whole);
+	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume, int *whole);
 
 /* PRISM v4's exposure (docs/prism_bake.md, "Raster's exposure"): the meter's
 buffer (made in commands the first time; 0 none), which a frame's pass fills

@@ -310,6 +310,10 @@ static struct
 	real_vector3d sun;
 	real_rgb_color sun_color;
 	real sun_power, sun_diameter;
+	/* port: the sun's test distance (its sky light's: Tool's radiosity tests
+	a ray toward a sky light that far; 0 none) and each dome's (domes'
+	[8]) */
+	float sun_reach, dome_reaches[PRISM_RT_DOMES];
 	int dome_count;
 	float domes[PRISM_RT_DOMES][8];
 	unsigned long frame;
@@ -1376,6 +1380,22 @@ static void static_frame(void)
 
 /* the sun of the window's sky (or the one last found for this map), and
 its other lights, the domes */
+
+/* port: a sky light's test distance (its tag's lights' field at 0x60, world
+units: Tool's radiosity tests a ray toward the light that far, so that a
+roof further along it does not shade it); 0 where it has none */
+static float sky_light_reach(short sky_index, short light_index)
+{
+	byte const *sky = sky_index >= 0 ? (byte const *)scenario_get_sky(sky_index) : NULL;
+	struct tag_block const *lights = sky ? (struct tag_block const *)(sky + 0xC4) : NULL;
+	float reach = 0.0f;
+
+	if (!lights || !lights->address || light_index < 0 || light_index >= lights->count)
+		return 0.0f;
+	memcpy(&reach, (byte const *)lights->address + light_index * 0x74 + 0x60, sizeof(reach));
+	return reach > 0.0f && reach < 100000.0f ? reach : 0.0f;
+}
+
 static void sun_find(void)
 {
 	short sky_index = render.visible_sky_model ? render.visible_sky_index : NONE;
@@ -1410,6 +1430,7 @@ static void sun_find(void)
 	prism_rt.sun_found = render_sky_sun(sky_index, &prism_rt.sun, &prism_rt.sun_color, &prism_rt.sun_power);
 	prism_rt.sun_diameter = 0.0f;
 	prism_rt.dome_count = 0;
+	prism_rt.sun_reach = 0.0f;
 	count = render_sky_light_count(sky_index);
 	for (index = 0; index < count; index++)
 	{
@@ -1425,10 +1446,12 @@ static void sun_find(void)
 			direction.k == prism_rt.sun.k && power == prism_rt.sun_power)
 		{
 			prism_rt.sun_diameter = diameter;
+			prism_rt.sun_reach = sky_light_reach(sky_index, index);
 			continue;
 		}
 		if (prism_rt.dome_count == PRISM_RT_DOMES)
 			continue;
+		prism_rt.dome_reaches[prism_rt.dome_count] = sky_light_reach(sky_index, index);
 		dome = prism_rt.domes[prism_rt.dome_count++];
 		dome[0] = direction.i;
 		dome[1] = direction.j;
@@ -1525,7 +1548,9 @@ they are) */
 		memcpy(dome, prism_rt.domes[index], 4 * sizeof(float));
 		for (channel = 0; channel < 3; channel++)
 			dome[4 + channel] = prism_rt.domes[index][4 + channel] * scales->sun * scales->sun_rgb[channel] / PRISM_RT_PI;
-		dome[7] = 0.0f;
+		/* (port: dome[7], its test distance where the rig is in the light's
+		units: its rays tested that far, as Tool's; 0 the whole level) */
+		dome[7] = scales->units ? prism_rt.dome_reaches[index] : 0.0f;
 	}
 	settings[PRISM_RT_SETTING_STYLE] = (float)prism_rt.style;
 	settings[PRISM_RT_SETTING_ANCHOR] = (prism_rt.anchor >= 0 ? (float)prism_rt.anchor : remix ? 0.0f : 100.0f) /
@@ -1554,7 +1579,10 @@ they are) */
 	/* (rig[62]: 1 where the bounces' albedo is the base maps' stored mean,
 	prism_rt_albedo_stored: the host's drawn objects' alike) */
 	rig[62] = prism_rt_albedo_stored() ? 1.0f : 0.0f;
-	rig[63] = 0.0f;
+	/* (rig[63]: the sun's test distance where the rig is in the light's
+	units: its rays tested that far, as Tool's (c40's moon: 30 world units,
+	under a cliff 105 up along it); 0 the whole level) */
+	rig[63] = scales->units ? prism_rt.sun_reach : 0.0f;
 	settings[PRISM_RT_SETTING_DYNAMIC_SHADOWS] = remix ? 1.0f : 0.6f;
 }
 

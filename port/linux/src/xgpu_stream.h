@@ -430,6 +430,10 @@ diffuse light by the albedo) */
 materials compose the frame whole; else CE's compose Raster's light: it
 goes into the light target, CE's base and additions with it) */
 #define XGPU_GBUFFER_PHASE_RASTER_MATERIALS 0x20000u
+/* (with it: display.prism_raster_objects "volume", an object's light the
+irradiance volume's alone; else, with CE's composition, never under the
+light CE gives the object's pixel) */
+#define XGPU_GBUFFER_PHASE_RASTER_OBJECTS_VOLUME 0x40000u
 #define XGPU_GBUFFER_PHASE_VIEW_MASK 0xff00u
 /* the second target's word 2: the motion's history bit and the page's
 shift (GBUFFER_BEGIN) */
