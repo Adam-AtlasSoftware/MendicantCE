@@ -632,3 +632,19 @@ def test_the_specular_history_is_whole_for_a_still_eye_and_short_for_a_moving_mi
     assert 4.0 < model.specular_most(0.3, 0.005) < 32.0
     assert model.specular_most(0.6, 0.5) == 32.0
     assert model.specular_most(0.05, 0.0, level=False) < 8.0
+
+
+def test_catmull_rom_keeps_a_moved_historys_detail_that_bilinear_blurs():
+    for f in (0.0, 0.25, 0.5, 0.9):
+        assert abs(model.catmull_rom(f).sum() - 1.0) < 1e-12
+    assert np.allclose(model.catmull_rom(0.0), [0.0, 1.0, 0.0, 0.0])
+    # (a sparse light's sample in a dark history, moved 30 times by a third of a pixel and back by whole pixels: the
+    # bilinear taps spread it over many pixels, Catmull-Rom keeps most of it where it was)
+    row = np.zeros(64)
+    row[32] = 1.0
+    cubic, linear = row.copy(), row.copy()
+    for _ in range(30):
+        cubic = np.roll(model.resample_row(cubic, 1.0 / 3.0), 0)
+        linear = np.roll(model.resample_row(linear, 1.0 / 3.0, cubic=False), 0)
+    assert cubic.max() > 2.0 * linear.max(), (cubic.max(), linear.max())
+    assert (cubic >= 0.0).all()

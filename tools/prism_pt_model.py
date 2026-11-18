@@ -19,6 +19,7 @@ can check them without a GPU:
   tree_build         the reference's light tree as xgpu_vulkan_pt.c's tree_node builds it
   tree_importance, tree_pick, tree_probability  the GLSL's walk of it
   specular_most      the temporal pass's longest specular history, by the gloss and the eye's parallax at the point
+  catmull_rom, resample_row  the temporal pass's history resampling (Catmull-Rom held to its 2 x 2's range, or bilinear)
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
   atrous_step        an a-trous step's weights: the 3 x 3 kernel, the plane, the normal, the instance, the luminance
 """
@@ -192,6 +193,30 @@ def specular_most(roughness, parallax, most_d=32.0, level=True):
         alpha = max(roughness * roughness, 0.01)
         most = max(most, min(max(0.5 * alpha / max(parallax, 1.0e-6), 4.0), most_d))
     return most
+
+
+def catmull_rom(f):
+    """the weights of the taps 1 before, at, 1 and 2 after the place's floor, f its fraction"""
+    f2, f3 = f * f, f * f * f
+    return np.array([-0.5 * f3 + f2 - 0.5 * f, 1.5 * f3 - 2.5 * f2 + 1.0, -1.5 * f3 + 2.0 * f2 + 0.5 * f,
+                     0.5 * f3 - 0.5 * f2])
+
+
+def resample_row(row, shift, cubic=True):
+    """a history row moved by `shift` pixels (0 to 1) as the temporal pass reprojects it, by Catmull-Rom held to the
+    two nearest taps' range, or bilinear; the edges' pixels kept"""
+    out = row.copy()
+    for x in range(2, len(row) - 2):
+        at = x - shift
+        a = int(np.floor(at))
+        f = at - a
+        if cubic:
+            taps = row[a - 1:a + 3]
+            v = float(np.dot(catmull_rom(f), taps))
+            out[x] = min(max(v, min(row[a], row[a + 1])), max(row[a], row[a + 1]))
+        else:
+            out[x] = (1.0 - f) * row[a] + f * row[a + 1]
+    return out
 
 
 def temporal_step(history, sample, most=32.0, most_fast=4.0, gamma=2.0):

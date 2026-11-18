@@ -1973,6 +1973,30 @@ there, its 2 x 2 taps each kept where its guide is the surface's (the same
 instance, the normal within 25 degrees, the plane through it near the
 point: no history across an edge, nor through an opening onto a surface
 behind), bilinear over the kept ones */
+/* whether the last frame's pixel q held this pixel's surface (the temporal
+pass's guide test: the instance, the normal, and the level's point on this
+surface's plane, an object's distance loosely) */
+bool history_tap(ivec2 q, Surface g, float tolerance)
+{
+    if (!inside(q))
+        return false;
+    uvec4 gl = imageLoad(guide_last, q);
+    if (gl.x != (g.instance | 0x10000u))
+        return false;
+    vec3 nl = unfold(unpackSnorm2x16(gl.y));
+    if (dot(nl, g.normal) < 0.9)
+        return false;
+    float dl = uintBitsToFloat(gl.z);
+    if (g.instance == 0u)
+        return abs(dot(last_point(q, dl) - g.point, g.normal)) <= tolerance;
+    return abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
+}
+/* Catmull-Rom's weights for a tap 1, 0, 1, 2 away (the offset f in [0, 1)) */
+vec4 catmull_rom(float f)
+{
+    float f2 = f * f, f3 = f2 * f;
+    return vec4(-0.5 * f3 + f2 - 0.5 * f, 1.5 * f3 - 2.5 * f2 + 1.0, -1.5 * f3 + 2.0 * f2 + 0.5 * f, 0.5 * f3 - 0.5 * f2);
+}
 bool reproject(ivec2 pixel, Surface g, out vec4 d, out vec4 sp, out vec4 mo, out vec4 ms, out vec4 su,
     out float length_d)
 {
@@ -2030,6 +2054,49 @@ bool reproject(ivec2 pixel, Surface g, out vec4 d, out vec4 sp, out vec4 mo, out
     ms /= weights;
     su /= weights;
     length_d = d.a;
+    /* (the light's histories resampled by Catmull-Rom where the whole 4 x 4
+    about the place is this surface's, as TAA and ReLAX resample theirs:
+    bilinear taps at every move blur the history along the move, so a moving
+    eye's histories smeared a lamp's sparse samples into streaks toward the
+    point it moves to (round 2's G4 floor) and the lit structure's light into
+    the ground beside it (G6); the result held to the range of the 2 x 2
+    taps, so it never rings past them. The moments, the lengths and the sun's
+    visibility keep the bilinear taps) */
+    if (weights > 0.999)
+    {
+        bool whole = true;
+        for (int k = 0; k < 16 && whole; k++)
+        {
+            ivec2 o = ivec2(k & 3, k >> 2) - 1;
+            if (o.x >= 0 && o.x <= 1 && o.y >= 0 && o.y <= 1)
+                continue;
+            whole = history_tap(a + o, g, tolerance);
+        }
+        if (whole)
+        {
+            vec4 wx = catmull_rom(f.x), wy = catmull_rom(f.y);
+            vec3 cd = vec3(0.0), cs = vec3(0.0);
+            vec3 lo_d = vec3(1.0e30), hi_d = vec3(-1.0e30), lo_s = vec3(1.0e30), hi_s = vec3(-1.0e30);
+            for (int k = 0; k < 16; k++)
+            {
+                ivec2 o = ivec2(k & 3, k >> 2);
+                ivec2 q = a + o - 1;
+                float w = wx[o.x] * wy[o.y];
+                vec3 vd = imageLoad(diff_last, q).rgb, vs = imageLoad(spec_last, q).rgb;
+                cd += w * vd;
+                cs += w * vs;
+                if (o.x >= 1 && o.x <= 2 && o.y >= 1 && o.y <= 2)
+                {
+                    lo_d = min(lo_d, vd);
+                    hi_d = max(hi_d, vd);
+                    lo_s = min(lo_s, vs);
+                    hi_s = max(hi_s, vs);
+                }
+            }
+            d.rgb = clamp(cd, lo_d, hi_d);
+            sp.rgb = clamp(cs, lo_s, hi_s);
+        }
+    }
     return true;
 }
 void main()
