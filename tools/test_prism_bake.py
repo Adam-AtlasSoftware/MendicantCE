@@ -1,9 +1,10 @@
 """PRISM v4's baker groundwork (port/linux/vulkan/prism_bake_*.c): the reachable space, the atlas, the bake cache
-file and the convergence rule.
+file, the convergence rule and the volume's batches.
 
 - tools/prism_bake/test_bake.c on synthetic data: a collision bsp built from boxes (a room with a step, stairs to a
   mezzanine, a block too high to jump, a chimney, a sealed room), an atlas of three charts, the cache file written,
-  torn, corrupted, resumed and replaced, and the stopping rule on Gaussian, heavy-tailed and rare-firefly samples;
+  torn, corrupted, resumed and replaced, the stopping rule on Gaussian, heavy-tailed and rare-firefly samples, and
+  the irradiance volume's batches with several readbacks in flight (each probe written once, none past the end);
   built warning-free as C89 and run, also under the address and undefined-behaviour sanitizers where they link.
 - With the player's maps (HALO_DATA_ROOT or assets, never committed): Rat Race's reachable space reaches every
   spawn and almost all its floor, and none of what is left is within jumping height of a floor walked.

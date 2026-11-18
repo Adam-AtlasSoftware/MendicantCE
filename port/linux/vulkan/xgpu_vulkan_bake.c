@@ -61,6 +61,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 #include "xgpu_vulkan_scene.h"
 #include "host.h"
 #include "prism_bake_atlas.h"
+#include "prism_bake_batch.h"
 #include "prism_bake_cache.h"
 #include "prism_bake_converge.h"
 #include "prism_bake_reach.h"
@@ -267,6 +268,8 @@ struct bake_readback
 	uint32_t tiles[BATCH_TILES];
 	uint32_t finished;
 	int kind;
+	/* the volume's batch it is of (prism_bake_batch.h) */
+	uint32_t batch;
 };
 
 enum
@@ -406,9 +409,9 @@ struct bake_state
 	uint32_t *mask_tiles;
 	uint32_t mask_tile_count, masks_done, masks_batched;
 	struct bake_buffer mask_ranges, mask_out;
-	/* the volume */
-	uint32_t probes_done, probes_batched;
-	int volume_waiting, volume_loaded;
+	/* the volume: its batches of probes (done: those written) */
+	struct prism_bake_batches volume;
+	int volume_loaded;
 	/* the reflection probes: their places, info, texels and hashed grid on
 	the GPU, the grid's entries, those done and in the batch running */
 	struct bake_buffer reflection_points, reflection_info, reflection_data, reflection_table;
@@ -2554,6 +2557,7 @@ static struct bake_readback *readback_take(VkDeviceSize size, int kind)
 		r->serial = xgpu_vulkan_serial();
 		r->kind = kind;
 		r->finished = 0;
+		r->batch = 0;
 		return r;
 	}
 	return NULL;
@@ -3612,24 +3616,29 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 			return;
 		}
 		free(table);
+		prism_bake_batches_start(&b->volume, plan->probe_count, VOLUME_BATCH);
 		barrier(commands);
 		return;
 	}
-	if (b->volume_waiting)
-		return;
-	if (b->probes_batched > b->probes_done)
+	if (b->volume.batched > b->volume.done)
 	{
-		/* (the batch running: its count of running probes read back) */
+		uint32_t number = prism_bake_batches_counting(&b->volume);
+
+		/* (the batch running: its count of running probes read back, until
+		its results are asked for) */
+		if (!number)
+			return;
 		r = readback_take(16, STEP_VOLUME);
 		if (!r)
 			return;
-		addresses[0] = b->probe_points.address + (VkDeviceSize)b->probes_done * 16;
+		r->batch = number;
+		addresses[0] = b->probe_points.address + (VkDeviceSize)b->volume.done * 16;
 		addresses[1] = b->probe_accumulators.address;
 		addresses[2] = b->probe_states.address;
 		addresses[3] = b->probe_statistics.address;
 		addresses[4] = b->probe_states.address + (VkDeviceSize)VOLUME_BATCH * 4;
 		addresses[7] = gather_cache(b);
-		count = b->probes_batched - b->probes_done;
+		count = b->volume.batched - b->volume.done;
 		run_compacted(commands, PIPELINE_VOLUME, b, b->probe_states.address, count, addresses, 5, 5, bake.samples, 64,
 			b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b), (float)BOUNCES, 1u);
 		barrier(commands);
@@ -3637,26 +3646,24 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 		r->finished = 0;
 		return;
 	}
-	if (b->probes_done >= plan->probe_count)
-		return;
 	/* the next batch begun */
-	count = plan->probe_count - b->probes_done;
-	if (count > VOLUME_BATCH)
-		count = VOLUME_BATCH;
+	count = prism_bake_batches_begin(&b->volume);
+	if (!count)
+		return;
 	vkCmdFillBuffer(commands, b->probe_accumulators.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(commands, b->probe_states.buffer, 0, (VkDeviceSize)VOLUME_BATCH * 4, 0u);
 	vkCmdFillBuffer(commands, b->probe_states.buffer, (VkDeviceSize)VOLUME_BATCH * 4, 4, count);
 	vkCmdFillBuffer(commands, b->probe_statistics.buffer, 0, VK_WHOLE_SIZE, 0u);
 	barrier(commands);
-	b->probes_batched = b->probes_done + count;
 }
 
 /* the running probes' count read: the batch's results asked for where it is
-0, or its results written (each brick's record, the raster's probes) */
+0 (once: several counts of a batch are in flight while the game draws), or
+its results written (each brick's record, the raster's probes) */
 static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struct bake_readback *r)
 {
 	struct bake_plan *plan = &b->plan;
-	uint32_t count = b->probes_batched - b->probes_done, index;
+	uint32_t count, index;
 
 	if (r->finished == 0)
 	{
@@ -3664,11 +3671,17 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 		struct bake_readback *data;
 
 		memcpy(&running, r->buffer.mapped, 4);
-		if (running != 0 || count == 0)
+		count = prism_bake_batches_counted(&b->volume, r->batch, running);
+		if (!count)
 			return;
 		data = readback_take((VkDeviceSize)count * (ACCUMULATOR_FLOATS * 4 + 4 + 36), STEP_VOLUME);
 		if (!data)
+		{
+			/* (asked again by the next count) */
+			b->volume.asked = 0;
 			return;
+		}
+		data->batch = r->batch;
 		copy_region(commands, &b->probe_accumulators, 0, &data->buffer, 0, (VkDeviceSize)count * ACCUMULATOR_FLOATS * 4);
 		copy_region(commands, &b->probe_states, 0, &data->buffer, (VkDeviceSize)count * ACCUMULATOR_FLOATS * 4,
 			(VkDeviceSize)count * 4);
@@ -3676,7 +3689,6 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 			(VkDeviceSize)count * 36);
 		data->finished = count;
 		/* (no more samples meanwhile: the batch is whole) */
-		b->volume_waiting = 1;
 		return;
 	}
 	{
@@ -3685,8 +3697,12 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 			(size_t)r->finished * ACCUMULATOR_FLOATS * 4);
 		const uint32_t *statistics = (const uint32_t *)((const char *)r->buffer.mapped +
 			(size_t)r->finished * (ACCUMULATOR_FLOATS * 4 + 4));
-		uint32_t first = b->probes_done, words[BRICK_PROBES * PROBE_WORDS], k;
+		uint32_t first, words[BRICK_PROBES * PROBE_WORDS], k;
+		int64_t at = prism_bake_batches_finished(&b->volume, r->batch, r->finished);
 
+		if (at < 0)
+			return;
+		first = (uint32_t)at;
 		for (index = 0; index < r->finished; index++)
 		{
 			const float *a = accumulators + (size_t)index * ACCUMULATOR_FLOATS;
@@ -3710,9 +3726,6 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 			(void)p;
 			file_append(b, PRISM_BAKE_RECORD_VOLUME_BRICK, brick_job(plan, first + index), words, sizeof(words));
 		}
-		b->probes_done += r->finished;
-		b->probes_batched = b->probes_done;
-		b->volume_waiting = 0;
 		(void)half_to_float;
 	}
 }
@@ -4240,7 +4253,7 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 static void volume_load(VkCommandBuffer commands, struct bake_state *b)
 {
 	struct bake_plan *plan = &b->plan;
-	uint32_t index, words[BRICK_PROBES * PROBE_WORDS], first = b->probes_done;
+	uint32_t index, words[BRICK_PROBES * PROBE_WORDS], first = b->volume.done;
 
 	if (!b->cache.record_count || !b->probe_host)
 		return;
@@ -4257,8 +4270,7 @@ static void volume_load(VkCommandBuffer commands, struct bake_state *b)
 		memcpy(b->probe_host + (size_t)index * PROBE_WORDS, words, sizeof(words));
 		if (!upload(commands, &b->probes, (VkDeviceSize)index * PROBE_WORDS * 4, words, sizeof(words)))
 			break;
-		b->probes_done = index + BRICK_PROBES;
-		b->probes_batched = b->probes_done;
+		prism_bake_batches_skip(&b->volume, index + BRICK_PROBES);
 	}
 }
 
@@ -4391,7 +4403,7 @@ static void status_write(struct bake_state *b)
 	else if (step > STEP_MASK)
 		done += 0.1;
 	if (b->plan.probe_count)
-		done += (double)b->probes_done / (double)b->plan.probe_count * 0.1;
+		done += (double)b->volume.done / (double)b->plan.probe_count * 0.1;
 	else if (step > STEP_VOLUME)
 		done += 0.1;
 	progress = step == STEP_DONE ? 1.0f : (float)done;
@@ -4429,7 +4441,7 @@ static void bake_log_progress(struct bake_state *b)
 		"%.0f s, %u samples a dispatch (%.1f ms of GPU), %u texels running, %.0f MB written; %.0f samples a texel (the "
 		"most %u; %.0f%% by the firefly rule; %.0f%% of those converged by the noise floor), %.1f M samples a second, "
 		"%.1f s of GPU", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
-		b->mask_tile_count, b->probes_done, b->plan.probe_count, t - b->started, bake.samples, bake.gpu_milliseconds,
+		b->mask_tile_count, b->volume.done, b->plan.probe_count, t - b->started, bake.samples, bake.gpu_milliseconds,
 		b->running_texels, (double)b->file_bytes / 1048576.0, b->texels_baked > 0.0 ? (double)b->rays / b->texels_baked : 0.0,
 		b->samples_most, b->texels_baked > 0.0 ? 100.0 * b->texels_firefly_bound / b->texels_baked : 0.0,
 		b->texels_converged > 0.0 ? 100.0 * b->texels_floor / b->texels_converged : 0.0,
@@ -4588,15 +4600,15 @@ static void bake_frame(void)
 		/* (the bricks the file has first, a frame's staging at a time) */
 		if (!b->volume_loaded && b->probe_host)
 		{
-			uint32_t before = b->probes_done;
+			uint32_t before = b->volume.done;
 
 			volume_load(commands, b);
-			if (b->probes_done == before)
+			if (b->volume.done == before)
 				b->volume_loaded = 1;
 		}
 		else
 			volume_frame(commands, b);
-		if (b->probes_done >= b->plan.probe_count)
+		if (b->volume.done >= b->plan.probe_count)
 			b->step = STEP_REFLECTIONS;
 		break;
 	case STEP_REFLECTIONS:
@@ -5243,7 +5255,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		*whole = 0;
 	if (!bake.made || !b || !copy || !base || !additions || !words || !extras || !view || !b->scene.address ||
 		b->step <= STEP_UPLOAD ||
-		(!b->physical_count && !b->probes_done))
+		(!b->physical_count && !b->volume.done))
 		return NULL;
 	if (b->step == STEP_FAILED)
 		return NULL;
@@ -5281,11 +5293,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	memcpy(job.corners, view->corners, sizeof(job.corners));
 	job.volume[0] = PROBE_SPACING;
 	job.volume[1] = COARSE_SPACING;
-	job.counts[0] = b->probes.buffer && b->probes_done ? b->brick_entries : 0;
+	job.counts[0] = b->probes.buffer && b->volume.done ? b->brick_entries : 0;
 	job.counts[1] = description->width;
 	job.counts[2] = description->height;
 	job.coarse = b->bricks_coarse.address;
-	job.counts[3] = b->probes.buffer && b->probes_done ? b->coarse_entries : 0;
+	job.counts[3] = b->probes.buffer && b->volume.done ? b->coarse_entries : 0;
 	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on) */
 	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
 	for (index = 0; lights && index < light_count && dynamic < RASTER_LIGHTS; index++)

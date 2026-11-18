@@ -3,7 +3,8 @@ TEST_BAKE.C
 
 The baker's host libraries on synthetic data (tools/test_prism_bake.py
 builds and runs it): port/linux/vulkan/prism_bake_reach.c (a collision bsp
-built here from boxes), prism_bake_atlas.c, prism_bake_cache.c and
+built here from boxes), prism_bake_atlas.c, prism_bake_batch.c (the
+volume's batches, their readbacks in flight), prism_bake_cache.c and
 prism_bake_converge.c.
 
 	test_bake <scratch folder>
@@ -13,6 +14,7 @@ non-zero if any failed.
 */
 
 #include "prism_bake_atlas.h"
+#include "prism_bake_batch.h"
 #include "prism_bake_cache.h"
 #include "prism_bake_converge.h"
 #include "prism_bake_reach.h"
@@ -1236,6 +1238,152 @@ static void test_converge(void)
 	}
 }
 
+/* the irradiance volume's batches as xgpu_vulkan_bake.c runs them, with its
+four readback slots collected in their order once the frame they were
+recorded in is done, lag frames later: while the game draws, two or three
+counts of a batch are in flight and come back 0 together (b30's live bake:
+the results asked twice, every other batch skipped, the last past the
+probes' end). Each item must be written once, in its batch, and no batch
+past the end. */
+struct batch_slot
+{
+	int busy;
+	uint32_t frame, batch, finished, running, first;
+};
+
+static int batches_run(uint32_t total, uint32_t size, uint32_t lag, uint32_t work, uint32_t starve, char *why)
+{
+	struct prism_bake_batches batches;
+	struct batch_slot slots[4];
+	unsigned char *written = (unsigned char *)calloc(total ? total : 1, 1);
+	uint32_t frame, index, dispatched = 0, k;
+	int ok = 1;
+
+	if (!written)
+		return 0;
+	memset(slots, 0, sizeof(slots));
+	prism_bake_batches_start(&batches, total, size);
+	for (frame = 1; frame < 100000 && batches.done < total && ok; frame++)
+	{
+		/* (the readbacks of done frames, in slot order) */
+		for (index = 0; index < 4 && ok; index++)
+		{
+			struct batch_slot *r = &slots[index];
+
+			if (!r->busy || r->frame + lag > frame)
+				continue;
+			if (!r->finished)
+			{
+				uint32_t count = prism_bake_batches_counted(&batches, r->batch, r->running);
+
+				if (count)
+				{
+					/* (a data slot: the first free, maybe one after this one's) */
+					struct batch_slot *data = NULL;
+
+					for (k = 0; k < 4 && !data; k++)
+						if (!slots[k].busy && !(starve && frame % starve == 0))
+							data = &slots[k];
+					if (!data)
+						batches.asked = 0;
+					else
+					{
+						data->busy = 1;
+						data->frame = frame;
+						data->batch = r->batch;
+						data->finished = count;
+						data->first = batches.done;
+					}
+				}
+			}
+			else
+			{
+				int64_t at = prism_bake_batches_finished(&batches, r->batch, r->finished);
+
+				if (at >= 0)
+				{
+					if ((uint32_t)at != r->first || (uint64_t)at + r->finished > total)
+					{
+						sprintf(why, "results of %u at %ld (asked at %u)", r->finished, (long)at, r->first);
+						ok = 0;
+					}
+					for (k = 0; ok && k < r->finished; k++)
+						if (written[at + k]++)
+						{
+							sprintf(why, "item %ld written twice", (long)(at + k));
+							ok = 0;
+						}
+				}
+			}
+			r->busy = 0;
+		}
+		/* (the frame's slice: a running batch's samples and count, or the
+		next batch) */
+		if (batches.batched > batches.done)
+		{
+			uint32_t number = prism_bake_batches_counting(&batches);
+			struct batch_slot *r = NULL;
+
+			if (!number)
+				continue;
+			for (k = 0; k < 4 && !r; k++)
+				if (!slots[k].busy)
+					r = &slots[k];
+			if (!r)
+				continue;
+			dispatched++;
+			r->busy = 1;
+			r->frame = frame;
+			r->batch = number;
+			r->finished = 0;
+			r->running = dispatched >= work ? 0 : work - dispatched;
+		}
+		else if (prism_bake_batches_begin(&batches))
+			dispatched = 0;
+	}
+	for (index = 0; ok && index < total; index++)
+		if (written[index] != 1)
+		{
+			sprintf(why, "item %u written %u times (done %u of %u)", index, written[index], batches.done, total);
+			ok = 0;
+		}
+	free(written);
+	return ok;
+}
+
+static void test_batches(void)
+{
+	struct prism_bake_batches batches;
+	char why[256], name[64];
+	uint32_t lag, work;
+
+	/* b30's volume in small: a last batch shorter than the rest */
+	for (lag = 1; lag <= 3; lag++)
+		for (work = 1; work <= 4; work++)
+		{
+			why[0] = 0;
+			sprintf(name, "batches_lag%u_work%u", lag, work);
+			check(batches_run(64u * 31u + 34u, 64u, lag, work, 0, why), name, why);
+		}
+	why[0] = 0;
+	check(batches_run(64u * 7u, 64u, 3, 2, 3, why), "batches_no_slot", why);
+	why[0] = 0;
+	check(batches_run(0, 64u, 2, 1, 0, why), "batches_none", why);
+	/* (a count of another batch, or results not asked for, let go) */
+	prism_bake_batches_start(&batches, 100, 40);
+	check(prism_bake_batches_begin(&batches) == 40 && prism_bake_batches_begin(&batches) == 0 &&
+		prism_bake_batches_counted(&batches, 2, 0) == 0 && prism_bake_batches_finished(&batches, 1, 40) < 0 &&
+		prism_bake_batches_counted(&batches, 1, 5) == 0 && prism_bake_batches_counted(&batches, 1, 0) == 40 &&
+		prism_bake_batches_counting(&batches) == 0 && prism_bake_batches_counted(&batches, 1, 0) == 0 &&
+		prism_bake_batches_finished(&batches, 1, 40) == 0 && prism_bake_batches_finished(&batches, 1, 40) < 0 &&
+		batches.done == 40 && prism_bake_batches_begin(&batches) == 40 && batches.number == 2,
+		"batches_stale", "a stale count or result taken");
+	prism_bake_batches_start(&batches, 100, 40);
+	prism_bake_batches_skip(&batches, 64);
+	check(batches.done == 64 && prism_bake_batches_begin(&batches) == 36 && prism_bake_batches_begin(&batches) == 0,
+		"batches_skip", "the file's items skipped");
+}
+
 int main(int argc, char **argv)
 {
 	if (argc < 2)
@@ -1249,6 +1397,7 @@ int main(int argc, char **argv)
 	test_cache(argv[1]);
 	test_cache_jobs(argv[1]);
 	test_converge();
+	test_batches();
 	printf("%s: %d failed\n", failures ? "FAILED" : "PASSED", failures);
 	return failures != 0;
 }
