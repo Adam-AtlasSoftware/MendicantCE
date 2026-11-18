@@ -245,17 +245,43 @@ scene changes.
 `HALO_PT_TIMES_FILE` writes each frame's GPU time and its passes' (light, temporal, fix, atrous, composite), as the log
 does their means every 600 frames.
 
+## The moving objects
+
+The traced scene is the bake's (the level and its static scenery: placements of scenery, controls and light fixtures
+that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this frame's moving objects (c7218cff2):
+
+- **What is captured.** Every object draw of the G-buffer pass (`xgpu_vulkan_stream.c`'s `gbuffer_draw`) but the
+  first-person view's (its weapon and arms would stand in front of the eye in the world's rays) and those of objects
+  the bake's static scenery already holds (the game marks them `XGPU_SCENE_INSTANCE_IN_TLAS` in SCENE_INSTANCE,
+  `prism_bake_object_static`: a placement of the static kinds at its place, by `scenery_static`'s rule). So the
+  vehicles, the characters, weapons on the ground and in hands, the Pelican, projectiles with a model, the machines
+  (doors and lifts, which the bake leaves out since prism-v4-m2 c50d3b3d3), equipment and scenery that can move or
+  break are traced as drawn, in their pose and level of detail. A draw is passed over (counted) where its vertices are
+  not the stock layout, or it is alpha-tested with no cutout coverage; a cutout (foliage on an object) is traced by its
+  share of texels drawn. Transparent draws (effects, particles, shields, glass) are not in the G-buffer pass and so not
+  traced.
+- **How.** RT_FRAME carries `XGPU_RT_FLAG_OBJECTS` under "pathtraced"; the old tracer's object capture
+  (`xgpu_vulkan_rt.c`: a draw's vertices, indices and node matrices where they already are on the GPU, skinned by a
+  compute pass into a triangle soup, a bottom-level structure an entry, kept from frame to frame and refitted as it
+  moves) is fed by the G-buffer pass's draws, and one top level is built as the pass ends
+  (`xgpu_vulkan_rt_objects_end`). Nothing else of that file runs in this mode, and the old `display.prism_rt` modes
+  never see the flag: they are as they were (D3). The plan was an instance manager in the path tracer's own files;
+  reusing the frozen module's capture got the objects traced now, at the cost of that module's limits (2.25 million
+  object triangles a window, the far ones past `display.prism_rt_objects`' reach traced by the game's own model).
+- **What sees them.** `job.objects` (the top level: object instances mask 4, cutouts 8) and `job.object_table` (a
+  row an object: its soup, its base map's mean albedo, its coverage). Every visibility test of BAKE_COMMON's the
+  shaders make (`blocked`, `sky_blocked`, wrapped by `tools/vulkan_pt_shaders.py` so the baker's text stays as it
+  is): the lamps', fixtures', dynamic lights', domes' and the sun's at the pixel and at every path vertex; the sun's
+  ray (`sun_ray`) and the far sun mask (an object's shadow over it, by the sun's centre); a bounce's or a reflection's
+  hit on an object, lit by the irradiance volume at its point and a sun ray from it; the reference's paths, which hit
+  them with their albedo and go on from them. `HALO_PT_OBJECTS=0` leaves them out (the frame and the reference).
+- **Not yet.** An object hit's own glow and specular, its texture's colour at the hit (the mean only); the baked
+  indirect light (the texels' and the volume's, at the pixel and at a hit) has no object in it, so an object takes no
+  share of the indirect light the bake carries beyond the traced bounce (`performance`'s short occlusion rays are the
+  plan); the first-person view's shadow on the world.
+
 ## What is not done yet
 
-- **Moving objects in the trace.** The traced scene is the bake's: the level and the static scenery. The moving
-  objects (vehicles, doors and other devices, weapons on the ground, bodies) are lit, but cast no traced shadow, are
-  not hit by rays and do not occlude the bake's light; the reference has the same scene, so the gates compare like
-  with like (the G scenes, with the AI erased, hold few). The old modes' object capture (`xgpu_vulkan_rt.c`, fed by
-  world AO's pre-pass) stays frozen and unused (D3). The plan: an instance manager in the path tracer's own files,
-  fed by the G-buffer pass's object draws (a capture variant of their vertex shaders writing world positions to a
-  buffer, as the G-buffer twin already computes world normals), a bottom-level structure a draw built once and
-  refitted as it moves (far ones first dropped under a budget, as `prism-pt` did), a top-level structure of the
-  bake's static ones and the objects', the objects' materials for a hit's shading, and the reference tracing the same.
 - **ReSTIR's spatial reuse** (left out on purpose, above) and the unbiased (ray-traced) reuse's correction.
 - **ReSTIR GI's spatial reuse** (its temporal reuse is in), the dynamic objects' occlusion of the baked light
   (`performance`'s short AO rays), traced-light upscaling and the async queue (M5, M6).
