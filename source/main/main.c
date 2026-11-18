@@ -731,6 +731,9 @@ boolean network_clock_server_pace_first(void);
 boolean network_clock_server_paced(void);
 /* port: port/linux/src/port_config.c */
 double config_real(const char *name);
+/* the display's pixels a screen unit (port/linux/game/menu_shapes.c: the
+performance overlay's text scaled to be readable) */
+real menu_shape_pixels(void);
 #ifdef HALO_VR
 void vr_seat_test_update(void);
 void vr_death_test_update(void);
@@ -3578,30 +3581,54 @@ void main_framerate_render(
 			draw_string_set_font(font_tag_index);
 			rasterizer_draw_string(&bounds, NULL, NULL, 0, frame_rate_string);
 
-			/* port: "detailed": the frame's times, a line each above the
-			counter (as the vblank deltas' lines are spaced), their right
-			edges the counter's three digits' */
+			/* port: "detailed": the frame's times in cells above the
+			counter, two to a row, a label at each cell's left and its value
+			at its right, scaled about the view's bottom right corner
+			(perf_overlay_place: compact, and readable from 720p to 4K and in
+			split screen) */
 			if (perf_overlay == _perf_overlay_detailed)
 			{
-				char lines[PERF_OVERLAY_LINES][PERF_OVERLAY_LINE_SIZE];
-				short count = perf_overlay_lines(lines);
-				short line;
+				/* (the widest label seen, so that the cells keep their width
+				as the sections shown change) */
+				static short label_most = 0;
+				struct perf_overlay_cell cells[PERF_OVERLAY_CELLS];
+				struct perf_overlay_place place;
+				rectangle2d window = render.camera.window_bounds;
+				rectangle2d wide = window, text, cursor;
+				short count = perf_overlay_cells(cells);
+				short value_width, cell;
 
-				bounds = render.camera.window_bounds;
-				/* (room for debug.timings' longest lines, PERF_OVERLAY_LINE_SIZE) */
-				bounds.x0 = (short)(bounds.x1 - 400 < bounds.x0 ? bounds.x0 : bounds.x1 - 400);
-				bounds.x1 = (short)(bounds.x1 - 14);
-				/* (a split screen's short view: the lines that fit, the top's) */
-				if (bounds.y1 - bounds.y0 < 50 + 20 * count)
-					count = (short)MAX(0, (bounds.y1 - bounds.y0 - 50) / 20);
-				bounds.y0 = (short)(bounds.y1 - 50 - 20 * count);
-				draw_string_set_format(NONE, _text_justification_right, 0);
-				draw_string_set_color(global_real_argb_white);
-				for (line = 0; line < count; line++)
+				wide.x0 = 0;
+				wide.x1 = 0x3FFF;
+				draw_string_set_format(NONE, _text_justification_left, 0);
+				for (cell = 0; cell < count; cell++)
 				{
-					rasterizer_draw_string(&bounds, NULL, NULL, 0, lines[line]);
-					bounds.y0 += 20;
+					draw_string_compute_bounds(&wide, cells[cell].label, &text, &cursor);
+					label_most = (short)MAX(label_most, text.x1 - text.x0);
 				}
+				/* (a value as wide as the widest a cell shows) */
+				draw_string_compute_bounds(&wide, "000.00 ms", &text, &cursor);
+				value_width = (short)(text.x1 - text.x0);
+				perf_overlay_place(window.x0, window.y0, window.x1, window.y1, menu_shape_pixels(),
+					local_player_count() > 1, count, (short)(label_most + 10 + value_width),
+					draw_string_capital_height(), &place);
+				rasterizer_text_set_scale(place.scale, (real)place.anchor_x, (real)place.anchor_y);
+				draw_string_set_color(global_real_argb_white);
+				for (cell = 0; cell < place.rows * PERF_OVERLAY_COLUMNS && cell < count; cell++)
+				{
+					short row = (short)(cell / PERF_OVERLAY_COLUMNS);
+					short column = (short)(cell % PERF_OVERLAY_COLUMNS);
+
+					bounds.x0 = (short)(place.anchor_x - place.width + column * (place.cell_width + place.column_gap));
+					bounds.x1 = (short)(bounds.x0 + place.cell_width);
+					bounds.y0 = (short)(place.anchor_y - place.height + row * place.row_height);
+					bounds.y1 = window.y1;
+					draw_string_set_format(NONE, _text_justification_left, 0);
+					rasterizer_draw_string(&bounds, NULL, NULL, 0, cells[cell].label);
+					draw_string_set_format(NONE, _text_justification_right, 0);
+					rasterizer_draw_string(&bounds, NULL, NULL, 0, cells[cell].value);
+				}
+				rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
 				draw_string_set_format(NONE, _text_justification_left, 0);
 			}
 		}

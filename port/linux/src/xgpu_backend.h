@@ -173,6 +173,10 @@ void xgpu_backend_hdr_peak_nits(int value);
 /* display.hdr_gamut (#1124): the encoding expands the highlights' colours
 past sRGB's (1) or not (0), from the next frame on */
 void xgpu_backend_hdr_gamut(int value);
+/* debug.timings: the backend times each pass on the GPU every so many
+frames from the next frame on (0: no more), where debug.pass_times does
+not already (the Vulkan backend's; the performance overlay shows them) */
+void xgpu_backend_pass_times(int frames);
 /* display.gamma: an SDR frame curved by one over this as it is presented
 (each channel raised to that power: past 1 brighter), from the next present
 on; 1 none, which costs nothing. An HDR swapchain's frame never is. */

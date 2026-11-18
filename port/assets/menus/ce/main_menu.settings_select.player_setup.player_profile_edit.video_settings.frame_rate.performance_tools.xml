@@ -97,7 +97,7 @@
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/frame_rate/performance_tools/help_strings">
 		<string text=""/>
 		<string text="Shows how the game runs, at the bottom right. Simple is the frame rate: green is 30 or more, red under 30. Detailed adds the frame time, the 1% low, and the milliseconds spent on the GPU, the render thread, the game and waiting for the display."/>
-		<string text="Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off times nothing.|The GPU's passes from the next start."/>
+		<string text="Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off times nothing."/>
 		<string text="Saves a log of each frame's times beside every demo recorded, lined up with the demo's ticks, so a hitch seen in play can be found in the demo. The demo itself is unchanged."/>
 	</strings>
 </menus>

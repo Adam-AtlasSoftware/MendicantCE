@@ -3548,6 +3548,13 @@ static void stream_sharp_upscale(void *context, uint32_t sharp)
 	xgpu_vulkan_sharp_upscale(sharp != 0);
 }
 
+/* debug.timings: the passes timed (xgpu_vulkan_pass_times_follow) */
+static void stream_pass_times(void *context, uint32_t frames)
+{
+	(void)context;
+	xgpu_vulkan_pass_times_follow((int)frames);
+}
+
 /* display.hdr_gamut: the encoding's gamut */
 static void stream_hdr_gamut(void *context, uint32_t value)
 {
@@ -3938,6 +3945,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
 		backend.hdr_peak_nits = stream_hdr_peak_nits;
 		backend.hdr_gamut = stream_hdr_gamut;
+		backend.pass_times = stream_pass_times;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block
