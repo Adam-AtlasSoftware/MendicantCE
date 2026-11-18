@@ -2246,10 +2246,12 @@ inverse, models.c's relative node matrices) moved back as its
 SCENE_INSTANCE node moved, last frame's world matrix by this frame's
 inverse times it. A model of more nodes than the constants hold has a
 part's own nodes there, which are not known here: they move as its root.
-The first-person weapon moves none on the screen: its constants as they
-are. The uniforms' [2].xy: half the draw's viewport's width and height, by
-which the clip positions' difference is in pixels. Whether it has history
-(the view's, the projection's and the instance's) */
+The first-person weapon moves none on the screen: no constants of its own
+are made (previous 0), its draw's (its pieces') bound for its second run as
+they are (xgpu_vulkan.c's binding 5 where a draw has none). The uniforms'
+[2].xy: half the draw's viewport's width and height, by which the clip
+positions' difference is in pixels. Whether it has history (the view's, the
+projection's and the instance's) */
 static int gbuffer_previous_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4])
 {
 	const struct gbuffer_instance *instance;
@@ -2263,6 +2265,8 @@ static int gbuffer_previous_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2]
 	gbuffer.previous = 0;
 	if (!history)
 		return 0;
+	if (gbuffer.instance == XGPU_GBUFFER_INSTANCE_FIRST_PERSON)
+		return 1;
 	if (!gbuffer.last_constants)
 	{
 		gbuffer.last_constants = malloc(CONSTANTS_RANGE);
@@ -2276,16 +2280,11 @@ static int gbuffer_previous_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2]
 			return 0;
 		}
 	}
-	memcpy(gbuffer.last_constants, stream.constants, CONSTANTS_RANGE);
-	if (gbuffer.instance == XGPU_GBUFFER_INSTANCE_FIRST_PERSON)
-	{
-		gbuffer.previous = 1;
-		return 1;
-	}
 	instance = gbuffer.instances && gbuffer.instance <= GBUFFER_INSTANCES ? &gbuffer.instances[gbuffer.instance] : NULL;
 	if (!instance || instance->pass != gbuffer.pass_number || !instance->node_count ||
 		(instance->flags & XGPU_SCENE_INSTANCE_NO_HISTORY))
 		return 0;
+	memcpy(gbuffer.last_constants, stream.constants, CONSTANTS_RANGE);
 	/* (each node's move, once an instance and pass) */
 	if (gbuffer.moves_instance != gbuffer.instance || gbuffer.moves_pass != gbuffer.pass_number)
 	{
@@ -2320,6 +2319,34 @@ static int gbuffer_previous_motion(float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2]
 			(float (*)[4])gbuffer.last_constants[60 + slot * 3]);
 	}
 	gbuffer.previous = 1;
+	return 1;
+}
+
+/* an object's G-buffer twin's last frame's constants (gbuffer_previous_motion's)
+uploaded for its draw, in the submission its other uploads are in (none where
+it has none of its own: the first-person weapon's, a twin without history, a
+draw not a twin, which bind their own constants for binding 5). Where a
+replacement mesh draws it (display.prism_models: pieces), its pieces'
+constants differ from the part's: their vertices are skinned in the world
+already and node 0's matrix is the identity (xgpu_vulkan_meshes_prepare), so
+theirs are made from that identity, moved as the instance's root node moved
+(the slot of node 0 the root's move alone), the projection the pass
+before's: a piece moves as its object's root, rigidly (its vertices' bones
+were skinned for this frame alone: last frame's skinning is not kept). 0
+where the upload fails */
+static int gbuffer_last_constants(struct xgpu_vulkan_range *range, int pieces)
+{
+	float (*to)[4];
+
+	memset(range, 0, sizeof(*range));
+	if (!gbuffer.drawing || gbuffer.kind != XGPU_SPIRV_GBUFFER_OBJECT || !gbuffer.previous || !gbuffer.last_constants)
+		return 1;
+	to = xgpu_vulkan_upload(CONSTANTS_RANGE, 256, range);
+	if (!to)
+		return 0;
+	memcpy(to, gbuffer.last_constants, CONSTANTS_RANGE);
+	if (pieces)
+		memcpy(to[60], gbuffer.moves[0], sizeof(gbuffer.moves[0]));
 	return 1;
 }
 
@@ -3104,21 +3131,6 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 			preparation_end(1, traced);
 			continue;
 		}
-		/* (an object's G-buffer twin's last frame's constants: its program's
-		second run's, gbuffer_previous_motion; the constants' where it has
-		none) */
-		memset(&draw.last_constants, 0, sizeof(draw.last_constants));
-		if (gbuffer.drawing && gbuffer.kind == XGPU_SPIRV_GBUFFER_OBJECT && gbuffer.previous && gbuffer.last_constants)
-		{
-			void *to = xgpu_vulkan_upload(CONSTANTS_RANGE, 256, &draw.last_constants);
-
-			if (!to)
-			{
-				preparation_end(1, traced);
-				return 1;
-			}
-			memcpy(to, gbuffer.last_constants, CONSTANTS_RANGE);
-		}
 		preparation_end(1, traced);
 		traced = preparation_start();
 		for (index = 0; index < 16; index++)
@@ -3166,6 +3178,13 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 			!xgpu_vulkan_meshes_prepare((const float (*)[4])stream.constants, CONSTANTS_RANGE / 16, mesh_wide) &&
 			serial == xgpu_vulkan_serial())
 			mesh_verdict = XGPU_VULKAN_MESHES_STOCK;
+		/* (an object's G-buffer twin's last frame's constants: its program's
+		second run's, the part's or its pieces', gbuffer_last_constants) */
+		if (!gbuffer_last_constants(&draw.last_constants, mesh_verdict == XGPU_VULKAN_MESHES_SWAP))
+		{
+			preparation_end(2, traced);
+			return 1;
+		}
 		preparation_end(2, traced);
 		if (serial == xgpu_vulkan_serial())
 			break;

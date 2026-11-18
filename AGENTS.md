@@ -217,7 +217,7 @@ python -m pytest -q tools/test_macos_metal.py               # the Metal backend 
 python -m pytest -q tools/test_metal_post_shaders.py        # the Metal backend's anti-aliasing passes (tools/metal_post_shaders.py)
 python -m pytest -q tools/test_prism_gate.py tools/test_prism_plugin.py tools/test_scene_records.py tools/test_prism_rt_glsl.py
                                                             # PRISM's gates' metrics and captures' paths, the plugin ABI, the scene records, the RT GLSL generated
-python -m pytest -q tools/test_gbuffer_twins.py             # PRISM v4's G-buffer twins' SPIR-V: an object's run again on the last frame's constants (its motion)
+python -m pytest -q tools/test_gbuffer_twins.py             # PRISM v4's G-buffer twins' SPIR-V: an object's run again on the last frame's constants (its motion), and those constants
 python3 tools/vulkan_bake_shaders.py --check               # PRISM v4's baker's and Raster's SPIR-V still its GLSL's (glslangValidator)
 python3 tools/prism_gate/capture.py all --stage <tree> --data <game data> --config <toml> --out <dir>
                                                             # PRISM's frozen capture set and its references (docs/prism_gates.md; local only)
