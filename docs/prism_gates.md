@@ -553,7 +553,9 @@ above, which only a part gone stock reaches):
   drawn as their stock triangles, 0 kept), and the crack view at the place's poses shows 13, 7 and 0 new pixels, as
   built. a50's hangar's hull's group, in the first build: the material part past its vertices went stock alone
   and left a hole where its 368 surfaces were (563 magenta pixels at a pose under the hull, none with the stock
-  level): the parts rule above closes it.
+  level). The parts rule above closes it: with it the engine's load code (offline, above) draws both of the
+  material's parts stock, and a material with no part made is drawn as the map's own, as every material without a
+  remodel is.
 - *ce_deferred's equivalence* (M1's gate: the mean FLIP of the deferred diagnostic's frame against Classic's at the
   probe poses, threshold 0.05): no scene worse.
 
