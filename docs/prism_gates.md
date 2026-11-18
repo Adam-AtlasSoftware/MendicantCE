@@ -461,7 +461,10 @@ remodel step made them):
 
 The other 17 parts have none. Over all 22, where a remodel reaches more than 0.1 wu from its stock triangle it reaches
 at most 0.8 of the triangle's longest edge (a50's inner cliffs; b30a's strips 0.63), the needles 2 to 50 times it:
-the needle bound is the edge (or 0.1 wu, whichever is more).
+the needle bound is the edge (or 0.1 wu, whichever is more). The engine allows the whole of it; the build holds a part
+to 0.9 of it, as it holds the other bounds to 0.9 wu against the engine's world unit, so that a part the build passes
+never shows the engine a facet (in every shipped file the furthest vertex lies at 0.80 of its reach, a50's exterior;
+the build's check and the engine's both find nothing in any of the 22).
 
 **The build.** At the source (`wg2_remodel.py`) the bevel's vertices further than twice the bevel from the stock
 triangles about them are put back on the nearest (a10f's remodel: 18, a10g's: 10), and the rounded classes' points
@@ -475,6 +478,9 @@ kit's sealed remodels through the same last steps need it to move 15 positions i
 thinning (`wg3_fix.py`) and from the moves, and the kit's sealed remodels' version 3 files none the kit's own files
 lack (`wg2_cracks.py`'s analysis, file against file: the thinning gives the kit's thinned files again).
 
+The files the packs ship (a10f, a10g and a50's hangar and exterior rebuilt from the remodel on, the rest the kit's
+sealed remodels through the new steps), from their build reports:
+
 | Part | Seal groups | Largest | Singletons | Atlas charts | Pages (4096², 4 texels a wu) used | File (MB) |
 | --- | --- | --- | --- | --- | --- | --- |
 | a10a | 9,055 | 7,955 | 5,531 | 96,937 | 24% | 66 |
@@ -482,14 +488,14 @@ lack (`wg2_cracks.py`'s analysis, file against file: the thinning gives the kit'
 | a10c | 8,381 | 7,464 | 5,191 | 85,821 | 21% | 65 |
 | a10d | 7,225 | 9,324 | 4,421 | 73,643 | 18% | 58 |
 | a10e | 16,879 | 2,071 | 8,883 | 110,527 | 28% | 76 |
-| a10f | 13,319 | 7,942 | 9,416 | 175,762 | 42% | 123 |
-| a10g | 14,891 | 6,282 | 9,128 | 160,255 | 38% | 104 |
+| a10f | 13,321 | 7,942 | 9,415 | 175,772 | 42% | 123 |
+| a10g | 14,899 | 6,282 | 9,136 | 160,348 | 38% | 104 |
 | x10hangar | 6,460 | 1,959 | 5,127 | 15,242 | 10% | 14 |
 | a30_a | 3,697 | 14,221 | 1,555 | 133,029 | 65% | 206 |
 | a30_b | 1,499 | 26,404 | 828 | 105,644 | 49% | 182 |
-| a50_exterior | 718 | 13,774 | 681 | 84,235 | 34% | 152 |
+| a50_exterior | 718 | 13,774 | 681 | 85,001 | 34% | 152 |
 | a50_control | 14,685 | 3,056 | 13,670 | 14,647 | 6% | 40 |
-| a50_hangar | 13,429 | 5,649 | 12,424 | 23,215 | 12% | 57 |
+| a50_hangar | 13,429 | 5,649 | 12,424 | 23,332 | 12% | 57 |
 | a50_muster | 14,324 | 4,614 | 13,257 | 22,685 | 9% | 51 |
 | b30a | 584 | 32,031 | 563 | 79,068 | 46% | 158 |
 | b30b | 2,909 | 17,469 | 2,682 | 54,529 | 20% | 46 |
@@ -542,20 +548,23 @@ above, which only a part gone stock reaches):
   (The base's column is M1's measurement of the kit's files, `crackmeasure.py`, on the RTX 3070 Ti.) The same
   pixels, within one: no magenta the kit's files do not have.
 
-- *At the facet places*, before (the base, the kit's files), the kit's remodels through the new steps and rebuilt:
-  the crack view's new magenta alike in all three (a10f's eight poses 13, 7, 0, 2, 0, 156, 10 and 16 pixels; a10g's,
-  the hangar's and the exterior's none). The facets are hard to see from where a player can be: most of each needle
-  lies inside the walls, so that from inside the level at most 3 of a10g's needle points and 1 or 2 of a10f's are in
-  sight (rays against the kit's own remodel, at cameras 0.6 to 5.5 wu off), and none of the hangar's hull's capped
-  corners: so the in-game frames at the places change little, and the drawings of the surfaces' triangles show the
-  facets (`sheets/geom_*.png`).
+- *Where the facets can be seen* (offline: each flagged triangle of the kit's files sampled, a sample in the open where
+  64 rays from it meet the stock level's front faces; a camera in the open by the same test with 0.4 wu of room): a10f's
+  #1718 needle stands 1.4 wu up into the room from its floor strip (113 of its 693 samples in the open) and #26's tip
+  shows 0.3 wu above a door (96 of 811); #235's and #242's needles lie wholly inside the wall (0 of 824). a10g's eight
+  needles lie in a closed pocket 0.1 to 0.2 wu across, outside the space a player is in: no camera with 0.4 wu of room
+  within 7 wu sees them. a50's hangar: #74's capped corner reaches into the open (292 of 1,105 samples), #1's and #6's
+  stay inside the hull; a50's exterior: #387, #398, #401 and #404 are wholly in the open, the other eight inside. The
+  in-game frames this section first gave at a10f's and a10g's places, and at the forced a10f group, were taken from
+  outside the level (at a10f's "#235 from the room" none of 64 rays meets a front face first), where the game draws no
+  cluster: their crack-view figures said nothing about the places and are withdrawn. Frames from cameras inside the
+  level at these places are not measured yet.
 - *A facet forced* (this tree): a10f's sliver's group of 68 surfaces falls back (8 facets on 1 surface, 68 surfaces
-  drawn as their stock triangles, 0 kept), and the crack view at the place's poses shows 13, 7 and 0 new pixels, as
-  built. a50's hangar's hull's group, in the first build: the material part past its vertices went stock alone
-  and left a hole where its 368 surfaces were (563 magenta pixels at a pose under the hull, none with the stock
-  level). The parts rule above closes it: with it the engine's load code (offline, above) draws both of the
-  material's parts stock, and a material with no part made is drawn as the map's own, as every material without a
-  remodel is.
+  drawn as their stock triangles, 0 kept, in the log). a50's hangar's hull's group, in the first build: the material
+  part past its vertices went stock alone and left a hole where its 368 surfaces were (563 magenta pixels at a pose
+  under the hull, none with the stock level). The parts rule above closes it (the final build: 0, 0, 0, 1, 0 and 0 new
+  magenta pixels at the six poses under the hull); with it the engine's load code draws both of the material's parts
+  stock, and a material with no part made is drawn as the map's own, as every material without a remodel is.
 - *ce_deferred's equivalence* (M1's gate: the mean FLIP of the deferred diagnostic's frame against Classic's at the
   probe poses, threshold 0.05): no scene worse.
 
@@ -572,8 +581,9 @@ above, which only a part gone stock reaches):
   tree): stills at G2, G4 and G5, 30 frames each, byte-identical in all four comparisons (base with base, this tree
   with itself, base with this tree, twice); G7 differs between two runs of the same tree in both trees (its ring
   animates by the frames drawn), as before. Determinism on a10: 1,477 ticks alike base with base, 1,478 this tree
-  with itself, 1,477 base with this tree (the game state and the seeds). Classic's frames (b30 and a10, 46 each,
-  the game's defaults, which load no remodel): byte-identical in all four comparisons (the first build).
+  with itself, 1,477 base with this tree (the game state and the seeds). Frames (b30 and a10, 46 each, with the
+  game's defaults, whose display.graphics is "enhanced" and loads no remodel): byte-identical in all four comparisons
+  (the first build).
 - *Vulkan validation with sync validation* (the layers on: "validated" in the device's line), at a10f's places with a
   group fallen back: ce and ce_deferred 0 VUIDs, 0 sync hazards.
 

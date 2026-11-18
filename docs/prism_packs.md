@@ -83,8 +83,8 @@ command again: finished steps are remembered in the work folder. `--again <pack>
 Options: `--out <folder>` writes the packs somewhere other than the data folder, in the same layout.
 `--work <folder>` puts the work folder elsewhere (default `<data>/prism_packs_work`). `--gpu <part of its name>`
 chooses the card Cycles uses, `--vulkan-gpu <number>` the upscaler's card and `--torch cpu|cuda` PyTorch's.
-`--threads <n>` keeps Blender and the level remodels' steps to that many of the processor's threads (all by
-default). `--game` and `--extractor` name the game and the extractor if the tools do not find them beside themselves.
+`--threads <n>` keeps Blender and the level remodels' steps to that many of the processor's threads (by default
+Blender takes them all and the remodels' thinning up to 8). `--game` and `--extractor` name the game and the extractor if the tools do not find them beside themselves.
 
 When everything is built, the work folder can be deleted. The packs do not need it. Keep it if you want to build
 more levels later without extracting again.
@@ -149,16 +149,18 @@ Each part of a level (each structure BSP the recipes cover) is built in these st
 2. **The seal** (`wg2_seal.py`): every edge two surfaces share made the same vertices on both sides.
 3. **The far levels** (`wg2_far2.py`, Blender).
 4. **The thinning** (`wg3_thin.py`, Blender): triangles that buy no visible shape taken out, checked by
-   `wg3_fix.py` in every mode the game draws (near, far, and neighbours at different levels): where the thinning
-   opened an edge, the surfaces there are kept whole and it is thinned again; if an edge is still open after three
-   times, the part is kept unthinned.
+   `wg3_fix.py` against the part before it, at both levels and with neighbouring surfaces at different levels
+   (alternate surfaces near and far, both ways round): where the thinning opened an edge, the surfaces there are
+   kept whole and it is thinned again; if an edge is still open after three times, the part is kept unthinned. It
+   runs in up to 8 processes (`--threads`), on Windows in one: there it is slower, and the file is the same.
 5. **The checks and version 3** (`wg3_build.py`, `wg3_pwg.py`): no remodel vertex may lie further from its stock
-   triangle than its longest edge (or 0.1 world units) as a needle does, nor further than 0.9 world units off its
-   plane or past its edges (the game's own check allows a world unit). What does is moved back, and the step checks
-   that the moves opened no edge in any mode. Then each surface's seal group (the surfaces that must fall back to
-   their stock triangles together for no crack to open), its deviation from its stock triangle and the remodel's own
-   lightmap atlas (xatlas) are written as the file's version 3. A part that still fails a check stops the build
-   with its report (`<work>/world/<level>/<part>.build.json`) rather than write a file the game would have to fix.
+   triangle than 0.9 of its longest edge (or of 0.1 world units) as a needle does, nor further than 0.9 world units
+   off its plane or past its edges (the game's own check allows the whole edge and a world unit). What does is moved
+   back, and the step checks that the moves opened no edge in the same modes. Then each surface's seal group (the
+   surfaces that must fall back to their stock triangles together for no crack to open), its deviation from its
+   stock triangle and the remodel's own lightmap atlas (xatlas 0.0.11 or newer) are written as the file's version 3.
+   A part that still fails a check stops the build with its report (`<work>/world/<level>/<part>.build.json`) rather
+   than write a file the game would have to fix.
 
 The game reads versions 1 to 3 (`port/linux/game/prism_world_geometry.c`); a version 3 file lets it fall back a
 group whole where a surface fails its own check or a material is drawn stock, without a crack.
