@@ -78,7 +78,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 15u
+#define BAKE_VERSION 16u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -1958,6 +1958,11 @@ static struct bake_state *bake_begin(void)
 	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, frame->rig, XGPU_RT_RIG_SETTINGS * sizeof(float));
 	hash = prism_bake_hash64(hash, &frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE], 3 * sizeof(float));
 	hash = prism_bake_hash64(hash, frame->sun, sizeof(frame->sun));
+	/* (the port's rig words past the settings, rig[57] on: the indoor
+	floor, the fixtures' scale, the units and the sky's kind, the albedo's
+	rule, the sun's test distance; rig[56], the host's seconds, left out) */
+	hash = prism_bake_hash64(hash, &frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_COUNT + 1],
+		(XGPU_STREAM_RT_RIG_FLOATS - XGPU_RT_RIG_SETTINGS - XGPU_RT_SETTING_COUNT - 1) * sizeof(float));
 	hash = prism_bake_hash64(hash, b->plan.lamps, (size_t)lamps * 16 * sizeof(float));
 	if (b->fixture_count)
 		hash = prism_bake_hash64(hash, b->fixtures, (size_t)b->fixture_count * 16 * sizeof(float));
@@ -2004,11 +2009,12 @@ static struct bake_state *bake_begin(void)
 		b->map, (int)b->bsp, b->quality, kept, indoor, lamps, (double)power, b->fixture_count, b->fixtures_seen,
 		b->scenery_count, bake.brick_count, b->path);
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the rig: sun %.5f %.5f %.5f toward %.5f %.5f %.5f (%s, disc %.4f), sky "
-		"%.4f %.4f %.4f, gamma %.2f, emissive scale %.3f", b->map, (int)b->bsp, (double)b->block.rig[0][0],
+		"%.4f %.4f %.4f (%s), gamma %.2f, emissive scale %.3f", b->map, (int)b->bsp, (double)b->block.rig[0][0],
 		(double)b->block.rig[0][1], (double)b->block.rig[0][2], (double)b->block.sun[0], (double)b->block.sun[1],
 		(double)b->block.sun[2], b->block.sun[3] > 0.0f ? "present" : "none", (double)b->block.rig[0][3],
-		(double)b->block.rig[1][0], (double)b->block.rig[1][1], (double)b->block.rig[1][2], (double)b->block.rig[1][3],
-		(double)b->block.rig[11][0]);
+		(double)b->block.rig[1][0], (double)b->block.rig[1][1], (double)b->block.rig[1][2],
+		b->block.rig[15][1] > 1.5f ? "a light" : b->block.rig[15][1] > 0.5f ? "a flat fill" : "the fitted rig's",
+		(double)b->block.rig[1][3], (double)b->block.rig[11][0]);
 	return b;
 }
 

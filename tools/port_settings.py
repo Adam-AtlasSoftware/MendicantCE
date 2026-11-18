@@ -1602,6 +1602,10 @@ PAGES = {
              [("MAX", "max"), ("ULTRA", "ultra"), ("HIGH", "high"), ("DRAFT", "draft")],
              "Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and "
              "large on disk. The others are quicker and smaller.", "desktop"),
+            ("SKY LIGHT", "display.prism_sky_light", [("SKY", "sky"), ("FLAT", "flat")],
+             "Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground "
+             "fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the "
+             "same everywhere. A change bakes again.", "desktop"),
             ("REBAKE LIGHTMAPS", "display.bake_rebake", [("—", "0"), ("ASKED", "1")],
              "Change this to bake the level you are playing again from nothing (needed after its geometry, "
              "materials or lights change; a finished bake is otherwise kept).", "desktop"),

@@ -60,7 +60,7 @@ does. The units are Tool's radiosity's, as far as the shipped pages and the publ
 | --- | --- | --- |
 | The sun (the sky's narrowest light) | the light it gives a white surface facing it (a directional light, no 1/pi) | colour × power |
 | The domes (the sky's other lights) | the same | colour × power |
-| The sky's ambient radiosity | CE's flat floor of light, unoccluded, at every point | colour × power, added to every texel and probe, not passed on by the bounces: the outdoor values in the structure's clusters with a sky, sky 0's indoor values in those with none |
+| The sky's ambient radiosity | the open sky's radiance (`display.prism_sky_light` `"sky"`, the default): a point under the open sky gets colour × power, one under cover less | colour × power, seen where a path leaves the level and passed on by the bounces; nothing where no sky is seen. `"flat"`, Tool's: a floor of light, unoccluded, at every texel and probe, not bounced (the outdoor values in the structure's clusters with a sky, sky 0's indoor values in those with none) |
 | A light card or lamp surface (radiosity power) | its radiance (the patch's radiosity, shot once) | colour × power |
 | A light fixture (intensity) | the irradiance it gives a surface facing it a world unit away | colour × intensity / d² |
 
@@ -84,13 +84,27 @@ What the units rest on (November 2026):
   is: 0.93 to 1.01 at G2, 0.66 to 0.75 under G3's cliff). The floor the first fit put at 3.1 to 4.1 times the ambient
   (5.9 to 7.9 traced as a radiance from the open sky, more under cover) was the sun's and the domes' bounce missing its
   pi.
-- **The ambient is flat and by the cluster's sky** (Tool's, as c20 and both accounts give it: no visibility ray). An
-  interior's clusters have no sky: c40's chamber takes sky 0's indoor values (0.066 0.088 0.128), a10's none (its sky's
-  ambient powers are 0). `prism_scene_static.c` marks each drawn triangle of an indoor cluster (its middle a little off
-  its face, the collision BSP's leaf and the leaf's cluster: `XGPU_SCENE_INDOOR`); a texel takes its triangle's floor, a
-  probe the floor of the nearest structure the six axes meet (`floor_at`), R's pixel the floor of the structure it
-  shows (an object's, the structure below it).
+- **The sky is a light** (`display.prism_sky_light` `"sky"`, the default since the lighting is to look path traced;
+  `sky_light()` in the bake, the rig's word 61 at 2): its ambient colour × power is the open sky's radiance, seen where
+  a path leaves the level (a ray that meets nothing within 300 world units, the bake's and R's alike) and passed on by
+  the bounces. In the light's unit (the irradiance over pi) a point under the whole open sky gets colour × power, Tool's
+  ambient, and one under cover less: the contact shadows and the occlusion a path-traced frame has. There is no floor:
+  a room with no sky (a10's, c40's chamber) has its lamps' light and what comes in. The sky's rays have no test
+  distance (the sun's and the domes' keep theirs). Against the flat fill (draft bakes, `"auto"` exposure, the
+  frames' medians, 3070 Ti): b30's sunlit beach unchanged (0.98 to 1.03), the shade under G3's cliff 0.82 to 0.83,
+  c40's moonlit canyon 0.73 to 0.76 (now at Classic's, 0.11 to 0.16), its chamber 0.77 to 0.92, b30's interior 1.03
+  to 1.17.
+- **Tool's fill, the other choice** (`"flat"`, the word at 1): the ambient flat and by the cluster's sky (Tool's, as c20
+  and both accounts give it: no visibility ray). An interior's clusters have no sky: c40's chamber takes sky 0's indoor
+  values (0.066 0.088 0.128), a10's none (its sky's ambient powers are 0). `prism_scene_static.c` marks each drawn
+  triangle of an indoor cluster (its middle a little off its face, the collision BSP's leaf and the leaf's cluster:
+  `XGPU_SCENE_INDOOR`); a texel takes its triangle's floor, a probe the floor of the nearest structure the six axes meet
+  (`floor_at`), R's pixel the floor of the structure it shows (an object's, the structure below it).
 - **The cards' unit is 1:** a receiver gains the emitter's colour × power by the form factor, the bake's radiance.
+
+Kept on purpose with the path-traced look (November 2026): the sky lights' test distance (a canyon without its moon is
+not tasteful; a map's own override of the light is the later answer), CE's composition as Raster's default (the
+textures' and the materials' style, which is to match Classic's), the linear albedo, and every bounce (up to 32).
 
 **CE's light target** (`ce_deferred`'s light, `debug.gbuffer_view` `light`, which every fit here is measured against)
 is CE's lightmap pass: the page's light by a mix of 1 and the bump map's dot product with the vertex's incident radiosity
@@ -243,7 +257,9 @@ jobs finish. While the bake runs it is `bsp<n>.pbk.new`, and a quit, a crash or 
 unfinished job (the tiles of the batch then on the GPU are begun again); once every job is done, `DONE` is appended
 and the file renamed over `bsp<n>.pbk`. Its key (the header) holds what the bake was made from: the map's checksum and
 name, the BSP, a hash of the level's triangles and attributes as the bake read them, the surfaces' tiers, the materials
-and alpha maps, the rig and the lamps, the reach's bricks, the baker's version, the quality and the threshold. A file of
+and alpha maps, the rig (with the port's words past its settings: the indoor floor, the fixtures' scale, the units and
+the sky's kind, the albedo's rule, the sun's test distance) and the lamps, the reach's bricks, the baker's version, the
+quality and the threshold. A file of
 another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done.
 
 ## The settings
@@ -261,6 +277,7 @@ another key is not resumed: the BSP is baked again (into `.new`) and replaces it
 | `debug.gbuffer_view` | `"bake_light"`, `"bake_sun"`, `"bake_texels"`, `"bake_volume"`, `"bake_total"` | Raster's views |
 | `display.prism_raster_composition` | `"ce"`, `"materials"` | CE's shaders compose Raster's light (default), or PRISM's own materials |
 | `display.prism_raster_objects` | `"volume"`, `"classic"` | Objects by the volume's light (default), or never lit under Classic |
+| `display.prism_sky_light` | `"sky"`, `"flat"` | The sky a light, by what each point sees of it (default), or Tool's flat fill; a change bakes again |
 | `display.prism_exposure`, `_range`, `_speed`, `_bias`, `display.prism_tone_curve` | as the path tracer's | Raster's exposure and tone curve (its style's: `"auto"` and `"filmic"`) |
 
 The bake's diagnostics (environment variables): `HALO_BAKE_TERMS` leaves terms out (1 the domes, 2 the lamps, 4 the
@@ -272,7 +289,7 @@ gather, `HALO_BAKE_EMITTERS_PASS` the level's emitting faces neither blocking no
 frame.
 
 Settings > Mods > PRISM LIGHTING has Lighting (Classic or PRISM Raster), Bake (While Playing, When Asked, Never), Bake
-Quality, Rebake Lightmaps and Progress on Screen. The bake needs ray queries; a GPU without them draws Raster with CE's
+Quality, Sky Light, Rebake Lightmaps and Progress on Screen, and Raster's look: Exposure, Highlights and Objects. The bake needs ray queries; a GPU without them draws Raster with CE's
 light (D5).
 
 ## How Raster reads the bake

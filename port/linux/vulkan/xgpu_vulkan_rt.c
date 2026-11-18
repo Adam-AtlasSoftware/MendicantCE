@@ -474,6 +474,9 @@ static struct
 	the replacement meshes traced within RT_REPLACEMENT_REACH of it) */
 	float eye[3];
 	int eye_known;
+	/* HALO_RT_NO_OBJECTS: 1 the objects left out of the scene (objects_record),
+	-1 not, 0 not read yet */
+	int no_objects;
 	/* the owners' first draws' node 0, this window's and the last's */
 	float owner_now[64][3], owner_last[64][3];
 	uint8_t owner_now_seen[64], owner_last_seen[64];
@@ -2815,8 +2818,13 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 		}
 		built++;
 	}
-	/* the instances: the structure's, then the objects' with a structure */
+	/* the instances: the structure's, then the objects' with a structure
+	(none with HALO_RT_NO_OBJECTS, a diagnostic: the structure alone, as a
+	bake made with HALO_BAKE_NO_SCENERY traces it, for the bake's gate on
+	equal scenes) */
 	instances = (VkAccelerationStructureInstanceKHR *)slot->instances.mapped + first;
+	if (rt.no_objects == 0)
+		rt.no_objects = getenv("HALO_RT_NO_OBJECTS") ? 1 : -1;
 	if (rt.static_structure)
 	{
 		memset(&instances[count], 0, sizeof(instances[count]));
@@ -2828,7 +2836,7 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 		instances[count].accelerationStructureReference = rt.static_address;
 		count++;
 	}
-	for (draw = 0; draw < capture->draw_count && first + count < RT_INSTANCES; draw++)
+	for (draw = 0; rt.no_objects < 0 && draw < capture->draw_count && first + count < RT_INSTANCES; draw++)
 	{
 		uint32_t index = capture->draws[draw] & 0x7fffffffu;
 		struct rt_entry *entry = &rt.entries[index];
