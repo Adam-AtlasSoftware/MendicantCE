@@ -4658,10 +4658,15 @@ static void bake_frame(void)
 	case STEP_REFLECTIONS:
 		if (!b->reflections_made)
 		{
+			/* (port: no memory for them (a card shared with the desktop, the
+			path tracer's objects): the bake goes on without them, the
+			surfaces' reflections the volume's, rather than failing whole and
+			leaving the frame Classic's) */
 			if (b->plan.reflection_count && !reflections_make(commands, b))
 			{
-				bake_fail(b, "no memory for the reflection probes");
-				break;
+				host_logf(HOST_LOG_WARN, "prism bake: %s bsp %d: no memory for the %u reflection probes: none used",
+					b->map, (int)b->bsp, b->plan.reflection_count);
+				b->plan.reflection_count = 0;
 			}
 			b->reflections_made = 1;
 			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: %u reflection probes", b->map, (int)b->bsp,
