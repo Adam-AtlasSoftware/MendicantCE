@@ -170,7 +170,9 @@ over 2 pi, a0 = 1 - k . n0. */
 	"/* (the terms a diagnostic leaves out: s.settings.y's bits, 1 the domes, 2\n" \
 	"the lamps, 4 the glows, 8 the paths past the first hit, 16 the fixtures;\n" \
 	"32 the grid (every lamp picked by power), 64 the lamps' spherical\n" \
-	"sampling (by area alone); 0 none) */\n" \
+	"sampling (by area alone); a texel's: 128 its indirect light (its paths),\n" \
+	"256 its own lamps' direct light; 512 every lamp of its cell's lists even\n" \
+	"without the gather, 1024 the resampled pick even with it; 0 none) */\n" \
 	"bool term_off(uint bit) { return (s.settings.y & bit) != 0u; }\n" \
 	"vec3 glow_of(uint t)\n" \
 	"{\n" \
@@ -654,6 +656,76 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    moment += luma(fe) * 3.14159265 / max(dot(n, fl), 0.1) * fl;\n" \
 	"    return e + fe;\n" \
 	"}\n" \
+	"/* whether lamp l is in a cell's list (a binary search of its ids) */\n" \
+	"bool list_has(uint at, uint count, uint l)\n" \
+	"{\n" \
+	"    Uints g = Uints(s.grid);\n" \
+	"    uint lo = 0u, hi = count;\n" \
+	"    while (lo < hi)\n" \
+	"    {\n" \
+	"        uint mid = (lo + hi) / 2u;\n" \
+	"        if (g.v[at + 2u * mid + 1u] < l)\n" \
+	"            lo = mid + 1u;\n" \
+	"        else\n" \
+	"            hi = mid;\n" \
+	"    }\n" \
+	"    return lo < count && g.v[at + 2u * lo + 1u] == l;\n" \
+	"}\n" \
+	"/* one lamp's light at p: a point of it (by solid angle or area), its\n" \
+	"shadow traced from o, over its density; the moment kept */\n" \
+	"vec3 lamp_sample(uint lamp, vec3 p, vec3 n, vec3 o, inout vec3 moment)\n" \
+	"{\n" \
+	"    Floats f = Floats(s.lamps);\n" \
+	"    uint at = lamp * 16u;\n" \
+	"    vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);\n" \
+	"    vec3 a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);\n" \
+	"    vec3 a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);\n" \
+	"    vec3 ne = normalize(cross(a1 - a0, a2 - a0));\n" \
+	"    vec3 l;\n" \
+	"    float d, inverse_pdf;\n" \
+	"    if (!lamp_direction(p, a0, a1, a2, ne, l, d, inverse_pdf))\n" \
+	"        return vec3(0.0);\n" \
+	"    float cr = dot(n, l);\n" \
+	"    if (cr <= 0.0 || !lamp_visible(o, l, d))\n" \
+	"        return vec3(0.0);\n" \
+	"    vec3 e = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x * (cr / 3.14159265) * inverse_pdf;\n" \
+	"    if (any(isnan(e)) || any(isinf(e)))\n" \
+	"        return vec3(0.0);\n" \
+	"    moment += luma(e) * 3.14159265 / max(cr, 0.1) * l;\n" \
+	"    return e;\n" \
+	"}\n" \
+	"/* the lamps' and the fixtures' light at a texel, every lamp of its cell's\n" \
+	"two lists sampled each time (a point of each, its shadow traced) in place\n" \
+	"of one pick among them, and the level's other lamps by one pick by power,\n" \
+	"counted only where it is in neither list: unbiased, and without the pick's\n" \
+	"noise among the lamps that light the cell (a cell with no lists: the\n" \
+	"resampled pick, lamps_at) */\n" \
+	"vec3 lamps_all(vec3 p, vec3 n, vec3 o, inout vec3 moment)\n" \
+	"{\n" \
+	"    int cell = grid_cell(p);\n" \
+	"    if (cell < 0 || term_off(32u) || s.counts.z == 0u || s.lamp.x <= 0.0 || s.rig[10].w < 0.5 || term_off(2u))\n" \
+	"        return lamps_at(p, n, o, moment);\n" \
+	"    Uints g = Uints(s.grid);\n" \
+	"    uint seen_at = uint(cell), seen = min(g.v[seen_at], 64u);\n" \
+	"    uint near_at = seen_at + 1u + 2u * seen, near = min(g.v[near_at], 64u);\n" \
+	"    vec3 sum = vec3(0.0);\n" \
+	"    for (uint i = 0u; i < seen; i++)\n" \
+	"        sum += lamp_sample(g.v[seen_at + 1u + 2u * i], p, n, o, moment);\n" \
+	"    for (uint i = 0u; i < near; i++)\n" \
+	"    {\n" \
+	"        uint l = g.v[near_at + 1u + 2u * i];\n" \
+	"        if (!list_has(seen_at, seen, l))\n" \
+	"            sum += lamp_sample(l, p, n, o, moment);\n" \
+	"    }\n" \
+	"    uint far_ = lamp_by_power();\n" \
+	"    float pp = lamp_power(far_) / max(s.lamp.x, 1.0e-20);\n" \
+	"    if (pp > 0.0 && !list_has(seen_at, seen, far_) && !list_has(near_at, near, far_))\n" \
+	"        sum += lamp_sample(far_, p, n, o, moment) / pp;\n" \
+	"    vec3 fl;\n" \
+	"    vec3 fe = fixtures_ris(p, n, o, fl);\n" \
+	"    moment += luma(fe) * 3.14159265 / max(dot(n, fl), 0.1) * fl;\n" \
+	"    return sum + fe;\n" \
+	"}\n" \
 	"\n" \
 	"/* a path from o along d (its first ray), the light it brings: the sky\n" \
 	"where it leaves the level (the domes with it past the first ray, which\n" \
@@ -703,6 +775,117 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        h = oh + wi * t2;\n" \
 	"    }\n" \
 	"    return light;\n" \
+	"}\n" \
+	"\n" \
+	"/* the final gather (docs/prism_bake.md, \"The estimator\"): the bake's own\n" \
+	"light where a bounce's path meets the level, in place of the paths past\n" \
+	"that hit. The cache's block (xgpu_vulkan_bake.c's gather_cache): the\n" \
+	"virtual pages, the tile table, the pool (each texel's light and direction\n" \
+	"words, Raster's), the atlas triangles (corners in their virtual page's\n" \
+	"texels; flags from bit 8 the virtual page + 1) and each kept triangle's\n" \
+	"atlas triangle (+1) */\n" \
+	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Cache\n" \
+	"{\n" \
+	"    uvec2 vpages, table, tiles, triangles, plan_atlas, unused[3];\n" \
+	"};\n" \
+	"vec3 cache_rgb9e5(uint v)\n" \
+	"{\n" \
+	"    float e = exp2(float(int(v >> 27u) - 15 - 9));\n" \
+	"    return vec3(float(v & 511u), float((v >> 9u) & 511u), float((v >> 18u) & 511u)) * e;\n" \
+	"}\n" \
+	"bool cache_texel(Cache c, uint vp, ivec2 x, out uvec2 w)\n" \
+	"{\n" \
+	"    Uints v = Uints(c.vpages);\n" \
+	"    uint tiles_x = v.v[vp * 8u + 2u], tiles_y = v.v[vp * 8u + 3u];\n" \
+	"    w = uvec2(0u);\n" \
+	"    if (x.x < 0 || x.y < 0)\n" \
+	"        return false;\n" \
+	"    uvec2 t = uvec2(x) / 16u;\n" \
+	"    if (t.x >= tiles_x || t.y >= tiles_y)\n" \
+	"        return false;\n" \
+	"    uint physical = Uints(c.table).v[v.v[vp * 8u + 4u] + t.y * tiles_x + t.x];\n" \
+	"    if (physical == 0u)\n" \
+	"        return false;\n" \
+	"    uvec2 l = uvec2(x) % 16u;\n" \
+	"    uint at = (physical - 1u) * 512u + (l.y * 16u + l.x) * 2u;\n" \
+	"    Uints tl = Uints(c.tiles);\n" \
+	"    w = uvec2(tl.v[at], tl.v[at + 1u]);\n" \
+	"    return (w.y & 0xff000000u) != 0u;\n" \
+	"}\n" \
+	"/* the bake's light at a structure hit (t, its barycentrics b) at the\n" \
+	"normal n, less the floor of light (which the bounces do not pass on): its\n" \
+	"texels' (bilinear, those the bake has); false where it has none there */\n" \
+	"bool cached_at(uvec2 cache, uint t, vec2 b, vec3 n, out vec3 l)\n" \
+	"{\n" \
+	"    l = vec3(0.0);\n" \
+	"    if (cache == uvec2(0u) || t >= s.counts.x + s.counts.y)\n" \
+	"        return false;\n" \
+	"    Cache c = Cache(cache);\n" \
+	"    uint kept = Uints(s.info).v[t * 8u + 7u];\n" \
+	"    if (kept == 0xffffffffu)\n" \
+	"        return false;\n" \
+	"    uint ai = Uints(c.plan_atlas).v[kept];\n" \
+	"    if (ai == 0u)\n" \
+	"        return false;\n" \
+	"    Floats tr = Floats(c.triangles);\n" \
+	"    uint base_ = (ai - 1u) * 16u;\n" \
+	"    uint vp1 = floatBitsToUint(tr.v[base_ + 15u]) >> 8u;\n" \
+	"    if (vp1 == 0u)\n" \
+	"        return false;\n" \
+	"    vec2 x = (1.0 - b.x - b.y) * vec2(tr.v[base_], tr.v[base_ + 1u]) + b.x * vec2(tr.v[base_ + 2u], tr.v[base_ + 3u]) +\n" \
+	"        b.y * vec2(tr.v[base_ + 4u], tr.v[base_ + 5u]);\n" \
+	"    vec2 tx = x - 0.5;\n" \
+	"    ivec2 a = ivec2(floor(tx));\n" \
+	"    vec2 f = tx - vec2(a);\n" \
+	"    vec3 sum = vec3(0.0);\n" \
+	"    float weights = 0.0;\n" \
+	"    for (int k = 0; k < 4; k++)\n" \
+	"    {\n" \
+	"        ivec2 o = ivec2(k & 1, k >> 1);\n" \
+	"        uvec2 tw;\n" \
+	"        if (!cache_texel(c, vp1 - 1u, a + o, tw))\n" \
+	"            continue;\n" \
+	"        vec4 dir = unpackUnorm4x8(tw.y);\n" \
+	"        if (dir.w <= 0.0)\n" \
+	"            continue;\n" \
+	"        vec3 kk = (dir.xyz - 0.5) * 4.0;\n" \
+	"        float a0 = dir.w * 4.0 - 1.0;\n" \
+	"        float wk = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);\n" \
+	"        sum += wk * cache_rgb9e5(tw.x) * clamp(a0 + dot(kk, n), 0.0, 4.0);\n" \
+	"        weights += wk;\n" \
+	"    }\n" \
+	"    if (weights < 1.0e-4)\n" \
+	"        return false;\n" \
+	"    l = max(sum / weights - (indoor(t) ? ambient_indoor() : ambient()), vec3(0.0));\n" \
+	"    return true;\n" \
+	"}\n" \
+	"/* the light along d from o, gathered: at the first hit the hit's glow, and\n" \
+	"its albedo by the sun there (traced) and the bake's own light there\n" \
+	"(cached_at: every bounce past it, the lamps', the domes' and the\n" \
+	"fixtures' light there), in place of the hit's lamp pick and the paths past\n" \
+	"it; a hit the cache has nothing for (the static scenery, a tile not baked\n" \
+	"yet) takes the path as path() does. No cache: path() */\n" \
+	"vec3 path_gathered(vec3 o, vec3 d, int bounces, uvec2 cache, out bool backface)\n" \
+	"{\n" \
+	"    if (cache == uvec2(0u))\n" \
+	"        return path(o, d, bounces, backface);\n" \
+	"    vec3 nh;\n" \
+	"    uint t;\n" \
+	"    vec2 b;\n" \
+	"    backface = false;\n" \
+	"    float th = hit(o, d, 300.0, nh, t, b);\n" \
+	"    if (th < 0.0)\n" \
+	"        return sky_along(d, false);\n" \
+	"    if (dot(nh, nh) <= 0.0)\n" \
+	"    {\n" \
+	"        backface = true;\n" \
+	"        return vec3(0.0);\n" \
+	"    }\n" \
+	"    vec3 l;\n" \
+	"    if (!cached_at(cache, t, b, nh, l))\n" \
+	"        return path(o, d, bounces, backface);\n" \
+	"    vec3 oh = o + d * th + nh * 0.03;\n" \
+	"    return glow_of(t) + albedo_of(t) * (sun_at(oh, nh) + l);\n" \
 	"}\n" \
 	"\n" \
 	"/* the samples' batches (each 64 samples, its first directions stratified\n" \
@@ -919,7 +1102,7 @@ stops whatever its error (0: none; the draft's), w the bounces */
 static const char lightmap_source[] =
 	BAKE_COMMON
 	"layout(local_size_x = 64) in;\n"
-	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 texels, accumulators, states, running, list, args, unused[2]; };\n"
+	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 texels, accumulators, states, running, list, args, cache, all_lamps; };\n"
 	"/* two sets' count, mean and sum of squared deviations made one (Chan's) */\n"
 	"void merge(inout float n, inout float mean, inout float m2, float n2, float mean2, float m22)\n"
 	"{\n"
@@ -1017,10 +1200,16 @@ static const char lightmap_source[] =
 	"    for (uint k = 0u; k < samples; k++)\n"
 	"    {\n"
 	"        vec3 m = vec3(0.0);\n"
-	"        vec3 dl = domes_at(o, n, m) + lamps_at(p, n, o, m) + floor_;\n"
+	"        /* (past the draft: every lamp of the cell's lists; the draft: the\n"
+	"        resampled pick) */\n"
+	"        bool all_lamps = (j.all_lamps.x != 0u && !term_off(1024u)) || term_off(512u);\n"
+	"        vec3 dl = domes_at(o, n, m) + (term_off(256u) ? vec3(0.0) : all_lamps ? lamps_all(p, n, o, m) :\n"
+	"            lamps_at(p, n, o, m)) + floor_;\n"
 	"        vec3 d = cosine_dir_at(n, stratum(first + k));\n"
 	"        bool backface;\n"
-	"        vec3 il = path(o, d, bounces, backface);\n"
+	"        vec3 il = path_gathered(o, d, bounces, j.cache, backface);\n"
+	"        if (term_off(128u))\n"
+	"            il = vec3(0.0);\n"
 	"        float c = max(dot(d, n), 0.1);\n"
 	"        m += luma(il) * 3.14159265 / c * d;\n"
 	"        float v = s.sun.w > 0.0 && dot(n, s.sun.xyz) > 0.0 ? sun_visible(o) : 0.0;\n"
@@ -1241,7 +1430,7 @@ the batch's count of running probes; parameters as the lightmap's */
 static const char volume_source[] =
 	BAKE_COMMON
 	"layout(local_size_x = 64) in;\n"
-	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 probes, accumulators, states, statistics, running, list, args, unused; };\n"
+	"layout(buffer_reference, std430, buffer_reference_align = 8) readonly buffer Job { uvec2 probes, accumulators, states, statistics, running, list, args, cache; };\n"
 	"vec4 sh(vec3 d) { return vec4(0.282095, 0.488603 * d.y, 0.488603 * d.z, 0.488603 * d.x); }\n"
 	"void main()\n"
 	"{\n"
@@ -1276,7 +1465,7 @@ static const char volume_source[] =
 	"    {\n"
 	"        vec3 d = sphere_dir_at(stratum(count + k));\n"
 	"        bool backface;\n"
-	"        vec3 l = (path(p, d, bounces, backface) + floor_) * 12.566371;\n"
+	"        vec3 l = (path_gathered(p, d, bounces, j.cache, backface) + floor_) * 12.566371;\n"
 	"        if (any(isnan(l)) || any(isinf(l))) l = vec3(0.0);\n"
 	"        vec4 y = sh(d);\n"
 	"        vec3 shc0 = l * y.x;\n"

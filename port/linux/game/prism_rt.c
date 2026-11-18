@@ -788,23 +788,18 @@ static float rig_emitter_scale(long shader_tag, float rgb[3])
 
 /* ---------- the materials */
 
-/* port: the bounces' albedo. In the light's units (the rig "units": PRISM
-v4's) a base map's mean as stored, the byte over 255 with no curve: the
-reflectance CE's frame shows (its light times the stored texel), and so the
-one the light the rig is measured against (CE's lightmaps) bounced. Made
-linear (a byte to the power 2.2) the light where no lamp is near came out at
-0.14 to 0.43 of CE's (docs/prism_bake.md, "The light's units"). Else (the
-fitted rig, PRISM RT's) made linear, as it was fitted. HALO_PRISM_ALBEDO
-"stored" or "linear" overrides the rule (a diagnostic) */
+/* port: the bounces' albedo: a base map's mean made linear (a byte to the
+power 2.2, its detail maps' factors as CE's frame applies them), the
+reflectance of the linear light the bake carries, in the light's units as
+in the fitted rig (docs/prism_bake.md, "The light's units": decided against
+the stored mean on CE's raw pages, November 2026). HALO_PRISM_ALBEDO
+"stored" takes the base map's mean as stored, the byte over 255 (a
+diagnostic) */
 int prism_rt_albedo_stored(void)
 {
 	char const *value = getenv("HALO_PRISM_ALBEDO");
 
-	if (value && !strcmp(value, "stored"))
-		return TRUE;
-	if (value && !strcmp(value, "linear"))
-		return FALSE;
-	return prism_rt.rig_mode == 1 || (prism_rt.rig_mode == 0 && prism_deferred_raster());
+	return value && !strcmp(value, "stored");
 }
 
 /* a bitmap's first texture's mean colour (linear, or as stored where stored
