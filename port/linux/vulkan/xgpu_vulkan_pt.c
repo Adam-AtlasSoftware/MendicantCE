@@ -953,8 +953,11 @@ static void tree_collect(void)
 		return;
 	pt.lamps_serial = 0;
 	memcpy(&count, copy, sizeof(count));
+	/* (no lamps, or more than the copy holds: no tree, the grid alone) */
 	if (count == 0 || count > LAMPS_MOST)
 	{
+		if (count > LAMPS_MOST)
+			host_logf(HOST_LOG_INFO, "prism pt: %u lamps, more than the light tree takes: the grid alone", count);
 		pt.tree_generation = pt.lamps_generation;
 		pt.tree_nodes = 0;
 		return;

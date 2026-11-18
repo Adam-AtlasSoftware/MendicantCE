@@ -2484,7 +2484,8 @@ void main()
 //@pass lamps
 layout(local_size_x = 256) in;
 /* the bake's lamps copied for the host (its light tree, xgpu_vulkan_pt.c):
-job.lamps_out's first word their count, then from its 16th each lamp's 16
+job.lamps_out's first word their count (all of them: the host makes no tree
+where they are more than the copy holds), then from its 16th each lamp's 16
 floats (the bake's: its corners, radiance, area, cumulative power);
 parameters.x the most the buffer holds */
 layout(buffer_reference, std430, buffer_reference_align = 16) buffer LampsOut
@@ -2499,7 +2500,7 @@ void main()
     uint count = min(s.counts.z, push.parameters.x);
     LampsOut o = LampsOut(job.lamps_out);
     if (index == 0u)
-        o.v[0] = uintBitsToFloat(count);
+        o.v[0] = uintBitsToFloat(s.counts.z);
     if (index >= count)
         return;
     Floats f = Floats(s.lamps);

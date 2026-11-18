@@ -444,10 +444,17 @@ R is the gate's truth.
 M3 (`docs/prism_pathtraced.md`) is judged on the frozen G scenes with `display.lighting` `"pathtraced"` reading a bake
 made before by the game itself (`ultra`, `debug.bake_exit`; the run's `HALO_BAKE_FOLDER`, `display.bake` `"off"`),
 against its own reference: `debug.pt_reference` in that mode traces the same scene, materials and lights unbiased at
-every pixel with no bake, summed until its estimated relative MSE is under `reference_noise` (0.001) or its frames
-are done, its file `p<n>.exr` (`light.R/G/B`, `spec.R/G/B`, `Z`, `samples`, `noise`) and its frame `p<n>_ref.png`.
-The moves' RT off is Classic's frame (`v4off`); the moving frames measured are the `quality` profile's (`v4pt`), the
-`performance` profile's (`v4perf`) beside them; `v4raw` is the light as traced (the denoiser off, a diagnostic).
+every pixel with no bake, summed until its estimated relative MSE is under `reference_noise` (0.001) as the gates'
+frames measure the error (round 2: the drawn values, a clipped pixel's noise left out, the 960 × 540 frames' share of
+a pixel's variance; at least 256 frames) or its frames are done, its file `p<n>.exr` (`light.R/G/B`, `spec.R/G/B`,
+`Z`, `samples`, `noise`, and each part's noise: `noise.direct`, `noise.indirect`, `noise.specular`) and its frame
+`p<n>_ref.png`. The moves' RT off is Classic's frame (`v4off`); the moving frames measured are the `quality` profile's
+(`v4pt`), the `performance` profile's (`v4perf`) beside them; `v4raw` is the light as traced (the denoiser off, a
+diagnostic); `v4sun` and `v4hist` show the quality profile's moves as the sun's filtered visibility and the history's
+length. Every Path Traced state, and the reference, is drawn at a fixed exposure (`display.prism_exposure "fixed"`, the
+clipped tone curve): the gates compare the frames as drawn, after the white hold (`docs/prism_pathtraced.md`).
+`HALO_PT_DEBUG_FILE` writes the path tracer's per-frame diagnostics (whether it took the history, how far the eye
+moved, the temporal pass's counts of the level pixels whose last place was in the view and on their own surface).
 
 ```sh
 python3 tools/prism_gate/capture.py moves G5 --stage <tree> --data <data> --config <classic toml> --out <dir> \
