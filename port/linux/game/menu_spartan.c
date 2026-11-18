@@ -664,14 +664,35 @@ static void spartan_tags_find(
 	}
 }
 
+/* whether object_index is still an object a Spartan made of definition_index
+(its body's or its rifle's): its index names nothing once a map is loaded
+since (the tags' generation), and a slot reused names another object with
+the same index (a map's objects are made in the same order each time it
+loads: the ui map's Spartan and rifle at 1 and 2 had the indices of the
+next map's first scenery, ratrace's teleporters, #1186) */
+static boolean spartan_object_current(
+	long object_index,
+	long definition_index)
+{
+	struct object_datum *object;
+
+	if (object_index == NONE || definition_index == NONE ||
+		menu_spartan.generation != cache_files_tags_generation())
+	{
+		return FALSE;
+	}
+	object = object_try_and_get(object_index);
+	return object && object->definition_index == definition_index;
+}
+
 static void spartan_delete(
 	struct menu_spartan *spartan)
 {
 	/* (the rifle goes with it, attached: deleted first all the same, in
-	case it was not) */
-	if (spartan->rifle_index != NONE && object_try_and_get(spartan->rifle_index))
+	case it was not; nothing that is no longer the Spartan's) */
+	if (spartan_object_current(spartan->rifle_index, menu_spartan.rifle_definition))
 		object_delete(spartan->rifle_index);
-	if (spartan->object_index != NONE && object_try_and_get(spartan->object_index))
+	if (spartan_object_current(spartan->object_index, menu_spartan.spartan_definition))
 		object_delete(spartan->object_index);
 	spartan->object_index = NONE;
 	spartan->rifle_index = NONE;
@@ -1535,8 +1556,10 @@ boolean menu_spartan_object(
 		return FALSE;
 	for (index = 0; index < MAXIMUM_MENU_SPARTANS; index++)
 	{
-		if (menu_spartan.spartans[index].object_index == object_index ||
-			menu_spartan.spartans[index].rifle_index == object_index)
+		if ((menu_spartan.spartans[index].object_index == object_index &&
+				spartan_object_current(object_index, menu_spartan.spartan_definition)) ||
+			(menu_spartan.spartans[index].rifle_index == object_index &&
+				spartan_object_current(object_index, menu_spartan.rifle_definition)))
 		{
 			return TRUE;
 		}
@@ -1563,7 +1586,8 @@ void menu_spartan_frame(
 	{
 		struct menu_spartan *spartan = &menu_spartan.spartans[index];
 
-		if (spartan->object_index != NONE && !object_try_and_get(spartan->object_index))
+		if (spartan->object_index != NONE &&
+			!spartan_object_current(spartan->object_index, menu_spartan.spartan_definition))
 		{
 			spartan->object_index = NONE;
 			spartan->rifle_index = NONE;
