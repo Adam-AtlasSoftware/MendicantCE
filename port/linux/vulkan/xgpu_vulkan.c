@@ -3291,6 +3291,56 @@ static void pass_times_create(void)
 		host_logf(HOST_LOG_INFO, "vulkan: each pass timed every %d frames (debug.pass_times)", host_pass_times);
 }
 
+/* debug.timings as it turns on and off (the front end's PASS_TIMES record,
+from its first frame): the passes timed every frames frames from the next
+frame on, or no more; never where debug.pass_times times them already (it
+says how often, and stays). A frame being timed as it turns off is still
+read back (pass_times_collect), its marks ended. */
+void xgpu_vulkan_pass_times_follow(int frames)
+{
+	/* (host_pass_times is debug.timings', not debug.pass_times') */
+	static int following;
+
+#ifdef HALO_VR
+	/* (as pass_times_create: the VR mode times no passes) */
+	(void)frames;
+	(void)following;
+	return;
+#else
+	if (frames > 0 && !host_pass_times && vk.capabilities.gpu_timestamps)
+	{
+		if (!pass_times.pool)
+		{
+			VkQueryPoolCreateInfo create;
+
+			memset(&create, 0, sizeof(create));
+			create.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+			create.queryType = VK_QUERY_TYPE_TIMESTAMP;
+			create.queryCount = PASS_TIMES_MAXIMUM;
+			if (!check(vkCreateQueryPool(vk.device, &create, NULL, &pass_times.pool), "vkCreateQueryPool (pass times)"))
+			{
+				pass_times.pool = VK_NULL_HANDLE;
+				return;
+			}
+		}
+		/* (a summary of these frames alone) */
+		pass_times.sum_count = 0;
+		pass_times.frames = 0.0;
+		host_pass_times = frames;
+		following = 1;
+		host_logf(HOST_LOG_INFO, "vulkan: each pass timed every %d frames (debug.timings)", frames);
+	}
+	else if (frames <= 0 && following)
+	{
+		host_pass_times = 0;
+		following = 0;
+		/* (xgpu_vulkan_pass_owner keeps none while nothing is timed) */
+		vk.pass_owner = NULL;
+		host_logf(HOST_LOG_INFO, "vulkan: passes no longer timed (debug.timings)");
+	}
+#endif
+}
+
 /* a timestamp in the main command buffer, after the work label names (NULL:
 a submission's start, which begins the frame's timing on a timed frame) */
 static void pass_times_mark(VkCommandBuffer main, const char *label)

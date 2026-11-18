@@ -856,6 +856,9 @@ void xgpu_vulkan_window_luminance(float black_nits, float full_frame_nits);
 /* display.hdr_gamut (#1124): the highlights' colours expanded past sRGB's
 (any thread) */
 void xgpu_vulkan_hdr_gamut(int expanded);
+/* debug.timings as it changes: each pass timed every so many frames from
+the next on (0: no more), where debug.pass_times does not time them */
+void xgpu_vulkan_pass_times_follow(int frames);
 /* the gamut the window's display's primaries make (xgpu_hdr_gamut_target:
 0, P3's, where the system says none; any thread) */
 void xgpu_vulkan_window_gamut(float target);

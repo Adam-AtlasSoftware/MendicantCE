@@ -518,8 +518,6 @@ void host_apply_debug_settings(const char *path, const char *hashes_reason)
 	int memory_watch = 1;
 	/* (game.priority's default, as port_config.c's) */
 	char priority_mode[16] = "normal";
-	/* (debug.timings' default, as port_config.c's) */
-	int developer_timings = 0;
 
 	if (result.ok)
 	{
@@ -527,7 +525,6 @@ void host_apply_debug_settings(const char *path, const char *hashes_reason)
 		toml_datum_t watch = toml_seek(result.toptab, "debug.memory_watch");
 		toml_datum_t astc = toml_seek(result.toptab, "display.astc_textures");
 		toml_datum_t pass_times = toml_seek(result.toptab, "debug.pass_times");
-		toml_datum_t timings = toml_seek(result.toptab, "debug.timings");
 		toml_datum_t stall = toml_seek(result.toptab, "debug.stall_ms");
 		toml_datum_t priority = toml_seek(result.toptab, "game.priority");
 
@@ -539,8 +536,6 @@ void host_apply_debug_settings(const char *path, const char *hashes_reason)
 			snprintf(host_astc_textures, sizeof(host_astc_textures), "%s", astc.u.s);
 		if (pass_times.type == TOML_INT64)
 			host_pass_times = (int)pass_times.u.int64;
-		if (timings.type == TOML_BOOLEAN)
-			developer_timings = timings.u.boolean ? 1 : 0;
 		if (stall.type == TOML_FP64 || stall.type == TOML_INT64)
 			stall_ms = stall.type == TOML_FP64 ? stall.u.fp64 : (double)stall.u.int64;
 		if (priority.type == TOML_STRING)
@@ -553,12 +548,6 @@ void host_apply_debug_settings(const char *path, const char *hashes_reason)
 	host's environment) */
 	if (getenv("HALO_PASS_TIMES") && *getenv("HALO_PASS_TIMES"))
 		host_pass_times = atoi(getenv("HALO_PASS_TIMES"));
-	if (getenv("HALO_TIMINGS") && *getenv("HALO_TIMINGS"))
-		developer_timings = !strcmp(getenv("HALO_TIMINGS"), "true") || !strcmp(getenv("HALO_TIMINGS"), "1");
-	/* (debug.timings: the passes timed for the performance overlay, every
-	10 frames, where debug.pass_times does not say how often) */
-	if (developer_timings && host_pass_times <= 0)
-		host_pass_times = 10;
 	if (getenv("HALO_SAMPLE"))
 		sample_seconds = atof(getenv("HALO_SAMPLE"));
 	if (getenv("HALO_PRIORITY") && *getenv("HALO_PRIORITY"))

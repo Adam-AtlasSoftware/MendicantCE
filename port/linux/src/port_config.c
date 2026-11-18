@@ -3176,7 +3176,7 @@ static const struct config_setting config_settings[] =
 		"effects, particles and pipelines and, with Vulkan, each setting's\n"
 		"passes on the GPU in the performance overlay's detailed view. Off,\n"
 		"nothing is timed. With Vulkan it times the passes every 10 frames\n"
-		"from the next start where debug.pass_times is 0." },
+		"from the next frame on, where debug.pass_times is 0." },
 	{ "debug.pass_times", _config_integer, "0", "HALO_PASS_TIMES", _environment_value, _platform_all,
 		"Every this many frames, time each of the frame's passes on the GPU and\n"
 		"log, every 30 timed frames, each kind of pass's milliseconds a frame and\n"

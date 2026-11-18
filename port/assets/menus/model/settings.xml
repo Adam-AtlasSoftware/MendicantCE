@@ -792,7 +792,6 @@
 		</row>
 		<row key="timings" kind="choice" setting="debug.timings" label="DEVELOPER TIMINGS" crumb="VIDEO › FRAME RATE &amp; SYNC › PERFORMANCE TOOLS">
 			<help>Times the game's own work (AI, objects, effects, scripts...) and, with Vulkan, each graphics setting's passes on the GPU, shown in the Detailed overlay with counts of objects and effects. Off times nothing.</help>
-			<note>The GPU's passes from the next start.</note>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>

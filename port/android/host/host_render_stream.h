@@ -101,6 +101,10 @@ struct host_render_backend
 	/* display.hdr_gamut: the highlights' colours expanded (1) or not
 	(0), from the next frame on */
 	void (*hdr_gamut)(void *context, uint32_t value);
+	/* debug.timings: each pass timed every so many frames (0: no more,
+	but where debug.pass_times times them); NULL where the backend has
+	no passes' times (Metal's) */
+	void (*pass_times)(void *context, uint32_t frames);
 	/* the game's renderer's category of the draws from now on
 	(XGPU_STREAM_CATEGORY's value), for the GPU's timing */
 	void (*category)(void *context, uint32_t category);

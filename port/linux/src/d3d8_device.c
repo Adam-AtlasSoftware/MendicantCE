@@ -2539,6 +2539,30 @@ static void hdr_gamut_send(void)
 	sent = expanded;
 }
 
+/* debug.timings: the backend times each pass on the GPU (every
+PASS_TIMES_TIMINGS_FRAMES frames) while it is on, for the performance
+overlay's detailed view, from the frame after it turns on to the one after
+it turns off (the Vulkan backend's; where debug.pass_times times them, it
+keeps to that) */
+#define PASS_TIMES_TIMINGS_FRAMES 10
+
+static void pass_times_send(void)
+{
+	static int sent = -1;
+	/* (read again as the settings change: config_changes) */
+	static unsigned long read_at = (unsigned long)-1;
+	int frames;
+
+	if (!device.gl_ready || read_at == config_changes())
+		return;
+	read_at = config_changes();
+	frames = config_boolean("debug.timings") ? PASS_TIMES_TIMINGS_FRAMES : 0;
+	if (frames == sent)
+		return;
+	xgpu_backend_pass_times(frames);
+	sent = frames;
+}
+
 /* a point in the window, as SDL reports it, in the menus' coordinates: the
 inverse of the letterboxed display blit at presentation, the screen's
 width and the menus' centering (halo_screen_ui_offset); or, not centered,
@@ -2838,6 +2862,8 @@ long halo_screen_commit(void)
 	hdr_peak_nits_send();
 	/* (display.hdr_gamut) */
 	hdr_gamut_send();
+	/* (debug.timings) */
+	pass_times_send();
 	/* display.shadow_resolution, if it has changed: the maps' entries at
 	the old scale are freed (render_targets_evict), new ones made at the new */
 	if (shadow_scale && shadow_scale_read_at != config_changes())

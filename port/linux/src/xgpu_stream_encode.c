@@ -952,6 +952,12 @@ void xgpu_backend_hdr_gamut(int value)
 		record_value(XGPU_STREAM_HDR_GAMUT, (uint32_t)value);
 }
 
+void xgpu_backend_pass_times(int frames)
+{
+	if (stream.open)
+		record_value(XGPU_STREAM_PASS_TIMES, frames > 0 ? (uint32_t)frames : 0u);
+}
+
 void xgpu_backend_hdr_peak_nits(int value)
 {
 	if (stream.open)
