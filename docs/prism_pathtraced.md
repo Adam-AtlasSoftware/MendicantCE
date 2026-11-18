@@ -168,7 +168,15 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   Catmull-Rom, held to the range of the 2 × 2 taps (bilinear taps at every move blurred the history along the move:
   round 2's moving G4 floor streaked a lamp's sparse samples toward the point the eye moved to); the sun's visibility
   alike (G6's moonlit ground brighter than R in motion where the lit side's history bled over the shadows' edges); the
-  moments and the lengths keep the bilinear taps. A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
+  moments and the lengths keep the bilinear taps. The specular's history on the level moves with the reflection where
+  the reflection is traced (ReLAX's virtual motion, from its published descriptions): the light pass keeps the
+  reflection ray's length in the guide (its `w`'s high half), and the temporal pass projects the reflection's image
+  (the point along the eye's ray past the surface by the mean length over the pixel's 3 × 3 on the same surface:
+  exact for a plane mirror, `tools/test_prism_pt.py`) into the last camera and takes the specular history and its
+  moments there (2 × 2 taps, each this surface's), mixed with the surface's by `1 − smoothstep(0.1, 0.45, roughness)`;
+  where the image's place holds no history of this surface, the specular's history is shortened in that proportion.
+  Round 3's glossy floors in motion streaked toward the point the eye moved to: their history went with the surface.
+  A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
   the reflection lobe's width (twice alpha, the roughness squared) over the parallax, the angle the eye turned about the point
   since the last frame, as ReLAX's specular accumulation, and 4 frames for a mirror under a moving eye, the whole 32
   for a still one) and a fast one (4) of the
@@ -189,7 +197,10 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
 - **fix**: where the history is shorter than 4 frames (a disocclusion, the first frames), the light gathered wide from
   the neighbours on the same surface (instance, normal, plane), weighed by their history's length, and written into
   the history; the variance from the neighbourhood's own spread where the moments do not have it yet (as SVGF takes
-  it; round 1's 4 / n times it let the a-trous steps blur a moving camera's noise into smears).
+  it; round 1's 4 / n times it let the a-trous steps blur a moving camera's noise into smears). The specular's
+  variance is its 3 × 3 neighbourhood's spread as it is (round 3 divided it again by the history's length, though the
+  history is already a mean, so its stops were a fifth as wide as the noise left and the semi-glossy walls' lamp pools
+  stayed grainy held still).
 - **atrous**: the first step holds a pixel brighter than twice the brightest of its eight neighbours on the same
   surface to that (ReLAX's anti-firefly), for the frame shown only: the histories keep the light whole, and a sample
   of a light few rays find adds its share to them without showing as a single bright pixel (round 3's G7 walls).
@@ -263,6 +274,10 @@ scene changes.
 | `display.denoiser` | `"prism"`, `"off"` | The in-tree denoiser, or the light as traced |
 | `debug.gbuffer_view` | `"pt_diffuse"`, `"pt_specular"`, `"pt_sun"`, `"pt_direct"`, `"pt_indirect"`, `"pt_history"`, `"pt_noisy"` | The diffuse light (denoised), the specular, the sun's visibility, the direct or indirect light alone (each denoised), the history's length, the diffuse light as traced |
 | `debug.pt_reference` | frames | The reference, at most that many frames |
+
+`HALO_PT_REFERENCE_LIVE=1` (a diagnosis) makes `debug.pt_reference` sum the light pass's own estimate in R's place
+(its light as traced, ReSTIR's reservoirs reused from frame to frame, no denoiser) into the same EXR: its mean against
+R's says what the live estimator holds apart from what the denoiser does.
 
 `HALO_PT_TIMES_FILE` writes each frame's GPU time and its passes' (light, temporal, fix, atrous, composite), as the log
 does their means every 600 frames.
