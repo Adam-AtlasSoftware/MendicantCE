@@ -1607,6 +1607,21 @@ PAGES = {
              "materials or lights change; a finished bake is otherwise kept).", "desktop"),
             ("PROGRESS ON SCREEN", "display.bake_indicator", ON_OFF,
              "Shows \"Baking lightmaps 37%\" at the top left while a level is baked.", "desktop"),
+            # (PRISM Raster's look: its exposure, highlights and objects, a
+            # path tracer's by default, Classic's the other choice; the
+            # exposure and highlights are PRISM PATH TRACING's settings too)
+            (SECTION, "LOOK"),
+            ("EXPOSURE", "display.prism_exposure",
+             [("STYLE'S", "style"), ("FIXED", "fixed"), ("GAME'S", "ce"), ("AUTO", "auto")],
+             "PRISM Raster's brightness. Style's: Auto, which adapts as an eye does, a dark place staying darker "
+             "than a bright one. Game's: the frame kept as bright as Classic's. Fixed: none.", "desktop"),
+            ("HIGHLIGHTS", "display.prism_tone_curve",
+             [("STYLE'S", "style"), ("CLIPPED", "ce"), ("FILMIC", "filmic"), ("ACES", "aces"), ("LOCAL", "local")],
+             "How light past white is drawn. Style's: Filmic, which rolls it off gently. ACES: punchier, a film's "
+             "curve. Clipped: held at white, as Classic did.", "desktop"),
+            ("OBJECTS", "display.prism_raster_objects", [("BAKED LIGHT", "volume"), ("CLASSIC'S", "classic")],
+             "How characters, vehicles and weapons are lit. Baked Light: by the baked light where they are. "
+             "Classic's: never darker than the game lit them.", "desktop"),
         ],
     },
     PRISM_PT_PAGE[0]: {

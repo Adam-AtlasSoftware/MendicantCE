@@ -221,7 +221,7 @@ static void settings_read(
 	lit under the light CE gives its pixel; "volume" the irradiance volume's
 	light alone) */
 	value = config_string("display.prism_raster_objects");
-	prism_deferred.raster_objects_volume = value && !strcmp(value, "volume");
+	prism_deferred.raster_objects_volume = !value || strcmp(value, "classic");
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :

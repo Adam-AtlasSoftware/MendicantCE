@@ -490,9 +490,12 @@ static struct
 	struct xgpu_vulkan_image *raster_light;
 	uint32_t raster_frames;
 	/* the exposure's meter (xgpu_vulkan_bake_glsl.inc's EXPOSURE_COMMON: 128
-	bins, the exposure's log2, whether it is made), kept from frame to frame */
-	struct bake_buffer meter;
+	bins, the exposure's log2, whether it is made, the last medians), kept
+	from frame to frame; with HALO_RASTER_EXPOSURE_LOG its last four words
+	copied each step to a host buffer and logged (a diagnostic) */
+	struct bake_buffer meter, meter_log;
 	double exposure_clock;
+	int meter_logging;
 
 	uint32_t status_serial;
 	double last_status;
@@ -5145,6 +5148,24 @@ void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
 		&push);
 	vkCmdDispatch(commands, 1, 1, 1);
 	barrier(commands);
+	/* (the diagnostic log: the exposure (stops) and the medians (log2) an
+	earlier step left, the host buffer's, then this step's copied to it) */
+	if (!bake.meter_logging)
+		bake.meter_logging = getenv("HALO_RASTER_EXPOSURE_LOG") ? 1 : -1;
+	if (bake.meter_logging > 0 && (bake.meter_log.buffer || buffer_make(16, 0, 1, &bake.meter_log)))
+	{
+		const float *words = (const float *)bake.meter_log.mapped;
+		VkBufferCopy copy;
+
+		host_logf(HOST_LOG_INFO, "prism raster: frame %u, %.3f s: the exposure %+.2f stops, the lit frame's median "
+			"%.4f, Classic's %.4f", bake.raster_frames, bake.exposure_clock, words[0], words[2] < 90.0f ?
+			exp2f(words[2]) : 0.0f, words[3] < 90.0f ? exp2f(words[3]) : 0.0f);
+		copy.srcOffset = 512;
+		copy.dstOffset = 0;
+		copy.size = 16;
+		vkCmdCopyBuffer(commands, bake.meter.buffer, bake.meter_log.buffer, 1, &copy);
+		barrier(commands);
+	}
 }
 
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
@@ -5383,6 +5404,7 @@ void xgpu_vulkan_bake_shutdown(void)
 	for (index = 0; index < STAGING_SLOTS; index++)
 		buffer_free_now(&bake.staging[index]);
 	buffer_free_now(&bake.meter);
+	buffer_free_now(&bake.meter_log);
 	while (bake.garbage_count)
 	{
 		bake.garbage_count--;
