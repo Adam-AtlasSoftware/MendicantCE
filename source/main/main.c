@@ -3610,7 +3610,7 @@ void main_framerate_render(
 				draw_string_compute_bounds(&wide, "000.00 ms", &text, &cursor);
 				value_width = (short)(text.x1 - text.x0);
 				perf_overlay_place(window.x0, window.y0, window.x1, window.y1, menu_shape_pixels(),
-					local_player_count() > 1, count, (short)(label_most + 10 + value_width),
+					local_player_count() > 1, count, (short)(label_most + 24 + value_width),
 					draw_string_capital_height(), &place);
 				rasterizer_text_set_scale(place.scale, (real)place.anchor_x, (real)place.anchor_y);
 				draw_string_set_color(global_real_argb_white);
