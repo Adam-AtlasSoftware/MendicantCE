@@ -536,16 +536,24 @@ frame's own; the GPU's on it (Metal's: the time the GPU was busy, the
 presentation's included; Vulkan's: from the frame's first work on the GPU
 to its last, two timestamps the renderer writes each frame); the
 renderer's thread's, playing the frame's commands (the backend's calls
-included); and the game's waits for the renderer and the display (room in
-the command stream, a frame on the GPU finished, vsync's pacing and
-`display.max_fps`'s), and of those the pacing's. The summary gives the
-GPU's time a frame (its average and 99th percentile), how much of the
-time the GPU, the game (its thread: a frame's time less its waits) and
-the renderer's thread were busy, how much the game waited for vsync or
-the frame cap, and a verdict: **limited by vsync or the frame cap** if
-the game waited for them for 20% of the time or more and nothing was busy
-for 95% of it; else the busiest of the three, **GPU-bound**, **CPU-bound
-(the game)** or **CPU-bound (the renderer's thread)**.
+included, but its waits for a FIFO swapchain's image or present, which are
+the display's); and the game's waits for the renderer and the display (room
+in the command stream, a frame on the GPU finished, vsync's pacing and
+`display.max_fps`'s), and of those the pacing's (vsync's and the cap's own
+waits, and a wait for the renderer while the display held its thread). The
+summary gives the GPU's time a frame (its average and 99th percentile), how
+much of the time the GPU, the game (its thread: a frame's time less its
+waits) and the renderer's thread were busy, how much the game waited for
+vsync or the frame cap and on how many frames, and a verdict: **limited by
+vsync or the frame cap** if the game waited for them on half the frames or
+more (for 2% of a frame's time or more: the frame would have been shorter
+without them) and nothing was busy for 95% of the time; else the busiest of
+the three, **GPU-bound**, **CPU-bound (the game)** or **CPU-bound (the
+renderer's thread)**. With vsync's FIFO the game, the renderer's thread and
+the GPU take their turns, so a frame at its cap can have none of them busy
+for half of it. The 1% and 0.1% lows (the report's, the performance
+overlay's and the benchmark's) are the slowest frames' but the stalls of
+100 ms or more, which are counted and listed on their own.
 With fewer than 30 frames measured (the VR mode's renderer measures none)
 it says the GPU's time was not measured.
 

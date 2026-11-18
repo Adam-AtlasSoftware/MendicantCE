@@ -67,6 +67,9 @@ VkResult xgpu_vulkan_pacing_acquire(PFN_vkAcquireNextImageKHR acquire, VkDevice 
 the one just presented, when the game starts the next
 (host_render_stream_frames_ahead): 0 with FIFO, -1 (the stream's own) else */
 void xgpu_vulkan_pacing_frames_ahead(int frames);
+/* (render thread) the display holds the thread from now (1), or no longer
+(0): a FIFO swapchain's acquire or present (host_render_stream_display_blocking) */
+void xgpu_vulkan_pacing_display_blocking(int blocking);
 /* (render thread) a frame ended with nothing presented */
 void xgpu_vulkan_pacing_unshown(void);
 /* (render thread) the swapchain has given no image for seconds: the thread

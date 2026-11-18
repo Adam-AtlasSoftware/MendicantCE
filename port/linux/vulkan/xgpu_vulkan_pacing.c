@@ -716,6 +716,11 @@ void xgpu_vulkan_pacing_frames_ahead(int frames)
 	host_render_stream_frames_ahead(frames);
 }
 
+void xgpu_vulkan_pacing_display_blocking(int blocking)
+{
+	host_render_stream_display_blocking(blocking);
+}
+
 void xgpu_vulkan_pacing_unshown(void)
 {
 	struct entry *entry;

@@ -122,8 +122,11 @@ struct xgpu_stream_ring
 	end (host_render_stream_gpu_time: Metal's, the time the GPU was busy;
 	Vulkan's, from each frame's first work to its last), and nonzero once
 	the backend measures it; the render thread's time playing records (the
-	backend's calls included); the guest's waits for the display's pacing
-	(display_wait, a part of wait_nanoseconds) */
+	backend's calls included, but its waits for the display:
+	host_render_stream_display_blocking); the guest's waits for the
+	display's pacing, a part of wait_nanoseconds (display_wait's, and its
+	waits for the render thread or the GPU while the display held the render
+	thread) */
 	uint32_t gpu_microseconds;
 	uint32_t gpu_measured;
 	uint32_t render_microseconds;

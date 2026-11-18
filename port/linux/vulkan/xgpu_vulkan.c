@@ -9073,7 +9073,7 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 	struct xgpu_vulkan_output output;
 	uint32_t index, width = 0, height = 0, x = 0, y = 0;
 	uint8_t format;
-	int turns = 0, copied = 0;
+	int turns = 0, copied = 0, fifo;
 
 	uint64_t serial;
 
@@ -9132,7 +9132,13 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 		host_load_trace("vulkan.acquire.begin", "");
 	/* (in parts, never for good: a swapchain that gives no image for
 	seconds is noted, and display.low_latency's thread stops waiting for its
-	presents, which might be what holds it, xgpu_vulkan_pacing_silence) */
+	presents, which might be what holds it, xgpu_vulkan_pacing_silence. With
+	FIFO a wait for the image, or in the present, is the display's pacing,
+	not the thread's work (xgpu_vulkan_pacing_display_blocking); mailbox's
+	and immediate's are not the display's) */
+	fifo = vk.present_mode == VK_PRESENT_MODE_FIFO_KHR || vk.present_mode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+	if (fifo)
+		xgpu_vulkan_pacing_display_blocking(1);
 	{
 		uint64_t waited = 0;
 
@@ -9151,6 +9157,8 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 			}
 		}
 	}
+	if (fifo)
+		xgpu_vulkan_pacing_display_blocking(0);
 	if (trace)
 		host_load_trace("vulkan.acquire.end", "result=%d", result);
 	if (result == VK_ERROR_OUT_OF_DATE_KHR)
@@ -9239,7 +9247,11 @@ static uint64_t present(struct xgpu_vulkan_image *image, int frame)
 	info.pImageIndices = &index;
 	if (trace)
 		host_load_trace("vulkan.queue_present.begin", "");
+	if (fifo)
+		xgpu_vulkan_pacing_display_blocking(1);
 	result = xgpu_vulkan_pacing_present(vkQueuePresentKHR, vk.queue, &info, frame, serial);
+	if (fifo)
+		xgpu_vulkan_pacing_display_blocking(0);
 	if (trace)
 		host_load_trace("vulkan.queue_present.end", "result=%d", result);
 	host_load_trace("vulkan.present.return", "result=%d image=%d", result, image != NULL);
