@@ -2,10 +2,11 @@
 README lists them (port/third_party/fidelityfx-fsr3), the generated SPIR-V still their GLSL's
 (tools/vulkan_upscale_shaders.py --check, where glslang and SPIRV-Tools are installed), FSR's host half
 (port/linux/vulkan/xgpu_vulkan_fsr3.c, driven by port/linux/vulkan/tests/upscale_test.c over stubs of the core: its
-jitter, the SDK's Halton sequence; a dispatch with no device refused), the denoiser's hooks
-(port/linux/vulkan/xgpu_vulkan_upscale.c over the same stubs and fake plugins: the path tracer's light given raw only
-in a view begun for the plugin, a plugin that denoises and upscales only with the view's G-buffer), and the settings
-(port_config.c's entries, the README's rows, the menus' values)."""
+jitter, the SDK's Halton sequence; a dispatch with no device refused), the denoiser's hooks and the plugins'
+extensions (port/linux/vulkan/xgpu_vulkan_upscale.c over the same stubs and fake plugins: the path tracer's light
+given raw only in a view begun for the plugin, a plugin that denoises and upscales only with the view's G-buffer; an
+extension missing turns off the plugins that asked for it, no other), and the settings (port_config.c's entries, the
+README's rows, the menus' values)."""
 
 import hashlib
 import os
@@ -133,6 +134,23 @@ def test_raw_light_only_in_a_view_begun_for_it(driver, kind):
     own = f"denoiser: the path tracer's own filter ({kind} not given the light)"
     raw = f"denoiser: the path tracer's light given raw to {kind}"
     assert log == [own, raw, own, raw, own]
+
+
+def test_extension_missing_turns_off_its_plugins_alone(driver):
+    """an instance extension the loader lacks turns off the plugin that asked for it, not the other; a device
+    extension both plugins asked for (asked once of the device) turns off both"""
+    text = run_driver(driver, "extensions", "instance")
+    assert "instance VK_A VK_B\n" in text
+    assert "device VK_C VK_D\n" in text
+    off = re.findall(r"^log: prism plugin (\w+): turned off: (.*)$", text, re.M)
+    assert off == [("askB", "the Vulkan loader has no VK_B; the renderer's own denoiser is drawn")]
+    assert re.search(r"^log: prism plugin askA: ready", text, re.M)
+    text = run_driver(driver, "extensions", "device")
+    assert "device VK_C VK_D VK_E\n" in text
+    off = re.findall(r"^log: prism plugin (\w+): turned off: (.*)$", text, re.M)
+    assert sorted(name for name, _ in off) == ["askA", "askB"]
+    assert all(why.startswith("the graphics card has no VK_C;") for _, why in off)
+    assert "ready" not in text
 
 
 def test_settings():

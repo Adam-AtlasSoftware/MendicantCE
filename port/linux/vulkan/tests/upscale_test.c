@@ -1,9 +1,10 @@
 /* display.upscaler's and display.denoiser's host halves (xgpu_vulkan_fsr3.c,
 xgpu_vulkan_upscale.c) without a GPU (tools/test_upscale.py): FSR 3.1's
 jitter's sequence, a dispatch with no device refused (the view then
-stretched into the window as it is), and the path tracer's light given to a
-denoiser's plugin only in a view begun for it, over stubs of the core and
-of the plugin loader (fake plugins).
+stretched into the window as it is), the path tracer's light given to a
+denoiser's plugin only in a view begun for it, and a plugin's extension
+missing turning off the plugins that asked for it, over stubs of the core
+and of the plugin loader (fake plugins).
 
   upscale_test jitter <render width> <output width>   the sequence's length,
                                                       then its offsets
@@ -12,6 +13,9 @@ of the plugin loader (fake plugins).
                                                       (a plugin that denoises,
                                                       or one that denoises and
                                                       upscales)
+  upscale_test extensions instance|device             an instance extension
+                                                      missing, or a device
+                                                      extension both asked for
 The core's log lines are printed as "log: <line>". */
 
 #include <stdarg.h>
@@ -103,7 +107,9 @@ void host_logf(int priority, const char *format, ...)
 }
 
 /* ---------- fake plugins (xgpu_plugin_open's), by name: "denoise"
-(PRISM_CAP_DENOISE) and "rr" (PRISM_CAP_DENOISE_UPSCALE) */
+(PRISM_CAP_DENOISE), "rr" (PRISM_CAP_DENOISE_UPSCALE), "askA" (an upscaler
+asking for the instance's VK_A and the device's VK_C and VK_D) and "askB"
+(a denoiser asking for VK_B, and VK_C and VK_E) */
 
 static int evaluations;
 
@@ -113,6 +119,42 @@ static int no_device_extensions(VkPhysicalDevice physical, const char **names, u
 	(void)physical; (void)names;
 	*count = 0;
 	return 1;
+}
+
+static int listed(const char **names, uint32_t *count, const char *const *list, uint32_t length)
+{
+	uint32_t index;
+
+	if (names)
+	{
+		for (index = 0; index < length && index < *count; index++)
+			names[index] = list[index];
+	}
+	*count = length;
+	return 1;
+}
+
+static int a_instance(const char **names, uint32_t *count)
+{
+	static const char *const list[] = { "VK_A" };
+	return listed(names, count, list, 1);
+}
+static int a_device(VkPhysicalDevice physical, const char **names, uint32_t *count)
+{
+	static const char *const list[] = { "VK_C", "VK_D" };
+	(void)physical;
+	return listed(names, count, list, 2);
+}
+static int b_instance(const char **names, uint32_t *count)
+{
+	static const char *const list[] = { "VK_B" };
+	return listed(names, count, list, 1);
+}
+static int b_device(VkPhysicalDevice physical, const char **names, uint32_t *count)
+{
+	static const char *const list[] = { "VK_C", "VK_E" };
+	(void)physical;
+	return listed(names, count, list, 2);
 }
 
 static int supported(VkPhysicalDevice physical) { (void)physical; return 1; }
@@ -146,6 +188,8 @@ static const struct prism_plugin fakes[] =
 {
 	FAKE("denoise", PRISM_CAP_DENOISE, no_extensions, no_device_extensions),
 	FAKE("rr", PRISM_CAP_UPSCALE | PRISM_CAP_DENOISE_UPSCALE, no_extensions, no_device_extensions),
+	FAKE("askA", PRISM_CAP_UPSCALE, a_instance, a_device),
+	FAKE("askB", PRISM_CAP_DENOISE, b_instance, b_device),
 };
 static struct xgpu_plugin libraries[sizeof(fakes) / sizeof(fakes[0])];
 
@@ -228,6 +272,33 @@ static int denoiser_test(const char *name)
 	return 0;
 }
 
+static int extensions_test(const char *which)
+{
+	const char *const *instance;
+	const char *device[16];
+	uint32_t count, index;
+
+	stub_device = 1;
+	xgpu_vulkan_upscale_plugins_open("plugins", "askA", "askB");
+	count = xgpu_vulkan_upscale_instance_extensions(&instance);
+	printf("instance");
+	for (index = 0; index < count; index++)
+		printf(" %s", instance[index]);
+	printf("\n");
+	if (!strcmp(which, "instance"))
+		xgpu_vulkan_upscale_extension_missing("VK_B", 0);
+	count = xgpu_vulkan_upscale_device_extensions(VK_NULL_HANDLE, device, 16);
+	printf("device");
+	for (index = 0; index < count; index++)
+		printf(" %s", device[index]);
+	printf("\n");
+	if (!strcmp(which, "device"))
+		xgpu_vulkan_upscale_extension_missing("VK_C", 1);
+	xgpu_vulkan_upscale_plugins_create();
+	xgpu_vulkan_upscale_shutdown();
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc >= 4 && !strcmp(argv[1], "jitter"))
@@ -256,5 +327,7 @@ int main(int argc, char **argv)
 	}
 	if (argc >= 3 && !strcmp(argv[1], "denoiser"))
 		return denoiser_test(argv[2]);
+	if (argc >= 3 && !strcmp(argv[1], "extensions"))
+		return extensions_test(argv[2]);
 	return 2;
 }

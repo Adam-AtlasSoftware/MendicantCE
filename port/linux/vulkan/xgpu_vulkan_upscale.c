@@ -141,11 +141,13 @@ static struct
 		int sized;
 		int failures_logged;
 	} plugins[2];
+	/* the extensions asked for, each with the plugins that asked for it
+	(1 << PLUGIN_*: those turned off where it is missing) */
 	const char *instance_extensions[16];
+	uint32_t instance_extension_plugins[16];
 	uint32_t instance_extension_count;
-	/* a device extension asked for, of which plugin (for the missing) */
 	const char *device_extensions[16];
-	int device_extension_plugin[16];
+	uint32_t device_extension_plugins[16];
 	uint32_t device_extension_count;
 	char credits[512];
 
@@ -279,7 +281,16 @@ void xgpu_vulkan_upscale_plugins_open(const char *folder, const char *upscaler, 
 				have++)
 				;
 			if (have == up.instance_extension_count && up.instance_extension_count < 16)
+			{
+				up.instance_extension_plugins[have] = 0;
 				up.instance_extensions[up.instance_extension_count++] = wanted[index];
+			}
+			if (have == up.instance_extension_count)
+			{
+				plugin_off(which, "the plugins ask for more instance extensions than the renderer keeps");
+				break;
+			}
+			up.instance_extension_plugins[have] |= 1u << which;
 		}
 	}
 }
@@ -322,9 +333,15 @@ uint32_t xgpu_vulkan_upscale_device_extensions(VkPhysicalDevice physical, const 
 				;
 			if (have == up.device_extension_count && up.device_extension_count < 16)
 			{
-				up.device_extension_plugin[up.device_extension_count] = which;
+				up.device_extension_plugins[have] = 0;
 				up.device_extensions[up.device_extension_count++] = wanted[index];
 			}
+			if (have == up.device_extension_count)
+			{
+				plugin_off(which, "the plugins ask for more device extensions than the renderer keeps");
+				break;
+			}
+			up.device_extension_plugins[have] |= 1u << which;
 		}
 	}
 	for (which = 0; which < (int)up.device_extension_count && which < (int)most; which++)
@@ -335,7 +352,9 @@ uint32_t xgpu_vulkan_upscale_device_extensions(VkPhysicalDevice physical, const 
 void xgpu_vulkan_upscale_extension_missing(const char *extension, int device)
 {
 	char why[160];
-	uint32_t index;
+	const char *const *names = device ? up.device_extensions : up.instance_extensions;
+	const uint32_t *plugins = device ? up.device_extension_plugins : up.instance_extension_plugins;
+	uint32_t index, count = device ? up.device_extension_count : up.instance_extension_count;
 	int which;
 
 	if (device == 2)
@@ -343,17 +362,14 @@ void xgpu_vulkan_upscale_extension_missing(const char *extension, int device)
 			extension);
 	else
 		snprintf(why, sizeof(why), "the %s has no %s", device ? "graphics card" : "Vulkan loader", extension);
-	for (which = 0; which < 2; which++)
+	/* (each plugin that asked for it) */
+	for (index = 0; index < count; index++)
 	{
-		if (!device)
-		{
-			/* (an instance extension: each plugin that asked for it) */
-			plugin_off(which, why);
+		if (strcmp(names[index], extension))
 			continue;
-		}
-		for (index = 0; index < up.device_extension_count; index++)
+		for (which = 0; which < 2; which++)
 		{
-			if (up.device_extension_plugin[index] == which && !strcmp(up.device_extensions[index], extension))
+			if (plugins[index] & (1u << which))
 				plugin_off(which, why);
 		}
 	}
@@ -476,6 +492,20 @@ static int make(void)
 	if (!name) return failed("the device has no " #name);
 	UPSCALE_FUNCTIONS(LOAD)
 #undef LOAD
+	/* (the input pass and FSR 3.1's write images of one and two channels,
+	and its output through one of no declared format: the device's features,
+	which xgpu_vulkan.c enables where the device has them) */
+	{
+		PFN_vkGetPhysicalDeviceFeatures features_of = (PFN_vkGetPhysicalDeviceFeatures)up.handles.get_instance_proc(
+			up.handles.instance, "vkGetPhysicalDeviceFeatures");
+		VkPhysicalDeviceFeatures features;
+
+		memset(&features, 0, sizeof(features));
+		if (features_of)
+			features_of(up.handles.physical, &features);
+		if (!features.shaderStorageImageWriteWithoutFormat || !features.shaderStorageImageExtendedFormats)
+			return failed("the device cannot write storage images without a format, or of one and two channels");
+	}
 	memset(bindings, 0, sizeof(bindings));
 	for (index = 0; index < INPUT_BINDINGS; index++)
 	{
@@ -1154,9 +1184,13 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	at its own size resolves it where the plugin does not) */
 	if (upscaler == XGPU_UPSCALE_UPSCALER_NONE)
 		upscaler = XGPU_UPSCALE_UPSCALER_FSR3;
+	/* (stretched where the view or the window has no pixels, or the camera
+	is not known, its near and far planes none: FSR's depth and the motion
+	would have nothing to work from) */
 	if (record->view_corners[2] <= record->view_corners[0] || record->view_corners[3] <= record->view_corners[1] ||
 		record->output_corners[2] <= record->output_corners[0] ||
-		record->output_corners[3] <= record->output_corners[1] || !make())
+		record->output_corners[3] <= record->output_corners[1] || !(record->now[0][3] > 0.0f) ||
+		!(record->now[1][3] > record->now[0][3]) || !make())
 	{
 		stretch(record, view, output);
 		return;
@@ -1370,10 +1404,18 @@ void xgpu_vulkan_upscale_shutdown(void)
 	uint32_t index;
 	int which;
 
+	/* (the work recorded so far submitted and done before anything it uses
+	goes: a last frame's END, its FSR 3.1 passes and a plugin's may be in
+	it, and FSR's shutdown and the plugins' destroy want the device idle) */
+	if (up.handles.device || up.plugins[PLUGIN_UPSCALER].created || up.plugins[PLUGIN_DENOISER].created)
+	{
+		xgpu_vulkan_wait(xgpu_vulkan_fence());
+		if (up.handles.device && vkDeviceWaitIdle)
+			vkDeviceWaitIdle(up.handles.device);
+	}
 	xgpu_vulkan_fsr3_shutdown();
 	if (up.handles.device)
 	{
-		vkDeviceWaitIdle(up.handles.device);
 		for (index = 0; index < INPUT_COUNT; index++)
 			image_release(&up.inputs[index]);
 		for (index = 0; index < GUIDE_COUNT; index++)

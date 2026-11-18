@@ -95,10 +95,10 @@ display.upscaler's and display.denoiser's `"plugin:<name>"` names, and the folde
 1. Before the instance: each plugin opened, its instance extensions asked for; the core (`xgpu_vulkan.c`) adds
    those the loader has (`xgpu_vulkan_options`' `plugin_instance_extensions`).
 2. Before the device, for the device chosen: each plugin's device extensions, then `supported`; the core adds those
-   the device has (`plugin_device_extensions`). An extension the loader or the device lacks turns its plugin off
-   (`plugin_missing`), logged: NGX's ask for `VK_NVX_binary_import`, `VK_NVX_image_view_handle`,
-   `VK_EXT_buffer_device_address` and `VK_KHR_push_descriptor` on an NVIDIA card's device, and
-   `VK_KHR_get_physical_device_properties2` on the instance. `VK_EXT_buffer_device_address` is met by Vulkan 1.2's
+   the device has (`plugin_device_extensions`). An extension the loader or the device lacks turns off the plugins
+   that asked for it, no other (`plugin_missing`), logged: NGX's ask for `VK_NVX_binary_import`,
+   `VK_NVX_image_view_handle`, `VK_EXT_buffer_device_address` and `VK_KHR_push_descriptor` on an NVIDIA card's device,
+   and `VK_KHR_get_physical_device_properties2` on the instance. `VK_EXT_buffer_device_address` is met by Vulkan 1.2's
    `bufferDeviceAddress` where the device has it (the feature enabled in its place, as the ray queries enable it): a
    device may not have both, and NVIDIA's driver does not make one with both. A device that cannot be made with the
    plugins' extensions is made again without them, those plugins off: a plugin never costs the game its device.
@@ -219,8 +219,8 @@ It checks FSR 3.1's vendored files against their README's SHA-256, that the gene
 (`tools/vulkan_upscale_shaders.py --check`, where glslang and SPIRV-Tools are installed), FSR's host half over a fake
 core (its jitter the SDK's Halton sequence, of 8 times the area's ratio; no dispatch without a device), the
 denoiser's hooks over the same core and fake plugins (the light given raw only between a view's BEGIN and END, and to
-a plugin that denoises and upscales only with the view's G-buffer; each change logged), and the settings' entries,
-README rows and menu values.
+a plugin that denoises and upscales only with the view's G-buffer; each change logged), an extension missing turning
+off the plugins that asked for it alone, and the settings' entries, README rows and menu values.
 
 ## Measurements
 
