@@ -581,6 +581,37 @@ pixel, the first round's limit, to fit a hold):
   brighter): single samples of lamps the grid's lists missed, held in short histories and spread into blobs. Round 2's
   visibility hold, short-history firefly hold and light tree answer these.
 
+### M3 round 2 as measured (prism-v4-m3 40c22c76d unless said; the RTX 2060, BAKE_VERSION 16 at "high")
+
+The final tree has the moving objects traced (c7218cff2), one live lamp candidate from the light tree (8b413a06c)
+and prism-v4-m2's sky as a light (aa9c97827). Gates at a fixed exposure with the filmic curve, against R on the same
+side (above).
+
+| scene | v4pt error / blotch / FLIP / flicker | v4perf | verdict |
+|---|---|---|---|
+| G2 | 0.0015 / 0.0070 / 0.072 / 1.13 | 0.0015 / 0.0072 / 0.070 / 1.13 | pass |
+| G4 | p0 0.1255 / 0.1164 / 0.091, p1 0.1425 / 0.0827 / 0.131; flicker 1.40 (p2's R did not finish in 1700 s) | | fail (partial) |
+| G5 | 0.1632 / 0.0819 / 0.147 / 1.01 | 0.1765 / 0.0845 / 0.153 / 1.02 | fail |
+| G6 | 0.0257 / 0.0296 / 0.075 / 0.92 (8b413a06c, before the sky-light merge) | 0.0272 / 0.0382 / 0.101 / 0.95 | fail |
+| G1, G3, G7 | not measured on the final tree when this was written (their runs were queued) | | |
+
+What the frames show: in the interiors (G4, G5) the live frames, still or moving, keep a fine specular glitter over
+the walls and floors that R does not have (a glossy pixel's specular history is held to 4 frames, so the GGX rays'
+noise is hardly averaged), and G4's floor under its lamps is brighter than R's; at G5's second pose the corridor seen
+through the door windows differs from R's. At G6 the denoiser brightens the moonlit structure by about a fifth while
+the eye moves (raw 0.98 of R, the still frame 1.05, the moving denoised frame 1.21 in that region). The sky as a
+light leaves a10's rooms with no sky far darker than before (R agrees).
+
+RTX 3070 Ti, 1080p quality, final tree's trace (8b413a06c): G2 median 15.5 ms, p99 17.5; G5 14.2, 18.6: pass. Two
+costs found on the way: the reprojection counters' atomics (8.5 ms of the temporal pass; now only with
+HALO_PT_DEBUG_FILE) and the light tree's mixture on every live candidate (12 ms).
+
+Common gates on the final tree: Classic's and Enhanced's frames byte-identical to prism-v4-m2 036f858b1 (b30, a10,
+46 frames each) and the kit's stills at G4 and G5; G7's stills differ run to run on the base itself (0 of 30 alike
+base against base), so they say nothing of this branch; determinism: the game state and seeds alike over 1476 ticks.
+Vulkan validation with synchronisation: its run met a bake being made again (BAKE_VERSION 16) and traced nothing,
+so it is asked again (not yet measured).
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
