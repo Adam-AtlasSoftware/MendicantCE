@@ -113,8 +113,11 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
   against the pixel's by the variance; the specular's kernel narrowed by the roughness and stopped after three steps
   (none on a mirror).
-- **the sun's visibility**: its own slow and fast history, the fix's gather, and the a-trous steps only where it is
-  neither all lit nor all dark (its variance) and only as wide as the penumbra (the blocker's distance by the disc's
+- **the sun's visibility**: its own slow and fast history, the fix's gather, and the a-trous steps only at a pixel
+  whose visibility is neither all lit nor all dark (above 0.02, below 0.98, with a variance) and only as wide as the
+  penumbra; a lit pixel is never filtered, so a shadow beside it cannot darken it (in G2's moves of round 1, before
+  this rule, the foreground's sunlight lost up to a third where the variance of a moving camera's short histories
+  let the filter spread the rocks' shadows) (the blocker's distance by the disc's
   angle over the pixel's footprint). Pixels past 60 world units read the baked mask, which has no noise. The
   FidelityFX Shadows denoiser was not vendored: this filter does its work here (its tile classification, temporal
   accumulation and penumbra-sized spatial passes) in the same frame as the other signals.

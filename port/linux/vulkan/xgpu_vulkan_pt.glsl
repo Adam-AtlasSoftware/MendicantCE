@@ -1706,8 +1706,11 @@ void main()
     pixel's footprint at this distance) */
     float footprint = 2.0 * length(job.camera[2].xyz) * dist / max(float(job.corners.z - job.corners.x), 1.0);
     float penumbra = vc.z * s.rig[0].w / max(footprint, 1.0e-4);
+    /* (only a pixel in a penumbra, its visibility neither all lit nor all
+    dark: a lit pixel beside a shadow is never darkened by it, which in G2's
+    moves (round 1) took up to a third of the foreground's sunlight) */
     bool sun_on = (signals & 4u) != 0u && vc.w > 0.5 && float(stride) <= max(penumbra, 2.0) &&
-        vc.y > 1.0e-4;
+        vc.y > 1.0e-4 && vc.x > 0.02 && vc.x < 0.98;
     const float kernel[2] = float[2](1.0 / 2.0, 1.0 / 4.0);
     vec3 sum_d = vec3(0.0), sum_s = vec3(0.0);
     float wsum_d = 0.0, wsum_s = 0.0, var_d = 0.0, var_s = 0.0, sum_v = 0.0, wsum_v = 0.0, var_v = 0.0;
