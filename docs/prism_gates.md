@@ -468,7 +468,9 @@ python3 tools/prism_gate/capture.py bake G2 G5 --stage <tree> --data <data> --co
 
 ### M4 as measured
 
-The RTX 2060, November 2026, the stock world (`config.classic.toml`), the pack of b30 and a10.
+The RTX 2060, November 2026, the stock world (`config.classic.toml`), the pack of b30 and a10. The equivalence and
+Raster captures are 89e6217d7's tree's; the final tree only asks the device for independent blending besides (the
+albedo target's own write mask), and the every-milestone checks below are its.
 
 **The pack** (`prism_v4_materials.py`, four workers, the processor alone; b30 90 s, a10 79 s):
 
@@ -482,7 +484,7 @@ and 0.13 (a10) on average at the median shader, 0.64 at the worst. b30's 24 deta
 mip levels (a10's environment shaders have none).
 
 **The packs off.** `gate.py equivalence`: G2 0.0035 (poses 0.0027, 0.0035, 0.0031), G5 0.0020 (0.0020, 0.0010, 0.0015),
-M1's to the digit; the frames byte for byte those of the tree before the last two fixes below (30 of 30 each).
+M1's to the digit; the frames byte for byte those of the tree before the two fixes below (30 of 30 each).
 Material source 1.000000 at every pose, no pixel missed, extra or without a material.
 
 **The packs on.** Material source 1.000000 at every pose; the pack's share of the opaque pixels G2 0.952, 0.896, 0.833
