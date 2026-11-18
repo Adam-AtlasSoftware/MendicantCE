@@ -431,3 +431,26 @@ def test_the_grids_probability_mirrors_lamp_pick():
         assert line in bake and line in pt, line
     assert "probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);" in bake
     assert "float probability = (1.0 - share_seen - share_near) * lamp_power(l) / max(s.lamp.x, 1.0e-20);" in pt
+
+
+def test_the_fireflies_are_held_by_the_neighbours_only_while_the_history_is_short():
+    """a lone bright sample among dark neighbours is held while the history is short (a moving camera's), not once it
+    is long (a still camera's: a light few pixels see is the light itself); a light several neighbours see passes"""
+    dark = [0.01, 0.02, 0.015, 0.0, 0.01, 0.02, 0.01, 0.0]
+    assert model.firefly_cap(5.0, 0, neighbours=dark) == pytest.approx(0.08)
+    assert model.firefly_cap(5.0, 8, neighbours=dark) == pytest.approx(0.08)
+    assert model.firefly_cap(5.0, 20, 0.05, 0.05 ** 2 + 0.7 ** 2, neighbours=dark) == pytest.approx(5.0)
+    lit = [0.01, 1.5, 0.015, 2.0, 0.01, 0.02, 1.2, 0.0]
+    assert model.firefly_cap(5.0, 2, neighbours=lit) == pytest.approx(5.0)
+    # (a still camera: the light of a gap a pixel's samples see one frame in ten reaches its mean once the history is
+    # long, though every neighbour is dark)
+    rng = np.random.default_rng(31)
+    h = None
+    slow = []
+    for frame in range(1200):
+        sample = 1.0 if rng.random() < 0.1 else 0.0
+        if h is not None:
+            sample = model.firefly_cap(sample, h["n"], h["m1"], h["m2"], neighbours=[0.0] * 8)
+        h = model.temporal_step(h, sample)
+        slow.append(h["slow"])
+    assert np.mean(slow[200:]) == pytest.approx(0.1, abs=0.03)

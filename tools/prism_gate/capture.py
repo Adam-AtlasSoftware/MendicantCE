@@ -55,17 +55,25 @@ STATES = {
     "v4off": ('prism_set "rt off"', 'prism_set "display.lighting ce"', 'prism_set "debug.gbuffer_view off"'),
     "v4pt": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
              'prism_set "display.denoiser prism"', 'prism_set "display.prism_exposure fixed"',
-             'prism_set "display.prism_tone_curve ce"'),
+             'prism_set "display.prism_tone_curve ce"', 'prism_set "debug.gbuffer_view off"'),
     "v4perf": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"',
                'prism_set "display.pt_profile performance"', 'prism_set "display.denoiser prism"',
-               'prism_set "display.prism_exposure fixed"', 'prism_set "display.prism_tone_curve ce"'),
+               'prism_set "display.prism_exposure fixed"', 'prism_set "display.prism_tone_curve ce"',
+               'prism_set "debug.gbuffer_view off"'),
     "v4raw": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
               'prism_set "display.denoiser off"', 'prism_set "display.prism_exposure fixed"',
-              'prism_set "display.prism_tone_curve ce"'),
+              'prism_set "display.prism_tone_curve ce"', 'prism_set "debug.gbuffer_view off"'),
+    # (diagnostics of the quality profile's moves: the sun's filtered visibility, the history's length)
+    "v4sun": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
+              'prism_set "display.denoiser prism"', 'prism_set "display.prism_exposure fixed"',
+              'prism_set "display.prism_tone_curve ce"', 'prism_set "debug.gbuffer_view pt_sun"'),
+    "v4hist": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
+               'prism_set "display.denoiser prism"', 'prism_set "display.prism_exposure fixed"',
+               'prism_set "display.prism_tone_curve ce"', 'prism_set "debug.gbuffer_view pt_history"'),
     "v4raster": ('prism_set "rt off"', 'prism_set "display.lighting raster"'),
 }
 # (the states that read the bake: entered from another, the bake is loaded again, BAKE_LOAD_FRAMES held)
-BAKE_STATES = ("v4pt", "v4perf", "v4raw", "v4raster")
+BAKE_STATES = ("v4pt", "v4perf", "v4raw", "v4sun", "v4hist", "v4raster")
 
 
 def load_scenes(path=HERE / "scenes.json"):

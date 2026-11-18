@@ -1722,9 +1722,16 @@ void main()
 
     /* fireflies: a new sample's luminance held, once the history has 16
     frames, to the history's mean and 8 times its samples' spread (the slow
-    moments'). Not to its neighbours': where few pixels see a light (a lamp
-    through a gap) a sample far above its neighbours is the light itself,
-    and holding it to them takes that light away */
+    moments'); before, while the history is short (the camera moving, a
+    disocclusion, the first frames), to 4 times the brightest of its
+    neighbours on the same surface (eight, two pixels away), so that one
+    sample of a small bright light (a keypad's glow met by the bounce, a lamp
+    one candidate in thousands finds) is not spread by the fix's wide gather
+    and the a-trous steps into a blob (round 1's moving frames in a10: green
+    dots over a dark wall, smears where the history was short). Once the
+    history is long, not to the neighbours: where few pixels see a light (a
+    lamp through a gap) a sample far above them is the light itself, and a
+    still camera's frames take it whole after its first 16 */
     float ld = nd.a, ls = ns.a;
     float cap_d = 1.0e30, cap_s = 1.0e30;
     if (history && length_d >= 16.0)
@@ -1736,6 +1743,26 @@ void main()
     {
         float sigma = sqrt(max(hms.w - hms.z * hms.z, 0.0));
         cap_s = max(hms.z + 8.0 * sigma, 1.0e-4);
+    }
+    bool short_d = !history || length_d < 16.0, short_s = !history || hs.a < 16.0;
+    if (short_d || short_s)
+    {
+        uint here = imageLoad(guide_now, pixel).x;
+        float most_d = 0.0, most_s = 0.0;
+        bool any_ = false;
+        for (int k = 0; k < 8; k++)
+        {
+            ivec2 q = pixel + 2 * ivec2(k < 3 ? k - 1 : k == 3 ? -1 : k == 4 ? 1 : k - 6, k < 3 ? -1 : k < 5 ? 0 : 1);
+            if (!inside(q) || imageLoad(guide_now, q).x != here)
+                continue;
+            most_d = max(most_d, imageLoad(noisy_diffuse, q).a);
+            most_s = max(most_s, imageLoad(noisy_specular, q).a);
+            any_ = true;
+        }
+        if (any_ && short_d)
+            cap_d = min(cap_d, max(4.0 * most_d, 1.0e-3));
+        if (any_ && short_s)
+            cap_s = min(cap_s, max(4.0 * most_s, 1.0e-3));
     }
     vec3 cd = ld > cap_d ? nd.rgb * (cap_d / ld) : nd.rgb;
     vec3 cs = ls > cap_s ? ns.rgb * (cap_s / ls) : ns.rgb;
@@ -1920,9 +1947,10 @@ void main()
     {
         float mean = wm > 0.0 ? m1 / wm : luma(od.rgb);
         float spatial = wm > 0.0 ? max(m2 / wm - mean * mean, 0.0) : 0.0;
-        /* (a short history's variance the larger: its noise is a few
-        samples') */
-        od.a = spatial * 4.0 / max(n_d, 1.0);
+        /* (the neighbourhood's own spread, as SVGF takes it for a history
+        under 4 frames: round 1 made it 4 / n times larger, which let the
+        a-trous steps blur a moving camera's noise into smears) */
+        od.a = spatial;
     }
     /* (the specular's variance: its spread over the 3 x 3, scaled by its
     history) */
@@ -1941,7 +1969,7 @@ void main()
                 sw += 1.0;
             }
         float mean = s1 / max(sw, 1.0);
-        os.a = max(s2 / max(sw, 1.0) - mean * mean, 0.0) * 4.0 / max(n_s, 1.0);
+        os.a = max(s2 / max(sw, 1.0) - mean * mean, 0.0) / max(n_s, 1.0);
     }
     vec4 ov = vc;
     if (fix_v && w_v > 0.0)

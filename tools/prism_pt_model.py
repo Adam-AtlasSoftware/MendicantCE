@@ -11,6 +11,7 @@ can check them without a GPU:
   mirror_normal      the G-buffer's object normal turned from the eye, mirrored about the plane square to it
   ggx_weight         the GGX visible-normals sample's weight (Fresnel by G2 / G1), as ggx_sample computes it
   cone_sample        a direction of a dome's cone (the bake's cone_dir), for its next-event estimate
+  firefly_cap        the temporal pass's hold of a new sample (by its history once long, by its neighbours before)
   tree_build         the reference's light tree as xgpu_vulkan_pt.c's tree_node builds it
   tree_importance, tree_pick, tree_probability  the GLSL's walk of it
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
@@ -358,3 +359,16 @@ def tree_probability(nodes, leaf, lamp, p, n):
         probability *= pl if k == left else 1.0 - pl
         k = parent
     return probability
+
+
+def firefly_cap(sample, history_length, history_mean=0.0, history_m2=0.0, neighbours=()):
+    """the temporal pass's hold of a new sample's luminance: with 16 frames of history or more, the history's mean and
+    8 times its spread; with fewer (or none: history_length 0), 4 times the brightest of its neighbours on the same
+    surface (none given: no hold)"""
+    cap = 1.0e30
+    if history_length >= 16.0:
+        sigma = np.sqrt(max(history_m2 - history_mean * history_mean, 0.0))
+        cap = max(history_mean + 8.0 * sigma, 1.0e-4)
+    elif len(neighbours):
+        cap = max(4.0 * max(neighbours), 1.0e-3)
+    return min(sample, cap)
