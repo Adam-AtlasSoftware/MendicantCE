@@ -1,7 +1,7 @@
 """PRISM's level remodels as the pack tools write them (tools/prism_packs/art/world_geo/wg3_pwg.py, wg3_build.py), on a
 made-up level of four stock triangles: version 3's file read back as written, the seal groups (surfaces joined across
-an edge that is not the stock edge on both sides), the needle check and its fix (no edge opened, in every mode the game
-draws), and the atlas. Needs numpy and scipy (xatlas for the atlas); no game data."""
+an edge that is not the stock edge on both sides), the needle check and its fix (no edge opened, near, far and with
+neighbours at different levels), and the atlas. Needs numpy and scipy (xatlas for the atlas); no game data."""
 import struct
 import sys
 from pathlib import Path
@@ -127,6 +127,24 @@ def test_a_needle_is_moved_back_and_no_edge_opens():
                                                                                 range(3)))[0][0] < 1e-6
     for mode in MODES:
         assert not len(new_edges(before[mode], seams(mats, level.parts, mode)))
+
+
+def test_the_builds_needle_bound_lies_inside_the_engines():
+    # a point past surface 0's corner (1, 0): 0.7 past its edges and 0.85 above it (inside the build's 0.9 for both),
+    # 1.31 from the triangle: 0.92 of the needle's reach (its longest edge, the square's diagonal). The build moves it;
+    # the engine's bound (the whole reach) would let it be.
+    p = part(np.concatenate([SQUARES, [[1.7, -0.7, 0.85]]]), np.concatenate([STOCK, [[0, 6, 1], [6, 0, 1]]]),
+             [0, 1, 2, 3, 0, 0])
+    level = v3.Level([material()], [p])
+    dist = v3.tri_distance(np.array([[1.7, -0.7, 0.85]]), *(level.C[0:1, k] for k in range(3)))[0][0]
+    assert v3.BUILD_NEEDLE * np.sqrt(2) < dist < np.sqrt(2)
+    found = v3.check_shape(level)
+    assert len(found["needle"][0]) == 1 and not len(found["cap"][0])
+    engine = v3.check_shape(level, relief=v3.SHAPE_RELIEF, margin=v3.SHAPE_MARGIN, reach=1.0)
+    assert not len(engine["needle"][0]) and not len(engine["cap"][0])
+    report = {}
+    v3.fix_shape(level, [material()], report=report)
+    assert report["positions_moved"] == 1 and report["needles_left"] == 0
 
 
 def test_past_the_bounds_moved_just_inside():

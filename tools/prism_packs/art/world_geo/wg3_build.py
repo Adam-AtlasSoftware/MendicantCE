@@ -5,11 +5,12 @@
 usage: python3 art/world_geo/wg3_build.py <bsp.gltf> <in.pwg> <out.pwg> <report.json>
 
   1. The shape (wg3_pwg.check_shape): every remodel vertex, near and far, within its stock triangle's bounds: no needle
-     (further from the triangle than 0.1 wu or its longest edge, whichever is more) and nothing further off its
-     plane or past its edges than 0.9 wu (the engine's bounds are a world unit). What is outside is moved back
+     (further from the triangle than 0.9 times 0.1 wu or its longest edge, whichever is more) and nothing further off
+     its plane or past its edges than 0.9 wu (the engine's bounds are the whole reach and a world unit, so a part this
+     passes has no facet the engine finds). What is outside is moved back
      (wg3_pwg.fix_shape: every row at a position alike, so no edge opens), and checked again.
-  2. The open edges (wg2_cracks.py's seams, in every mode the engine draws: near, far and the two mixed): none the
-     input does not have.
+  2. The open edges (wg2_cracks.py's seams, in its four modes: near, far and the two mixed ones, alternate surfaces
+     near and far both ways round): none the input does not have.
   3. Seal groups, deviations and the atlas (xatlas), written as version 3, read back and its groups checked: every
      stock edge between a group and the rest the stock edge on both sides, at both levels.
 

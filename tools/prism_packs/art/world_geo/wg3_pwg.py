@@ -28,9 +28,11 @@ engine falls back whole groups. The atlas (xatlas, MIT) charts and packs each re
 ATLAS_DENSITY texels a world unit on pages of ATLAS_PAGE texels; the baker scales its charts as it scales CE's.
 
 The checks (check_shape, and wg2_cracks.py's seams for the open edges): no remodel vertex (near or far) further from its
-stock triangle than NEEDLE_FLOOR or NEEDLE_RATIO times the triangle's longest edge, whichever is more (a needle: the
-bevel's miter on a sliver, metres long), nor further off its plane or past its edges than BUILD_RELIEF and
-BUILD_MARGIN (within the engine's SHAPE_RELIEF and SHAPE_MARGIN, a world unit each). fix_shape moves such vertices
+stock triangle than BUILD_NEEDLE times a needle's reach (NEEDLE_FLOOR or NEEDLE_RATIO times the triangle's longest
+edge, whichever is more; a needle is the bevel's miter on a sliver, metres long), nor further off its plane or past
+its edges than BUILD_RELIEF and BUILD_MARGIN. The engine's bounds are the whole reach and a world unit each
+(SHAPE_RELIEF, SHAPE_MARGIN): the build's lie inside them, so that no vertex the build passes is a facet to the engine,
+whose float positions can sit a fraction of a millimetre from the build's welded ones. fix_shape moves such vertices
 back (every row at the position alike, so no edge opens): a needle's onto the stock triangle, the others just inside
 those bounds, their texture and lightmap coordinates, frames and light taken from the stock triangle there.
 
@@ -54,6 +56,7 @@ BUILD_RELIEF = 0.9
 BUILD_MARGIN = 0.9
 NEEDLE_FLOOR = 0.1
 NEEDLE_RATIO = 1.0
+BUILD_NEEDLE = 0.9
 ATLAS_DENSITY = 4.0
 ATLAS_PAGE = 4096
 ATLAS_PADDING = 2
@@ -312,14 +315,14 @@ def needle_bound(level, s):
     return np.maximum(NEEDLE_FLOOR, NEEDLE_RATIO * level.longest[s])
 
 
-def check_shape(level, relief=BUILD_RELIEF, margin=BUILD_MARGIN):
-    """the remodel's vertices outside their surfaces' bounds: dict(needle, cap: (surface, welded vertex) pairs, and
-    the surfaces' worst figures)"""
+def check_shape(level, relief=BUILD_RELIEF, margin=BUILD_MARGIN, reach=BUILD_NEEDLE):
+    """the remodel's vertices outside their surfaces' bounds (the build's; relief, margin and reach 1.0 are the
+    engine's): dict(needle, cap: (surface, welded vertex) pairs, and the surfaces' worst figures)"""
     s, g = surface_vertices(level)
     keep = level.area_ok[s]
     s, g = s[keep], g[keep]
     h, out, dist = point_metrics(level, level.gpos[g], s)
-    needle = dist > needle_bound(level, s)
+    needle = dist > reach * needle_bound(level, s)
     cap = ~needle & ((np.abs(h) > relief) | (out > margin))
     return dict(needle=(s[needle], g[needle]), cap=(s[cap], g[cap]), dist=dist, h=h, out=out, s=s, g=g)
 

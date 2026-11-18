@@ -3,8 +3,10 @@
 
 usage: python3 art/world_geo/wg3_fix.py <bsp.gltf> <in.pwg> <out.pwg> <keep.npz> [<report.txt>]
 
-wg2_cracks.py's analysis (seams) is run on both files in every mode the engine can draw (near, far, and the two mixed
-ones: neighbours at different levels); an open edge of the output (T-junction or gap, not the stock BSP's own border)
+wg2_cracks.py's analysis (seams) is run on both files in its four modes (near, far, and the two mixed ones: alternate
+surfaces near and far, both ways round, so that neighbours meet at different levels; a sample of the mixes the engine
+can draw, where any surface may be at either level); an open edge of the output (T-junction or gap, not the stock BSP's
+own border)
 whose ends and middle are not all within 2 mm of the input's open edges is new. Their ends are added to <keep.npz>
 ("P"), which wg3_thin.py reads (WG3_KEEP_POINTS) to keep the surfaces there whole. Exit status 0: nothing new; 3:
 points were added (run the thinning again).
