@@ -65,6 +65,12 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
     vec4 exposure;
 };
 Job job;
+/* (the light pass's lamps by their diffuse light alone: a glossy pixel whose
+reflection's ray takes their specular light by meeting their faces, as the
+reference's glossy pixels do) */
+bool lamps_diffuse_only = false;
+/* (hit_light_n's last triangle met on the level, else 0xffffffff) */
+uint hit_light_triangle = 0xffffffffu;
 
 /* the frame's counters (job.counters, in the job's own block, zero at its
 start; the host reads them once the frame is done): [0] the level pixels
@@ -759,7 +765,7 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         float ce = dot(ne, -l);
         if (ce <= 0.0)
             return false;
-        parts(g, l, radiance * c, false, dif, spe);
+        parts(g, l, radiance * c, lamps_diffuse_only, dif, spe);
         float geometry = ce / d2;
         dif *= geometry;
         spe *= geometry;
@@ -830,7 +836,7 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
             if (c_ <= 0.0)
                 continue;
             vec3 dif, spe;
-            parts(g, l, radiance * c_, false, dif, spe);
+            parts(g, l, radiance * c_, lamps_diffuse_only, dif, spe);
             float target = luma(dif) + luma(spe);
             float w = target * inverse_pdf / probability / float(lamp_count);
             if (!(w > 0.0) || isinf(w))
@@ -1308,6 +1314,7 @@ vec3 hit_light_n(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance
     uint t;
     vec2 b;
     hit_distance = -1.0;
+    hit_light_triangle = 0xffffffffu;
     float th = hit(o, d, t_max, nh, t, b);
     /* (a moving object nearer: lit by the irradiance volume and the sun's
     ray from its point) */
@@ -1329,6 +1336,7 @@ vec3 hit_light_n(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance
     if (th < 0.0)
         return sky_along(d, domes);
     hit_distance = th;
+    hit_light_triangle = t;
     if (dot(nh, nh) <= 0.0)
         return vec3(0.0);
     vec3 h = o + d * th;
@@ -1872,6 +1880,15 @@ void main()
 
     vec3 noisy_d = vec3(0.0), noisy_s = vec3(0.0), clean_d = vec3(0.0), clean_s = vec3(0.0);
     vec3 share = specular_share(g);
+    /* (a glossy pixel, its reflection traced (under REFERENCE_GLOSSY and the
+    profile's ray roughness): the lamps' specular light by that ray meeting
+    their faces, their diffuse light alone by ReSTIR DI, as the reference
+    splits them, so each lamp's specular light is counted once. By next-event
+    estimation a narrow lobe's lamp highlight is found by few candidate
+    points and then held by the firefly clamp: round 2's a10 corridor floor
+    beyond the door windows lacked R's lamp strips' reflections (G5's second
+    pose)) */
+    bool glossy = g.roughness < REFERENCE_GLOSSY && g.roughness <= job.settings.y && indirect_on;
     if (direct_on)
     {
         /* the domes, the lamps, the fixtures, the dynamic lights */
@@ -1880,7 +1897,9 @@ void main()
         noisy_d += domes_at(o, g.normal, m);
         vec3 ld, ls;
         seed_for(pixel, frame, 3u);
+        lamps_diffuse_only = glossy;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
+        lamps_diffuse_only = false;
         noisy_d += ld;
         noisy_s += ls;
         /* the sky's floor (the units' rig: unoccluded, as the bake adds it;
@@ -1914,7 +1933,12 @@ void main()
             vec3 r = ggx_sample(g, weight);
             float hd;
             if (dot(weight, weight) > 0.0)
-                noisy_s += weight * hit_light(o, r, 300.0, true, hd);
+            {
+                vec3 met = hit_light(o, r, 300.0, true, hd);
+                if (glossy && direct_on && hit_light_triangle != 0xffffffffu)
+                    met += lamp_met(hit_light_triangle, r);
+                noisy_s += weight * met;
+            }
         }
         else
         {
