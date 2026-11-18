@@ -312,6 +312,12 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
   never see the flag: they are as they were (D3). The plan was an instance manager in the path tracer's own files;
   reusing the frozen module's capture got the objects traced now, at the cost of that module's limits (2.25 million
   object triangles a window, the far ones past `display.prism_rt_objects`' reach traced by the game's own model).
+  The structure is shared with PRISM Raster since `prism-v4-raster-int` was merged: under `display.lighting`
+  `"raster"` with `display.prism_raster_object_shadows` `"traced"` RT_FRAME carries `XGPU_RT_FLAG_RASTER_OBJECTS`
+  (32; it had 16 on its branch, XGPU_STREAM_VERSION 37) and the same capture and top level are built, which Raster's
+  resolve (`objects_blocked`) traces for the moving objects' sun shadows through `xgpu_vulkan_rt_objects`. Both
+  modes leave out the first-person view and the bake's static scenery (Path Traced by SCENE_INSTANCE's
+  `IN_TLAS`, Raster by GBUFFER_DRAW's `XGPU_GBUFFER_FLAG_STATIC_SCENERY`; the capture takes either).
 - **What sees them.** `job.objects` (the top level: object instances mask 4, cutouts 8) and `job.object_table` (a
   row an object: its soup, its base map's mean albedo, its coverage). Every visibility test of BAKE_COMMON's the
   shaders make (`blocked`, `sky_blocked`, wrapped by `tools/vulkan_pt_shaders.py` so the baker's text stays as it
