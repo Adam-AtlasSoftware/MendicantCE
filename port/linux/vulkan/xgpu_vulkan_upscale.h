@@ -55,14 +55,20 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 /* ---------- display.denoiser's plugin (xgpu_vulkan_rt.c's path tracer)
 
 Whether the view drawn now gives the path tracer's light to the denoiser's
-plugin (display.denoiser "plugin:<name>", one ready): its own filter is then
-off, the light traced raw. A plugin that denoises (PRISM_CAP_DENOISE) is
-given the light then (xgpu_vulkan_upscale_denoise: the path pass's two raw
-images, the light and the light added, RGBA16F, denoised in place, recorded
-into commands outside a pass; 1 if it was); one that denoises and upscales
+plugin (display.denoiser "plugin:<name>", one ready, between the view's
+BEGIN and END; never outside a view): its own filter is then off, the light
+traced raw. A plugin that denoises (PRISM_CAP_DENOISE) is given the light
+then (xgpu_vulkan_upscale_denoise: the path pass's two raw images, the
+light and the light added, RGBA16F, denoised in place, recorded into
+commands outside a pass; 1 if it was); one that denoises and upscales
 (PRISM_CAP_DENOISE_UPSCALE: DLSS Ray Reconstruction) the whole view at
-END, with the G-buffer's guides, in the upscaler's place (the view must
-have its G-buffer: display.lighting "ce_deferred" or "raster"). */
+END, with the G-buffer's guides, in the upscaler's place, where the view
+has its G-buffer (display.lighting "ce_deferred" or "raster"; the stream
+tells it, xgpu_vulkan_upscale_gbuffer, before the trace): without it the
+tracer's own filter is kept and FSR 3.1 resolves the view. Each change of
+the answer is logged where a denoiser's plugin is named. */
+/* the G-buffer drawn this frame was the target's (its number; 0 none) */
+void xgpu_vulkan_upscale_gbuffer(uint32_t target);
 int xgpu_vulkan_upscale_raw_light(void);
 int xgpu_vulkan_upscale_denoise(VkCommandBuffer commands, struct xgpu_vulkan_image *light,
 	struct xgpu_vulkan_image *added, uint32_t width, uint32_t height);

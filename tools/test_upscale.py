@@ -2,8 +2,10 @@
 README lists them (port/third_party/fidelityfx-fsr3), the generated SPIR-V still their GLSL's
 (tools/vulkan_upscale_shaders.py --check, where glslang and SPIRV-Tools are installed), FSR's host half
 (port/linux/vulkan/xgpu_vulkan_fsr3.c, driven by port/linux/vulkan/tests/upscale_test.c over stubs of the core: its
-jitter, the SDK's Halton sequence; a dispatch with no device refused), and the settings (port_config.c's entries, the
-README's rows, the menus' values)."""
+jitter, the SDK's Halton sequence; a dispatch with no device refused), the denoiser's hooks
+(port/linux/vulkan/xgpu_vulkan_upscale.c over the same stubs and fake plugins: the path tracer's light given raw only
+in a view begun for the plugin, a plugin that denoises and upscales only with the view's G-buffer), and the settings
+(port_config.c's entries, the README's rows, the menus' values)."""
 
 import hashlib
 import os
@@ -58,8 +60,8 @@ def driver(tmp_path_factory):
     out = tmp_path_factory.mktemp("upscale") / "upscale_test"
     result = subprocess.run([cc, "-std=gnu11", "-O1", "-Wall", "-Werror", f"-I{headers}", f"-I{VULKAN}",
                              f"-I{ROOT / 'port/android/host'}", f"-I{ROOT / 'port/android/include'}",
-                             str(VULKAN / "tests/upscale_test.c"),
-                             str(VULKAN / "xgpu_vulkan_fsr3.c"), "-o", str(out), "-lm"], capture_output=True,
+                             str(VULKAN / "tests/upscale_test.c"), str(VULKAN / "xgpu_vulkan_fsr3.c"),
+                             str(VULKAN / "xgpu_vulkan_upscale.c"), "-o", str(out), "-lm"], capture_output=True,
                             text=True)
     assert result.returncode == 0, result.stderr
     return out
@@ -93,6 +95,44 @@ def test_jitter_is_fsrs_halton_sequence(driver, render, output):
 def test_no_device_no_dispatch(driver):
     result = subprocess.run([str(driver), "nodevice"], capture_output=True, text=True, check=True)
     assert "dispatch 0" in result.stdout
+
+
+def run_driver(driver, *arguments):
+    return subprocess.run([str(driver), *arguments], capture_output=True, text=True, check=True).stdout
+
+
+def steps_and_log(text):
+    steps = {}
+    for what, raw, denoised in re.findall(r"^([^:\n]+): raw (\d) denoised (\d)$", text, re.M):
+        steps[what] = (int(raw), int(denoised))
+    return steps, re.findall(r"^log: (denoiser: .*)$", text, re.M)
+
+
+@pytest.mark.parametrize("kind", ["denoise", "rr"])
+def test_raw_light_only_in_a_view_begun_for_it(driver, kind):
+    """the path tracer's light is given raw to display.denoiser's plugin (its own filter off) only between the
+    BEGIN and END of a view begun for the plugin: never in a frame with no view (split screen, a replay's held view,
+    a movie, or the setting changed back to "prism" and no view begun), nor in a view begun for PRISM's filter; a
+    plugin that denoises takes it in place then, one that denoises and upscales (Ray Reconstruction's kind) takes the
+    view at END, so only where the view has its G-buffer (its guides); each change logged"""
+    steps, log = steps_and_log(run_driver(driver, "denoiser", kind))
+    rr = kind == "rr"
+    expected = {
+        "no view yet": (0, 0),
+        "view begun": (0, 0) if rr else (1, 1),
+        "another target's G-buffer": (0, 0) if rr else (1, 1),
+        "the view's G-buffer": (1, 0) if rr else (1, 1),
+        "view ended": (0, 0),
+        "a frame with no view": (0, 0),
+        "a frame with no view, its G-buffer": (0, 0),
+        "a view for PRISM's filter": (0, 0),
+        "a view for the plugin again": (1, 0) if rr else (1, 1),
+        "ended again": (0, 0),
+    }
+    assert steps == expected
+    own = f"denoiser: the path tracer's own filter ({kind} not given the light)"
+    raw = f"denoiser: the path tracer's light given raw to {kind}"
+    assert log == [own, raw, own, raw, own]
 
 
 def test_settings():

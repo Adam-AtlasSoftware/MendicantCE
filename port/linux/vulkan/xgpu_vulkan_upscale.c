@@ -165,9 +165,17 @@ static struct
 	uint32_t input_width, input_height;
 	struct upscale_image guides[GUIDE_COUNT];
 	uint32_t guide_width, guide_height;
-	/* BEGIN's denoiser: the path tracer's light given raw to a plugin
-	(xgpu_vulkan_upscale_raw_light) */
+	/* BEGIN's denoiser, to its view's END: the path tracer's light given
+	raw to a plugin (xgpu_vulkan_upscale_raw_light) only in a view begun for
+	it; PRISM (its own filter) outside one */
 	uint32_t denoiser;
+	/* BEGIN's view (its target's number; 0 outside a view), and whether the
+	G-buffer was drawn for it (xgpu_vulkan_upscale_gbuffer): the guides of a
+	plugin that denoises and upscales */
+	uint32_t view_number;
+	int view_gbuffer;
+	/* the last raw light's answer logged */
+	int raw_logged, raw_last;
 	/* the jitter off (HALO_UPSCALE_JITTER=0: the passthrough plugin's
 	identity with the upscaler off, a test's) */
 	int no_jitter;
@@ -806,6 +814,8 @@ void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct 
 	up.opaque_kept = 0;
 	up.jittering = 0;
 	up.denoiser = record->denoiser;
+	up.view_number = record->view;
+	up.view_gbuffer = 0;
 	xgpu_vulkan_set_jitter(0.0f, 0.0f, 0, 0);
 	/* (an upscaler, or the denoiser's plugin where it denoises and upscales:
 	Ray Reconstruction resolves the jitter as an upscaler does) */
@@ -1126,6 +1136,13 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	int reset, done = 0, denoise_upscale;
 	VkMemoryBarrier memory;
 
+	/* (the view over: the path tracer's light is given raw to a plugin only
+	between a view's BEGIN and its END, so that a frame with no view begun,
+	split screen's, a replay's held view, a movie's or one with neither an
+	upscaler nor a denoiser's plugin, has the tracer's own filter) */
+	up.denoiser = XGPU_UPSCALE_DENOISER_PRISM;
+	up.view_number = 0;
+	up.view_gbuffer = 0;
 	xgpu_vulkan_set_jitter(0.0f, 0.0f, 0, 0);
 	if (!up.jittering || !view || !view_depth || !output)
 	{
@@ -1276,10 +1293,33 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 
 /* ---------- display.denoiser's plugin */
 
+void xgpu_vulkan_upscale_gbuffer(uint32_t target)
+{
+	up.view_gbuffer = up.view_number && target == up.view_number;
+}
+
 int xgpu_vulkan_upscale_raw_light(void)
 {
-	return up.denoiser == XGPU_UPSCALE_DENOISER_PLUGIN && (plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE) ||
-		plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE_UPSCALE));
+	/* (in a view begun for the denoiser's plugin: one that denoises takes the
+	light as it is traced; one that denoises and upscales takes it at END,
+	where the view has its G-buffer's guides, else FSR 3.1 resolves the view
+	and the tracer's own filter is kept) */
+	int raw = up.denoiser == XGPU_UPSCALE_DENOISER_PLUGIN && (plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE) ||
+		(plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE_UPSCALE) && up.view_gbuffer));
+
+	/* (each change logged, where a denoiser's plugin is named) */
+	if (up.plugins[PLUGIN_DENOISER].library && (!up.raw_logged || raw != up.raw_last))
+	{
+		if (raw)
+			host_logf(HOST_LOG_INFO, "denoiser: the path tracer's light given raw to %s",
+				up.plugins[PLUGIN_DENOISER].name);
+		else
+			host_logf(HOST_LOG_INFO, "denoiser: the path tracer's own filter (%s not given the light)",
+				up.plugins[PLUGIN_DENOISER].name);
+		up.raw_logged = 1;
+		up.raw_last = raw;
+	}
+	return raw;
 }
 
 static struct prism_plugin_image core_image(struct xgpu_vulkan_image *image, VkFormat format)

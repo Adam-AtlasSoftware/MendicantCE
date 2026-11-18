@@ -4425,11 +4425,15 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 			prepass.history = last;
 		}
 		/* (display.prism_rt: the traced light read in the occlusion's place,
-		world AO's pass not drawn) */
+		world AO's pass not drawn; display.denoiser's plugin told first whether
+		the view has its G-buffer, drawn before this pass: a plugin that
+		denoises and upscales is given the light raw only with its guides,
+		xgpu_vulkan_upscale.c) */
 		{
-			struct xgpu_vulkan_image *traced = xgpu_vulkan_rt_window_end(prepass.inputs, prepass.width,
-				prepass.height, &uniforms);
+			struct xgpu_vulkan_image *traced;
 
+			xgpu_vulkan_upscale_gbuffer(gbuffer.drawn ? gbuffer.color : 0);
+			traced = xgpu_vulkan_rt_window_end(prepass.inputs, prepass.width, prepass.height, &uniforms);
 			if (traced)
 			{
 				xgpu_vulkan_world_ao_set_pixels(traced);

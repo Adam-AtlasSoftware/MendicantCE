@@ -177,7 +177,10 @@ other corners), and where the sizes or the upscaler change.
 ## The denoiser's entry points
 
 display.denoiser `"plugin:<name>"` gives the path tracer's light (display.prism_rt `"pathtraced"`) to a plugin, its
-own filter then off (the light traced raw, `xgpu_vulkan_rt.c`):
+own filter then off (the light traced raw, `xgpu_vulkan_rt.c`), in a view begun for the plugin alone, from its BEGIN
+to its END (`xgpu_vulkan_upscale_raw_light`): a frame with no view begun (split screen, a replay's held view, a movie,
+or display.denoiser set back to `"prism"` with no upscaler on) has the tracer's own filter. Each change is logged
+(`denoiser: the path tracer's light given raw to <name>`, `denoiser: the path tracer's own filter`).
 
 - a plugin that **denoises** (`PRISM_CAP_DENOISE`, NRD's kind) is given the path pass's two raw images, the light
   and the light added (`diffuse_radiance`, `specular_radiance`: RGBA16F), before the passes that carry them on
@@ -186,7 +189,9 @@ own filter then off (the light traced raw, `xgpu_vulkan_rt.c`):
   END in the upscaler's place, its noisy colour with the G-buffer's guides (the diffuse albedo: an object's base
   colour, the level's the base target's, less where metal; the specular albedo: F0, the specular scale's dielectric
   or the base colour where metal; the shading normal and roughness), the depth, motion and jitter. The view must have
-  its G-buffer (display.lighting `"ce_deferred"` or `"raster"`): where it has none, FSR 3.1 resolves the view.
+  its G-buffer (display.lighting `"ce_deferred"` or `"raster"`), which the stream tells before the trace
+  (`xgpu_vulkan_upscale_gbuffer`: the G-buffer's pass is drawn first): where it has none, the light keeps the tracer's
+  own filter and FSR 3.1 resolves the view.
 
 display.denoiser `"off"` traces the light raw, the tracer's own filter off whatever display.prism_rt_denoiser
 says (`port/linux/game/prism_rt.c`): a diagnostic, and the light a plugin is given.
@@ -212,8 +217,10 @@ python -m pytest -q tools/test_upscale.py
 
 It checks FSR 3.1's vendored files against their README's SHA-256, that the generated SPIR-V is still its GLSL's
 (`tools/vulkan_upscale_shaders.py --check`, where glslang and SPIRV-Tools are installed), FSR's host half over a fake
-core (its jitter the SDK's Halton sequence, of 8 times the area's ratio; no dispatch without a device), and the
-settings' entries, README rows and menu values.
+core (its jitter the SDK's Halton sequence, of 8 times the area's ratio; no dispatch without a device), the
+denoiser's hooks over the same core and fake plugins (the light given raw only between a view's BEGIN and END, and to
+a plugin that denoises and upscales only with the view's G-buffer; each change logged), and the settings' entries,
+README rows and menu values.
 
 ## Measurements
 
