@@ -184,6 +184,13 @@ extern boolean render_prism_shadow_pass;
 opaque surfaces is being drawn (port/linux/game/prism_deferred.c): their
 draws alone, as render_world_ao_prepass draws them */
 extern boolean render_gbuffer_pass;
+/* port: the window's own pass is drawn for display.lighting
+"ce_deferred"'s resolve (port/linux/game/prism_deferred.c): from the
+G-buffer pass's end to the resolve. What the objects draw then into the
+light target is lit again by the resolve's light (Raster's relight and the
+composites over it replace their pixels): what must stay on them is queued
+to the transparent geometry, which is drawn over the resolved frame */
+extern boolean render_deferred_window;
 /* port: (render_world_ao_prepass, render_prism_shadow_pass or
 render_gbuffer_pass: a pass before the window's own, whose objects are found
 once for all) */

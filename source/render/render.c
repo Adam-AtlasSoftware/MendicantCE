@@ -167,6 +167,7 @@ boolean render_world_ao_prepass = FALSE;
 boolean render_prism_shadow_pass = FALSE;
 /* port: display.lighting "ce_deferred"'s G-buffer pass (render.h) */
 boolean render_gbuffer_pass = FALSE;
+boolean render_deferred_window = FALSE; /* port: (render.h) */
 /* port: port/linux/game/prism_shadows.c */
 boolean prism_shadows_wanted(void);
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
@@ -533,6 +534,7 @@ static void render_window(
 			render_gbuffer_pass = FALSE;
 			prism_deferred_gbuffer_end();
 		}
+		render_deferred_window = prism_deferred; /* port: (render.h) */
 		world_ao_prepassed = FALSE;
 		if (rasterizer_target == _render_target_primary && !rasterizer_camera->mirrored &&
 #ifdef HALO_VR
@@ -684,6 +686,7 @@ static void render_window(
 		{
 			prism_deferred_phase(_prism_deferred_resolve);
 		}
+		render_deferred_window = FALSE; /* port: (the resolve is made) */
 		structure_render_transparent_geometry();
 		structure_render_fog();
 		game_engine_post_rasterize_objects();
