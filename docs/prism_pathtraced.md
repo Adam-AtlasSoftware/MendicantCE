@@ -158,6 +158,13 @@ after it. The specular is denoised as the light the lobe takes in (divided by it
 composite). `display.denoiser` `"off"` shows the light as traced (one sample a pixel). The passes, written from the
 published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
 
+- **pre-blur** (ReLAX's pre-pass, from its published descriptions; the fix pass's first dispatch): the light as traced
+  spread over a Vogel disc of 12 points within 6 pixels (the specular's radius by `smoothstep(0.1, 0.6, roughness)`,
+  none on a mirror), turned each frame and pixel, each tap weighed by its plane's distance, its normal and the same
+  instance only, with no luminance stop, so the light's energy is kept and a lucky sample is shared with its
+  neighbours rather than shown and carried by the history alone (round 3's moving interiors: glitter, and radial
+  streaks where the history dragged such samples along the move). The temporal pass takes these as the frame's samples.
+  `HALO_PT_RAY_ROUGHNESS` (a diagnosis) sets the roughness under which the reflection is traced (0.35; 1 everywhere).
 - **temporal**: each pixel's last-frame histories found where its surface was: a level pixel's point projected into
   the last frame's camera (the level stands still: its geometry, not a motion vector), an object's along the
   G-buffer's motion; each of the 2 × 2 taps kept only
