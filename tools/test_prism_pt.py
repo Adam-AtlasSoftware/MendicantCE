@@ -588,3 +588,47 @@ def test_live_candidates_own_sources_unbiased():
         sums += light[pick] / p[pick] / count
     mean, error = sums.mean(), sums.std() / np.sqrt(trials)
     assert abs(mean - light.sum()) < 4.0 * error + 1e-9
+
+
+def _restir_di_run(shadowed, chains=4000, frames=24, seed=11):
+    """a still pixel in a room of 40 lamps, 34 of them hidden from it (the light-importance grid knows nothing of
+    that: its picks by power alone), 4 initial candidates a frame: each chain's frame `frames` estimate"""
+    rng = np.random.default_rng(seed)
+    count = 40
+    light = rng.uniform(0.2, 1.0, (count, 3)) * rng.uniform(0.5, 2.0, (count, 1))
+    visible = np.zeros(count, bool)
+    visible[rng.choice(count, 6, replace=False)] = True
+    pick = rng.uniform(0.5, 1.0, count)
+    exact = light[visible].sum(axis=0)
+    estimates = np.zeros((chains, 3))
+    for c in range(chains):
+        last = None
+        for _ in range(frames):
+            e, last = model.restir_di(rng, pick, light, visible, 4, last, shadowed=shadowed)
+        estimates[c] = e
+    return exact, estimates
+
+
+def test_restir_dis_shadowed_target_is_unbiased_and_quieter_than_the_unshadowed():
+    exact, shadowed = _restir_di_run(True)
+    _, unshadowed = _restir_di_run(False)
+    # (each mean within 4 standard errors of the exact light: the unshadowed target's error is 5 times the other's)
+    for estimates in (shadowed, unshadowed):
+        y = model.luma(estimates)
+        bound = 4.0 * y.std() / np.sqrt(len(y))
+        assert abs(y.mean() - model.luma(exact)) < bound, (y.mean(), model.luma(exact), bound)
+    # (the relative spread of a pixel's frame: the shadowed target's a fraction of the unshadowed one's)
+    spread_s = model.luma(shadowed).std() / model.luma(exact)
+    spread_u = model.luma(unshadowed).std() / model.luma(exact)
+    assert spread_s < 0.6 * spread_u, (spread_s, spread_u)
+    # (and its frames are rarely black where it sees a light)
+    assert (model.luma(shadowed) <= 0.0).mean() < 0.05
+
+
+def test_the_specular_history_is_whole_for_a_still_eye_and_short_for_a_moving_mirror():
+    assert model.specular_most(0.05, 0.0) == 32.0
+    assert model.specular_most(0.05, 0.02) < 8.0
+    assert model.specular_most(0.3, 0.001) == 32.0
+    assert 4.0 < model.specular_most(0.3, 0.005) < 32.0
+    assert model.specular_most(0.6, 0.5) == 32.0
+    assert model.specular_most(0.05, 0.0, level=False) < 8.0

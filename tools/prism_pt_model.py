@@ -12,10 +12,13 @@ can check them without a GPU:
   ggx_weight         the GGX visible-normals sample's weight (Fresnel by G2 / G1), as ggx_sample computes it
   cone_sample        a direction of a dome's cone (the bake's cone_dir), for its next-event estimate
   firefly_cap        the temporal pass's hold of a new sample (by its history once long, by its neighbours before)
+  restir_di          ReSTIR DI's reservoir at a still pixel: its initial candidates, the last frame's reservoir, both
+                     by the shadowed target (lights_restir), or by the unshadowed one (round 2's) for comparison
   restir_gi          ReSTIR GI's reservoir at a pixel: its own bounce sample, the last frame's merged by its Jacobian
   visibility_step    the temporal pass's sun visibility history, held to the frame's own 5 x 5 range
   tree_build         the reference's light tree as xgpu_vulkan_pt.c's tree_node builds it
   tree_importance, tree_pick, tree_probability  the GLSL's walk of it
+  specular_most      the temporal pass's longest specular history, by the gloss and the eye's parallax at the point
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
   atrous_step        an a-trous step's weights: the 3 x 3 kernel, the plane, the normal, the instance, the luminance
 """
@@ -179,6 +182,16 @@ def reference_stops(noise, frames_measured, frames, count):
     """the reference's stopping rule (xgpu_vulkan_pt.c): its noise under the bound with REFERENCE_LEAST frames, or
     its frames done"""
     return (noise <= REFERENCE_NOISE and frames_measured >= REFERENCE_LEAST) or count >= frames
+
+
+def specular_most(roughness, parallax, most_d=32.0, level=True):
+    """the temporal pass's most_s: 4 frames for a mirror to most_d at roughness 0.5, and on the level at least the
+    lobe's width (alpha) over twice the parallax (radians the eye turned about the point since the last frame)"""
+    most = 4.0 + (most_d - 4.0) * min(max(roughness * 2.0, 0.0), 1.0)
+    if level:
+        alpha = max(roughness * roughness, 0.01)
+        most = max(most, min(max(0.5 * alpha / max(parallax, 1.0e-6), 4.0), most_d))
+    return most
 
 
 def temporal_step(history, sample, most=32.0, most_fast=4.0, gamma=2.0):
@@ -374,6 +387,43 @@ def firefly_cap(sample, history_length, history_mean=0.0, history_m2=0.0, neighb
     elif len(neighbours):
         cap = max(4.0 * max(neighbours), 1.0e-3)
     return min(sample, cap)
+
+
+def restir_di(rng, pick, light, visible, candidates, last=None, m_cap=20.0, shadowed=True):
+    """one frame of the light pass's lights_restir at a pixel whose surface is the last frame's: pick (each light's
+    candidate probability), light (each light's rgb integrand at the pixel, unshadowed), visible (each light's
+    shadow ray from the pixel), candidates the initial reservoir's count; last = (light, W, M) or None. shadowed: the
+    target holds the shadow (this round's), else the unshadowed target and the kept sample's shadow traced after
+    (round 2's). Returns (rgb estimate, the reservoir kept (light or None, W, M))"""
+    pick = np.asarray(pick, float) / float(np.sum(pick))
+    target = luma(np.asarray(light, float))
+    kept, total = None, 0.0
+    for _ in range(candidates):
+        i = int(np.searchsorted(np.cumsum(pick), rng.random(), side="right"))
+        i = min(i, len(pick) - 1)
+        w = target[i] / pick[i] / candidates
+        if not w > 0.0:
+            continue
+        total += w
+        if rng.random() * total <= w:
+            kept = i
+    if shadowed and kept is not None and not visible[kept]:
+        kept, total = None, 0.0
+    m_total, w_total = 1.0, total if kept is not None else 0.0
+    if last is not None and last[0] is not None and last[1] > 0.0:
+        m_last = min(last[2], m_cap)
+        j = last[0]
+        w_last = target[j] * last[1] * m_last
+        if w_last > 0.0 and (visible[j] or not shadowed):
+            w_total += w_last
+            if rng.random() * w_total <= w_last:
+                kept = j
+        m_total += m_last
+    elif last is not None:
+        m_total += min(last[2], m_cap)
+    big_w = w_total / (target[kept] * m_total) if kept is not None and target[kept] > 0.0 else 0.0
+    estimate = np.asarray(light[kept], float) * big_w if kept is not None and visible[kept] else np.zeros(3)
+    return estimate, (kept if big_w > 0.0 else None, big_w, m_total)
 
 
 def restir_gi(rng, point, normal, sample, last=None, m_cap=20.0):

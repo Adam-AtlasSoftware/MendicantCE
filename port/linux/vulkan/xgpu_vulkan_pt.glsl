@@ -910,14 +910,27 @@ frame's at its surface's place there (the motion's pixel, its guide this
 surface's: no reuse across an edge or an opening), its sample's target
 evaluated again here, its confidence capped at denoise_m frames (a dynamic
 light's sample is not reused: their order changes from frame to frame), one
-kept by its weight; its shadow traced for the light it gives; the reservoir
-kept for the next frame as it is, its weight and confidence whatever its
-sample's shadow. The target is unshadowed, the same for every reservoir
-combined, so their confidences weigh like estimates: had a hidden sample's
-weight been set to 0 with its confidence kept, a pixel that sees a lamp in
-few frames would take a ninth of that light (its frames held still: G5 in
-round 1); had its confidence been dropped, the light would brighten as it is
-reused (prism-pt's) */
+kept by its weight. The two are combined by a target that holds the
+sample's shadow (its light at this pixel times its visibility from here: a
+shadow ray for the initial sample and one for the last frame's), the
+generalized RIS of Lin et al. 2022 with both targets this pixel's, so the
+balance heuristic is the confidences' share and the light stays unbiased;
+the kept sample's shadow is known, its light given with no further ray, and
+the reservoir kept for the next frame with the weight of that target.
+Round 2's reservoirs held the unshadowed target alone: in a room of many
+lamps most of a pixel's picks were hidden, so its reservoir held a hidden
+lamp most frames and a seen one in a few, each frame's light 0 or several
+times its mean (G4's and G5's speckled walls, which the firefly hold then
+darkened). With the shadow in the target the reservoir keeps to the lamps
+this pixel sees. (A hidden sample's weight 0 with its confidence kept is
+not the same thing: there the weight is set after a choice made by the
+unshadowed target, which takes a ninth of a sparse light (round 1's G5);
+here the choice itself is by the shadowed target, and an empty reservoir is
+a valid estimate of 0 at its confidence) */
+bool light_seen(vec3 o, int kind, vec3 l, float d)
+{
+    return kind == KIND_LAMP ? lamp_visible(o, l, d) : !blocked(o, l, max(d - 0.05, 0.0));
+}
 void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse, out vec3 specular)
 {
     diffuse = vec3(0.0);
@@ -927,11 +940,28 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     vec3 y;
     float target_own, sum;
     lights_initial(g, int(job.extra.x), 8, 4, kind, index, y, target_own, sum);
-    float w_cur = kind != KIND_NONE && target_own > 0.0 ? sum : 0.0;
+    /* (the initial sample's shadow: hidden, its weight in the shadowed
+    target 0; seen, its light kept for the shading) */
+    vec3 kept_d = vec3(0.0), kept_s = vec3(0.0);
+    float w_cur = 0.0;
+    float target_kept = 0.0;
+    if (kind != KIND_NONE && target_own > 0.0)
+    {
+        vec3 dif, spe, l;
+        float d;
+        if (sample_light(g, kind, index, y, dif, spe, l, d) && light_seen(o, kind, l, d))
+        {
+            w_cur = sum;
+            target_kept = target_own;
+            kept_d = dif;
+            kept_s = spe;
+        }
+    }
+    if (w_cur <= 0.0)
+        kind = KIND_NONE;
     float m_total = 1.0;
     /* (the kept sample's weight sum, its target here) */
     float w_total = w_cur;
-    float target_kept = target_own;
     if (reuse && g.has_history && (job.frame.y & FLAG_HISTORY) != 0u)
     {
         ivec2 q = ivec2(floor(last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u) + 0.5));
@@ -959,7 +989,8 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
                 {
                     float target = luma(dif) + luma(spe);
                     float w_last = target * rp.w * m_last;
-                    if (w_last > 0.0 && !isinf(w_last))
+                    /* (its shadow traced only where it would weigh) */
+                    if (w_last > 0.0 && !isinf(w_last) && light_seen(o, k_last, l, d))
                     {
                         w_total += w_last;
                         if (rnd() * w_total <= w_last)
@@ -968,6 +999,8 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
                             index = i_last;
                             y = rp.xyz;
                             target_kept = target;
+                            kept_d = dif;
+                            kept_s = spe;
                         }
                     }
                 }
@@ -978,17 +1011,10 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     /* (W: the weights' sum over the kept target, by the confidences' sum:
     the initial reservoir's weights are already its candidates' mean) */
     float big_w = kind != KIND_NONE && target_kept > 0.0 ? w_total / (target_kept * m_total) : 0.0;
-    vec3 dif = vec3(0.0), spe = vec3(0.0), l = vec3(0.0, 0.0, 1.0);
-    float d = 0.0;
-    bool seen = false;
-    if (big_w > 0.0 && sample_light(g, kind, index, y, dif, spe, l, d))
+    if (big_w > 0.0)
     {
-        seen = kind == KIND_LAMP ? lamp_visible(o, l, d) : !blocked(o, l, max(d - 0.05, 0.0));
-        if (seen)
-        {
-            diffuse = dif * big_w;
-            specular = spe * big_w;
-        }
+        diffuse = kept_d * big_w;
+        specular = kept_s * big_w;
     }
     imageStore(reservoir_point_now, pixel, vec4(y, big_w));
     imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
@@ -2033,8 +2059,20 @@ void main()
     }
     float most_d = job.denoise.x, most_fast = job.denoise.y;
     /* (the specular's history shorter where the surface is glossy: a
-    reflection moves over it as the eye does) */
+    reflection moves over it as the eye does; by how far it moves, the
+    parallax (the angle the eye turned about the point since the last
+    frame) against the lobe's width (alpha), as ReLAX's specular
+    accumulation: a still eye takes the whole history whatever the gloss,
+    since its reflection does not move. Round 2's 4 frames for a mirror
+    left a still frame's glossy floors and walls sparkling (G4, G5)) */
     float most_s = mix(4.0, most_d, clamp(g.roughness * 2.0, 0.0, 1.0));
+    if (g.instance == 0u)
+    {
+        vec3 eye_last = job.last_camera[0].xyz - g.point;
+        float parallax = acos(clamp(dot(g.eye, eye_last * inversesqrt(max(dot(eye_last, eye_last), 1.0e-12))), -1.0, 1.0));
+        float alpha = max(g.roughness * g.roughness, 0.01);
+        most_s = max(most_s, clamp(0.5 * alpha / max(parallax, 1.0e-6), 4.0, most_d));
+    }
 
     /* fireflies: a new sample's luminance held, once the history has 16
     frames, to the history's mean and 8 times its samples' spread (the slow
