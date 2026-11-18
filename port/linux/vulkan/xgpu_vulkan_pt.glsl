@@ -124,6 +124,14 @@ layout(set = 0, binding = 29, rgba32f) uniform image2D reservoir_point_last;
 layout(set = 0, binding = 30, rgba32f) uniform image2D reservoir_point_now;
 layout(set = 0, binding = 31, rgba32ui) uniform uimage2D reservoir_info_last;
 layout(set = 0, binding = 32, rgba32ui) uniform uimage2D reservoir_info_now;
+/* ReSTIR GI's reservoirs (the last frame's, this frame's): the kept bounce
+sample's hit point and the hit's normal (folded, its bits); its radiance
+toward the pixel's surface (halves), its confidence M (a half) and its
+weight W */
+layout(set = 0, binding = 33, rgba32f) uniform image2D gi_point_last;
+layout(set = 0, binding = 34, rgba32f) uniform image2D gi_point_now;
+layout(set = 0, binding = 35, rgba32f) uniform image2D gi_data_last;
+layout(set = 0, binding = 36, rgba32f) uniform image2D gi_data_now;
 
 ivec2 size_of() { return ivec2(job.counts.y, job.counts.z); }
 bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(job.counts.y) && p.y < int(job.counts.z); }
@@ -1185,9 +1193,8 @@ sun's and less the ambient floor, which the estimator does not pass on; else
 the irradiance volume's) and the sun's by the mask (else the volume's
 visibility); a miss the sky's, the domes with it where the point did not
 take them as lights (domes: a reflection's ray, not a diffuse bounce's) */
-vec3 hit_light(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance)
+vec3 hit_light_n(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance, out vec3 nh)
 {
-    vec3 nh;
     uint t;
     vec2 b;
     hit_distance = -1.0;
@@ -1239,6 +1246,113 @@ vec3 hit_light(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance)
     float c = dot(nh, s.sun.xyz);
     vec3 sunlight = s.sun.w > 0.0 && c > 0.0 ? s.rig[0].rgb * c * max(sun_v, 0.0) : vec3(0.0);
     return light + albedo * (total + sunlight);
+}
+vec3 hit_light(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance)
+{
+    vec3 nh;
+    return hit_light_n(o, d, t_max, domes, hit_distance, nh);
+}
+
+/* ---------- ReSTIR GI (Ouyang et al. 2021), temporal reuse: the quality
+profile's bounce
+
+A bounce sample is its hit point (far along its direction where it leaves
+the level), the hit's normal and the radiance it sends back (hit_light's:
+the bake at the hit, which is diffuse, so the same toward any point near the
+pixel). A pixel's reservoir: its own sample (one candidate from the cosine
+density, its target the radiance's luminance by the cosine at the pixel)
+and the last frame's reservoir at the surface's place there (the denoiser's
+guide test: the same instance, the normal, the plane; its confidence capped
+at job.denoise.z frames), merged by generalized resampled importance (Lin et
+al. 2022): each sample's weight its MIS weight (the generalized balance
+heuristic over the two points, each by its confidence and its target there,
+a reconnection's Jacobian taking a sample from one point's measure to the
+other's: the cosine at the hit over the other's, by the distances squared
+the other way) by its target here by its contribution weight W. The last
+reservoir's confidence counts whatever its sample (a miss's, a dark one's),
+or the light would grow as it is reused (tools/test_prism_pt.py: the merge
+unbiased across a moved point). A last sample whose Jacobian is outside 1/10
+to 10 is not taken. The kept sample's light by the cosine over pi by W is
+the pixel's bounce. Its segment to the pixel is not traced again: the point
+moves by a pixel's footprint on its own surface between frames, so its
+visibility seldom changes */
+float gi_target(vec3 x, vec3 n, vec3 p_x, vec3 p_l)
+{
+    vec3 to = p_x - x;
+    float d2 = max(dot(to, to), 1.0e-8);
+    return luma(p_l) * max(dot(n, to) * inversesqrt(d2), 0.0);
+}
+float gi_jacobian(vec3 p_x, vec3 p_n, vec3 from_x, vec3 to_x)
+{
+    vec3 a = p_x - from_x, b = p_x - to_x;
+    float da = max(dot(a, a), 1.0e-8), db = max(dot(b, b), 1.0e-8);
+    float ca = abs(dot(p_n, a)) * inversesqrt(da), cb = abs(dot(p_n, b)) * inversesqrt(db);
+    return ca > 1.0e-4 ? (cb / ca) * (da / db) : 0.0;
+}
+vec3 restir_gi(ivec2 pixel, Surface g, vec3 o, vec3 d, float hd, vec3 hn, vec3 radiance)
+{
+    vec3 y_x = hd > 0.0 ? o + d * hd : o + d * 1.0e4;
+    vec3 y_n = hd > 0.0 && dot(hn, hn) > 0.0 ? hn : -d;
+    vec3 y_l = max(radiance, vec3(0.0));
+    float t_c = gi_target(g.point, g.normal, y_x, y_l);
+    float w_c = t_c > 0.0 ? luma(y_l) * PI : 0.0;
+    float w_sum = w_c, m_total = 1.0, y_t = t_c;
+    if (job.denoise.z > 0.0 && g.has_history && (job.frame.y & FLAG_HISTORY) != 0u)
+    {
+        ivec2 q = ivec2(floor(last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u) + 0.5));
+        if (inside(q))
+        {
+            uvec4 gl = imageLoad(guide_last, q);
+            vec3 nl = unfold(unpackSnorm2x16(gl.y));
+            float dl = uintBitsToFloat(gl.z);
+            bool same = gl.x == (g.instance | 0x10000u) && dot(nl, g.normal) >= 0.9;
+            vec3 x_last = last_point(q, dl);
+            if (same && g.instance == 0u)
+                same = abs(dot(x_last - g.point, g.normal)) <= 0.02 + 0.004 * g.distance;
+            else if (same)
+                same = abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
+            vec4 pa = imageLoad(gi_point_last, q), pb = imageLoad(gi_data_last, q);
+            vec2 l_rg = unpackHalf2x16(floatBitsToUint(pb.x)), l_bm = unpackHalf2x16(floatBitsToUint(pb.y));
+            float m_last = min(l_bm.y, job.denoise.z), w_last = pb.z;
+            if (same && m_last > 0.0)
+            {
+                /* (this frame's sample: its MIS weight, the last point's target
+                for it by the move's Jacobian) */
+                float t_cl = gi_target(x_last, nl, y_x, y_l), j_cl = gi_jacobian(y_x, y_n, g.point, x_last);
+                float m_c = t_c > 0.0 ? t_c / (t_c + m_last * t_cl * j_cl) : 0.0;
+                w_sum = m_c * w_c;
+                /* (the last frame's sample: its target here, by its Jacobian from
+                there to here) */
+                vec3 p_x = pa.xyz, p_n = unfold(unpackSnorm2x16(floatBitsToUint(pa.w)));
+                vec3 p_l = vec3(l_rg, l_bm.x);
+                float j_lc = gi_jacobian(p_x, p_n, x_last, g.point);
+                float t_here = gi_target(g.point, g.normal, p_x, p_l), t_ll = gi_target(x_last, nl, p_x, p_l);
+                if (w_last > 0.0 && !isinf(w_last) && j_lc > 0.1 && j_lc < 10.0 && t_here > 0.0)
+                {
+                    float m_l = m_last * t_ll / (t_here * j_lc + m_last * t_ll);
+                    float w = m_l * t_here * w_last * j_lc;
+                    if (w > 0.0 && !isinf(w))
+                    {
+                        w_sum += w;
+                        if (rnd() * w_sum <= w)
+                        {
+                            y_x = p_x;
+                            y_n = p_n;
+                            y_l = p_l;
+                            y_t = t_here;
+                        }
+                    }
+                }
+                m_total += m_last;
+            }
+        }
+    }
+    float big_w = y_t > 0.0 ? w_sum / y_t : 0.0;
+    imageStore(gi_point_now, pixel, vec4(y_x, uintBitsToFloat(packSnorm2x16(fold(y_n)))));
+    imageStore(gi_data_now, pixel, vec4(uintBitsToFloat(packHalf2x16(y_l.rg)),
+        uintBitsToFloat(packHalf2x16(vec2(y_l.b, min(m_total, job.denoise.z)))), big_w, 0.0));
+    float cos_y = max(dot(g.normal, normalize(y_x - g.point)), 0.0);
+    return y_l * cos_y / PI * big_w;
 }
 
 /* a direction of GGX's visible normals (Heitz 2018) about n for the eye v at
@@ -1523,6 +1637,9 @@ void main()
         imageStore(reservoir_point_now, pixel, vec4(0.0));
         imageStore(reservoir_info_now, pixel, uvec4(uint(KIND_NONE), 0u, 0u, 0u));
     }
+    /* (no bounce traced this frame, none kept: the GI reservoir empty) */
+    if (!g.present || view == 23u)
+        imageStore(gi_data_now, pixel, vec4(0.0));
     if (!g.present)
     {
         imageStore(noisy_diffuse, pixel, vec4(0.0));
@@ -1578,14 +1695,22 @@ void main()
     }
     if (indirect_on)
     {
-        /* the indirect light: the bake's at the pixel, else a bounce */
+        /* the indirect light: the bake's at the pixel, else a bounce (its
+        sample reused by ReSTIR GI where job.denoise.z gives it frames) */
         if (performance && texel)
+        {
             clean_d += bake_indirect;
+            imageStore(gi_data_now, pixel, vec4(0.0));
+        }
         else
         {
             float hd;
+            vec3 hn;
             seed_for(pixel, frame, 4u);
-            noisy_d += hit_light(o, cosine_dir(g.normal), 300.0, false, hd);
+            vec3 d = cosine_dir(g.normal);
+            vec3 bounce = hit_light_n(o, d, 300.0, false, hd, hn);
+            seed_for(pixel, frame, 8u);
+            noisy_d += job.denoise.z > 0.0 ? restir_gi(pixel, g, o, d, hd, hn, bounce) : bounce;
         }
         /* the reflections: a GGX ray below the roughness, else the probes */
         if (g.roughness <= job.settings.y)

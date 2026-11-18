@@ -64,7 +64,7 @@ diagnostics), four words in the job's block before its lights */
 #define JOB_COUNTERS_OFFSET 960u
 #define SET_SLOTS 16u
 /* the bindings (xgpu_vulkan_pt.glsl's) */
-#define BINDINGS 33u
+#define BINDINGS 37u
 /* the reference's floats a pixel (the GLSL's SUMS), its noise's bound (the
 gates' reference_noise, as the gates' frames measure it), the frames
 between its noise's measures, the fewest it sums, the gates' frames' width
@@ -129,6 +129,10 @@ enum
 	IMAGE_RESERVOIR_POINT_NOW,
 	IMAGE_RESERVOIR_INFO_LAST,
 	IMAGE_RESERVOIR_INFO_NOW,
+	IMAGE_GI_POINT_LAST,
+	IMAGE_GI_POINT_NOW,
+	IMAGE_GI_DATA_LAST,
+	IMAGE_GI_DATA_NOW,
 };
 
 /* the job block's flags (xgpu_vulkan_pt.glsl's FLAG_*) */
@@ -224,6 +228,9 @@ static struct
 	struct xgpu_vulkan_image *noisy_diffuse, *noisy_specular, *clean_diffuse, *clean_specular, *sun_raw;
 	struct xgpu_vulkan_image *guide[2], *diff[2], *spec[2], *moments[2], *spec_moments[2], *sun[2];
 	struct xgpu_vulkan_image *reservoir_point[2], *reservoir_info[2];
+	/* ReSTIR GI's reservoirs (the bounce's sample: its point and normal; its
+	radiance, confidence and weight), the last frame's and this one's */
+	struct xgpu_vulkan_image *gi_point[2], *gi_data[2];
 	struct xgpu_vulkan_image *diff_a, *diff_b, *spec_a, *spec_b, *sun_a, *sun_b, *out;
 	uint32_t parity;
 	int history_valid;
@@ -562,7 +569,9 @@ static int images_make(uint32_t width, uint32_t height)
 			!(pt.reservoir_info[index] = image_make(pt.reservoir_info[index], XGPU_VULKAN_FORMAT_RGBA32_UINT, width,
 			height)) ||
 			!(pt.reservoir_point[index] = image_make(pt.reservoir_point[index], XGPU_VULKAN_FORMAT_RGBA32F, width,
-			height)))
+			height)) ||
+			!(pt.gi_point[index] = image_make(pt.gi_point[index], XGPU_VULKAN_FORMAT_RGBA32F, width, height)) ||
+			!(pt.gi_data[index] = image_make(pt.gi_data[index], XGPU_VULKAN_FORMAT_RGBA32F, width, height)))
 			return 0;
 	pt.width = width;
 	pt.height = height;
@@ -1240,6 +1249,15 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->denoise[0] = 32.0f;
 	job->denoise[1] = 4.0f;
 	job->denoise[3] = 2.0f;
+	/* (ReSTIR GI's reservoirs' confidence at most 20 frames, the quality
+	profile's bounce reused; HALO_PT_RESTIR_GI=0: none, each frame's own) */
+	{
+		static int restir_gi = -1;
+
+		if (restir_gi < 0)
+			restir_gi = getenv("HALO_PT_RESTIR_GI") ? atoi(getenv("HALO_PT_RESTIR_GI")) != 0 : 1;
+		job->denoise[2] = restir_gi ? 20.0f : 0.0f;
+	}
 	/* the lamps' candidates a pixel; the reference's paths a pixel a frame;
 	ReSTIR DI's temporal reuse, its reservoirs' confidence at most 8 frames
 	(HALO_PT_RESTIR 0: none, each pixel's own candidates alone) */
@@ -1312,6 +1330,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	bound[IMAGE_RESERVOIR_POINT_NOW] = pt.reservoir_point[now];
 	bound[IMAGE_RESERVOIR_INFO_LAST] = pt.reservoir_info[last];
 	bound[IMAGE_RESERVOIR_INFO_NOW] = pt.reservoir_info[now];
+	bound[IMAGE_GI_POINT_LAST] = pt.gi_point[last];
+	bound[IMAGE_GI_POINT_NOW] = pt.gi_point[now];
+	bound[IMAGE_GI_DATA_LAST] = pt.gi_data[last];
+	bound[IMAGE_GI_DATA_NOW] = pt.gi_data[now];
 	set = pt.sets[set_slot];
 	for (index = 0; index < BINDINGS; index++)
 		write_image(&writes[index], &infos[index], set, index, bound[index], index < 4 || index == IMAGE_LIGHT_IN);
@@ -1476,7 +1498,7 @@ void xgpu_vulkan_pt_shutdown(void)
 		&pt.guide[1], &pt.diff[0], &pt.diff[1], &pt.spec[0], &pt.spec[1], &pt.moments[0], &pt.moments[1],
 		&pt.spec_moments[0], &pt.spec_moments[1], &pt.sun[0], &pt.sun[1], &pt.diff_a, &pt.diff_b, &pt.spec_a, &pt.spec_b,
 		&pt.sun_a, &pt.sun_b, &pt.out, &pt.reservoir_point[0], &pt.reservoir_point[1], &pt.reservoir_info[0],
-		&pt.reservoir_info[1],
+		&pt.reservoir_info[1], &pt.gi_point[0], &pt.gi_point[1], &pt.gi_data[0], &pt.gi_data[1],
 	};
 	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
 		&pt.tree };

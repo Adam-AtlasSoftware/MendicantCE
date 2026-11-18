@@ -12,6 +12,7 @@ can check them without a GPU:
   ggx_weight         the GGX visible-normals sample's weight (Fresnel by G2 / G1), as ggx_sample computes it
   cone_sample        a direction of a dome's cone (the bake's cone_dir), for its next-event estimate
   firefly_cap        the temporal pass's hold of a new sample (by its history once long, by its neighbours before)
+  restir_gi          ReSTIR GI's reservoir at a pixel: its own bounce sample, the last frame's merged by its Jacobian
   tree_build         the reference's light tree as xgpu_vulkan_pt.c's tree_node builds it
   tree_importance, tree_pick, tree_probability  the GLSL's walk of it
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
@@ -372,3 +373,60 @@ def firefly_cap(sample, history_length, history_mean=0.0, history_m2=0.0, neighb
     elif len(neighbours):
         cap = max(4.0 * max(neighbours), 1.0e-3)
     return min(sample, cap)
+
+
+def restir_gi(rng, point, normal, sample, last=None, m_cap=20.0):
+    """the light pass's restir_gi: sample = (hit point, hit normal, radiance) of this pixel's cosine bounce (its
+    radiance 0 where it left), last = None or (the last frame's point, its normal, its reservoir (hit point, hit
+    normal, radiance, M, W)); the two merged by generalized resampled importance (Lin et al. 2022): each one's
+    weight its MIS weight (the generalized balance heuristic over the two domains, each by its confidence and its
+    target there, the reconnection's Jacobian taking a sample from one point's measure to the other's) by its target
+    here by its contribution weight W; returns (the bounce's light: the kept radiance by the cosine over pi by W,
+    the reservoir)"""
+    def target(x, n, p_x, p_l):
+        to = p_x - x
+        d2 = max(float(to @ to), 1e-8)
+        return float(luma(p_l)) * max(float(n @ to) / np.sqrt(d2), 0.0), d2, to
+
+    def jacobian(p_x, p_n, from_x, to_x):
+        a, b = p_x - from_x, p_x - to_x
+        da, db = max(float(a @ a), 1e-8), max(float(b @ b), 1e-8)
+        ca, cb = abs(float(p_n @ a)) / np.sqrt(da), abs(float(p_n @ b)) / np.sqrt(db)
+        return (cb / ca) * (da / db) if ca > 1e-4 else 0.0
+
+    y_x, y_n, y_l = (np.asarray(v, float) for v in sample)
+    t_c, _, _ = target(point, normal, y_x, y_l)
+    w_c = float(luma(y_l)) * np.pi if t_c > 0.0 else 0.0
+    m_total = 1.0
+    keep = (y_x, y_n, y_l, t_c)
+    w_sum = w_c
+    if last is not None:
+        x_last, n_last, (p_x, p_n, p_l, m_last, w_last) = last
+        x_last, n_last = np.asarray(x_last, float), np.asarray(n_last, float)
+        p_x, p_n, p_l = (np.asarray(v, float) for v in (p_x, p_n, p_l))
+        m_last = min(m_last, m_cap)
+        if m_last > 0.0:
+            # (this frame's sample: its MIS weight, the last point's target for it by the move's Jacobian; the last
+            # reservoir's confidence counts whatever its sample, a miss's or a dark one's, or the light grows as it is
+            # reused)
+            t_cl, _, _ = target(x_last, n_last, y_x, y_l)
+            j_cl = jacobian(y_x, y_n, point, x_last)
+            m_c = t_c / (t_c + m_last * t_cl * j_cl) if t_c > 0.0 else 0.0
+            w_sum = m_c * w_c
+            # (the last frame's sample: its target here, by its Jacobian from there to here)
+            j_lc = jacobian(p_x, p_n, x_last, point)
+            t_here, _, _ = target(point, normal, p_x, p_l)
+            t_ll, _, _ = target(x_last, n_last, p_x, p_l)
+            if w_last > 0.0 and 0.1 < j_lc < 10.0 and t_here > 0.0:
+                m_l = m_last * t_ll / (t_here * j_lc + m_last * t_ll)
+                w = m_l * t_here * w_last * j_lc
+                if w > 0.0:
+                    w_sum += w
+                    if rng.random() * w_sum <= w:
+                        keep = (p_x, p_n, p_l, t_here)
+            m_total += m_last
+    y_x, y_n, y_l, y_t = keep
+    big_w = w_sum / y_t if y_t > 0.0 else 0.0
+    to = y_x - point
+    cos_y = max(float(normal @ to) / np.linalg.norm(to), 0.0)
+    return y_l * cos_y / np.pi * big_w, (y_x, y_n, y_l, min(m_total, m_cap), big_w)

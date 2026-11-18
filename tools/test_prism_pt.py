@@ -454,3 +454,47 @@ def test_the_fireflies_are_held_by_the_neighbours_only_while_the_history_is_shor
         h = model.temporal_step(h, sample)
         slow.append(h["slow"])
     assert np.mean(slow[200:]) == pytest.approx(0.1, abs=0.03)
+
+
+def test_restir_gis_temporal_merge_is_unbiased_across_a_moved_point():
+    """ReSTIR GI's reservoir made at the last frame's point and merged at this frame's (a pixel's footprint along the
+    same floor), its sample's target taken here by the move's Jacobian: the bounce's light at this point is the
+    integral the cosine bounce estimates (a lit square ceiling of varying radiance), and its noise far less"""
+    rng = np.random.default_rng(37)
+    normal = np.array([0.0, 0.0, 1.0])
+    here, there = np.array([0.0, 0.0, 0.0]), np.array([0.15, -0.1, 0.0])
+
+    def radiance(x):
+        return np.array([1.0, 0.9, 0.8]) * (0.2 + 3.0 * np.exp(-((x[0] - 0.6) ** 2 + (x[1] + 0.3) ** 2) / 0.05))
+
+    def bounce(p):
+        u, a = rng.random(), rng.random() * 2.0 * np.pi
+        d = np.array([np.sqrt(u) * np.cos(a), np.sqrt(u) * np.sin(a), np.sqrt(1.0 - u)])
+        t = 1.0 / d[2]
+        x = p + d * t
+        if abs(x[0]) > 1.5 or abs(x[1]) > 1.5:
+            return (p + d * 1.0e4, -d, np.zeros(3))
+        return (x, np.array([0.0, 0.0, -1.0]), radiance(x))
+
+    # (the exact light: (1 / pi) times the ceiling's radiance by the cosines over the distance squared)
+    g = np.linspace(-1.5, 1.5, 301)
+    dx = g[1] - g[0]
+    exact = np.zeros(3)
+    for x in g:
+        for y in g:
+            to = np.array([x, y, 1.0]) - here
+            d2 = to @ to
+            c = to[2] / np.sqrt(d2)
+            exact += radiance(np.array([x, y, 1.0])) * c * c / d2 * dx * dx / np.pi
+    plain, merged = [], []
+    for _ in range(12_000):
+        _, reservoir = model.restir_gi(rng, there, normal, bounce(there))
+        for _ in range(3):
+            _, reservoir = model.restir_gi(rng, there, normal, bounce(there), (there, normal, reservoir))
+        light, _ = model.restir_gi(rng, here, normal, bounce(here), (there, normal, reservoir))
+        merged.append(light)
+        plain.append(bounce(here)[2])
+    merged, plain = np.array(merged), np.array(plain)
+    assert merged.mean(0) == pytest.approx(exact, rel=0.04)
+    assert plain.mean(0) == pytest.approx(exact, rel=0.04)
+    assert model.luma(merged).std() < 0.7 * model.luma(plain).std()

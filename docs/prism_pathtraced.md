@@ -114,6 +114,21 @@ found safe:
   moves). Dropping its confidence instead brightens the light as it is reused (`prism-pt`'s finding).
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
 
+## ReSTIR GI
+
+The quality profile's bounce is reused by ReSTIR GI's temporal reuse (Ouyang et al. 2021). A bounce sample is its hit
+point (far along its direction where it leaves the level), the hit's normal and the radiance it sends back (the bake at
+the hit, diffuse: the same toward any point near the pixel). A pixel's reservoir is its own sample (one candidate of
+the cosine density, its target the radiance's luminance by the cosine at the pixel) and the last frame's reservoir at
+the surface's place there (the denoiser's guide test, its confidence at most 20 frames), merged by generalized
+resampled importance (Lin et al. 2022): each sample weighed by its MIS weight (the generalized balance heuristic over
+the two points, each by its confidence and its target there, the reconnection's Jacobian taking a sample from one
+point's measure to the other's) by its target here by its contribution weight. The last reservoir's confidence counts
+whatever its sample (a miss's, a dark one's): left out, the light grows as it is reused, as ReSTIR DI's did in
+`prism-pt` (`tools/test_prism_pt.py`: the merge unbiased across a moved point, its noise far less). The kept sample's
+segment to the pixel is not traced again (the point moves by a pixel's footprint on its own surface between frames).
+There is no spatial reuse yet. `HALO_PT_RESTIR_GI=0` turns it off (each frame's own bounce).
+
 ## The denoiser
 
 The light's noisy parts (the domes, lamps, fixtures and dynamic lights, the traced bounce, the traced reflections) go
@@ -214,7 +229,7 @@ does their means every 600 frames.
   objects' structure and traces nothing) is the short way; a new instance manager the long one. The first touches the
   frozen RT backend's file (not its modes), so it waits for a decision.
 - **ReSTIR's spatial reuse** (left out on purpose, above) and the unbiased (ray-traced) reuse's correction.
-- **ReSTIR GI** (`quality`'s bounce reuse), the dynamic objects' occlusion of the baked light (`performance`'s short
-  AO rays), traced-light upscaling and the async queue (M5, M6).
+- **ReSTIR GI's spatial reuse** (its temporal reuse is in), the dynamic objects' occlusion of the baked light
+  (`performance`'s short AO rays), traced-light upscaling and the async queue (M5, M6).
 - **The transparent layer** (water and glass, traced reflection and refraction): after the seven gate scenes pass.
 - **A lamp surface seen directly** shows its G-buffer emission (its self-illumination), not its radiosity's radiance.
