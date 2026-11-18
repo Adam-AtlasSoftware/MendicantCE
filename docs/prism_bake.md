@@ -24,8 +24,11 @@ The bake reads what the renderer already has: SCENE_STATIC's level as drawn (its
 materials (each environment shader's mean albedo, its alpha map, its glow; the light cards' and lamp surfaces'
 emission) and its light rig (RT_FRAME's: the sun, the sky's ambient, the domes, the lamps), in the light's units (below:
 `display.prism_rig` `"auto"` is `"units"` with Raster). In Raster the game sends display.prism_rt's scene and rig
-whatever `display.prism_rt` says, with nothing traced in the frame (RT_FRAME's mode off). With the reach's inputs the
-game sends two more things only it has:
+whatever `display.prism_rt` says, with nothing traced in the frame (RT_FRAME's mode off): its older modes (`"shadows"`,
+`"gi"`, `"pathtraced"`) are off under `display.lighting` `"raster"` (`prism_rt.c`'s `settings_read`, logged once), and
+the level traced is the level as drawn whatever `display.prism_rt_world` says. Before, a config with `"gi"` and
+`display.prism_rt_world` `"remodel"` gave the bake a scene of no triangles, and Raster drew Classic's light. With the
+reach's inputs the game sends two more things only it has:
 
 - **The static scenery** (`prism_bake.c`'s `scenery_copy`): every placement of the scenario's scenery, machines and
   controls that nothing can move or destroy (no script names it, it is made on every difficulty, it has no animations
@@ -45,7 +48,12 @@ game sends two more things only it has:
 The map's own triangles are wound clockwise, as D3D draws them: their corners' cross product points into the level.
 SCENE_STATIC now turns each of them to its vertices' normals (`prism_scene_static.c`), so that every consumer's face
 normal points out of the level; before M2, display.prism_rt's one-sided faces were inside out with the stock world
-traced as drawn (the remodel, two-sided, hid it).
+traced as drawn (the remodel, two-sided, hid it). The remodel's triangles (`display.prism_world_geometry` `"remodel"`)
+are wound the same way (b30's first BSP: 99.96% of their area against their vertices' normals) and are turned alike
+(`prism_world_geometry_surface_triangles`). Until then the baker took a remodel texel's normal from the cross product,
+into the level, and turned it toward whichever side its first rays travelled further on, a guess that open ground over
+the void below a level loses: b30's beach baked dark, its sun mask facing away from the sun, and Raster drew it so.
+The remodel's faces are still traced two-sided.
 
 ## The light's units
 
