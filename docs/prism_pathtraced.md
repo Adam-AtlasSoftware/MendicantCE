@@ -166,8 +166,9 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   within 5%). So no history is taken across an edge, nor through an opening onto the surface behind it (a10's door
   windows). Where the whole 4 × 4 about the place passes that test, the diffuse and specular light are resampled by
   Catmull-Rom, held to the range of the 2 × 2 taps (bilinear taps at every move blurred the history along the move:
-  round 2's moving G4 floor streaked a lamp's sparse samples toward the point the eye moved to); the moments, the
-  lengths and the sun's visibility keep the bilinear taps. A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
+  round 2's moving G4 floor streaked a lamp's sparse samples toward the point the eye moved to); the sun's visibility
+  alike (G6's moonlit ground brighter than R in motion where the lit side's history bled over the shadows' edges); the
+  moments and the lengths keep the bilinear taps. A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
   the reflection lobe's width (twice alpha, the roughness squared) over the parallax, the angle the eye turned about the point
   since the last frame, as ReLAX's specular accumulation, and 4 frames for a mirror under a moving eye, the whole 32
   for a still one) and a fast one (4) of the

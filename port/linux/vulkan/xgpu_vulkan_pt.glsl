@@ -2121,8 +2121,10 @@ bool reproject(ivec2 pixel, Surface g, out vec4 d, out vec4 sp, out vec4 mo, out
     eye's histories smeared a lamp's sparse samples into streaks toward the
     point it moves to (round 2's G4 floor) and the lit structure's light into
     the ground beside it (G6); the result held to the range of the 2 x 2
-    taps, so it never rings past them. The moments, the lengths and the sun's
-    visibility keep the bilinear taps) */
+    taps, so it never rings past them. The sun's visibility (its slow and
+    fast means) alike: G6's moonlit ground in motion brighter than R where
+    the lit side's history bled over the shadows' edges. The moments and the
+    lengths keep the bilinear taps) */
     if (weights > 0.999)
     {
         bool whole = true;
@@ -2137,6 +2139,7 @@ bool reproject(ivec2 pixel, Surface g, out vec4 d, out vec4 sp, out vec4 mo, out
         {
             vec4 wx = catmull_rom(f.x), wy = catmull_rom(f.y);
             vec3 cd = vec3(0.0), cs = vec3(0.0);
+            vec2 cv = vec2(0.0), lo_v = vec2(1.0e30), hi_v = vec2(-1.0e30);
             vec3 lo_d = vec3(1.0e30), hi_d = vec3(-1.0e30), lo_s = vec3(1.0e30), hi_s = vec3(-1.0e30);
             for (int k = 0; k < 16; k++)
             {
@@ -2144,18 +2147,23 @@ bool reproject(ivec2 pixel, Surface g, out vec4 d, out vec4 sp, out vec4 mo, out
                 ivec2 q = a + o - 1;
                 float w = wx[o.x] * wy[o.y];
                 vec3 vd = imageLoad(diff_last, q).rgb, vs = imageLoad(spec_last, q).rgb;
+                vec2 vv = imageLoad(sun_last, q).xy;
                 cd += w * vd;
                 cs += w * vs;
+                cv += w * vv;
                 if (o.x >= 1 && o.x <= 2 && o.y >= 1 && o.y <= 2)
                 {
                     lo_d = min(lo_d, vd);
                     hi_d = max(hi_d, vd);
                     lo_s = min(lo_s, vs);
                     hi_s = max(hi_s, vs);
+                    lo_v = min(lo_v, vv);
+                    hi_v = max(hi_v, vv);
                 }
             }
             d.rgb = clamp(cd, lo_d, hi_d);
             sp.rgb = clamp(cs, lo_s, hi_s);
+            su.xy = clamp(cv, lo_v, hi_v);
         }
     }
     return true;
