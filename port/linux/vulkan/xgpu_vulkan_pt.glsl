@@ -1005,7 +1005,15 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     float w_total = w_cur;
     if (reuse && g.has_history && (job.frame.y & FLAG_HISTORY) != 0u)
     {
-        ivec2 q = ivec2(floor(last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u) + 0.5));
+        /* (the last frame's pixel one of the 2 x 2 about the place, chosen
+        by its bilinear weight, not the nearest: where the eye moves toward a
+        surface several pixels map to one of the last frame's, and the
+        nearest gave them all its reservoir, so a lucky sample was copied
+        into blocks that grew along the move (round 2's and 3's G4 floor
+        streaking toward the point the eye moved to)) */
+        vec2 at_last = last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u);
+        vec2 fl = floor(at_last), fr = at_last - fl;
+        ivec2 q = ivec2(fl) + ivec2(rnd() < fr.x ? 1 : 0, rnd() < fr.y ? 1 : 0);
         if (inside(q))
         {
             uvec4 gl = imageLoad(guide_last, q);
@@ -1469,7 +1477,10 @@ vec3 restir_gi(ivec2 pixel, Surface g, vec3 o, vec3 d, float hd, vec3 hn, vec3 r
     float w_sum = w_c, m_total = 1.0, y_t = t_c;
     if (job.denoise.z > 0.0 && g.has_history && (job.frame.y & FLAG_HISTORY) != 0u)
     {
-        ivec2 q = ivec2(floor(last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u) + 0.5));
+        /* (one of the 2 x 2 by its bilinear weight, as ReSTIR DI's) */
+        vec2 at_last = last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u);
+        vec2 fl = floor(at_last), fr = at_last - fl;
+        ivec2 q = ivec2(fl) + ivec2(rnd() < fr.x ? 1 : 0, rnd() < fr.y ? 1 : 0);
         if (inside(q))
         {
             uvec4 gl = imageLoad(guide_last, q);
@@ -2202,7 +2213,7 @@ void main()
     /* (the specular's history shorter where the surface is glossy: a
     reflection moves over it as the eye does; by how far it moves, the
     parallax (the angle the eye turned about the point since the last
-    frame) against the lobe's width (alpha), as ReLAX's specular
+    frame) against the reflection lobe's width (about twice alpha), as ReLAX's specular
     accumulation: a still eye takes the whole history whatever the gloss,
     since its reflection does not move. Round 2's 4 frames for a mirror
     left a still frame's glossy floors and walls sparkling (G4, G5)) */
@@ -2212,7 +2223,7 @@ void main()
         vec3 eye_last = job.last_camera[0].xyz - g.point;
         float parallax = acos(clamp(dot(g.eye, eye_last * inversesqrt(max(dot(eye_last, eye_last), 1.0e-12))), -1.0, 1.0));
         float alpha = max(g.roughness * g.roughness, 0.01);
-        most_s = max(most_s, clamp(0.5 * alpha / max(parallax, 1.0e-6), 4.0, most_d));
+        most_s = max(most_s, clamp(2.0 * alpha / max(parallax, 1.0e-6), 4.0, most_d));
     }
 
     /* fireflies: a new sample's luminance held, once the history has 16

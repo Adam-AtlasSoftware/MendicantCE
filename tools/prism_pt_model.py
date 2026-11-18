@@ -189,11 +189,11 @@ def reference_stops(noise, frames_measured, frames, count):
 
 def specular_most(roughness, parallax, most_d=32.0, level=True):
     """the temporal pass's most_s: 4 frames for a mirror to most_d at roughness 0.5, and on the level at least the
-    lobe's width (alpha) over twice the parallax (radians the eye turned about the point since the last frame)"""
+    reflection lobe's width (twice alpha) over the parallax (radians the eye turned about the point since the last frame)"""
     most = 4.0 + (most_d - 4.0) * min(max(roughness * 2.0, 0.0), 1.0)
     if level:
         alpha = max(roughness * roughness, 0.01)
-        most = max(most, min(max(0.5 * alpha / max(parallax, 1.0e-6), 4.0), most_d))
+        most = max(most, min(max(2.0 * alpha / max(parallax, 1.0e-6), 4.0), most_d))
     return most
 
 

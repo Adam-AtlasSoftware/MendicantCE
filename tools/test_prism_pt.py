@@ -629,7 +629,7 @@ def test_the_specular_history_is_whole_for_a_still_eye_and_short_for_a_moving_mi
     assert model.specular_most(0.05, 0.0) == 32.0
     assert model.specular_most(0.05, 0.02) < 8.0
     assert model.specular_most(0.3, 0.001) == 32.0
-    assert 4.0 < model.specular_most(0.3, 0.005) < 32.0
+    assert 4.0 < model.specular_most(0.3, 0.01) < 32.0
     assert model.specular_most(0.6, 0.5) == 32.0
     assert model.specular_most(0.05, 0.0, level=False) < 8.0
 

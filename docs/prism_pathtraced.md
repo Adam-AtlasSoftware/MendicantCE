@@ -116,7 +116,9 @@ found safe:
 - **Temporal reuse only.** The last frame's reservoir at the surface's place there (the G-buffer's motion), reused only
   where its guide is this surface's (the same instance, the normal, the plane: as the denoiser's history, so no sample
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
-  frames. A dynamic light's sample is not reused (their order changes from frame to frame). There is no spatial
+  frames. The last frame's pixel is one of the 2 × 2 about the surface's place there, chosen by its bilinear
+  weight (the nearest gave a lucky sample to every pixel that maps to it when the eye moves toward a surface: blocks
+  that grew along the move, G4's floor streaking); ReSTIR GI's alike. A dynamic light's sample is not reused (their order changes from frame to frame). There is no spatial
   reuse: in `prism-pt` it spread a pick's choice over patches.
 - **The target holds the shadow.** The initial reservoir is resampled by the unshadowed light (its candidates' shadows
   are not traced); its kept sample's shadow is then traced, and the last frame's sample's from this pixel, and the two
@@ -166,7 +168,7 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   Catmull-Rom, held to the range of the 2 × 2 taps (bilinear taps at every move blurred the history along the move:
   round 2's moving G4 floor streaked a lamp's sparse samples toward the point the eye moved to); the moments, the
   lengths and the sun's visibility keep the bilinear taps. A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
-  the lobe's width (alpha, the roughness squared) over twice the parallax, the angle the eye turned about the point
+  the reflection lobe's width (twice alpha, the roughness squared) over the parallax, the angle the eye turned about the point
   since the last frame, as ReLAX's specular accumulation, and 4 frames for a mirror under a moving eye, the whole 32
   for a still one) and a fast one (4) of the
   diffuse and specular light; the fast one holds the slow one (its luminance within the fast mean ± 2 standard
