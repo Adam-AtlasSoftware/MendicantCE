@@ -972,6 +972,56 @@ bool light_seen(vec3 o, int kind, vec3 l, float d)
 {
     return kind == KIND_LAMP ? lamp_visible(o, l, d) : !blocked(o, l, max(d - 0.05, 0.0));
 }
+/* one of the last frame's reservoirs (at pixel q) offered to this pixel's:
+taken only where q held this surface (the same instance, the normal, the
+plane, an object's distance), its sample's target evaluated here and its
+shadow traced where it would weigh, its confidence capped at denoise_m
+frames; kept by its weight (the generalized RIS's step, both targets this
+pixel's) */
+void restir_reuse(ivec2 q, Surface g, vec3 o, inout int kind, inout uint index, inout vec3 y, inout float target_kept,
+    inout vec3 kept_d, inout vec3 kept_s, inout float w_total, inout float m_total)
+{
+    if (!inside(q))
+        return;
+    uvec4 gl = imageLoad(guide_last, q);
+    vec3 nl = unfold(unpackSnorm2x16(gl.y));
+    float dl = uintBitsToFloat(gl.z);
+    bool same = gl.x == (g.instance | 0x10000u) && dot(nl, g.normal) >= 0.9;
+    if (same && g.instance == 0u)
+        same = abs(dot(last_point(q, dl) - g.point, g.normal)) <= 0.02 + 0.004 * g.distance;
+    else if (same)
+        same = abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
+    if (!same)
+        return;
+    vec4 rp = imageLoad(reservoir_point_last, q);
+    uvec4 ri = imageLoad(reservoir_info_last, q);
+    int k_last = int(ri.x & 3u);
+    uint i_last = ri.x >> 2;
+    float m_last = min(uintBitsToFloat(ri.y), job.extra.z);
+    vec3 dif, spe, l;
+    float d;
+    if (k_last != KIND_DYNAMIC && k_last != KIND_NONE && rp.w > 0.0 && m_last > 0.0 &&
+        sample_light(g, k_last, i_last, rp.xyz, dif, spe, l, d))
+    {
+        float target = luma(dif) + luma(spe);
+        float w_last = target * rp.w * m_last;
+        /* (its shadow traced only where it would weigh) */
+        if (w_last > 0.0 && !isinf(w_last) && light_seen(o, k_last, l, d))
+        {
+            w_total += w_last;
+            if (rnd() * w_total <= w_last)
+            {
+                kind = k_last;
+                index = i_last;
+                y = rp.xyz;
+                target_kept = target;
+                kept_d = dif;
+                kept_s = spe;
+            }
+        }
+    }
+    m_total += max(m_last, 0.0);
+}
 void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse, out vec3 specular)
 {
     diffuse = vec3(0.0);
@@ -1014,47 +1064,19 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
         vec2 at_last = last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u);
         vec2 fl = floor(at_last), fr = at_last - fl;
         ivec2 q = ivec2(fl) + ivec2(rnd() < fr.x ? 1 : 0, rnd() < fr.y ? 1 : 0);
-        if (inside(q))
+        restir_reuse(q, g, o, kind, index, y, target_kept, kept_d, kept_s, w_total, m_total);
+        /* (the spatiotemporal reuse, job.settings.z of them: the last
+        frame's reservoirs at points of a disc of 2 to 16 pixels about the
+        place, each this surface's by the same test, taken alike: a lamp
+        that one pixel's candidates found is offered to its neighbours, so a
+        light few candidates reach (a semi-glossy wall's highlight of a lamp
+        the grid's lists rank low) is not one pixel's luck) */
+        int spatial = int(job.settings.z);
+        for (int k = 0; k < spatial; k++)
         {
-            uvec4 gl = imageLoad(guide_last, q);
-            vec3 nl = unfold(unpackSnorm2x16(gl.y));
-            float dl = uintBitsToFloat(gl.z);
-            bool same = gl.x == (g.instance | 0x10000u) && dot(nl, g.normal) >= 0.9;
-            if (same && g.instance == 0u)
-                same = abs(dot(last_point(q, dl) - g.point, g.normal)) <= 0.02 + 0.004 * g.distance;
-            else if (same)
-                same = abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
-            if (same)
-            {
-                vec4 rp = imageLoad(reservoir_point_last, q);
-                uvec4 ri = imageLoad(reservoir_info_last, q);
-                int k_last = int(ri.x & 3u);
-                uint i_last = ri.x >> 2;
-                float m_last = min(uintBitsToFloat(ri.y), job.extra.z);
-                vec3 dif, spe, l;
-                float d;
-                if (k_last != KIND_DYNAMIC && k_last != KIND_NONE && rp.w > 0.0 && m_last > 0.0 &&
-                    sample_light(g, k_last, i_last, rp.xyz, dif, spe, l, d))
-                {
-                    float target = luma(dif) + luma(spe);
-                    float w_last = target * rp.w * m_last;
-                    /* (its shadow traced only where it would weigh) */
-                    if (w_last > 0.0 && !isinf(w_last) && light_seen(o, k_last, l, d))
-                    {
-                        w_total += w_last;
-                        if (rnd() * w_total <= w_last)
-                        {
-                            kind = k_last;
-                            index = i_last;
-                            y = rp.xyz;
-                            target_kept = target;
-                            kept_d = dif;
-                            kept_s = spe;
-                        }
-                    }
-                }
-                m_total += max(m_last, 0.0);
-            }
+            float a = 6.2831853 * rnd(), r = 2.0 + 14.0 * sqrt(rnd());
+            ivec2 qs = ivec2(floor(at_last + r * vec2(cos(a), sin(a)) + 0.5));
+            restir_reuse(qs, g, o, kind, index, y, target_kept, kept_d, kept_s, w_total, m_total);
         }
     }
     /* (W: the weights' sum over the kept target, by the confidences' sum:

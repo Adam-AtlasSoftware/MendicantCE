@@ -1271,7 +1271,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	the reflection is traced, 1 at every pixel) */
 	if (getenv("HALO_PT_RAY_ROUGHNESS"))
 		job->settings[1] = (float)atof(getenv("HALO_PT_RAY_ROUGHNESS"));
-	job->settings[2] = 4.0f;
+	/* (ReSTIR DI's spatiotemporal reuse: the last frame's reservoirs at that
+	many points about the place, besides its own; HALO_PT_RESTIR_SPATIAL) */
+	{
+		static int spatial = -1;
+
+		if (spatial < 0)
+			spatial = getenv("HALO_PT_RESTIR_SPATIAL") ? atoi(getenv("HALO_PT_RESTIR_SPATIAL")) : 0;
+		spatial = spatial < 0 ? 0 : spatial > 8 ? 8 : spatial;
+		job->settings[2] = (float)spatial;
+	}
 	job->settings[3] = 4.0f;
 	/* the histories: the slow one at most 32 frames, the fast 4, the fast
 	one's hold at 2 standard deviations of its mean */
