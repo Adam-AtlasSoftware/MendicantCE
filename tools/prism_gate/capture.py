@@ -161,11 +161,12 @@ def refs_timeline(scene, frames):
     return t
 
 
-def refs_v4_timeline(scene, frames, state="v4pt", only=None):
+def refs_v4_timeline(scene, frames, state="v4pt", only=None, live_only=False):
     """M3's references (docs/prism_pathtraced.md): RT off's stills (Classic's frame) at the probe poses first, then
     display.lighting "pathtraced" once (its bake read), and at each probe pose its live frame held, then
     debug.pt_reference in that mode (the same scene, materials and lights unbiased, no bake: summed until its noise is
-    under the bound, `frames` at most), its linear file and the frame it holds"""
+    under the bound, `frames` at most), its linear file and the frame it holds. live_only: the live frames and RT
+    off's alone, for references kept from an earlier run while the scene, materials and lights are unchanged"""
     t = begin(scene)
     poses = paths.move_poses(scene["keys"], scene["steps"])
     probes = probe_steps(scene)
@@ -180,6 +181,8 @@ def refs_v4_timeline(scene, frames, state="v4pt", only=None):
             continue
         pose = poses[step - 1]
         t.hold(pose, scene["pt_settle"], save=f"refs/p{index}_live.png")
+        if live_only:
+            continue
         t.at(f'prism_set "pt_reference_file p{index}.exr"', f'prism_set "pt_reference {frames}"')
         t.hold(pose, frames + scene["reference_margin"], save=f"refs/p{index}_ref.png")
         t.at('prism_set "pt_reference 0"')
@@ -292,7 +295,7 @@ def capture(scene, what, args):
         run(scene, refs_timeline(scene, args.reference_frames or scene["reference_frames"]), out, "refs", args)
     if what in ("refs_v4", "all_v4"):
         run(scene, refs_v4_timeline(scene, args.reference_frames or scene.get("reference_frames_v4") or
-                                    scene["reference_frames"], args.v4_state, args.probe),
+                                    scene["reference_frames"], args.v4_state, args.probe, args.live_only),
             out, "refs" if args.probe is None else f"refs_p{args.probe}", args)
 
 
@@ -315,6 +318,8 @@ def main():
     parser.add_argument("--v4-state", default="v4pt", choices=BAKE_STATES, help="refs_v4: the live state at each "
                         "probe before its reference")
     parser.add_argument("--probe", type=int, default=None, help="refs_v4: this probe's reference alone (0, 1, 2)")
+    parser.add_argument("--live-only", action="store_true", help="refs_v4: the live and RT off frames alone (the "
+                        "references kept from an earlier run)")
     parser.add_argument("--env", action="append", default=[], help="K=V given to the game (diagnostics)")
     args = parser.parse_args()
     scenes = load_scenes()
