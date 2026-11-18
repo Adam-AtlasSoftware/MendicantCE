@@ -72,10 +72,12 @@ metalness (Raster's form). The sky's pixels are CE's frame there.
 **The exposure, the tone curve, the white hold** (Raster's meter and step, shared: `xgpu_vulkan_bake_meter` and
 `xgpu_vulkan_bake_exposure_step`; Adam's direction of 21:34 on November 17: the light modern, path traced and
 physically lit by default, darker than Classic where it is, only the characters' art and the textures' style
-matching Classic). `display.prism_exposure` multiplies `D` and `S` (the mode's style default `"auto"`, an eye's: the
-frame's middle toward a middle grey within its range, moving at `display.prism_exposure_speed`; `"ce"` pins it to
-Classic's, `"fixed"` is the light's own scale); `display.prism_tone_curve` takes what is past white (the mode's style
-default `"filmic"`); the diffuse light is held at white as CE's page held it (a colour past white divided by its
+matching Classic). `display.prism_exposure` multiplies `D` and `S` (the mode's style default `"auto"`, an eye's, the
+shared step's as Raster has it since `prism-v4-m2` 82546a690: a share of the stops between the frame's median and a
+key of 0.30, half of them where the frame is brighter and a quarter where it is darker, so a dark place stays darker,
+at most the range up and two thirds of it down, moving at `display.prism_exposure_speed`; `"ce"` pins it to Classic's,
+`"fixed"` is the light's own scale); `display.prism_tone_curve` takes what is past white (the mode's style default
+`"filmic"`, Raster's too: `prism_deferred_raster` is true for both modes); the diffuse light is held at white as CE's page held it (a colour past white divided by its
 brightest channel, its hue kept) only under the `"ce"` curve, the display's clip. The emission is CE's and stays. The
 `pt_*` views are the light's own values (no exposure, no curve, no hold).
 
