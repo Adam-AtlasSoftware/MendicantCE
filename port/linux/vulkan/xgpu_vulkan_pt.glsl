@@ -2529,6 +2529,10 @@ void main()
         /* (one path a sample: the diffuse lobe's or the specular's, chosen by
         their shares (at least a tenth each), its light over its chance) */
         float chance = clamp(luma(share) / max(luma(share) + luma(kd), 1.0e-4), 0.1, 0.9);
+        /* (a glossy pixel's lamp highlights come by its reflection's path alone:
+        that lobe taken at least half the time) */
+        if (glossy)
+            chance = max(chance, 0.5);
         vec3 bounce = vec3(0.0), reflection = vec3(0.0);
         seed_for(pixel, frame, 6u);
         if (rnd() >= chance)
