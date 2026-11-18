@@ -2591,8 +2591,12 @@ void main()
         a-trous steps blur a moving camera's noise into smears) */
         od.a = spatial;
     }
-    /* (the specular's variance: its spread over the 3 x 3, scaled by its
-    history) */
+    /* (the specular's variance: its spread over the 3 x 3 as it is. The
+    history is already a mean of its frames, so its spread over the
+    neighbours is what noise is left: round 3 divided it again by the
+    history's length, so a long history's stops were a fifth as wide as its
+    noise and a still eye's lamp pools on the semi-glossy walls stayed
+    grainy (G4's second and third poses)) */
     os.a = 0.0;
     {
         float s1 = 0.0, s2 = 0.0, sw = 0.0;
@@ -2608,7 +2612,7 @@ void main()
                 sw += 1.0;
             }
         float mean = s1 / max(sw, 1.0);
-        os.a = max(s2 / max(sw, 1.0) - mean * mean, 0.0) / max(n_s, 1.0);
+        os.a = max(s2 / max(sw, 1.0) - mean * mean, 0.0);
     }
     vec4 ov = vc;
     if (fix_v && w_v > 0.0)
