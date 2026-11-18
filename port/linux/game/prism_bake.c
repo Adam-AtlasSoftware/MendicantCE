@@ -76,6 +76,9 @@ unsigned long config_changes(void);
 void platform_log(const char *format, ...);
 char const *platform_data_root(void);
 int halo_prism_rt_available(void);
+/* prism_rt.c's: the bounces' albedo the base maps' stored mean (the light's
+units) rather than made linear */
+int prism_rt_albedo_stored(void);
 void xgpu_backend_prism_bake(const struct xgpu_stream_prism_bake *bake, const void *data, unsigned long size);
 unsigned long prism_scene_static_generation(void);
 int prism_scene_static_ended(void);
@@ -636,8 +639,10 @@ static void scenery_shader(
 		struct bitmap_data const *bitmap = header ? TAG_BLOCK_GET_ELEMENT(&group->bitmaps, 0, struct bitmap_data) : NULL;
 		float mean[4];
 
-		if (bitmap && bitmap->base_address && xgpu_texture_mean_color((unsigned int)header[3], (unsigned int)header[4],
-			(unsigned char const *)bitmap->base_address, 64, mean))
+		/* (the rule prism_rt.c's materials take: in the light's units the
+		stored mean) */
+		if (bitmap && bitmap->base_address && xgpu_texture_mean_color_as((unsigned int)header[3], (unsigned int)header[4],
+			(unsigned char const *)bitmap->base_address, 64, mean, prism_rt_albedo_stored()))
 		{
 			for (channel = 0; channel < 3; channel++)
 			{

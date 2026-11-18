@@ -37,6 +37,9 @@ int xgpu_vulkan_rt_scene(uint32_t *generation, const float **materials, uint32_t
 
 /* this frame traces (an RT_FRAME with a mode since the last frame's end) */
 int xgpu_vulkan_rt_active(void);
+/* the bounces' albedo is the base maps' stored mean, not made linear (the
+last RT_FRAME's rig[62]: prism_rt.c's prism_rt_albedo_stored) */
+int xgpu_vulkan_rt_albedo_stored(void);
 /* the frame traces the stock models, not the mesh store's replacements
 (display.prism_rt_objects "low_lod") */
 int xgpu_vulkan_rt_stock_models(void);
