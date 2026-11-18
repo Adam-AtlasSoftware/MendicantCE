@@ -68,6 +68,12 @@ Records:
   for the tiles refined from it, each until its own result is in: a refined
   tile is drawn from its parent's (or grandparent's) texels while it is
   unfinished;
+- ATLAS_AUX and ATLAS_FILTERED, the filter's (prism_bake_filter.h), of a
+  lightmap tile's job: its texels' normals, charts and variances beside its
+  result, then its texels filtered (its result's layout). The unfinished log
+  keeps the result as baked, so the filter can run again from it; the
+  finished file has the filtered texels as the tile's result and neither of
+  these;
 - CHECKPOINT: a job's state part-way (its accumulators and convergence
   state, so a long job resumes where it stopped); a later record of the
   same job replaces it;
@@ -115,6 +121,8 @@ enum prism_bake_record_type
 	PRISM_BAKE_RECORD_CHECKPOINT = PRISM_BAKE_CACHE_FOURCC('C', 'K', 'P', 'T'),
 	PRISM_BAKE_RECORD_DONE = PRISM_BAKE_CACHE_FOURCC('D', 'O', 'N', 'E'),
 	PRISM_BAKE_RECORD_ATLAS_TILE = PRISM_BAKE_CACHE_FOURCC('A', 'T', 'L', 'S'),
+	PRISM_BAKE_RECORD_ATLAS_AUX = PRISM_BAKE_CACHE_FOURCC('A', 'T', 'L', 'X'),
+	PRISM_BAKE_RECORD_ATLAS_FILTERED = PRISM_BAKE_CACHE_FOURCC('A', 'T', 'L', 'F'),
 	PRISM_BAKE_RECORD_SUN_MASK_TILE = PRISM_BAKE_CACHE_FOURCC('M', 'A', 'S', 'K'),
 	PRISM_BAKE_RECORD_VOLUME_BRICK = PRISM_BAKE_CACHE_FOURCC('V', 'O', 'L', 'B'),
 	PRISM_BAKE_RECORD_PROBE = PRISM_BAKE_CACHE_FOURCC('P', 'R', 'O', 'B'),

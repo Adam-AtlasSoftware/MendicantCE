@@ -3,8 +3,8 @@ TEST_BAKE.C
 
 The baker's host libraries on synthetic data (tools/test_prism_bake.py
 builds and runs it): port/linux/vulkan/prism_bake_reach.c (a collision bsp
-built here from boxes), prism_bake_atlas.c, prism_bake_cache.c and
-prism_bake_converge.c.
+built here from boxes), prism_bake_atlas.c, prism_bake_cache.c,
+prism_bake_converge.c and prism_bake_filter.c.
 
 	test_bake <scratch folder>
 
@@ -15,6 +15,7 @@ non-zero if any failed.
 #include "prism_bake_atlas.h"
 #include "prism_bake_cache.h"
 #include "prism_bake_converge.h"
+#include "prism_bake_filter.h"
 #include "prism_bake_reach.h"
 
 #include <math.h>
@@ -1236,6 +1237,200 @@ static void test_converge(void)
 	}
 }
 
+/* ---------- the robust mean and the filter (prism_bake_filter.c) */
+
+/* a texel's samples as the bake takes them: count of them, each from
+source, their groups' sums, mean and largest */
+static void robust_texel(double (*source)(void), uint32_t count, float sums[PRISM_BAKE_GROUPS], double *mean,
+	float *largest)
+{
+	uint32_t k;
+	double total = 0.0;
+
+	memset(sums, 0, PRISM_BAKE_GROUPS * sizeof(float));
+	*largest = 0.0f;
+	for (k = 0; k < count; k++)
+	{
+		double x = source();
+
+		sums[(k / PRISM_BAKE_GROUP_BATCH) % PRISM_BAKE_GROUPS] += (float)x;
+		total += x;
+		if ((float)x > *largest)
+			*largest = (float)x;
+	}
+	*mean = total / count;
+}
+
+static double source_normal(void)
+{
+	double x = 1.0 + 0.3 * gaussian();
+
+	return x > 0.0 ? x : 0.0;
+}
+
+/* a lamp's light, and rarely a path that meets a small bright lamp: a
+tenth of the light in one sample of 10,000 (mean 1.1) */
+static double source_firefly(void)
+{
+	return 1.0 + 0.2 * gaussian() + (uniform() < 1.0e-4 ? 1000.0 : 0.0);
+}
+
+/* a heavy tail (Pareto, shape 2.5, mean 5/3) */
+static double source_pareto(void)
+{
+	return pow(uniform(), -1.0 / 2.5);
+}
+
+static void filter_flat(struct prism_bake_filter_texel *t, float light, float variance, int32_t chart, float nz)
+{
+	memset(t, 0, sizeof(*t));
+	t->light[0] = t->light[1] = t->light[2] = light;
+	t->indirect[0] = t->indirect[1] = t->indirect[2] = 0.5f * light;
+	t->variance = variance;
+	t->normal[2] = nz;
+	t->normal[0] = nz < 1.0f ? (float)sqrt(1.0 - nz * nz) : 0.0f;
+	t->chart = chart;
+}
+
+static void test_filter(void)
+{
+	struct prism_bake_robust_parameters rp;
+	struct prism_bake_filter_parameters fp;
+	static struct prism_bake_filter_texel window[48 * 48], scratch[2 * 48 * 48], world[64 * 64];
+	struct prism_bake_filter_texel out[256], out2[256];
+	float sums[PRISM_BAKE_GROUPS], largest, variance, factor;
+	double mean, before, after, sum_out, m;
+	uint32_t g, total, k;
+	int trials, triggered, x, y, ok;
+
+	prism_bake_robust_defaults(&rp);
+	/* the groups' samples */
+	for (ok = 1, k = 0; k < 3000; k += 37)
+	{
+		for (total = 0, g = 0; g < PRISM_BAKE_GROUPS; g++)
+			total += prism_bake_group_samples(k, g);
+		ok &= total == k;
+	}
+	check(ok && prism_bake_group_samples(2048, 3) == 256 && prism_bake_group_samples(100, 0) == 64 &&
+		prism_bake_group_samples(100, 1) == 36 && prism_bake_group_samples(100, 2) == 0, "robust_groups",
+		"the groups' samples");
+	/* without a firefly the mean stands (almost always) */
+	for (trials = 0, triggered = 0; trials < 2000; trials++)
+	{
+		robust_texel(source_normal, 2048, sums, &mean, &largest);
+		variance = 1.0f;
+		triggered += prism_bake_robust_factor(sums, 2048, largest, &variance, &rp) != 1.0f;
+	}
+	check(triggered <= 10, "robust_quiet", "the mean replaced where no firefly was");
+	/* a texel at the budget with a firefly in it: taken near its light
+	without the firefly, and with less noise than the mean's */
+	for (trials = 0, triggered = 0, before = after = 0.0; trials < 2000; trials++)
+	{
+		robust_texel(source_firefly, 512, sums, &mean, &largest);
+		factor = prism_bake_robust_factor(sums, 512, largest, NULL, &rp);
+		triggered += factor != 1.0f;
+		before += (mean - 1.1) * (mean - 1.1);
+		after += (mean * factor - 1.1) * (mean * factor - 1.1);
+	}
+	check(triggered > 50 && triggered < 200 && after < 0.25 * before, "robust_firefly", "the fireflies' texels not taken in");
+	/* unbiased in the limit: a heavy tail's texels' mean light over many
+	trials, at a budget and at 32 times it */
+	for (k = 2048; k <= 65536; k *= 32)
+	{
+		for (trials = 0, m = 0.0; trials < 400; trials++)
+		{
+			robust_texel(source_pareto, k, sums, &mean, &largest);
+			m += mean * prism_bake_robust_factor(sums, k, largest, NULL, &rp);
+		}
+		m /= 400.0;
+		if (k == 2048)
+			before = fabs(m / (5.0 / 3.0) - 1.0);
+		else
+			after = fabs(m / (5.0 / 3.0) - 1.0);
+	}
+	check(after < 0.01 && after <= before + 0.002, "robust_limit", "the robust mean's bias does not fall away");
+
+	/* the filter: a flat chart's noise falls, its light stays */
+	prism_bake_filter_defaults(&fp, PRISM_BAKE_QUALITY_ULTRA);
+	check(fp.passes == 3, "filter_passes", "three passes under max");
+	prism_bake_filter_defaults(&fp, PRISM_BAKE_QUALITY_MAX);
+	check(fp.passes == 1, "filter_passes_max", "max's mildest");
+	prism_bake_filter_defaults(&fp, PRISM_BAKE_QUALITY_HIGH);
+	for (k = 0; k < 48 * 48; k++)
+		filter_flat(&window[k], (float)(1.0 + 0.1 * gaussian()), 0.01f, 7, 1.0f);
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (before = after = sum_out = 0.0, k = 0; k < 256; k++)
+	{
+		double in = window[(16 + k / 16) * 48 + 16 + k % 16].light[0] - 1.0;
+
+		before += in * in;
+		after += (out[k].light[0] - 1.0) * (out[k].light[0] - 1.0);
+		sum_out += out[k].light[0];
+	}
+	check(after < before / 8.0 && fabs(sum_out / 256.0 - 1.0) < 0.02 && out[0].variance < 0.01f / 8.0f,
+		"filter_flat", "a flat chart's noise not reduced, or its light moved");
+	/* an edge the samples resolve stays: half the chart at 1, half at 4,
+	each with 1% noise */
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			filter_flat(&window[y * 48 + x], (float)((x < 24 ? 1.0 : 4.0) * (1.0 + 0.01 * gaussian())),
+				(float)(1.0e-4 * (x < 24 ? 1.0 : 16.0)), 7, 1.0f);
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (ok = 1, y = 0; y < 16; y++)
+		ok &= fabs(out[y * 16 + 7].light[0] - 1.0) < 0.02 && fabs(out[y * 16 + 8].light[0] - 4.0) < 0.08;
+	check(ok, "filter_edge", "an edge the samples resolve blurred");
+	/* never across a chart's edge, nor a turn of the face; a texel of
+	chart -1 is neither read nor changed */
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			filter_flat(&window[y * 48 + x], x < 24 ? 1.0f : 1.5f, 1.0f, x < 24 ? 3 : 4, 1.0f);
+	window[20 * 48 + 20].chart = -1;
+	window[20 * 48 + 20].light[0] = 100.0f;
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (ok = 1, k = 0; k < 256; k++)
+		ok &= k == 4 * 16 + 4 ? out[k].light[0] == 100.0f : out[k].light[0] == (k % 16 < 8 ? 1.0f : 1.5f);
+	check(ok, "filter_chart", "light taken across a chart's edge or from a texel not baked");
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			filter_flat(&window[y * 48 + x], x < 24 ? 1.0f : 1.5f, 1.0f, 3, x < 24 ? 1.0f : 0.0f);
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (ok = 1, k = 0; k < 256; k++)
+		ok &= out[k].light[0] == (k % 16 < 8 ? 1.0f : 1.5f);
+	check(ok, "filter_normal", "light taken across a turn of the face");
+	/* no seams: a texel's result does not depend on where the tiles fall
+	(the same texel from two windows 8 texels apart) */
+	for (k = 0; k < 64 * 64; k++)
+		filter_flat(&world[k], (float)(1.0 + 0.2 * gaussian() + ((k % 64) > 30 ? 0.5 : 0.0)), 0.01f, 1, 1.0f);
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			window[y * 48 + x] = world[y * 64 + x];
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			window[y * 48 + x] = world[(y + 8) * 64 + x + 8];
+	prism_bake_filter_tile(window, out2, scratch, &fp);
+	for (ok = 1, y = 0; y < 8; y++)
+		for (x = 0; x < 8; x++)
+			ok &= memcmp(&out[(y + 8) * 16 + x + 8], &out2[y * 16 + x], sizeof(out[0])) == 0;
+	check(ok, "filter_seams", "a texel's result depends on its tile's place");
+	/* the normals' 32 bits */
+	for (ok = 1, k = 0; k < 1000; k++)
+	{
+		float n[3], back[3], l;
+
+		n[0] = (float)gaussian();
+		n[1] = (float)gaussian();
+		n[2] = (float)gaussian();
+		l = (float)sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		n[0] /= l;
+		n[1] /= l;
+		n[2] /= l;
+		prism_bake_normal_unpack(prism_bake_normal_pack(n), back);
+		ok &= n[0] * back[0] + n[1] * back[1] + n[2] * back[2] > 0.99999f;
+	}
+	check(ok, "filter_normals", "a normal's 32 bits");
+}
+
 int main(int argc, char **argv)
 {
 	if (argc < 2)
@@ -1249,6 +1444,7 @@ int main(int argc, char **argv)
 	test_cache(argv[1]);
 	test_cache_jobs(argv[1]);
 	test_converge();
+	test_filter();
 	printf("%s: %d failed\n", failures ? "FAILED" : "PASSED", failures);
 	return failures != 0;
 }
