@@ -67,6 +67,9 @@ nothing changes.
 
 #include <string.h>
 
+/* prism_bake.c's: an object the bake holds as static scenery */
+boolean prism_bake_object_static(long object_index);
+
 /* the platform's (port/linux/src) */
 char const *config_string(char const *name);
 unsigned long config_changes(void);
@@ -116,6 +119,8 @@ enum
 #define SCALAR_TINT 25
 #define SCALARS 32
 #define DRAW_FIRST_PERSON 4ul
+/* (port: xgpu_stream.h's XGPU_GBUFFER_FLAG_STATIC_SCENERY) */
+#define DRAW_STATIC_SCENERY 16ul
 /* GBUFFER_DRAW's instance of the first-person weapon (xgpu_stream.h's
 XGPU_GBUFFER_INSTANCE_FIRST_PERSON) */
 #define INSTANCE_FIRST_PERSON 0xffffUL
@@ -152,7 +157,7 @@ the nodes an instance sends (xgpu_stream.h's XGPU_SCENE_INSTANCE_NODES) */
 static struct
 {
 	unsigned long settings_read;
-	boolean wanted, raster, raster_materials, raster_objects_volume;
+	boolean wanted, raster, raster_materials, raster_objects_volume, raster_object_shadows;
 	unsigned long view;
 	/* the window's phase sent last (0 none: the light) */
 	unsigned long phase;
@@ -203,6 +208,12 @@ static void settings_read(
 	light alone) */
 	value = config_string("display.prism_raster_objects");
 	prism_deferred.raster_objects_volume = !value || strcmp(value, "classic");
+	/* (port: display.prism_raster_object_shadows: "traced", the default, the
+	moving objects' sun shadows traced against the frame's objects
+	(prism_rt.c's RT_FRAME asks the renderer for their structure); "classic"
+	CE's projected shadows) */
+	value = config_string("display.prism_raster_object_shadows");
+	prism_deferred.raster_object_shadows = !value || strcmp(value, "classic");
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
@@ -580,7 +591,10 @@ void prism_deferred_object(
 	}
 	absolute = object_index == -1 ? 0 : (unsigned long)DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + 1;
 	prism_deferred.instance = absolute >= INSTANCE_FIRST_PERSON ? INSTANCE_FIRST_PERSON - 1 : absolute;
-	prism_deferred.draw_flags = 0;
+	/* (port: static scenery, whose shadows the bake has: not among the
+	objects whose sun shadows PRISM Raster traces) */
+	prism_deferred.draw_flags = absolute && prism_deferred.raster && prism_deferred.raster_object_shadows &&
+		prism_bake_object_static(object_index) ? DRAW_STATIC_SCENERY : 0;
 	prism_deferred.lightmap = 0;
 	/* (SCENE_INSTANCE: the object's nodes, before its draws) */
 	if (absolute)
@@ -645,6 +659,14 @@ boolean prism_deferred_raster(
 	settings_read();
 
 	return prism_deferred.raster;
+}
+
+boolean prism_deferred_raster_object_shadows(
+	void)
+{
+	settings_read();
+
+	return prism_deferred.raster && prism_deferred.raster_object_shadows;
 }
 
 void prism_deferred_lightmap(

@@ -1626,6 +1626,10 @@ PAGES = {
             ("OBJECTS", "display.prism_raster_objects", [("BAKED LIGHT", "volume"), ("CLASSIC'S", "classic")],
              "How characters, vehicles and weapons are lit. Baked Light: by the baked light where they are. "
              "Classic's: never darker than the game lit them.", "desktop"),
+            ("OBJECT SHADOWS", "display.prism_raster_object_shadows", [("TRACED", "traced"), ("CLASSIC'S", "classic")],
+             "The sun's shadows of vehicles, characters and weapons. Traced: ray traced, on the ground, on each "
+             "other and on themselves (a graphics card that traces rays). Classic's: the game's own, on the "
+             "ground only.", "desktop"),
         ],
     },
     PRISM_PT_PAGE[0]: {

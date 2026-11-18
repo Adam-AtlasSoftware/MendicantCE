@@ -303,6 +303,7 @@ the first traced window) and the beach stayed CE's light 16 s coming out.
 | `debug.gbuffer_view` | `"bake_light"`, `"bake_sun"`, `"bake_texels"`, `"bake_volume"`, `"bake_total"` | Raster's views |
 | `display.prism_raster_composition` | `"ce"`, `"materials"` | CE's shaders compose Raster's light (default), or PRISM's own materials |
 | `display.prism_raster_objects` | `"volume"`, `"classic"` | Objects by the volume's light (default), or never lit under Classic |
+| `display.prism_raster_object_shadows` | `"traced"`, `"classic"` | The moving objects' sun shadows traced (default), or CE's projected ones |
 | `display.prism_sky_light` | `"sky"`, `"flat"` | The sky a light, by what each point sees of it (default), or Tool's flat fill; a change bakes again |
 | `display.prism_exposure`, `_range`, `_speed`, `_bias`, `display.prism_tone_curve` | as the path tracer's | Raster's exposure and tone curve (its style's: `"auto"` and `"filmic"`) |
 
@@ -328,8 +329,10 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
 - **The diffuse light.** A level pixel: its CE texel's chart map gives its virtual page; the four texels about its point
   there are read through the page's tile table (bilinear, the texels the bake has), each at the pixel's normal
   (`a0 + k · n`), and the sun's light is the rig's by the pixel's facing and the sun's visibility (the tile's state, or
-  its mask, bilinear: the level's and the static scenery's shadows), less the moving objects' shadows CE drew over its
-  lightmap pass (its projected shadow maps: their share of the light the G-buffer says that pass gave). An object pixel
+  its mask, bilinear: the level's and the static scenery's shadows) and the moving objects' shadows, traced (below; with
+  `display.prism_raster_object_shadows` `"classic"`, or where the frame has no structure of its objects, those CE drew
+  over its lightmap pass instead: its projected shadow maps, their share of the light the G-buffer says that pass
+  gave). An object pixel
   (the static scenery's too): the volume's eight probes about its point in its fine cascade, else its coarse one
   (those inside the level left out), SH at its normal, and the sun's light by its shadow traced against the bake's
   scene (the level and the static scenery). Both add the frame's dynamic lights (SCENE_LIGHTS' dynamic class: CE's
@@ -343,6 +346,22 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
   the reflection parallax-corrected to the box, at the roughness's level, by inverse squared distance), else the bake's
   own light from the reflection's side (the texel's or the volume's SH read at the reflection); and the sun's highlight
   (GGX, Smith's visibility, Schlick's Fresnel) by the same visibility as its diffuse light.
+
+**The moving objects' sun shadows** (`display.prism_raster_object_shadows` `"traced"`, the default): the game sets
+RT_FRAME's `XGPU_RT_FLAG_RASTER_OBJECTS` with its mode off, and the RT backend (`xgpu_vulkan_rt.c`) takes a slot of its
+own for the frame, captures each object draw of the G-buffer pass as the path tracer captures the pre-pass's (the same
+`xgpu_vulkan_rt_capture`: the vertices where the GPU has them, each draw's entry and bottom-level structure kept from
+frame to frame, skinned and refitted on the GPU only where it moved; the first-person weapon, its G-buffer instance,
+left out, as CE never let it cast a shadow, and the static scenery the bake holds, whose shadows are baked: the game
+marks its draws, `XGPU_GBUFFER_FLAG_STATIC_SCENERY`, by the bake's own rule, `prism_bake_object_static`; b30's G2
+pose went from 703 draws to 175) and at the pass's end runs the path tracer's own `objects_record` and
+`scene_build`, nothing traced there. The raster job then has the top level's address and the objects' table
+(`xgpu_vulkan_rt_objects`), and `objects_visibility` traces one ray a pixel to the sun against the objects (masks 4 and 8: an
+opaque one's hit blocks it, each cutout crossed lets 1 - 0.75 x its share of texels drawn through, a smooth shade
+where the path tracer's stochastic hit, undenoised, was a dither) from every lit pixel the sun faces: the level's, so the vehicles,
+characters, weapons, crates and the Pelican shadow the ground, and the objects', so they shadow each other and
+themselves. CE's projected shadows on the level are then left out (they were the same shadows, softer and drawn in
+CE's own direction). With `"classic"`, or a GPU without ray queries, nothing is captured and CE's stay.
 
 **What composes the frame** (`display.prism_raster_composition`): by default (`"ce"`) CE's own shaders, until PRISM's
 materials reach theirs: the diffuse light (exposed, through the tone curve, below) goes into CE's light target in its light's
@@ -468,9 +487,8 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 - The sun's half-lit band (partial shadows, low cosines) comes out over CE's light (CE/bake 0.5 to 0.8 at G2 and G3):
   Tool's sun is sixteen directions spread over its disc, on the vertices, so its shadows' edges are softer and coarser
   than the bake's traced disc: a place where the bake is meant to differ.
-- The moving objects' sun shadows are CE's own projected ones (on the level) and none on the objects; traced ones from
-  display.prism_rt's per-frame structure of the objects (`objects_blocked` reads it where the job block has it) need the
-  RT backend to build that structure in Raster, which it does not yet.
+- The moving objects' traced sun shadows are one ray a pixel to the sun's centre: hard edged (CE's projected ones were
+  soft blobs), and an object off screen casts none, as it is not drawn in the G-buffer pass.
 - `max`: the tail spread over a subgroup, but no path guiding or light cache yet (Adam's decision on the floor stands).
 - The indirect layer's use by M3's path tracer, BC6H for the layers and the reflection cubes.
 - The remodel needs no atlas of its own: its corners carry CE's lightmap coordinates of the point of their surface, so

@@ -461,6 +461,9 @@ bits; its high 4 bits the flags */
 #define XGPU_GBUFFER_FLAG_FIRST_PERSON 4u
 /* (word 1 holds a normal: the vertices gave one) */
 #define XGPU_GBUFFER_FLAG_NORMAL 8u
+/* (GBUFFER_DRAW's alone: the object is static scenery the bake holds, its
+sun shadows baked; PRISM Raster's traced objects leave it out) */
+#define XGPU_GBUFFER_FLAG_STATIC_SCENERY 16u
 
 /* a record of no more than its header: SKIP, INVALIDATE, FLUSH,
 VISIBILITY_BEGIN, VISIBILITY_FRAME, DYNAMIC_LIGHTS_PREPARE,
@@ -2102,6 +2105,11 @@ enum
 	(xgpu_vulkan_rt.c) to the path at reference_file and held; spare[1] the
 	request's generation (a new one starts the sum again) */
 	XGPU_RT_FLAG_REFERENCE = 8,
+	/* display.lighting "raster" with display.prism_raster_object_shadows
+	"traced" (mode XGPU_RT_OFF): the objects of the G-buffer pass captured
+	and their structure built, nothing traced by the RT backend itself;
+	Raster's resolve traces the moving objects' sun shadows against it */
+	XGPU_RT_FLAG_RASTER_OBJECTS = 16,
 };
 #define XGPU_RT_REFERENCE_BOUNCES 32
 /* the reference file's path: a NUL-terminated UTF-8 string of at most this

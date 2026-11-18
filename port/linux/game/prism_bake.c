@@ -44,6 +44,8 @@ the settings. Nothing crosses the network.
 #include "models/model_animation_definitions.h"
 #include "models/model_definitions.h"
 #include "objects/object_definitions.h"
+#include "objects/objects.h"
+#include "objects/object_types.h"
 #include "physics/collision_model_definitions.h"
 #include "rasterizer/rasterizer_model_types.h"
 #include "shaders/shader_definitions.h"
@@ -653,6 +655,39 @@ static void scenery_shader(
 }
 
 /* a placement's definition if it is static and in this BSP (NONE if not) */
+/* a definition that nothing moves or destroys: a model, no animations, no
+body to damage */
+static boolean definition_static(
+	long index)
+{
+	struct object_definition const *definition;
+
+	if (index == NONE || !(definition = object_definition_get(index)) || definition->object.model.index == NONE)
+	{
+		return FALSE;
+	}
+	if (definition->object.animation_graph.index != NONE)
+	{
+		struct animation_graph const *graph = animation_graph_definition_get(definition->object.animation_graph.index);
+
+		if (graph && graph->animations.count > 0)
+		{
+			return FALSE;
+		}
+	}
+	if (definition->object.collision_model.index != NONE)
+	{
+		struct collision_model const *collision = collision_model_definition_get(definition->object.collision_model.index);
+
+		if (collision && collision->resistance.maximum_body_vitality > 0.0f)
+		{
+			return FALSE;
+		}
+	}
+
+	return TRUE;
+}
+
 static long scenery_static(
 	struct tag_block const *palette,
 	struct scenario_object_datum const *placement)
@@ -671,28 +706,11 @@ static long scenery_static(
 	}
 	entry = TAG_BLOCK_GET_ELEMENT(palette, placement->palette_entry_index, struct scenario_object_palette_entry);
 	index = entry->reference.index;
-	if (index == NONE || !(definition = object_definition_get(index)) || definition->object.model.index == NONE)
+	if (!definition_static(index))
 	{
 		return NONE;
 	}
-	if (definition->object.animation_graph.index != NONE)
-	{
-		struct animation_graph const *graph = animation_graph_definition_get(definition->object.animation_graph.index);
-
-		if (graph && graph->animations.count > 0)
-		{
-			return NONE;
-		}
-	}
-	if (definition->object.collision_model.index != NONE)
-	{
-		struct collision_model const *collision = collision_model_definition_get(definition->object.collision_model.index);
-
-		if (collision && collision->resistance.maximum_body_vitality > 0.0f)
-		{
-			return NONE;
-		}
-	}
+	definition = object_definition_get(index);
 	if (scenario_leaf_index_from_point(&placement->position) != NONE)
 	{
 		return index;
@@ -1366,6 +1384,33 @@ static void reach_frame(
 /* ---------- public code */
 
 /* the v4 modes that read a bake, where the renderer can make one */
+/* port: an object the bake holds as static scenery (scenery_copy's rule, as
+it stands: scenery, a control or a light fixture on no other object, no
+name a script finds it by, its definition static), whose sun shadows and
+light the bake has already: PRISM Raster's traced objects leave it out
+(prism_deferred.c's GBUFFER_DRAW flag) */
+boolean prism_bake_object_static(
+	long object_index)
+{
+	struct object_datum const *object;
+	static int no_scenery = -1;
+
+	if (no_scenery < 0)
+	{
+		no_scenery = getenv("HALO_BAKE_NO_SCENERY") != NULL;
+	}
+	if (no_scenery || object_index == NONE ||
+		!(object = (struct object_datum const *)object_try_and_get(object_index)) ||
+		object->object.parent_object_index != NONE || object->object.name_index != NONE ||
+		(object->object.type != _object_type_scenery && object->object.type != _object_type_control &&
+		object->object.type != _object_type_light_fixture))
+	{
+		return FALSE;
+	}
+
+	return definition_static(object->definition_index);
+}
+
 boolean prism_bake_wanted(
 	void)
 {

@@ -3959,16 +3959,13 @@ has them (the stock layout's position, float x y z at the first
 attribute's place; its nodes and weight at 28 and 30 past it where the
 layout has them) and the constants it is drawn with; an alpha-tested one
 passed over */
+static void rt_capture_draw(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin,
+	int occluder, int owner, uint32_t window);
+
 static void prepass_rt_capture(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin)
 {
 	uint8_t occlusion = twin->pixel_program.ambient_occlusion;
 	int light = XGPU_AMBIENT_OCCLUSION_LIGHT_OF(occlusion);
-	const struct xgpu_vulkan_attribute *position = &input->attributes[0];
-	struct vertex_source *source;
-	struct xgpu_vulkan_rt_draw draw;
-	uint32_t index, alpha = twin->pixel_program.alpha_test;
-	int alpha_tested;
-	float coverage;
 
 	/* (the occluders too: an object lighting itself, the Elites' armour,
 	casts its shadow as any other; the first-person weapon among them is
@@ -3977,6 +3974,37 @@ static void prepass_rt_capture(const struct draw_input *input, const struct xgpu
 		(!(occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) ||
 		(light != XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL && light != XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))))
 		return;
+	rt_capture_draw(input, twin, occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER,
+		(int)floorf(stream.uniforms.world_ao[0] + 0.5f), prepass.window);
+}
+
+/* port: PRISM Raster's objects (xgpu_vulkan_rt.h's xgpu_vulkan_rt_objects_*):
+an object's draw of the G-buffer pass captured as drawn, as the pre-pass's
+are, its alpha test the draw's own; the first-person weapon (its instance)
+left out, as CE never let it cast a shadow, and the static scenery the bake
+holds (GBUFFER_DRAW's XGPU_GBUFFER_FLAG_STATIC_SCENERY: its shadows baked);
+no owner (no denoiser's motion) */
+static void gbuffer_rt_capture(const struct draw_input *input, const struct xgpu_stream_pipeline_define *definition)
+{
+	if (!xgpu_vulkan_rt_objects_only() || !xgpu_vulkan_rt_capturing() || !gbuffer.instance ||
+		(gbuffer.flags & XGPU_GBUFFER_FLAG_STATIC_SCENERY) || gbuffer.instance == XGPU_GBUFFER_INSTANCE_FIRST_PERSON)
+		return;
+	rt_capture_draw(input, definition, 0, -1, prepass.window);
+}
+
+/* a draw captured (prepass_rt_capture's, gbuffer_rt_capture's): its vertices
+as the GPU has them, the constants it is drawn with; an alpha-tested one
+passed over (its twin's alpha test); window: the captures' count, the mesh
+store's pieces once a window */
+static void rt_capture_draw(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin,
+	int occluder, int owner, uint32_t window)
+{
+	const struct xgpu_vulkan_attribute *position = &input->attributes[0];
+	struct vertex_source *source;
+	struct xgpu_vulkan_rt_draw draw;
+	uint32_t index, alpha = twin->pixel_program.alpha_test;
+	int alpha_tested;
+	float coverage;
 	/* (an alpha test that keeps every texel but the fully clear ones: CE's
 models' greater than 0, whose base maps' alpha is a mask of another kind
 then, drawn opaque) */
@@ -4016,20 +4044,20 @@ then, drawn opaque) */
 		return;
 	}
 	memset(&draw, 0, sizeof(draw));
-	draw.occluder = occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
+	draw.occluder = occluder;
 	draw.serial = xgpu_vulkan_serial();
 	/* (its base map's mean colour: the traced hits' albedo; a cutout's
 	share of texels drawn) */
 	draw.has_albedo = xgpu_vulkan_textures_mean(&stream.stages[0].stage, draw.albedo, xgpu_vulkan_rt_albedo_stored());
 	draw.coverage = coverage;
-	draw.owner = (int)floorf(stream.uniforms.world_ao[0] + 0.5f);
+	draw.owner = owner;
 	/* (a part a replacement mesh draws, display.prism_models: its pieces as
 	the mesh store skinned them, in the world; a part its carrier stands
 	for, nothing) */
 	if (!xgpu_vulkan_rt_stock_models())
 	{
 		struct xgpu_vulkan_meshes_rt_piece pieces[XGPU_VULKAN_MESHES_RT_PIECES];
-		int count = xgpu_vulkan_meshes_rt_pieces(prepass.window, pieces, XGPU_VULKAN_MESHES_RT_PIECES), piece;
+		int count = xgpu_vulkan_meshes_rt_pieces(window, pieces, XGPU_VULKAN_MESHES_RT_PIECES), piece;
 		uint32_t triangles = 0;
 		float origin[3];
 
@@ -4267,6 +4295,8 @@ static void gbuffer_draw(const struct draw_input *input)
 	gbuffer.drawing = NULL;
 	gbuffer.drawn = 1;
 	stream.definition = definition;
+	/* (port: PRISM Raster's objects: an object's, captured as drawn) */
+	gbuffer_rt_capture(input, definition);
 	stream.pipeline = pipeline;
 	stream.pipeline_id = id;
 }
@@ -4911,6 +4941,10 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		{
 			if (gbuffer.ready)
 				xgpu_vulkan_gpu_time_mark(1);
+			/* (port: PRISM Raster's objects: their structure built, as the
+			window's camera saw them) */
+			if (xgpu_vulkan_rt_capturing())
+				xgpu_vulkan_rt_objects_end(gbuffer.view_known ? gbuffer.view.now[0] : NULL);
 			gbuffer.active = gbuffer.ready = 0;
 			stream.uniforms_dirty = 1;
 			xgpu_vulkan_set_second_target(NULL);
@@ -4936,6 +4970,12 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.color = stream.color;
 		gbuffer.ready = 1;
 		gbuffer.drawn = 0;
+		/* (port: PRISM Raster's objects: the pass's object draws captured) */
+		if (xgpu_vulkan_rt_objects_only())
+		{
+			prepass.window++;
+			xgpu_vulkan_rt_objects_begin();
+		}
 		gbuffer.material = gbuffer.instance = gbuffer.flags = 0;
 		memset(gbuffer.uniform_key, 0, sizeof(gbuffer.uniform_key));
 		stream.uniforms_dirty = 1;

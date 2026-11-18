@@ -138,6 +138,25 @@ pass's scale), or NULL (world AO's pass then draws as before) */
 struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *inputs, uint32_t width,
 	uint32_t height, const struct xgpu_world_ao_pass *pass);
 
+/* port: PRISM Raster's objects (RT_FRAME's XGPU_RT_FLAG_RASTER_OBJECTS with
+its mode off: display.prism_raster_object_shadows "traced"): this frame
+builds the objects' structure, traced by Raster's resolve, not here */
+int xgpu_vulkan_rt_objects_only(void);
+/* a window's capture is open (xgpu_vulkan_rt_capture takes draws) */
+int xgpu_vulkan_rt_capturing(void);
+/* the G-buffer pass begun: its object draws captured from here (as the
+pre-pass's are, xgpu_vulkan_rt_capture) */
+void xgpu_vulkan_rt_objects_begin(void);
+/* ... and ended (eye: the window's camera): the objects recorded and the
+frame's top level built (the path tracer's objects_record and scene_build),
+nothing traced */
+void xgpu_vulkan_rt_objects_end(const float eye[3]);
+/* this frame's top level of them (its device address; the objects' table:
+each instance's (custom index - 1) two 64-bit words, its soup's address and
+its albedo with its coverage, a float, in the high word) for Raster's
+resolve; 0 none (both 0) */
+int xgpu_vulkan_rt_objects(VkDeviceAddress *structure, VkDeviceAddress *table);
+
 /* display.prism_tone_curve (with display.prism_rt "pathtraced"): the 3D
 view's rectangle (corners: x0 y0 x1 y1) through the frame's tone curve, in
 compute, before PRISM's grade and the tone map; 0 where none was drawn (no

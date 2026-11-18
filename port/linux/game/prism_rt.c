@@ -76,6 +76,7 @@ void halo_prism_rt_frame(void const *frame);
 extern unsigned char render_enumerating;
 /* prism_deferred.c's: display.lighting "raster" */
 boolean prism_deferred_raster(void);
+boolean prism_deferred_raster_object_shadows(void);
 /* render_sky.c's (the sky's sun, as PRISM's cascaded shadows find it, and
 each of its lights) */
 boolean render_sky_sun(short sky_index, real_vector3d *direction, real_rgb_color *color, real *power);
@@ -150,6 +151,7 @@ enum
 	PRISM_RT_FLAG_STOCK_MODELS = 2,
 	PRISM_RT_FLAG_LIGHT = 4,
 	PRISM_RT_FLAG_REFERENCE = 8,
+	PRISM_RT_FLAG_RASTER_OBJECTS = 16,
 	/* debug.pt_reference: its frames at most, its path's bytes
 	(XGPU_RT_REFERENCE_PATH) */
 	PRISM_RT_REFERENCE_FRAMES_MOST = 1 << 20,
@@ -1795,7 +1797,8 @@ void prism_rt_frame_begin(void)
 	frame.fraction = render_interpolation_fraction();
 	frame.generation = (unsigned int)prism_rt.generation;
 	frame.flags = (prism_rt.cache ? 0 : PRISM_RT_FLAG_NO_CACHE) | (prism_rt.objects == 2 ? PRISM_RT_FLAG_STOCK_MODELS : 0) |
-		(light_keyed() ? PRISM_RT_FLAG_LIGHT : 0);
+		(light_keyed() ? PRISM_RT_FLAG_LIGHT : 0) |
+		(raster_scene() && prism_deferred_raster_object_shadows() ? PRISM_RT_FLAG_RASTER_OBJECTS : 0);
 	reference_frame(&frame);
 	frame.settings[0] = PRISM_RT_SUN_STRENGTH;
 	frame.settings[1] = PRISM_RT_MODEL_STRENGTH;
