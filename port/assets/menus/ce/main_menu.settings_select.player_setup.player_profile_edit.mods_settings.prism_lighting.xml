@@ -18,6 +18,10 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_bake_quality" x="28" y="168" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_bake_rebake" x="28" y="189" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_bake_indicator" x="28" y="210" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/section_7" x="28" y="237" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_exposure" x="28" y="257" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_tone_curve" x="28" y="278" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_raster_objects" x="28" y="299" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -95,6 +99,38 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/bake_indicator_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.bake_indicator" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/section_7" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/section_7_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/section_7_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels" string_index="7" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_exposure" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_exposure_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_exposure_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_exposure_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_exposure_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="STYLE'S|FIXED|GAME'S|AUTO" setting="display.prism_exposure" values="style|fixed|ce|auto" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_tone_curve" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_tone_curve_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_tone_curve_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_tone_curve_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_tone_curve_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="STYLE'S|CLIPPED|FILMIC|ACES|LOCAL" setting="display.prism_tone_curve" values="style|ce|filmic|aces|local" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_raster_objects" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_raster_objects_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_raster_objects_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_raster_objects_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_raster_objects_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="BAKED LIGHT|CLASSIC'S" setting="display.prism_raster_objects" values="volume|classic" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels">
 		<string text="LIGHTING"/>
 		<string text="LIGHTING"/>
@@ -103,6 +139,10 @@
 		<string text="BAKE QUALITY"/>
 		<string text="REBAKE LIGHTMAPS"/>
 		<string text="PROGRESS ON SCREEN"/>
+		<string text="LOOK"/>
+		<string text="EXPOSURE"/>
+		<string text="HIGHLIGHTS"/>
+		<string text="OBJECTS"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/help_strings">
 		<string text=""/>
@@ -113,5 +153,9 @@
 		<string text="Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller."/>
 		<string text="Change this to bake the level you are playing again from nothing (needed after its geometry, materials or lights change; a finished bake is otherwise kept)."/>
 		<string text='Shows "Baking lightmaps 37%" at the top left while a level is baked.'/>
+		<string text=""/>
+		<string text="PRISM Raster's brightness. Style's: Auto, which adapts as an eye does, a dark place staying darker than a bright one. Game's: the frame kept as bright as Classic's. Fixed: none."/>
+		<string text="How light past white is drawn. Style's: Filmic, which rolls it off gently. ACES: punchier, a film's curve. Clipped: held at white, as Classic did."/>
+		<string text="How characters, vehicles and weapons are lit. Baked Light: by the baked light where they are. Classic's: never darker than the game lit them."/>
 	</strings>
 </menus>
