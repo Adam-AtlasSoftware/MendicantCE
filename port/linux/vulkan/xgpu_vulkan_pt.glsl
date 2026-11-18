@@ -2260,8 +2260,9 @@ void main()
         imageStore(sun_a, pixel, vec4(0.0));
         return;
     }
-    vec4 nd = imageLoad(noisy_diffuse, pixel);
-    vec4 ns = imageLoad(noisy_specular, pixel);
+    /* (this frame's samples, pre-blurred: the fix pass's pre-blur) */
+    vec4 nd = imageLoad(diff_b, pixel);
+    vec4 ns = imageLoad(spec_b, pixel);
     vec4 sr = imageLoad(sun_raw, pixel);
     vec4 hd, hs, hm, hms, hsun;
     float length_d;
@@ -2356,8 +2357,8 @@ void main()
             ivec2 q = pixel + 2 * ivec2(k < 3 ? k - 1 : k == 3 ? -1 : k == 4 ? 1 : k - 6, k < 3 ? -1 : k < 5 ? 0 : 1);
             if (!inside(q) || imageLoad(guide_now, q).x != here)
                 continue;
-            most_d = max(most_d, imageLoad(noisy_diffuse, q).a);
-            most_s = max(most_s, imageLoad(noisy_specular, q).a);
+            most_d = max(most_d, imageLoad(diff_b, q).a);
+            most_s = max(most_s, imageLoad(spec_b, q).a);
             any_ = true;
         }
         if (any_ && short_d)
@@ -2495,7 +2496,86 @@ first frames), the signal gathered wide from the neighbours on the same
 surface (the instance, the normal, the plane; their history's length the
 weight), so that a pixel's first frames are not one sample's noise; the
 same written into this frame's history. Elsewhere passed on. The variance
-where it is unknown, from the 5 x 5 neighbourhood's luminance */
+where it is unknown, from the 5 x 5 neighbourhood's luminance.
+parameters.x 1: the pre-blur instead (below) */
+/* the pre-blur (ReLAX's pre-pass, from its published descriptions): before
+the temporal pass, the light as traced spread over a disc of PREBLUR_TAPS
+points about the pixel (a radius of PREBLUR_RADIUS pixels; the specular's
+by its roughness, none on a mirror), each weighed by its plane's distance,
+its normal and the same instance only (no luminance stop: the light's
+energy is kept, a lucky sample shared with its neighbours), the disc turned
+each frame and pixel. One sample of a lamp few candidates find is then a
+twelfth as bright at a dozen pixels, not a single one at many times its
+light: round 3's moving interiors glittered with such samples and dragged
+them into streaks with the history. Written to diff_b and spec_b (free
+until the fix), which the temporal pass reads as this frame's samples */
+const int PREBLUR_TAPS = 12;
+const float PREBLUR_RADIUS = 6.0;
+void preblur(ivec2 pixel)
+{
+    uvec4 gc = imageLoad(guide_now, pixel);
+    vec4 nd = imageLoad(noisy_diffuse, pixel), ns = imageLoad(noisy_specular, pixel);
+    if (gc.x == 0u)
+    {
+        imageStore(diff_b, pixel, nd);
+        imageStore(spec_b, pixel, ns);
+        return;
+    }
+    vec3 nc = unfold(unpackSnorm2x16(gc.y));
+    float dist = uintBitsToFloat(gc.z);
+    float roughness = unpackUnorm2x16(gc.w).x;
+    vec3 pc = job.camera[0].xyz + dist * ray_of(job.camera, job.corners, vec2(pixel));
+    float radius_s = PREBLUR_RADIUS * smoothstep(0.1, 0.6, roughness);
+    float turn = float(hash_u(uint(pixel.x) * 1973u + uint(pixel.y) * 9277u + job.frame.x * 26699u) & 0xffffu) *
+        (6.2831853 / 65536.0);
+    vec3 sum_d = nd.rgb, sum_s = ns.rgb;
+    float w_d = 1.0, w_s = 1.0;
+    for (int k = 0; k < PREBLUR_TAPS; k++)
+    {
+        /* (a Vogel disc: even over the disc for any count) */
+        float r = sqrt((float(k) + 0.5) / float(PREBLUR_TAPS));
+        float a = float(k) * 2.3999632 + turn;
+        vec2 o = r * vec2(cos(a), sin(a));
+        ivec2 qd = pixel + ivec2(round(o * PREBLUR_RADIUS));
+        if (qd != pixel && inside(qd))
+        {
+            uvec4 gq = imageLoad(guide_now, qd);
+            if (gq.x == gc.x)
+            {
+                vec3 nq = unfold(unpackSnorm2x16(gq.y));
+                vec3 pq = job.camera[0].xyz + uintBitsToFloat(gq.z) * ray_of(job.camera, job.corners, vec2(qd));
+                float w = exp(-abs(dot(pq - pc, nc)) / (0.02 + 0.004 * dist)) * power16(max(dot(nq, nc), 0.0));
+                if (w > 1.0e-3)
+                {
+                    sum_d += w * imageLoad(noisy_diffuse, qd).rgb;
+                    w_d += w;
+                }
+            }
+        }
+        ivec2 qs = pixel + ivec2(round(o * radius_s));
+        if (radius_s >= 1.0 && qs != pixel && inside(qs))
+        {
+            uvec4 gq = imageLoad(guide_now, qs);
+            if (gq.x == gc.x)
+            {
+                vec3 nq = unfold(unpackSnorm2x16(gq.y));
+                vec3 pq = job.camera[0].xyz + uintBitsToFloat(gq.z) * ray_of(job.camera, job.corners, vec2(qs));
+                float rq = unpackUnorm2x16(gq.w).x;
+                float wn = power16(max(dot(nq, nc), 0.0));
+                float w = exp(-abs(dot(pq - pc, nc)) / (0.02 + 0.004 * dist)) * wn * wn * exp(-abs(rq - roughness) * 8.0);
+                if (w > 1.0e-3)
+                {
+                    sum_s += w * imageLoad(noisy_specular, qs).rgb;
+                    w_s += w;
+                }
+            }
+        }
+    }
+    sum_d /= w_d;
+    sum_s /= w_s;
+    imageStore(diff_b, pixel, vec4(sum_d, luma(sum_d)));
+    imageStore(spec_b, pixel, vec4(sum_s, luma(sum_s)));
+}
 void main()
 {
     s = Scene(push.scene);
@@ -2503,6 +2583,11 @@ void main()
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
         return;
+    if (push.parameters.x == 1u)
+    {
+        preblur(pixel);
+        return;
+    }
     vec4 dc = imageLoad(diff_a, pixel);
     vec4 sc = imageLoad(spec_a, pixel);
     vec4 vc = imageLoad(sun_a, pixel);

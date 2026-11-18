@@ -1267,6 +1267,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	deviations */
 	job->settings[0] = (flags & FLAG_PERFORMANCE) ? 60.0f : 1.0e6f;
 	job->settings[1] = 0.35f;
+	/* (HALO_PT_RAY_ROUGHNESS, a diagnosis: another roughness under which
+	the reflection is traced, 1 at every pixel) */
+	if (getenv("HALO_PT_RAY_ROUGHNESS"))
+		job->settings[1] = (float)atof(getenv("HALO_PT_RAY_ROUGHNESS"));
 	job->settings[2] = 4.0f;
 	job->settings[3] = 4.0f;
 	/* the histories: the slow one at most 32 frames, the fast 4, the fast
@@ -1471,6 +1475,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		barrier(commands);
 		if (!denoiser_off)
 		{
+			/* (the pre-blur: the fix pass's first use, the light as traced
+			spread over a small disc before the histories take it) */
+			dispatch(commands, PASS_FIX, scene, slot_buffer->address, 1, 0, 0, 0, groups_x, groups_y);
+			barrier(commands);
 			dispatch(commands, PASS_TEMPORAL, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
 			stamp(commands, time_slot, 2);
 			barrier(commands);

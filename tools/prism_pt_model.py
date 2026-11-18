@@ -582,3 +582,29 @@ def specular_virtual_amount(roughness):
     """the share of the specular's history taken by the virtual motion: 1 - smoothstep(0.1, 0.45, roughness)"""
     x = min(max((roughness - 0.1) / 0.35, 0.0), 1.0)
     return 1.0 - x * x * (3.0 - 2.0 * x)
+
+
+def preblur_offsets(taps=12, radius=6.0, turn=0.0):
+    """the pre-blur's disc (the fix pass's preblur): a Vogel disc of `taps` points, radius pixels, turned by `turn`"""
+    out = []
+    for k in range(taps):
+        r = np.sqrt((k + 0.5) / taps)
+        a = k * 2.3999632 + turn
+        out.append((int(np.round(r * np.cos(a) * radius)), int(np.round(r * np.sin(a) * radius))))
+    return out
+
+
+def preblur(image, taps=12, radius=6.0, turn=0.0):
+    """one flat surface's pre-blur: each pixel the mean of itself and its disc's taps inside the image"""
+    h, w = image.shape
+    out = np.zeros_like(image)
+    offsets = [o for o in preblur_offsets(taps, radius, turn) if o != (0, 0)]
+    for y in range(h):
+        for x in range(w):
+            total, count = image[y, x], 1.0
+            for dx, dy in offsets:
+                if 0 <= x + dx < w and 0 <= y + dy < h:
+                    total += image[y + dy, x + dx]
+                    count += 1.0
+            out[y, x] = total / count
+    return out

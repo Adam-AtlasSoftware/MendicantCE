@@ -706,3 +706,23 @@ def test_specular_virtual_amount_mirror_to_rough():
     text = GLSL.read_text()
     assert "amount = 1.0 - smoothstep(0.1, 0.45, g.roughness);" in text
     assert "vec3 image = g.point - g.eye * (sum / count);" in text
+
+
+def test_preblur_spreads_a_lucky_sample_and_keeps_the_light():
+    """the pre-blur's disc spreads one bright sample over a dozen pixels (a twelfth as bright at each), keeps a flat
+    light flat and, over a still eye's turned discs, keeps the light's mean (no luminance stop: energy kept)"""
+    offsets = model.preblur_offsets()
+    assert len(set(offsets)) >= 10
+    assert max(max(abs(dx), abs(dy)) for dx, dy in offsets) <= 6
+    flat = np.full((24, 24), 0.3)
+    assert np.allclose(model.preblur(flat), 0.3)
+    spike = np.zeros((24, 24))
+    spike[12, 12] = 120.0
+    blurred = model.preblur(spike)
+    assert blurred.max() <= 120.0 / 10.0
+    rng = np.random.default_rng(3)
+    means = [model.preblur(spike, turn=rng.uniform(0, 2 * np.pi))[6:18, 6:18].sum() for _ in range(16)]
+    assert abs(np.mean(means) - 120.0) < 120.0 * 0.15
+    text = GLSL.read_text()
+    assert "const int PREBLUR_TAPS = 12;" in text and "const float PREBLUR_RADIUS = 6.0;" in text
+    assert "float a = float(k) * 2.3999632 + turn;" in text
