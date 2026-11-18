@@ -79,9 +79,10 @@ What the units rest on (November 2026):
   bounce by the linear albedo then), CE's light target over the bake's, the median per pixel at G2's and G3's poses:
   the sunlit pixels 0.84 to 0.87 with the sun at colour × power and the page's hold (the target is under the page's
   white there by its own factor, below), against 1.19 to 1.23 with the sun over pi; the shade 1.11 to 1.67 with the
-  sun's bounce at colour × power and the flat ambient alone, before the stored albedo raises the bounce (half to twice
-  the bounce: the shade then about 0.8 to 1.2). The floor the first fit put at 3.1 to 4.1 times the ambient (5.9 to
-  7.9 traced as a radiance from the open sky, more under cover) was the sun's and the domes' bounce missing its pi.
+  sun's bounce at colour × power and the flat ambient alone (b30's shade against the raw page with the rig as it now
+  is: 0.93 to 1.01 at G2, 0.66 to 0.75 under G3's cliff). The floor the first fit put at 3.1 to 4.1 times the ambient
+  (5.9 to 7.9 traced as a radiance from the open sky, more under cover) was the sun's and the domes' bounce missing its
+  pi.
 - **The ambient is flat and by the cluster's sky** (Tool's, as c20 and both accounts give it: no visibility ray). An
   interior's clusters have no sky: c40's chamber takes sky 0's indoor values (0.066 0.088 0.128), a10's none (its sky's
   ambient powers are 0). `prism_scene_static.c` marks each drawn triangle of an indoor cluster (its middle a little off
@@ -100,24 +101,36 @@ target is under the page by that factor, a bias of every fit against it (by the 
 The sky the rig takes is the BSP's own (the one most of its clusters have), whatever the window sees, so that a bake's
 rig is the same wherever its camera was.
 
-**The bounces' albedo.** In the light's units a surface's albedo is its base map's mean **as stored** (the byte over
-255, no curve; 0.03 to 0.85; the base map alone, as Tool's radiosity reflected it: the detail maps are the frame's, and
-a shader with no base map reflects nothing), the reflectance CE's frame shows (its light times the stored texel), and so
-the one the light the rig is measured against bounced: the bake's, R's and the drawn objects' alike (`prism_rt_albedo_stored`; the fitted rig keeps the mean made linear it was fitted with;
-`HALO_PRISM_ALBEDO` `stored` or `linear` overrides it, a diagnostic). Made linear (a byte to the power 2.2) instead,
-a10's light came out far darker than CE's away from its lamps. Measured on G5's three poses, CE's light target against
-the bake's whole light, every level pixel (luminance, the pixels at either image's white left out; a10's BSP 0 at
-`ultra`, the lamps' double count fixed):
+**The bounces' albedo.** In the light's units a surface's albedo is its base map's mean **made linear** (a byte to
+the power 2.2, its detail maps' factors as CE's frame applies them; 0.03 to 0.85), the reflectance of the linear light
+the bake carries and the one the path tracer's materials reflect with: the bake's, R's and the drawn objects' alike
+(`prism_rt_albedo_stored` false; `HALO_PRISM_ALBEDO` `stored` takes the base map's mean as stored, the byte over 255, a
+diagnostic). Decided (November 2026) from the bake's light over CE's raw page (the median of the level's pixels; draft
+bakes, the plain paths, 32 bounces, the doors out, the sky lights' test distances, the flat ambient by the cluster's
+sky):
 
-- **The shape.** Each bake at its own best single scale, the rms of log2(CE / bake) is 0.76, 0.83 and 0.86 (p0, p1,
-  p2) with the stored mean against 1.28, 1.17 and 1.17 made linear: the stored mean has CE's flatter light at every
-  pose, the cryo bay included.
-- **The level** decides neither way, and no single unit of the cards fits both kinds of place under either rule.
-  Where lamps light a place directly the linear bake is at CE's level and the stored one over it: the cryo bay
-  (the bands of CE's light that hold 71% of p0) 1.08 to 1.20 times CE's light against 2.2; the corridor lit through
-  p1's windows 0.94 to 1.05 against 1.14 to 1.27; c40's chamber, the sky's floor left out, 0.9 to 1.3 against 1.5 to
-  2.0. Where no lamp is near, the linear bake is at 0.14 to 0.43 of CE's light and the stored one at 0.5 to 1.1 (1.7 in
-  p2's darkest third).
+| Place (the bake over the page) | Linear | Stored |
+| --- | --- | --- |
+| a10's cryo bay | 0.95 | 1.59 |
+| a10, the wall behind p1's windows | 0.51 | 0.96 |
+| a10, p2's corner | 0.49 | 1.26 |
+| c40's chamber | 1.49 to 1.58 | 1.64 to 1.70 |
+| c40's canyon, moonlit | 1.22 to 1.33 | 1.43 to 1.56 |
+| c40's canyon, where the moon is not | 1.35 to 1.40 | 1.93 to 1.99 |
+| b30, G2 sunlit | 0.92 to 1.09 | 1.04 to 1.63 |
+| b30, G2 shade | 0.93 to 1.01 | 1.19 to 1.26 |
+| b30, G3 sunlit | 0.88 to 0.89 | 1.06 to 1.07 |
+| b30, G3 shade | 0.66 to 0.75 | 1.21 to 1.28 |
+
+The rms of log2(bake / page) over the ten places is 0.55 with the linear mean and 0.52 with the stored one; neither is
+within 30% of the page everywhere. The linear mean misses a10's far corners (half the page), c40's chamber (1.5), its
+canyon (1.3 to 1.4) and b30's deep shade under its cliff (0.7); the stored mean is over almost everywhere (1.2 to 2.0),
+a flatter error the exposure would absorb, but a reflectance the linear light does not have, which carries the walls'
+colour into the light. Tool's own pages hold far less bounce than a converged solve (c40's moonlit snow is the moon and
+the ambient alone; 28% of a10's texels are black, with no floor), which the weaker linear bounce is nearer. The stored
+mean was taken at first (on a10's far corners, 0.14 to 0.43 of CE's light made linear) while the bake still had the
+doors in it (they shaded those corners, Tool never had them) and the old rig (the sun over pi, the floor at pi); with
+both gone the comparison above undid it. The rule changes no more without a whole-BSP comparison in lightmap space.
 
 The cards' unit stays 1: the level a place is off by is one factor, the exposure's (Raster's exposure below). The ceiling
 matters little (0.95 for 0.85 moves the light 1 to 4%). The units' first check against CE left out the pixels whose
