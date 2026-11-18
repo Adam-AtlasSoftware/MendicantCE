@@ -357,6 +357,9 @@ struct filter_result
 struct bake_state
 {
 	int step;
+	/* (the step a failure stopped it at: what it had made by then stays
+	traced) */
+	int failed_at;
 	uint32_t generation;
 	int32_t bsp;
 	uint32_t quality, request;
@@ -1802,8 +1805,23 @@ static void bake_free(struct bake_state *b)
 static void bake_fail(struct bake_state *b, const char *why)
 {
 	host_logf(HOST_LOG_WARN, "prism bake: %s bsp %d: %s", b->map, (int)b->bsp, why);
+	if (b->step != STEP_FAILED)
+		b->failed_at = b->step;
 	b->step = STEP_FAILED;
 	status_set(XGPU_BAKE_STATUS_STATE, XGPU_BAKE_STATE_FAILED);
+}
+
+/* whether the bake's scene is on the GPU to be traced and looked up: past
+its upload, or failed past it (port: a failure after the upload, a card
+shared with the desktop out of memory for the importance grid's update, the
+sun mask, the volume or the probes, left the frame Classic's for good with a
+whole bake loaded (the demo's build of 4692c0483 under its launcher, "no bake's
+scene to trace yet" after "the bake is whole"); what it had made by then is
+traced, as a bake still being made is, its missing parts the shaders'
+fallbacks) */
+static int bake_traceable(const struct bake_state *b)
+{
+	return b && b->scene.address && (b->step == STEP_FAILED ? b->failed_at > STEP_UPLOAD : b->step > STEP_UPLOAD);
 }
 
 /* the bake's inputs taken (the render thread's: the scene, the materials,
@@ -5129,6 +5147,19 @@ static void bake_frame(void)
 		status_set(XGPU_BAKE_STATUS_STATE, XGPU_BAKE_STATE_PAUSED);
 		return;
 	}
+	/* (HALO_BAKE_DEBUG_FAIL=<step>: the bake failed as it reaches that step
+(4 the importance grid, 6 the sun mask, 7 the volume, 8 the reflection
+probes), as a card out of memory fails it; for the tests of what a failed
+bake still traces) */
+	{
+		const char *fail = getenv("HALO_BAKE_DEBUG_FAIL");
+
+		if (fail && b->step == atoi(fail))
+		{
+			bake_fail(b, "failed as HALO_BAKE_DEBUG_FAIL asks");
+			return;
+		}
+	}
 	timestamp(commands, 0);
 	switch (b->step)
 	{
@@ -5901,11 +5932,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 
 	if (whole)
 		*whole = 0;
-	if (!bake.made || !b || !copy || !base || !additions || !words || !extras || !view || !b->scene.address ||
-		b->step <= STEP_UPLOAD ||
+	if (!bake.made || !b || !copy || !base || !additions || !words || !extras || !view || !bake_traceable(b) ||
 		(!b->physical_count && !b->volume.done))
-		return NULL;
-	if (b->step == STEP_FAILED)
 		return NULL;
 	description = xgpu_vulkan_image_description(copy);
 	if (!bake.raster_light || xgpu_vulkan_image_description(bake.raster_light)->width != description->width ||
@@ -6069,8 +6097,7 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	struct bake_state *b = bake.bake;
 
 	memset(lookup, 0, sizeof(*lookup));
-	if (!bake.made || !b || b->step == STEP_FAILED || b->step <= STEP_UPLOAD || !b->scene.address ||
-		!b->block.tlas)
+	if (!bake.made || !bake_traceable(b) || !b->block.tlas)
 		return 0;
 	lookup->scene = b->scene.address;
 	lookup->pages = b->pages.address;
