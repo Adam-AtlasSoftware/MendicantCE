@@ -38,6 +38,7 @@ def settings_text(text):
 
 HARNESS = r"""
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 typedef int BOOL;

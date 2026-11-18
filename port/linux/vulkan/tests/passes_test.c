@@ -2867,8 +2867,16 @@ static void half_test(void)
 {
 	assert(half_value(0x3c00) == 1.0f && half_value(0x3800) == 0.5f && half_value(0xbc00) == -1.0f);
 	assert(half_value(0x4000) == 2.0f && half_value(0x0001) == ldexpf(1.0f, -24));
-	assert(half_byte(0x3c00) == 255 && half_byte(0x4400) == 255 && half_byte(0xbc00) == 0);
-	assert(half_byte(0x3800) == 128 && half_byte(0x0000) == 0);
+	const float *values = half_values();
+	uint32_t half;
+
+	/* (the table, as the frame's read back uses it, and without it) */
+	assert(values);
+	for (half = 0; half < 65536; half++)
+		assert(memcmp(&values[half], &(float){ half_value((uint16_t)half) }, sizeof(float)) == 0);
+	assert(half_byte(values, 0x3c00) == 255 && half_byte(values, 0x4400) == 255 && half_byte(values, 0xbc00) == 0);
+	assert(half_byte(values, 0x3800) == 128 && half_byte(values, 0x0000) == 0);
+	assert(half_byte(NULL, 0x3c00) == 255 && half_byte(NULL, 0x3800) == 128 && half_byte(NULL, 0xbc00) == 0);
 }
 
 /* ---------- HALO_VULKAN_DISCARDS: the passes in segments
