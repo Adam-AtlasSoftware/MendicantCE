@@ -110,11 +110,6 @@ void prism_bake_filter_defaults(struct prism_bake_filter_parameters *parameters,
 	parameters->variance_floor = 0.002f;
 }
 
-static float luma(float const c[3])
-{
-	return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
-}
-
 /* one a-trous pass at step over the square [low, high) of the window */
 static void filter_pass(struct prism_bake_filter_texel const *from, struct prism_bake_filter_texel *to, int step,
 	int low, int high, struct prism_bake_filter_parameters const *p)
@@ -128,12 +123,12 @@ static void filter_pass(struct prism_bake_filter_texel const *from, struct prism
 		{
 			struct prism_bake_filter_texel const *c = &from[y * PRISM_BAKE_FILTER_WINDOW + x];
 			struct prism_bake_filter_texel *o = &to[y * PRISM_BAKE_FILTER_WINDOW + x];
-			float lc, sum = 0.0f, variance = 0.0f, acc[9];
+			float lc, sum = 0.0f, variance = 0.0f, level = 0.0f, acc[9];
 
 			*o = *c;
 			if (c->chart < 0)
 				continue;
-			lc = luma(c->light);
+			lc = c->level;
 			memset(acc, 0, sizeof(acc));
 			for (dy = -1; dy <= 1; dy++)
 				for (dx = -1; dx <= 1; dx++)
@@ -153,7 +148,7 @@ static void filter_pass(struct prism_bake_filter_texel const *from, struct prism
 							continue;
 						wn = (cosine - p->normal_cos) / (1.0f - p->normal_cos);
 						wn = wn > 1.0f ? 1.0f : wn * wn;
-						lq = luma(q->light);
+						lq = q->level;
 						d = lc - lq;
 						f = p->variance_floor * (lc > lq ? lc : lq);
 						v = c->variance + q->variance + f * f + 1.0e-20f;
@@ -165,6 +160,7 @@ static void filter_pass(struct prism_bake_filter_texel const *from, struct prism
 						acc[3 + k] += w * q->indirect[k];
 						acc[6 + k] += w * q->moment[k];
 					}
+					level += w * q->level;
 					variance += w * w * q->variance;
 					sum += w;
 				}
@@ -174,6 +170,7 @@ static void filter_pass(struct prism_bake_filter_texel const *from, struct prism
 				o->indirect[k] = acc[3 + k] / sum;
 				o->moment[k] = acc[6 + k] / sum;
 			}
+			o->level = level / sum;
 			o->variance = variance / (sum * sum);
 		}
 }

@@ -98,11 +98,11 @@ groups' sums of luminance: the robust mean's, prism_bake_filter.h) */
 /* the probes a batch */
 #define VOLUME_BATCH (64u * 4096u)
 /* a raster tile's words (2 a texel), the bake file's tile (4 a texel), the
-filter's words of a tile (3 a texel: the normal, the chart + 1, the
-variance of the luminance's mean) */
+filter's words of a tile (4 a texel: the normal, the chart + 1, the
+variance of the level, the robust mean's factor) */
 #define RASTER_TILE_WORDS (TILE_TEXELS * 2u)
 #define FILE_TILE_WORDS (TILE_TEXELS * 4u)
-#define AUX_TILE_WORDS (TILE_TEXELS * 3u)
+#define AUX_TILE_WORDS (TILE_TEXELS * 4u)
 /* the filtered tiles waiting to be written and drawn at most, and those a
 frame writes */
 #define FILTER_RING 2048u
@@ -2843,9 +2843,9 @@ static float texel_variance(const float *a, uint32_t count)
 }
 
 /* a tile's results from its readback: written to the file (with the
-filter's words of its texels, where it filters), drawn, its mask asked
-for where its sun is mixed. Each texel's light is its robust mean's
-(prism_bake_filter.h) */
+filter's words of its texels, where it filters: their robust means'
+levels, prism_bake_filter.h), drawn, its mask asked for where its sun is
+mixed */
 static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t tile_index, const float *accumulators,
 	const uint32_t *states, const float *records)
 {
@@ -2889,8 +2889,9 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		}
 		if (!flags || (states[index] != 1 && states[index] != 2))
 			continue;
-		/* (the robust mean: the light taken to its groups' median where a
-		firefly put their mean far over it) */
+		/* (the robust mean: the level the filter compares, the groups'
+		median where a firefly put their mean far over it; the light as
+		sampled) */
 		variance = texel_variance(a, count);
 		if (b->robust_on && !b->drafting)
 		{
@@ -2900,15 +2901,15 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		}
 		for (axis = 0; axis < 3; axis++)
 		{
-			t->total[axis] = (a[axis] + a[3 + axis]) * factor;
-			t->indirect[axis] = a[3 + axis] * factor;
+			t->total[axis] = a[axis] + a[3 + axis];
+			t->indirect[axis] = a[3 + axis];
 			n[axis] = r[3 + axis];
 		}
 		lum = luma3(t->total);
 		/* (the direction: the moment's luminance over 2 pi, as a share of
 		the light at the texel's normal; at most 2) */
 		for (axis = 0; axis < 3; axis++)
-			t->k[axis] = lum > BLACK_FLOOR ? a[6 + axis] * factor / (6.2831853f * lum) : 0.0f;
+			t->k[axis] = lum > BLACK_FLOOR ? a[6 + axis] / (6.2831853f * lum) : 0.0f;
 		k = sqrtf(t->k[0] * t->k[0] + t->k[1] * t->k[1] + t->k[2] * t->k[2]);
 		if (k > 1.9f)
 			for (axis = 0; axis < 3; axis++)
@@ -2922,12 +2923,14 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 			t->sun = 0.0f;
 		t->valid = 1;
 		/* (the filter's words: the normal, the chart (the texel's atlas
-		triangle's) + 1, the variance of the luminance's mean) */
+		triangle's) + 1, the variance of the level, the robust mean's
+		factor) */
 		memcpy(&kept, &r[7], 4);
 		chart = kept && kept - 1u < b->plan.atlas.triangle_count ? b->plan.atlas.triangle_charts[kept - 1u] : -1;
-		aux[index * 3] = prism_bake_normal_pack(n);
-		aux[index * 3 + 1] = chart >= 0 ? (uint32_t)chart + 1u : 0u;
-		memcpy(&aux[index * 3 + 2], &variance, 4);
+		aux[index * 4] = prism_bake_normal_pack(n);
+		aux[index * 4 + 1] = chart >= 0 ? (uint32_t)chart + 1u : 0u;
+		memcpy(&aux[index * 4 + 2], &variance, 4);
+		memcpy(&aux[index * 4 + 3], &factor, 4);
 	}
 	sun_state = tile_words(texels, raster, file, sun);
 	for (index = 0; index < TILE_TEXELS; index++)
@@ -2991,11 +2994,11 @@ static void filter_texels(const uint32_t *file, const uint32_t *aux, struct pris
 	{
 		struct prism_bake_filter_texel *t = &texels[index];
 		uint32_t w1, axis;
-		float lum;
+		float lum, factor;
 
 		memset(t, 0, sizeof(*t));
 		t->chart = -1;
-		if (!file || !aux || ((file[index * 4 + 3] >> 24) & 3u) != 1u || !aux[index * 3 + 1])
+		if (!file || !aux || ((file[index * 4 + 3] >> 24) & 3u) != 1u || !aux[index * 4 + 1])
 			continue;
 		rgb9e5_decode(file[index * 4], t->light);
 		rgb9e5_decode(file[index * 4 + 2], t->indirect);
@@ -3003,9 +3006,11 @@ static void filter_texels(const uint32_t *file, const uint32_t *aux, struct pris
 		w1 = file[index * 4 + 1];
 		for (axis = 0; axis < 3; axis++)
 			t->moment[axis] = ((float)((w1 >> (axis * 8)) & 255u) / 255.0f - 0.5f) * 4.0f * lum;
-		memcpy(&t->variance, &aux[index * 3 + 2], 4);
-		prism_bake_normal_unpack(aux[index * 3], t->normal);
-		t->chart = (int32_t)aux[index * 3 + 1] - 1;
+		memcpy(&t->variance, &aux[index * 4 + 2], 4);
+		memcpy(&factor, &aux[index * 4 + 3], 4);
+		t->level = lum * factor;
+		prism_bake_normal_unpack(aux[index * 4], t->normal);
+		t->chart = (int32_t)aux[index * 4 + 1] - 1;
 	}
 }
 

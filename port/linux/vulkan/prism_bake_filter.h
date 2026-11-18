@@ -10,18 +10,22 @@ noise"): two steps between the estimator and the bake file.
   disagree badly (the mean over the groups' median by more than three of
   the median's standard errors, measured from the groups' spread, and the
   texel's largest sample alone a good part of that excess: a firefly) the
-  texel's light is scaled to the groups' median (a median of means).
-  Each group's mean tends to the texel's light as its samples grow, so
-  the median does too: unbiased in the limit, as the plain mean is.
+  texel's level is the groups' median (a median of means), and its noise
+  the median's. Each group's mean tends to the texel's light as its
+  samples grow, so the median does too: unbiased in the limit. The level
+  steers the filter (below): the texel's light is not scaled, since a
+  rare path's light is light the texel's neighbours should have had too
+  (scaling the texels to their medians took half the light of b30's
+  interior walls lit by such paths); the filter spreads it over them.
 - The filter in chart space. The tiers under `max` stop on a sample
   budget, not on their noise, and their texels keep a grain between two
   seeds; `max` runs to its noise floor and takes at most the mildest pass.
   Each pass of an a-trous filter (3 x 3 taps of 1/4, 1/2, 1/4, their
   spacing doubled each pass: 1, 2, 4) averages a texel with those of its
   neighbours on the same chart whose faces turn little from its own and
-  whose light differs from its own by no more than their noise explains:
-  the weight of a neighbour's light falls with the difference over the
-  two texels' measured standard errors (the 1% rule's statistics), so an
+  whose level differs from its own by no more than their noise explains:
+  the weight of a neighbour falls with the difference of the two levels
+  over the two texels' measured standard errors (the 1% rule's statistics), so an
   edge that the samples resolve (a shadow's, a lamp's pool) stays, and a
   difference the noise explains is averaged away. The variance of each
   result is carried to the next pass. Three passes reach 7 texels, less
@@ -73,12 +77,13 @@ float prism_bake_robust_factor(float const sums[PRISM_BAKE_GROUPS], uint32_t cou
 
 /* a texel in the filter: its light less the sun's, the indirect light
 alone, the light's moment (the direction's share k times the light's
-luminance), the variance of its luminance's mean, its face's normal and
-its chart (-1: not baked, a fill or none: neither filtered nor read) */
+luminance), its level (the luminance the weights compare: the robust
+mean's), the variance of its level, its face's normal and its chart (-1:
+not baked, a fill or none: neither filtered nor read) */
 struct prism_bake_filter_texel
 {
 	float light[3], indirect[3], moment[3];
-	float variance;
+	float level, variance;
 	float normal[3];
 	int32_t chart;
 };

@@ -1286,6 +1286,7 @@ static void filter_flat(struct prism_bake_filter_texel *t, float light, float va
 	memset(t, 0, sizeof(*t));
 	t->light[0] = t->light[1] = t->light[2] = light;
 	t->indirect[0] = t->indirect[1] = t->indirect[2] = 0.5f * light;
+	t->level = 0.2126f * light + 0.7152f * light + 0.0722f * light;
 	t->variance = variance;
 	t->normal[2] = nz;
 	t->normal[0] = nz < 1.0f ? (float)sqrt(1.0 - nz * nz) : 0.0f;
@@ -1369,6 +1370,18 @@ static void test_filter(void)
 	}
 	check(after < before / 8.0 && fabs(sum_out / 256.0 - 1.0) < 0.02 && out[0].variance < 0.01f / 8.0f,
 		"filter_flat", "a flat chart's noise not reduced, or its light moved");
+	/* a firefly's texel (its level its groups' median, its light as
+	sampled): its light spread over its neighbours, not lost */
+	for (k = 0; k < 48 * 48; k++)
+		filter_flat(&window[k], 1.0f, 1.0e-4f, 7, 1.0f);
+	window[24 * 48 + 24].light[0] = window[24 * 48 + 24].light[1] = window[24 * 48 + 24].light[2] = 50.0f;
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (sum_out = 0.0, m = 0.0, k = 0; k < 256; k++)
+	{
+		sum_out += out[k].light[0];
+		m = out[k].light[0] > m ? out[k].light[0] : m;
+	}
+	check(fabs(sum_out - (256.0 + 49.0)) < 3.0 && m < 5.0, "filter_firefly", "a firefly's light lost or kept in place");
 	/* an edge the samples resolve stays: half the chart at 1, half at 4,
 	each with 1% noise */
 	for (y = 0; y < 48; y++)
