@@ -559,6 +559,28 @@ pixel, the first round's limit, to fit a hold):
   to 1.61: the brighter corridors' noise in motion, which fails the flicker gate too. Two faults the round found on G5 are fixed: the denoiser's clamps took away light a few samples see
   (82c400552), and ReSTIR's reservoir with a hidden sample divided the next frames' light (ae9a51c4f).
 
+**Round 1's captures read again (round 2).**
+
+- *The references as the gates' frames see them.* Round 1's stopping rule measured a reference's noise linear, unclamped
+  and at full size. The gates measure the 8-bit frames brought to 960 × 540 by bilinear filtering, where a clipped
+  pixel's noise does not show and each pixel's independent noise keeps 0.098 of its variance. Read that way (`noise` ×
+  the drawn luminance, the clipped pixels left out, the resize's share), round 1's references were: G2 p0, p1, p2
+  0.000001, 0.0052, 0.000017; G3 0.000005, 0.000001, 0.000002 (converged where the linear rule said 0.05 to 0.23);
+  G5 0.0040, 0.0158, 0.0237 (not converged: 4 to 24 times too noisy at 1536 frames). G2's p1 figure came from pixels
+  with negative specular light (below).
+- *R's black pixels.* G2's and G3's references had 3,209 to 21,425 pixels a pose black where the live frames are lit:
+  the edges of b30's rocks and the leaves of its trees, objects whose normal at the pixel faces away from the eye.
+  GGX's visible-normal weight is negative there, and R summed negative reflections (its `spec` channel below 0, the
+  luminance's mean below 0, the drawn pixel black). G3's held-still blotch at p0 (0.0144) and part of G2's FLIP were
+  this. Fixed in round 2 (an object's normal mirrored toward the eye; the weight 0 below the surface).
+- *The moves against the light as traced* (`v4_m3_runs/tools/bias_map.py`: each step's denoised frame against its
+  denoiser-off frame in 24 × 24 blocks): G2's denoised foreground lost light steadily through the first leg's forward
+  move, 0.993 of the traced light at its second step to 0.926 at its 35th (12% of the leg's blocks more than 10% darker),
+  and came back on the other legs: the sun's visibility history blurred by each step's resampling. G5's denoised frames
+  were brighter than the traced light, the first leg's median block 1.14 times it (57% of its blocks more than 10%
+  brighter): single samples of lamps the grid's lists missed, held in short histories and spread into blobs. Round 2's
+  visibility hold, short-history firefly hold and light tree answer these.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
