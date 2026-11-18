@@ -905,10 +905,11 @@ static const struct config_setting config_settings[] =
 		"high 2, ultra 3)." },
 	{ "display.prism_exposure", _config_string, "\"style\"", "HALO_PRISM_EXPOSURE", _environment_value,
 		_platform_desktop,
-		"PRISM path tracing's exposure: \"fixed\" CE's; \"ce\" follows the\n"
-		"traced light so that the frame's middle stays as bright as CE's\n"
-		"(within display.prism_exposure_range); \"auto\" adapts freely, as an\n"
-		"eye does; \"style\" the style's (faithful fixed, remix ce)." },
+		"PRISM's exposure (path tracing and PRISM Raster): \"fixed\" CE's;\n"
+		"\"ce\" follows the traced or baked light so that the frame's middle\n"
+		"stays as bright as CE's (within display.prism_exposure_range); \"auto\"\n"
+		"adapts freely, as an eye does; \"style\" the style's (faithful fixed,\n"
+		"remix ce; PRISM Raster ce)." },
 	{ "display.prism_exposure_range", _config_real, "1.5", "HALO_PRISM_EXPOSURE_RANGE", _environment_value,
 		_platform_desktop,
 		"PRISM path tracing, exposure \"ce\": how far it may move from CE's, in\n"
@@ -921,7 +922,8 @@ static const struct config_setting config_settings[] =
 		"PRISM path tracing: stops added to the adapted exposure (-4 to 4)." },
 	{ "display.prism_tone_curve", _config_string, "\"style\"", "HALO_PRISM_TONE_CURVE", _environment_value,
 		_platform_desktop,
-		"PRISM path tracing: how the light past white is drawn: \"ce\" clipped,\n"
+		"PRISM path tracing and PRISM Raster: how the light past white is\n"
+		"drawn: \"ce\" clipped,\n"
 		"as CE did; \"filmic\" rolled off gently (CE's darker tones kept);\n"
 		"\"aces\" the film industry's curve; \"local\" each region's light\n"
 		"compressed about its own level, so that a dark room beside a sunlit\n"

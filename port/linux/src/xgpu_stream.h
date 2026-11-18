@@ -2375,7 +2375,9 @@ enum
 #define XGPU_SCENE_STATIC_ATTRIBUTE_WORDS 16u
 /* a triangle's attributes: its material (SCENE_MATERIAL's id; 0 none),
 its surface (the BSP's surface index), its kind (XGPU_RT_TRIANGLE_*) in
-bits 0 to 7, its level (XGPU_SCENE_LEVEL_*) in bits 8 and 9 and its
+bits 0 to 7, its level (XGPU_SCENE_LEVEL_*) in bits 8 and 9, bit 10
+(XGPU_SCENE_INDOOR) where it is in one of the structure's indoor clusters
+(a cluster with no sky, found from its middle a little off its face) and its
 lightmap page in 16 to 31 (XGPU_SCENE_PAGE_NONE: no lightmap), its three
 corners' lightmap coordinates (six floats, 0 to 1 across the page: the
 baker's atlas is CE's pages scaled), their base map coordinates (six
@@ -2401,6 +2403,7 @@ enum
 	XGPU_SCENE_LEVEL_FAR,
 };
 #define XGPU_SCENE_LEVEL_SHIFT 8
+#define XGPU_SCENE_INDOOR (1u << 10)
 #define XGPU_SCENE_PAGE_SHIFT 16
 #define XGPU_SCENE_PAGE_NONE 0xffffu
 #define XGPU_SCENE_TRACED_NONE 0xffffffffu

@@ -14,6 +14,7 @@ deferred resolve asks it for the light of display.lighting "raster".
 #define __HALO_LINUX_XGPU_VULKAN_BAKE_H
 
 #include <stdint.h>
+#include <vulkan/vulkan_core.h>
 
 #include "../src/xgpu_stream.h"
 
@@ -60,6 +61,16 @@ struct xgpu_vulkan_bake_lookup
 	float probe_spacing, coarse_spacing, gamma;
 };
 int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup);
+
+/* PRISM v4's exposure (docs/prism_bake.md, "Raster's exposure"): the meter's
+buffer (made in commands the first time; 0 none), which a frame's pass fills
+with its level pixels' lit light and CE's light (xgpu_vulkan_bake_glsl.inc's
+EXPOSURE_COMMON: meter_add), and the step after the pass, which makes the
+exposure the next frame reads (exposure_of) from display.prism_exposure's
+settings and empties the meter. Raster's frame takes them; the composite to
+come takes the same */
+VkDeviceAddress xgpu_vulkan_bake_meter(VkCommandBuffer commands);
+void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands);
 
 /* the device going away: everything let go of */
 void xgpu_vulkan_bake_shutdown(void);

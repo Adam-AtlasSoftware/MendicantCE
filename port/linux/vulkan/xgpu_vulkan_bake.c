@@ -78,7 +78,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 11u
+#define BAKE_VERSION 13u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -214,6 +214,7 @@ enum
 	PIPELINE_RASTER,
 	PIPELINE_COMPACT,
 	PIPELINE_REFLECTION,
+	PIPELINE_EXPOSURE,
 	PIPELINES
 };
 
@@ -389,6 +390,8 @@ struct bake_state
 	/* (the finished texels whose last samples the firefly rule asked for:
 	their largest sample over their mean wanted more than their noise did) */
 	double texels_firefly_bound;
+	/* HALO_BAKE_SEED's (0 none) */
+	uint32_t seed;
 	/* the `max` tier's noise floor (radiance; 0 none) and the texels it
 	stopped (converged with their light below it) */
 	float noise_floor;
@@ -482,6 +485,10 @@ static struct
 	double gpu_milliseconds;
 	struct xgpu_vulkan_image *raster_light;
 	uint32_t raster_frames;
+	/* the exposure's meter (xgpu_vulkan_bake_glsl.inc's EXPOSURE_COMMON: 128
+	bins, the exposure's log2, whether it is made), kept from frame to frame */
+	struct bake_buffer meter;
+	double exposure_clock;
 
 	uint32_t status_serial;
 	double last_status;
@@ -840,7 +847,8 @@ static int make(void)
 		!pipeline_make(PIPELINE_RASTER, raster_types, 6, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
 		!pipeline_make(PIPELINE_COMPACT, NULL, 0, xgpu_vulkan_bake_compact_words, xgpu_vulkan_bake_compact_count) ||
 		!pipeline_make(PIPELINE_REFLECTION, NULL, 0, xgpu_vulkan_bake_reflection_words,
-		xgpu_vulkan_bake_reflection_count))
+		xgpu_vulkan_bake_reflection_count) ||
+		!pipeline_make(PIPELINE_EXPOSURE, NULL, 0, xgpu_vulkan_bake_exposure_words, xgpu_vulkan_bake_exposure_count))
 	{
 		host_logf(HOST_LOG_WARN, "prism bake: its passes cannot be made: no bake");
 		return 0;
@@ -1754,7 +1762,7 @@ static struct bake_state *bake_begin(void)
 	const struct xgpu_stream_rt_frame *frame;
 	const float *materials;
 	const uint32_t *alpha;
-	uint32_t generation, material_count, alpha_words, index, kept = 0, lamps = 0;
+	uint32_t generation, material_count, alpha_words, index, kept = 0, lamps = 0, indoor = 0;
 	struct bake_state *b;
 	uint64_t hash;
 	float power = 0.0f;
@@ -1851,6 +1859,7 @@ static struct bake_state *bake_begin(void)
 	}
 	kept = 0;
 	lamps = 0;
+	indoor = 0;
 	for (index = 0; index < set->triangle_count; index++)
 	{
 		const uint32_t *a = set->attributes + (size_t)index * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS;
@@ -1889,6 +1898,7 @@ static struct bake_state *bake_begin(void)
 		memcpy(b->plan.positions + (size_t)kept * 9, p, 36);
 		memcpy(b->plan.attributes + (size_t)kept * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS, a,
 			XGPU_SCENE_STATIC_ATTRIBUTE_WORDS * 4);
+		indoor += (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] & XGPU_SCENE_INDOOR) != 0;
 		b->plan.tiers[kept] = bake.tiers && surface < bake.tier_count ? bake.tiers[surface] : 0;
 		kept++;
 	}
@@ -1907,6 +1917,15 @@ static struct bake_state *bake_begin(void)
 	b->noise_floor = b->quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
 		bake.control.noise_floor <= 10.0f ? bake.control.noise_floor * 0.18f : 0.0f;
 	b->block.rig[15][2] = b->noise_floor;
+	/* (HALO_BAKE_SEED: the samples from another seed, a diagnostic: rig[15].w
+	its bits, mixed into each texel's and probe's seed; 0 as before) */
+	{
+		const char *seed_text = getenv("HALO_BAKE_SEED");
+		uint32_t seed = seed_text ? (uint32_t)strtoul(seed_text, NULL, 10) : 0u;
+
+		memcpy(&b->block.rig[15][3], &seed, 4);
+		b->seed = seed;
+	}
 	memcpy(b->block.sun, frame->sun, sizeof(b->block.sun));
 	b->material_count = material_count;
 	/* the key */
@@ -1942,6 +1961,8 @@ static struct bake_state *bake_begin(void)
 	b->key.light_hash = hash;
 	b->key.settings_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
 	b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->noise_floor, sizeof(b->noise_floor));
+	if (b->seed)
+		b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->seed, sizeof(b->seed));
 	b->key.baker_version = BAKE_VERSION;
 	b->key.quality = b->quality;
 	b->key.convergence_threshold = bake.control.threshold > 0.0f ? bake.control.threshold : 0.01f;
@@ -1975,10 +1996,10 @@ static struct bake_state *bake_begin(void)
 		b->thread_running = 1;
 	else
 		plan_thread(&b->plan);
-	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: begun (quality %u): %u triangles, %u lamps (power %.2f), %u "
-		"fixtures (of %u: those of no light left out), %u triangles of static scenery, %u bricks; %s", b->map,
-		(int)b->bsp, b->quality, kept, lamps, (double)power, b->fixture_count, b->fixtures_seen, b->scenery_count,
-		bake.brick_count, b->path);
+	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: begun (quality %u): %u triangles (%u in indoor clusters), %u lamps "
+		"(power %.2f), %u fixtures (of %u: those of no light left out), %u triangles of static scenery, %u bricks; %s",
+		b->map, (int)b->bsp, b->quality, kept, indoor, lamps, (double)power, b->fixture_count, b->fixtures_seen,
+		b->scenery_count, bake.brick_count, b->path);
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the rig: sun %.5f %.5f %.5f toward %.5f %.5f %.5f (%s, disc %.4f), sky "
 		"%.4f %.4f %.4f, gamma %.2f, emissive scale %.3f", b->map, (int)b->bsp, (double)b->block.rig[0][0],
 		(double)b->block.rig[0][1], (double)b->block.rig[0][2], (double)b->block.sun[0], (double)b->block.sun[1],
@@ -2242,7 +2263,8 @@ static int bake_upload(struct bake_state *b)
 		uint32_t *to = info + (size_t)slot * 8;
 
 		memcpy(vertices + (size_t)slot * 9, plan->positions + (size_t)index * 9, 36);
-		to[0] = (traced < b->material_count ? traced : b->material_count) | (level != XGPU_SCENE_LEVEL_BOTH ? 0x10000u : 0u);
+		to[0] = (traced < b->material_count ? traced : b->material_count) | (level != XGPU_SCENE_LEVEL_BOTH ? 0x10000u : 0u) |
+			((a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] & XGPU_SCENE_INDOOR) ? 0x20000u : 0u);
 		memcpy(to + 1, a + XGPU_SCENE_ATTRIBUTE_BASE, 6 * sizeof(float));
 		to[7] = index;
 	}
@@ -2352,7 +2374,7 @@ static int bake_upload(struct bake_state *b)
 		vpages[index * 8 + 4] = plan->vpages[index].table_first;
 	}
 	/* (each atlas triangle: its corners in its virtual page's texels, its
-	world corners, its flags: 1 a remodel's) */
+	world corners, its flags: 1 a remodel's, 2 in an indoor cluster) */
 	for (index = 0; index < (uint32_t)plan->atlas.triangle_count; index++)
 	{
 		int32_t chart = plan->atlas.triangle_charts[index];
@@ -2366,6 +2388,9 @@ static int bake_upload(struct bake_state *b)
 		memcpy(to + 6, plan->positions + (size_t)scene_index * 9, 36);
 		flags = ((plan->attributes[(size_t)scene_index * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS +
 			XGPU_SCENE_ATTRIBUTE_KIND_PAGE] >> XGPU_SCENE_LEVEL_SHIFT) & 3u) != XGPU_SCENE_LEVEL_BOTH ? 1u : 0u;
+		if (plan->attributes[(size_t)scene_index * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS + XGPU_SCENE_ATTRIBUTE_KIND_PAGE] &
+			XGPU_SCENE_INDOOR)
+			flags |= 2u;
 		memcpy(to + 15, &flags, 4);
 	}
 	b->mask_capacity = plan->tile_count / 4 + 64;
@@ -4985,7 +5010,76 @@ struct bake_raster_job
 	uint32_t counts[4];
 	VkDeviceAddress lights, reflections, reflection_table, reflection_data;
 	uint32_t more[4];
+	/* the exposure's meter, and [0] display.prism_exposure (0 fixed, 1 ce, 2
+	auto), [1] display.prism_tone_curve (0 ce, 1 filmic, 2 aces, 3 local), [2]
+	1 where this frame meters (the frame whole) */
+	VkDeviceAddress meter, meter_pad;
+	float exposure[4];
 };
+
+/* PRISM v4's exposure's settings from the last RT_FRAME (display.
+prism_exposure and its range, speed and bias; display.prism_tone_curve);
+"ce" and the clipped curve where none has come */
+static void exposure_settings(uint32_t *mode, float values[4], uint32_t *curve)
+{
+	uint32_t generation, material_count, alpha_words;
+	const float *materials;
+	const uint32_t *alpha;
+	const struct xgpu_stream_rt_frame *frame = NULL;
+
+	xgpu_vulkan_rt_scene(&generation, &materials, &material_count, &alpha, &alpha_words, &frame);
+	*mode = 1;
+	*curve = 0;
+	values[0] = 1.5f;
+	values[1] = 2.0f;
+	values[2] = 0.0f;
+	values[3] = 1.0f / 60.0f;
+	if (!frame)
+		return;
+	*mode = (uint32_t)(frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EXPOSURE] + 0.5f);
+	*mode = *mode > 2 ? 1 : *mode;
+	*curve = (uint32_t)(frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_TONE_CURVE] + 0.5f);
+	*curve = *curve > 3 ? 0 : *curve;
+	values[0] = frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EXPOSURE_RANGE];
+	values[1] = frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EXPOSURE_SPEED];
+	values[2] = frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EXPOSURE_BIAS];
+}
+
+VkDeviceAddress xgpu_vulkan_bake_meter(VkCommandBuffer commands)
+{
+	if (!bake.made)
+		return 0;
+	if (!bake.meter.buffer && !buffer_filled(commands, NULL, 1024, &bake.meter, 0))
+		return 0;
+	return bake.meter.address;
+}
+
+void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
+{
+	struct bake_push push;
+	uint32_t mode, curve;
+
+	if (!bake.made || !bake.meter.buffer)
+		return;
+	memset(&push, 0, sizeof(push));
+	exposure_settings(&mode, push.values, &curve);
+	/* (the seconds since the last step, by the host's clock: at most a
+	quarter, a 60th the first time) */
+	{
+		double now = now_seconds(), since = bake.exposure_clock > 0.0 ? now - bake.exposure_clock : 1.0 / 60.0;
+
+		push.values[3] = (float)(since < 0.0 ? 0.0 : since > 0.25 ? 0.25 : since);
+		bake.exposure_clock = now;
+	}
+	push.scene = bake.meter.address;
+	push.parameters[0] = mode;
+	barrier(commands);
+	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_EXPOSURE]);
+	vkCmdPushConstants(commands, bake.pipeline_layouts[PIPELINE_EXPOSURE], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
+		&push);
+	vkCmdDispatch(commands, 1, 1, 1);
+	barrier(commands);
+}
 
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
@@ -5083,6 +5177,18 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		job.more[3] = REFLECTION_SIDE;
 	}
 	job.lights = dynamic ? b->raster_job.address + RASTER_LIGHTS_OFFSET : 0;
+	/* (the exposure: metered and applied in the frame whole, not in the bake's
+	views, the gates' measures) */
+	{
+		uint32_t mode, curve;
+		float values[4];
+
+		exposure_settings(&mode, values, &curve);
+		job.meter = xgpu_vulkan_bake_meter(commands);
+		job.exposure[0] = (float)mode;
+		job.exposure[1] = (float)curve;
+		job.exposure[2] = !bake_view && job.meter ? 1.0f : 0.0f;
+	}
 	if (!upload(commands, &b->raster_job, 0, &job, sizeof(job)) ||
 		(dynamic && !upload(commands, &b->raster_job, RASTER_LIGHTS_OFFSET, dynamic_lights, dynamic * 12 * sizeof(float))))
 		return NULL;
@@ -5137,6 +5243,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	}
 	vkCmdDispatch(commands, (description->width + 7) / 8, (description->height + 7) / 8, 1);
 	barrier(commands);
+	if (!bake_view)
+		xgpu_vulkan_bake_exposure_step(commands);
 	if (whole)
 		*whole = !bake_view;
 	return bake.raster_light;
@@ -5202,6 +5310,7 @@ void xgpu_vulkan_bake_shutdown(void)
 		buffer_free_now(&bake.readbacks[index].buffer);
 	for (index = 0; index < STAGING_SLOTS; index++)
 		buffer_free_now(&bake.staging[index]);
+	buffer_free_now(&bake.meter);
 	while (bake.garbage_count)
 	{
 		bake.garbage_count--;
