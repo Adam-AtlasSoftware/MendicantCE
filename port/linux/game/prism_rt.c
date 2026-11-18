@@ -1784,6 +1784,10 @@ void prism_rt_frame_begin(void)
 	/* (the level traced is a remodel: its faces wound either way) */
 	frame.settings[2] = prism_rt.copied_world != PRISM_RT_WORLD_STOCK ? 1.0f : 0.0f;
 	rig_frame(frame.rig);
+	/* (spare[2]: the sun's disc the bake takes, display.prism_sun_size's
+	"auto" whatever the setting (the tag's or the real sun's, the wider): the
+	baked light is the map's, not the path tracer's look) */
+	frame.spare[2] = MAX(prism_rt.sun_diameter > 0.0f ? prism_rt.sun_diameter : 0.0035f, PRISM_RT_SUN_REAL);
 	/* (the sky's outdoor ambient radiosity: its colour at 0x48 and power at
 0x54 of the tag, before its fogs) */
 	if (prism_rt.sky_index != NONE)

@@ -2122,6 +2122,9 @@ struct xgpu_stream_rt_frame
 	float sun[4];
 	float sun_color[4];
 	float sky[4];
+	/* spare[0] and [1]: XGPU_RT_FLAG_REFERENCE's; spare[2]: the sun's
+	angular diameter the baker takes (display.prism_sun_size "auto"'s, the
+	tag's or the real sun's, whatever the setting: xgpu_vulkan_bake.c) */
 	float spare[4];
 	/* the light rig (XGPU_RT_RIG_*) */
 	float rig[XGPU_STREAM_RT_RIG_FLOATS];

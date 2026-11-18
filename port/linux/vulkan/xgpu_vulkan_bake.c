@@ -412,6 +412,10 @@ struct bake_state
 	/* the volume: its batches of probes (done: those written) */
 	struct prism_bake_batches volume;
 	int volume_loaded;
+	/* display.bake "off" (or "ask" and not asked) when the file was opened:
+	nothing written, nothing baked (a whole bake, or an unfinished log of
+	this key read, is drawn); begun again once a bake is wanted */
+	int idle;
 	/* the reflection probes: their places, info, texels and hashed grid on
 	the GPU, the grid's entries, those done and in the batch running */
 	struct bake_buffer reflection_points, reflection_info, reflection_data, reflection_table;
@@ -1921,6 +1925,22 @@ static struct bake_state *bake_begin(void)
 	b->plan.quality = (int)b->quality;
 	/* the rig (the frame's: the sun, the sky, the domes, the lamps' scale) */
 	memcpy(b->block.rig, frame->rig, sizeof(b->block.rig));
+	/* (the map's light, not the path tracer's look: the sun's disc
+	display.prism_sun_size "auto"'s (RT_FRAME's spare[2]), the lamps
+	display.prism_rt_emissive "lights"' (the light cards and lamp surfaces,
+	no glows: Tool's radiosity's), at display.prism_rt_emissive_scale 1, the
+	albedo display.prism_rt_materials "average"'s, whatever those settings
+	are, so that a bake is the same in every session of the same light
+	settings) */
+	{
+		float *rig = (float *)b->block.rig;
+
+		if (frame->spare[2] > 0.0f && frame->spare[2] < 3.0f)
+			rig[XGPU_RT_RIG_SUN + 3] = frame->spare[2];
+		rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE] = 1.0f;
+		rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE_SCALE] = 1.0f;
+		rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_MATERIALS] = 1.0f;
+	}
 	/* (D4 amended: the `max` tier's noise floor, a share of middle grey; the
 	converge rule's error floor, rig[15].z) */
 	b->noise_floor = b->quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
@@ -1962,8 +1982,12 @@ static struct bake_state *bake_begin(void)
 	if (alpha_traced)
 		hash = prism_bake_hash64(hash, alpha, (size_t)alpha_words * 4);
 	b->key.material_hash = hash;
-	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, frame->rig, XGPU_RT_RIG_SETTINGS * sizeof(float));
-	hash = prism_bake_hash64(hash, &frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE], 3 * sizeof(float));
+	/* (the light: the rig the bake takes (its sun, sky and domes; the
+	lamps' words, fixed above), the sun, the port's words, the lamps and the
+	fixtures; not the frame's look settings, which the bake does not read) */
+	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, b->block.rig, XGPU_RT_RIG_SETTINGS * sizeof(float));
+	hash = prism_bake_hash64(hash, (const float *)b->block.rig + XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE,
+		3 * sizeof(float));
 	hash = prism_bake_hash64(hash, frame->sun, sizeof(frame->sun));
 	/* (the port's rig words past the settings, rig[57] on: the indoor
 	floor, the fixtures' scale, the units and the sky's kind, the albedo's
@@ -4027,10 +4051,12 @@ static int plan_write(struct bake_state *b, int with_masks)
 }
 
 /* the file: a whole bake of this key loaded (DONE), the log of an unfinished
-one resumed, or a new one made */
-static void file_open(struct bake_state *b)
+one resumed, or a new one made; where no bake is wanted (wanted 0), nothing
+made or resumed */
+static void file_open(struct bake_state *b, int wanted)
 {
 	enum prism_bake_cache_status status;
+	uint32_t differences;
 
 	status = prism_bake_cache_open(&b->cache, b->path, &b->key, 0);
 	if (status == PRISM_BAKE_CACHE_CURRENT && b->cache.done)
@@ -4041,10 +4067,34 @@ static void file_open(struct bake_state *b)
 		b->complete = 1;
 		return;
 	}
+	/* (the differences read before the cache is let go: closing clears it) */
+	differences = b->cache.differences;
 	prism_bake_cache_close(&b->cache);
+	if (!wanted)
+	{
+		/* (display.bake "off", or "ask" and not asked: no file made or
+		resumed, nothing baked; an unfinished log of this key drawn as far as
+		it goes) */
+		b->idle = 1;
+		b->writing = 0;
+		if (prism_bake_cache_open(&b->cache, b->new_path, &b->key, 0) != PRISM_BAKE_CACHE_CURRENT)
+		{
+			prism_bake_cache_close(&b->cache);
+			memset(&b->cache, 0, sizeof(b->cache));
+		}
+		if (status == PRISM_BAKE_CACHE_STALE)
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake there is of something else (differences 0x%x): "
+				"not baked (display.bake %s)", b->map, (int)b->bsp, differences,
+				bake.control.mode == XGPU_BAKE_MODE_OFF ? "\"off\"" : "\"ask\", not asked");
+		else
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: no whole bake: not baked (display.bake %s)%s", b->map,
+				(int)b->bsp, bake.control.mode == XGPU_BAKE_MODE_OFF ? "\"off\"" : "\"ask\", not asked",
+				b->cache.record_count ? ", its unfinished log drawn" : "");
+		return;
+	}
 	if (status == PRISM_BAKE_CACHE_STALE)
 		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake there is of something else (differences 0x%x): "
-			"baked again", b->map, (int)b->bsp, b->cache.differences);
+			"baked again", b->map, (int)b->bsp, differences);
 	if (prism_bake_cache_resume(&b->writer, &b->cache, b->new_path, &b->key, 0) == 0)
 	{
 		b->writing = 1;
@@ -4456,10 +4506,12 @@ static void bake_frame(void)
 
 	garbage_collect();
 	timing_collect();
-	/* (a bake of another BSP, scene or quality, or a rebake asked: let go) */
+	wanted = bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0;
+	/* (a bake of another BSP, scene or quality, a rebake asked, or one
+	opened while none was wanted that now is: let go) */
 	if (b && (b->generation != bake.control.generation || b->bsp != bake.control.bsp_index ||
 		b->quality != (bake.control.quality > PRISM_BAKE_QUALITY_MAX ? PRISM_BAKE_QUALITY_MAX : bake.control.quality) ||
-		b->request != bake.control.request))
+		b->request != bake.control.request || (b->idle && wanted)))
 	{
 		int rebake = b->request != bake.control.request && b->generation == bake.control.generation;
 		char path[XGPU_BAKE_PATH + 164];
@@ -4474,7 +4526,6 @@ static void bake_frame(void)
 			remove(path);
 		}
 	}
-	wanted = bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0;
 	if (!b)
 	{
 		b = bake.bake = bake_begin();
@@ -4523,7 +4574,7 @@ static void bake_frame(void)
 			bake_fail(b, "its scene cannot be put on the GPU (no memory)");
 			break;
 		}
-		file_open(b);
+		file_open(b, wanted);
 		b->step = STEP_LOAD;
 		break;
 	case STEP_LOAD:

@@ -186,7 +186,8 @@ converged against the same estimator converged:
   `B(n) = B(n0) (a0 + k · n)`, `k` the moment over 2 pi as a share of the light, `a0 = 1 - k · n0`.
 - **The fixtures:** one picked by its unshadowed light at the point among them all (16 or fewer) or 16 candidates, its
   shadow traced, its light over its share of the candidates' (exact for 16 or fewer).
-- **The sun's visibility** apart: a direction of the sun's disc (`display.prism_sun_size`'s, as R's).
+- **The sun's visibility** apart: a direction of the sun's disc (`display.prism_sun_size` `"auto"`'s, the tag's or the
+  real sun's, the wider, whatever the setting: R's at the default).
 - **The sky lights' rays** (the sun's, the domes') are tested as Tool's radiosity tests them: as far as the light's test
   distance (its tag's field: c40's moon 30 world units, b30's sun and dome 50; the rig's `rig[63]` and each dome's
   `[7]`), and a face met from its back (a one-sided face of the level seen from behind) lets them through. c40's canyon
@@ -260,7 +261,16 @@ name, the BSP, a hash of the level's triangles and attributes as the bake read t
 and alpha maps, the rig (with the port's words past its settings: the indoor floor, the fixtures' scale, the units and
 the sky's kind, the albedo's rule, the sun's test distance) and the lamps, the reach's bricks, the baker's version, the
 quality and the threshold. A file of
-another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done.
+another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done (with `display.bake` `"off"`,
+or `"ask"` and not asked, nothing is made or baked: a whole bake of the key is drawn, else an unfinished log of it as
+far as it goes).
+
+The light is the map's, not the path tracer's look: the bake takes the sun's disc of `display.prism_sun_size` `"auto"`,
+the lamps of `display.prism_rt_emissive` `"lights"` (the light cards and lamp surfaces; no glows, as Tool's radiosity),
+at `display.prism_rt_emissive_scale` 1, and the albedo of `display.prism_rt_materials` `"average"`, whatever those
+settings (and `display.prism_rt_style`, which picks their defaults) are, so a bake loads in every session of the same
+light settings: `display.prism_sky_light`, `display.prism_rig`, the quality. Those values are the settings' defaults
+with the faithful style: a bake made before at the defaults keeps its key.
 
 **The reach's file.** The walk that finds where the player can be (the reach: the bricks the probes fill, the
 surfaces' tiers) is kept beside the BSP's bake (`<map>/bsp<n>.reach`, keyed by a hash of its inputs), so a BSP drawn
