@@ -2519,7 +2519,8 @@ surface (the instance, the normal, the plane; their history's length the
 weight), so that a pixel's first frames are not one sample's noise; the
 same written into this frame's history. Elsewhere passed on. The variance
 where it is unknown, from the 5 x 5 neighbourhood's luminance.
-parameters.x 1: the pre-blur instead (below) */
+parameters.x 1: the pre-blur instead (below), 2: the light as traced copied
+for the temporal pass (the pre-blur off) */
 /* the pre-blur (ReLAX's pre-pass, from its published descriptions): before
 the temporal pass, the light as traced spread over a disc of PREBLUR_TAPS
 points about the pixel (a radius of PREBLUR_RADIUS pixels; the specular's
@@ -2608,6 +2609,12 @@ void main()
     if (push.parameters.x == 1u)
     {
         preblur(pixel);
+        return;
+    }
+    if (push.parameters.x == 2u)
+    {
+        imageStore(diff_b, pixel, imageLoad(noisy_diffuse, pixel));
+        imageStore(spec_b, pixel, imageLoad(noisy_specular, pixel));
         return;
     }
     vec4 dc = imageLoad(diff_a, pixel);

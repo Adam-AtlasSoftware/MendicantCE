@@ -1484,9 +1484,15 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		barrier(commands);
 		if (!denoiser_off)
 		{
-			/* (the pre-blur: the fix pass's first use, the light as traced
-			spread over a small disc before the histories take it) */
-			dispatch(commands, PASS_FIX, scene, slot_buffer->address, 1, 0, 0, 0, groups_x, groups_y);
+			/* (the pre-blur, HALO_PT_PREBLUR=1: the fix pass's first use, the
+			light as traced spread over a small disc before the histories
+			take it; else the fix pass copies the light as traced for the
+			temporal pass) */
+			static int preblur = -1;
+
+			if (preblur < 0)
+				preblur = getenv("HALO_PT_PREBLUR") ? atoi(getenv("HALO_PT_PREBLUR")) != 0 : 0;
+			dispatch(commands, PASS_FIX, scene, slot_buffer->address, preblur ? 1u : 2u, 0, 0, 0, groups_x, groups_y);
 			barrier(commands);
 			dispatch(commands, PASS_TEMPORAL, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
 			stamp(commands, time_slot, 2);
