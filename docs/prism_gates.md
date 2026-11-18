@@ -513,6 +513,14 @@ same run (the bake's loading: a barrier's `VK_ACCESS_2_HOST_READ_BIT` under `ALL
 `WRITE_AFTER_WRITE` hazard between two of its buffer copies, 9 times; each then cut by the duplicate limit), none
 from the materials.
 
+**A device that draws no materials.** The pack's uber-shaders sample the textures' set's material bindings, which the
+set has only where the device draws `display.prism_materials`' materials; the review's fix reads no pack or mod
+material there and binds no albedo target. `HALO_MATERIALS_OFF=1` (the knob that stands for such a device), G2's
+probes, the pack in the data folder, `ce_deferred` with Vulkan validation and synchronisation validation (a short
+check on the RTX 3070 Ti, 89 s): 0 messages, as the same run without the knob; the material source view has no pack
+pixel (its blue 0.000 at each pose, against 0.835, 0.893 and 0.805 without the knob) and every opaque pixel at the
+automatic tier.
+
 Not measured yet: the G-buffer pass's time with the pack against without (it needs the RTX 2060 alone), and the RTX
 3070 Ti's numbers.
 
