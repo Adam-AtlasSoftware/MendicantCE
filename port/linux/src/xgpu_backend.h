@@ -188,7 +188,7 @@ void xgpu_backend_scene_fog(const void *fog);
 /* SCENE_DECAL (xgpu_stream.h): a decal projected into the G-buffer's base
 colour, or the light, by the target the window's draws go to now: the bytes
 of a struct xgpu_stream_scene_decal but its header
-(port/linux/game/prism_decals.c) */
+(port/linux/game/prism_deferred.c) */
 void xgpu_backend_scene_decal(const void *decal);
 /* PRISM_BAKE (xgpu_stream.h; port/linux/game/prism_bake.c): the record
 whole but its data (its phase, counts and fields as the guest filled them;

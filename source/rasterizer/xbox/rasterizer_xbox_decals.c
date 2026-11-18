@@ -415,7 +415,10 @@ draw would blend it there, with its bitmap's texture (its own, read as the
 draw's stage reads it); FALSE where it is drawn as CE draws it: the water's
 layer, the alpha-tested layer (CE's texture pass leaves out the pixels under
 those decals by the stencil their draws write, which a projection does not),
-a decal with no projection kept for it or no texture */
+a decal with no projection kept for it or no texture, and one whose bitmap
+is not the 2D texture its draw's stage asks for (rasterizer_set_texture's
+type 0 below: CE draws it with its default texture, the host's 2D sampler
+takes no cube map or volume) */
 static boolean rasterizer_decal_port_projected(
 	long decal_index,
 	struct decal_datum const *decal,
@@ -435,7 +438,7 @@ static boolean rasterizer_decal_port_projected(
 	if (!bitmap_group || bitmap_group->bitmaps.count <= 0)
 		return FALSE;
 	bitmap = bitmap_group_try_and_get_bitmap(shader->map.index, (char)decal->bitmap_index % bitmap_group->bitmaps.count);
-	texture = bitmap ? _texture_cache_bitmap_get_hardware_format(bitmap, TRUE, TRUE) : NULL;
+	texture = bitmap && bitmap->type == 0 ? _texture_cache_bitmap_get_hardware_format(bitmap, TRUE, TRUE) : NULL;
 	return texture && prism_deferred_decal(decal_index, (unsigned long)texture, shader->framebuffer_blend_function,
 		decal->color, intensity, FALSE);
 }

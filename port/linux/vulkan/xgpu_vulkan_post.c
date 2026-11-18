@@ -691,6 +691,12 @@ int xgpu_vulkan_post_decal(struct xgpu_vulkan_image *target, struct xgpu_vulkan_
 
 	if (!target || !bitmap || !words || !extras || !view || !decal || decal->blend >= XGPU_SCENE_DECAL_BLENDS)
 		return 0;
+	/* (a bitmap of another kind than the 2D texture the pass samples: none,
+	as a draw's stage takes none, a cube map's or a volume's view in a 2D
+	sampler being undefined) */
+	description = xgpu_vulkan_image_description(bitmap);
+	if (description->type != XGPU_VULKAN_IMAGE_2D && description->type != XGPU_VULKAN_IMAGE_2D_ARRAY)
+		return 0;
 	description = xgpu_vulkan_image_description(target);
 	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
 		description->samples > 1)
