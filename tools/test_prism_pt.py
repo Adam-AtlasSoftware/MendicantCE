@@ -498,3 +498,22 @@ def test_restir_gis_temporal_merge_is_unbiased_across_a_moved_point():
     assert merged.mean(0) == pytest.approx(exact, rel=0.04)
     assert plain.mean(0) == pytest.approx(exact, rel=0.04)
     assert model.luma(merged).std() < 0.7 * model.luma(plain).std()
+
+
+def test_the_visibility_history_is_held_to_the_frames_own_range():
+    """a lit pixel among lit neighbours whose history the reprojection blurred with a shadow beside it (0.6) is lit at
+    once; in a penumbra (each of the 25 samples about it lit seven times in ten) the history still accumulates to its
+    light, the range spanning 0 to 1"""
+    h = model.visibility_step((0.6, 0.6, 0.45, 32.0), 1.0, [1.0] * 25)
+    assert h[0] == pytest.approx(1.0) and h[1] == pytest.approx(1.0)
+    rng = np.random.default_rng(41)
+    h = None
+    slow = []
+    for frame in range(2000):
+        samples = (rng.random(25) < 0.7).astype(float)
+        h = model.visibility_step(h, samples[12], samples)
+        slow.append(h[0])
+    assert np.mean(slow[100:]) == pytest.approx(0.7, abs=0.03)
+    # (and it seldom snaps: a frame's 25 samples all alike one frame in thousands)
+    snaps = np.mean([abs(b - a) > 0.25 for a, b in zip(slow[100:], slow[101:])])
+    assert snaps < 0.005

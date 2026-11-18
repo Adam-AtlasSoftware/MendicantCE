@@ -164,7 +164,11 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
   against the pixel's by the variance (the diffuse's prefiltered over the pixel's cross, as SVGF prefilters it); the
   specular's kernel narrowed by the roughness and stopped after three steps (none on a mirror).
-- **the sun's visibility**: its own slow and fast history, the fix's gather, and the a-trous steps only at a pixel
+- **the sun's visibility**: its own slow and fast history, held to the range the frame's own visibility spans over the
+  pixel's 5 × 5 on the same surface (a lit pixel among lit neighbours is lit, whatever the reprojection's bilinear taps
+  brought from a shadow beside it: round 1's G2 lost up to 8% of its foreground's light over its first leg's forward
+  move, measured block by block against the light as traced; in a penumbra the 25 samples span 0 to 1 and the history
+  accumulates), the fix's gather, and the a-trous steps only at a pixel
   whose visibility is neither all lit nor all dark (above 0.02, below 0.98, with a variance) and only as wide as the
   penumbra; a lit pixel is never filtered, so a shadow beside it cannot darken it (in G2's moves of round 1, before
   this rule, the foreground's sunlight lost up to a third where the variance of a moving camera's short histories

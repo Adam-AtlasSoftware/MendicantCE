@@ -13,6 +13,7 @@ can check them without a GPU:
   cone_sample        a direction of a dome's cone (the bake's cone_dir), for its next-event estimate
   firefly_cap        the temporal pass's hold of a new sample (by its history once long, by its neighbours before)
   restir_gi          ReSTIR GI's reservoir at a pixel: its own bounce sample, the last frame's merged by its Jacobian
+  visibility_step    the temporal pass's sun visibility history, held to the frame's own 5 x 5 range
   tree_build         the reference's light tree as xgpu_vulkan_pt.c's tree_node builds it
   tree_importance, tree_pick, tree_probability  the GLSL's walk of it
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
@@ -430,3 +431,22 @@ def restir_gi(rng, point, normal, sample, last=None, m_cap=20.0):
     to = y_x - point
     cos_y = max(float(normal @ to) / np.linalg.norm(to), 0.0)
     return y_l * cos_y / np.pi * big_w, (y_x, y_n, y_l, min(m_total, m_cap), big_w)
+
+
+def visibility_step(history, v, neighbourhood, most=32.0, most_fast=4.0):
+    """the temporal pass's sun visibility at a pixel: history None or (slow, fast, m2, n); v this frame's visibility,
+    neighbourhood this frame's visibilities of the 5 x 5 about it (the pixel's own among them); returns the history"""
+    if history is None:
+        return (v, v, v * v, 1.0)
+    slow, fast, m2, n = history
+    n = min(n + 1.0, most)
+    slow = slow + (v - slow) / n
+    fast = fast + (v - fast) / min(n, most_fast)
+    m2 = m2 + (v * v - m2) / n
+    lo, hi = min(neighbourhood), max(neighbourhood)
+    slow, fast = min(max(slow, lo), hi), min(max(fast, lo), hi)
+    sv = np.sqrt(max(m2 - slow * slow, 0.0))
+    if slow < fast - 2.0 * sv - 0.1 or slow > fast + 2.0 * sv + 0.1:
+        slow = min(max(slow, fast - 2.0 * sv - 0.1), fast + 2.0 * sv + 0.1)
+        n = min(n, most_fast * 2.0)
+    return (slow, fast, m2, n)

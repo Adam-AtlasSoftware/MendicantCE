@@ -1984,6 +1984,35 @@ void main()
     float slow_v = history ? mix(hsun.x, v, 1.0 / n_v) : v;
     float fast_v = history ? mix(hsun.y, v, 1.0 / min(n_v, most_fast)) : v;
     float m2v = history ? mix(hsun.z, v * v, 1.0 / n_v) : v * v;
+    /* (the visibility's histories held to the range the frame's own
+    visibility spans over the pixel's 5 x 5 on the same surface: a lit pixel
+    among lit neighbours is lit, whatever the history brought from a shadow
+    beside it through the reprojection's bilinear taps. Round 1's G2 lost up
+    to 8% of the foreground's light over its first leg's forward move (the
+    denoised frames against the light as traced, block by block): each step's
+    resampling blurred the rocks' shadows into the sand faster than the slow
+    history's 1/32 a frame undid it, and the visibility's moments, blurred
+    alike, let the fast history's hold pass it. Where the visibility is noisy
+    (a penumbra, the trees' cutouts) its 25 samples span 0 to 1 (all alike
+    one frame in thousands where the light is 0.7) and the history
+    accumulates as before) */
+    if (history)
+    {
+        uint here = imageLoad(guide_now, pixel).x;
+        float v_lo = v, v_hi = v;
+        for (int y = -2; y <= 2; y++)
+            for (int x = -2; x <= 2; x++)
+            {
+                ivec2 q = pixel + ivec2(x, y);
+                if ((x == 0 && y == 0) || !inside(q) || imageLoad(guide_now, q).x != here)
+                    continue;
+                float vq = imageLoad(sun_raw, q).x;
+                v_lo = min(v_lo, vq);
+                v_hi = max(v_hi, vq);
+            }
+        slow_v = clamp(slow_v, v_lo, v_hi);
+        fast_v = clamp(fast_v, v_lo, v_hi);
+    }
     float var_v = max(m2v - slow_v * slow_v, 0.0);
     float sv = sqrt(var_v);
     if (history && (slow_v < fast_v - 2.0 * sv - 0.1 || slow_v > fast_v + 2.0 * sv + 0.1))
