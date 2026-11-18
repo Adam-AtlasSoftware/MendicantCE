@@ -27,7 +27,7 @@ NEGATIVE_CONTROLS = {
     "no-floor": ("fit", "\tif (pixels > 0.0f && scale * capital_height * pixels < PERF_OVERLAY_CAPITAL_PIXELS)",
                  "\tif (0)"),
     # drawn at the font's own size, as it was
-    "full-size": ("compact", "#define PERF_OVERLAY_SCALE 0.55f", "#define PERF_OVERLAY_SCALE 1.0f"),
+    "full-size": ("compact", "#define PERF_OVERLAY_SCALE 0.45f", "#define PERF_OVERLAY_SCALE 1.0f"),
 }
 
 

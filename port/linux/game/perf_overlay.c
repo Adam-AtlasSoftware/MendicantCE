@@ -407,7 +407,7 @@ short perf_overlay_cells(
 capitals would be fewer display pixels tall than this (720p, a split
 screen's small views); the least it is made to fit, under which the bottom
 rows are left out instead */
-#define PERF_OVERLAY_SCALE 0.55f
+#define PERF_OVERLAY_SCALE 0.45f
 #define PERF_OVERLAY_SPLIT_SCALE 0.45f
 #define PERF_OVERLAY_CAPITAL_PIXELS 9.0f
 #define PERF_OVERLAY_SCALE_LEAST 0.3f
