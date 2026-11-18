@@ -147,18 +147,23 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   diffuse and specular light; the fast one holds the slow one (its luminance within the fast mean ± 2 standard
   deviations of that mean, the deviation the samples' spread the slow moments know over the fast count, the slow
   history's length cut to 4 where it is held); the luminance's moments give the variance; once the history has 16
-  frames, a new sample's luminance is held to the history's mean and 8 times its spread (the firefly clamp). Neither
-  holds a light to what the pixel's neighbours or its last few frames saw: where a lamp is seen by few samples (through
-  a gap) a sample far above them is the light itself, and the first round's clamps (4 times the brightest neighbour,
-  the fast spread alone) took a10's such light away (G5's first pose, round 1: the pillar lit in R, dark here).
+  frames, a new sample's luminance is held to the history's mean and 8 times its spread (the firefly clamp); while it
+  is shorter (a moving camera, a disocclusion, the first frames), to 4 times the brightest of its eight neighbours two
+  pixels away on the same surface, so that one sample of a small bright light (a keypad's glow met by the bounce) is
+  not spread by the fix and the a-trous steps into a blob (round 1's moving a10 frames: green dots, smears). Once the
+  history is long, no light is held to its neighbours: where a lamp is seen by few samples (through a gap) a sample
+  far above them is the light itself, and round 1's clamp at every frame (4 times the brightest neighbour) took a10's
+  such light away from a still camera (G5's first pose: the pillar lit in R, dark here); now a still camera takes it
+  once its history passes 16 frames.
 - **fix**: where the history is shorter than 4 frames (a disocclusion, the first frames), the light gathered wide from
   the neighbours on the same surface (instance, normal, plane), weighed by their history's length, and written into
-  the history; the variance from the neighbourhood where the moments do not have it yet.
+  the history; the variance from the neighbourhood's own spread where the moments do not have it yet (as SVGF takes
+  it; round 1's 4 / n times it let the a-trous steps blur a moving camera's noise into smears).
 - **atrous**: five steps of the a-trous filter (a 3 × 3 kernel, 1/4 1/2 1/4 each way, at strides 1 to 16: the reach
   of SVGF's five 5 × 5 steps with a third of their taps), each tap weighed by its
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
-  against the pixel's by the variance; the specular's kernel narrowed by the roughness and stopped after three steps
-  (none on a mirror).
+  against the pixel's by the variance (the diffuse's prefiltered over the pixel's cross, as SVGF prefilters it); the
+  specular's kernel narrowed by the roughness and stopped after three steps (none on a mirror).
 - **the sun's visibility**: its own slow and fast history, the fix's gather, and the a-trous steps only at a pixel
   whose visibility is neither all lit nor all dark (above 0.02, below 0.98, with a variance) and only as wide as the
   penumbra; a lit pixel is never filtered, so a shadow beside it cannot darken it (in G2's moves of round 1, before
