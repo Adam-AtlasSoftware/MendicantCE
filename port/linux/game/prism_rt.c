@@ -191,15 +191,18 @@ prism_bake.md, "The light's units"). CE's lightmap holds the light its
 radiosity found as is (linear, 1.0 the 8-bit page's white: Tool's
 radiosity stops on a residual in 1/255 steps), and each light's tag gives
 a colour by a power; these turn each kind of light's power into the bake's
-unit (a white surface's radiance: its irradiance over pi). The sun's power
-is the irradiance it gives a surface facing it (1); a light card's power
-its radiance (1); a fixture's intensity the irradiance it gives a surface
-facing it a world unit away, inverse square (1); the sky's outdoor ambient
-CE's floor of light, unoccluded, colour by power by pi (measured against
-CE's pages on b30, where it fits 3.1 to 4.1: docs/prism_gates.md, "The
-light's units") */
-#define PRISM_RT_UNITS_SUN 1.0f
-#define PRISM_RT_UNITS_SKY 3.14159265f
+unit (a white surface's radiance: its irradiance over pi), as Tool's
+radiosity takes them. The sun's and the sky's other lights' colour by power
+is the light they give a white surface facing them, CE's page's 1 its white
+(pi: the rig's sun is divided by pi below; b30's pages are at white where
+the sun is on them); a light card's power its radiance (1); a fixture's
+intensity the irradiance it gives a surface facing it a world unit away,
+inverse square (1); the sky's ambient a flat floor of light, colour by
+power, unoccluded and not bounced, its outdoor values in the structure's
+clusters with a sky and sky 0's indoor values in those with none (1:
+docs/prism_bake.md, "The light's units") */
+#define PRISM_RT_UNITS_SUN 3.14159265f
+#define PRISM_RT_UNITS_SKY 1.0f
 #define PRISM_RT_UNITS_EMIT 1.0f
 #define PRISM_RT_UNITS_FIXTURE 1.0f
 /* the real sun's angular diameter (display.prism_sun_size "real", and
@@ -948,9 +951,15 @@ static long material_of(long shader_tag, int *kind)
 		long glow_map = ((struct tag_reference const *)(bytes + 0x254))->index;
 		float mean[4], factor;
 
+		/* (port: in the light's units the base map's stored mean alone, as
+		Tool's radiosity reflected it (its detail maps are the frame's, not the
+		radiosity's), and none without a base map) */
+		if (prism_rt_albedo_stored())
+			record[0] = record[1] = record[2] = 0.0f;
 		if (bitmap_mean_as(base_map, mean, prism_rt_albedo_stored()))
 		{
-			factor = detail_factor(detail_map, detail_function) * detail_factor(micro_map, micro_function);
+			factor = prism_rt_albedo_stored() ? 1.0f :
+				detail_factor(detail_map, detail_function) * detail_factor(micro_map, micro_function);
 			record[0] = PIN(mean[0] * factor, PRISM_RT_ALBEDO_LEAST, PRISM_RT_ALBEDO_MOST);
 			record[1] = PIN(mean[1] * factor, PRISM_RT_ALBEDO_LEAST, PRISM_RT_ALBEDO_MOST);
 			record[2] = PIN(mean[2] * factor, PRISM_RT_ALBEDO_LEAST, PRISM_RT_ALBEDO_MOST);
@@ -1485,6 +1494,28 @@ they are) */
 		}
 	}
 	rig[PRISM_RT_RIG_SKY + 3] = scales->gamma;
+	/* (port: rig[14]'s y, z and w: the floor in the structure's indoor
+	clusters, sky 0's indoor ambient radiosity (its colour at 0x38, its power
+	at 0x44), where the rig is in the light's units; x is the host's) */
+	rig[57] = rig[58] = rig[59] = 0.0f;
+	if (scales->units)
+	{
+		struct scenario *scenario = global_scenario_get();
+		byte const *sky = scenario && scenario->sky_references.count > 0 ? (byte const *)scenario_get_sky(0) : NULL;
+
+		if (sky)
+		{
+			float ambient[3], power;
+
+			memcpy(ambient, sky + 0x38, sizeof(ambient));
+			memcpy(&power, sky + 0x44, sizeof(power));
+			if (power >= 0.0f && power < 1000.0f)
+			{
+				for (index = 0; index < 3; index++)
+					rig[57 + index] = PIN(ambient[index], 0.0f, 1.0f) * power * scales->sky * scales->sky_rgb[index];
+			}
+		}
+	}
 	/* (the domes: by the sun's scale, as the fit scaled every sky light) */
 	for (index = 0; index < prism_rt.dome_count; index++)
 	{
@@ -1504,7 +1535,10 @@ they are) */
 	settings[PRISM_RT_SETTING_EMISSIVE_SCALE] = prism_rt.emissive_scale;
 	settings[PRISM_RT_SETTING_MATERIALS] = (float)prism_rt.material_tier;
 	settings[PRISM_RT_SETTING_BOUNCES] = (float)prism_rt.bounces;
-	settings[PRISM_RT_SETTING_EXPOSURE] = (float)(prism_rt.exposure >= 0 ? prism_rt.exposure : remix ? 1 : 0);
+	/* (the style's exposure: remix's and PRISM Raster's "ce", the frame's
+	middle as bright as Classic's; faithful's fixed) */
+	settings[PRISM_RT_SETTING_EXPOSURE] = (float)(prism_rt.exposure >= 0 ? prism_rt.exposure :
+		remix || prism_deferred_raster() ? 1 : 0);
 	settings[PRISM_RT_SETTING_EXPOSURE_RANGE] = prism_rt.exposure_range;
 	settings[PRISM_RT_SETTING_EXPOSURE_SPEED] = prism_rt.exposure_speed;
 	settings[PRISM_RT_SETTING_EXPOSURE_BIAS] = prism_rt.exposure_bias;

@@ -91,6 +91,9 @@ over 2 pi, a0 = 1 - k . n0. */
 	"}\n" \
 	"uint material_of(uint t) { return min(Uints(s.info).v[t * 8u] & 0xffffu, s.counts.w); }\n" \
 	"bool two_sided(uint t) { return (Uints(s.info).v[t * 8u] & 0x10000u) != 0u; }\n" \
+	"/* (a structure triangle in one of its indoor clusters, one with no sky:\n" \
+	"xgpu_stream.h's XGPU_SCENE_INDOOR) */\n" \
+	"bool indoor(uint t) { return (Uints(s.info).v[t * 8u] & 0x20000u) != 0u; }\n" \
 	"float material_value(uint m, uint k) { return Floats(s.materials).v[m * 16u + k]; }\n" \
 	"\n" \
 	"bool alpha_kept(uint custom, uint primitive, vec2 b)\n" \
@@ -243,10 +246,36 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    return sum;\n" \
 	"}\n" \
 	"/* the rig in the light's units (s.rig[15].y): the sky's ambient is CE's\n" \
-	"floor of light, unoccluded, at every texel and probe (ambient()), not a\n" \
-	"radiance from the open sky, and not passed on by the bounces */\n" \
+	"flat floor of light, unoccluded, at every texel and probe: its outdoor\n" \
+	"values in the structure's clusters with a sky (ambient()), sky 0's indoor\n" \
+	"ones (s.rig[14].yzw: ambient_indoor()) in those with none (indoor(),\n" \
+	"floor_at()); not a radiance from the open sky, and not passed on by the\n" \
+	"bounces */\n" \
 	"bool units_rig() { return s.rig[15].y > 0.5; }\n" \
 	"vec3 ambient() { return units_rig() ? s.rig[1].rgb : vec3(0.0); }\n" \
+	"vec3 ambient_indoor() { return units_rig() ? s.rig[14].yzw : vec3(0.0); }\n" \
+	"/* 1 where a point in the air is in an outdoor cluster, 0 in an indoor\n" \
+	"one: the nearest of the structure's surfaces the six axes meet says which,\n" \
+	"by its triangle's flag (nothing met: outdoor) */\n" \
+	"float floor_at(vec3 p)\n" \
+	"{\n" \
+	"    float nearest = 1.0e30, weight = 1.0;\n" \
+	"    for (int a = 0; a < 6; a++)\n" \
+	"    {\n" \
+	"        vec3 d = vec3(0.0);\n" \
+	"        d[a >> 1] = (a & 1) == 0 ? 1.0 : -1.0;\n" \
+	"        vec3 nh;\n" \
+	"        uint t;\n" \
+	"        vec2 b;\n" \
+	"        float h = hit(p, d, 64.0, nh, t, b);\n" \
+	"        if (h >= 0.0 && h < nearest && t < s.counts.x + s.counts.y)\n" \
+	"        {\n" \
+	"            nearest = h;\n" \
+	"            weight = indoor(t) ? 0.0 : 1.0;\n" \
+	"        }\n" \
+	"    }\n" \
+	"    return weight;\n" \
+	"}\n" \
 	"vec3 sky_along(vec3 d, bool domes)\n" \
 	"{\n" \
 	"    vec3 l = units_rig() ? vec3(0.0) : s.rig[1].rgb;\n" \
@@ -822,7 +851,8 @@ static const char setup_source[] =
 	"        point = bc.x * w0 + bc.y * w1 + bc.z * w2;\n"
 	"        vec3 n = cross(w1 - w0, w2 - w0);\n"
 	"        normal = dot(n, n) > 1.0e-24 ? normalize(n) : vec3(0.0, 0.0, 1.0);\n"
-	"        flags = 1u | (distance == 0.0 ? 2u : 0u) | ((floatBitsToUint(t.v[b + 15u]) & 1u) != 0u ? 4u : 0u);\n"
+	"        flags = 1u | (distance == 0.0 ? 2u : 0u) | ((floatBitsToUint(t.v[b + 15u]) & 1u) != 0u ? 4u : 0u) |\n"
+	"            ((floatBitsToUint(t.v[b + 15u]) & 2u) != 0u ? 8u : 0u);\n"
 	"        if (distance == 0.0)\n"
 	"            break;\n"
 	"    }\n"
@@ -955,10 +985,13 @@ static const char lightmap_source[] =
 	"            batch_m2 = 0.0;\n"
 	"        }\n"
 	"    }\n"
+	"    /* (the units rig's floor of light: the indoor one in an indoor\n"
+	"    cluster, flag 8) */\n"
+	"    vec3 floor_ = (flags & 8u) != 0u ? ambient_indoor() : ambient();\n"
 	"    for (uint k = 0u; k < samples; k++)\n"
 	"    {\n"
 	"        vec3 m = vec3(0.0);\n"
-	"        vec3 dl = domes_at(o, n, m) + lamps_at(p, n, o, m) + ambient();\n"
+	"        vec3 dl = domes_at(o, n, m) + lamps_at(p, n, o, m) + floor_;\n"
 	"        vec3 d = cosine_dir_at(n, stratum(first + k));\n"
 	"        bool backface;\n"
 	"        vec3 il = path(o, d, bounces, backface);\n"
@@ -1209,11 +1242,14 @@ static const char volume_source[] =
 	"    float sun = 0.0, back = 0.0;\n"
 	"    uint bc = 0u, bh = 0u;\n"
 	"    float bmean = 0.0, bm2 = 0.0, bmost = 0.0;\n"
+	"    /* (the units rig's floor of light where the probe is: the indoor one\n"
+	"    in an indoor cluster) */\n"
+	"    vec3 floor_ = units_rig() ? mix(ambient_indoor(), ambient(), floor_at(p)) : vec3(0.0);\n"
 	"    for (uint k = 0u; k < push.parameters.y; k++)\n"
 	"    {\n"
 	"        vec3 d = sphere_dir_at(stratum(count + k));\n"
 	"        bool backface;\n"
-	"        vec3 l = (path(p, d, bounces, backface) + ambient()) * 12.566371;\n"
+	"        vec3 l = (path(p, d, bounces, backface) + floor_) * 12.566371;\n"
 	"        if (any(isnan(l)) || any(isinf(l))) l = vec3(0.0);\n"
 	"        vec4 y = sh(d);\n"
 	"        vec3 shc0 = l * y.x;\n"
@@ -1495,8 +1531,118 @@ static const char compact_source[] =
 	"    atomicMax(a.v[0], (at * max(push.parameters.y, 1u)) / 64u + 1u);\n"
 	"}\n";
 
+/* PRISM v4's exposure (Raster's frame; the composite to come takes the same
+meter and step): the meter of the frame's lit pixels, the lit frame before
+the exposure (the bake's light by the materials, Raster's) and Classic's at the
+same pixels (CE's light target by its base, its additions added), their
+luminances' histograms (log2 from -12 to 4, a quarter of a stop a bin,
+64 bins each: as xgpu_vulkan_rt_glsl.inc's for the path tracer), filled by
+the frame's pass (meter_add: a pixel in 16, 4 by 4) and read by the exposure
+step after it (exposure_source), which keeps the exposure (log2) for the
+next frame and empties the histograms. The display's tone curve over the
+lit light after it (tone_curved: display.prism_tone_curve's). */
+#define EXPOSURE_COMMON \
+	"layout(buffer_reference, std430, buffer_reference_align = 16) buffer Meter\n" \
+	"{\n" \
+	"    uint histogram[128];\n" \
+	"    float exposure;\n" \
+	"    uint made;\n" \
+	"    uint pad[2];\n" \
+	"};\n" \
+	"uint meter_bin(float l) { return uint(clamp((log2(max(l, 1.0e-6)) + 12.0) * 4.0, 0.0, 63.0)); }\n" \
+	"/* a pixel's two luminances counted (the lit frame's, Classic's) */\n" \
+	"void meter_add(uvec2 meter, float lit, float ce)\n" \
+	"{\n" \
+	"    Meter m = Meter(meter);\n" \
+	"    atomicAdd(m.histogram[meter_bin(lit)], 1u);\n" \
+	"    atomicAdd(m.histogram[64u + meter_bin(ce)], 1u);\n" \
+	"}\n" \
+	"/* the exposure the last step made (a factor; 1 before the first) */\n" \
+	"float exposure_of(uvec2 meter)\n" \
+	"{\n" \
+	"    Meter m = Meter(meter);\n" \
+	"    return m.made == 1u ? exp2(clamp(m.exposure, -8.0, 8.0)) : 1.0;\n" \
+	"}\n" \
+	"/* display.prism_tone_curve over a lit colour (1 white): 1 filmic (CE's light\n" \
+	"as it is up to 0.6 of white, past it rolled off toward white, the colour's\n" \
+	"brightest channel's, its hue kept; \"local\" here as filmic), 2 Narkowicz's\n" \
+	"fit of ACES's, else as it is (\"ce\": the display clips it) */\n" \
+	"vec3 tone_curved(vec3 c, int mode)\n" \
+	"{\n" \
+	"    c = max(c, vec3(0.0));\n" \
+	"    if (mode == 2)\n" \
+	"        return clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);\n" \
+	"    if (mode != 1 && mode != 3)\n" \
+	"        return c;\n" \
+	"    float brightest = max(c.r, max(c.g, c.b));\n" \
+	"    const float k = 0.6;\n" \
+	"    float mapped = brightest <= k ? brightest : k + (1.0 - k) * (1.0 - exp(-(brightest - k) / (1.0 - k)));\n" \
+	"    return brightest > 1.0e-5 ? c * (mapped / brightest) : c;\n" \
+	"}\n"
+
+/* the exposure step, a single invocation after the frame's pass: the push
+constants' scene the meter's address; parameters.x display.prism_exposure (0
+fixed, 1 "ce": the lit frame's median pinned to Classic's over the same
+pixels, within the range; 2 "auto": to a middle grey, 0.18, EV -2 to 5 about
+it); values: the range (stops), the speed (stops a second),
+the bias (stops, added) and the seconds since the last step. Moved toward
+its aim at the speed, at once the first time; the histograms emptied */
+static const char exposure_source[] =
+	BAKE_COMMON
+	EXPOSURE_COMMON
+	"layout(local_size_x = 1) in;\n"
+	"float median_of(Meter m, uint first)\n"
+	"{\n"
+	"    uint total = 0u;\n"
+	"    for (uint i = 0u; i < 64u; i++)\n"
+	"        total += m.histogram[first + i];\n"
+	"    if (total < 16u)\n"
+	"        return 99.0;\n"
+	"    uint half_ = total / 2u, sum = 0u;\n"
+	"    for (uint i = 0u; i < 64u; i++)\n"
+	"    {\n"
+	"        sum += m.histogram[first + i];\n"
+	"        if (sum >= half_)\n"
+	"            return (float(i) + 0.5) / 4.0 - 12.0;\n"
+	"    }\n"
+	"    return 99.0;\n"
+	"}\n"
+	"void main()\n"
+	"{\n"
+	"    Meter m = Meter(push.scene);\n"
+	"    uint mode = push.parameters.x;\n"
+	"    float range = push.values.x, speed = push.values.y, bias = push.values.z, seconds = push.values.w;\n"
+	"    float lit = median_of(m, 0u), ce = median_of(m, 64u);\n"
+	"    float aim = 0.0;\n"
+	"    bool measured = false;\n"
+	"    if (mode == 2u && lit < 90.0)\n"
+	"    {\n"
+	"        aim = clamp(log2(0.18) - lit, -2.0, 5.0) + bias;\n"
+	"        measured = true;\n"
+	"    }\n"
+	"    else if (mode == 1u && lit < 90.0 && ce < 90.0)\n"
+	"    {\n"
+	"        aim = clamp(ce - lit, -range, range) + bias;\n"
+	"        measured = true;\n"
+	"    }\n"
+	"    /* (no measure this frame, none of the level's pixels seen: kept) */\n"
+	"    float now = m.made == 1u ? m.exposure : aim;\n"
+	"    if (mode == 0u)\n"
+	"        now = aim = 0.0;\n"
+	"    else if (isnan(now) || isinf(now))\n"
+	"        now = aim;\n"
+	"    if (!measured && mode != 0u)\n"
+	"        aim = now;\n"
+	"    float step_ = speed * seconds;\n"
+	"    m.exposure = now + clamp(aim - now, -step_, step_);\n"
+	"    m.made = 1u;\n"
+	"    for (uint i = 0u; i < 128u; i++)\n"
+	"        m.histogram[i] = 0u;\n"
+	"}\n";
+
 static const char raster_source[] =
 	BAKE_COMMON
+	EXPOSURE_COMMON
 	"layout(local_size_x = 8, local_size_y = 8) in;\n"
 	"layout(set = 0, binding = 0) uniform usampler2D words;\n"
 	"layout(set = 0, binding = 1) uniform usampler2D extras;\n"
@@ -1514,6 +1660,8 @@ static const char raster_source[] =
 	"    uvec4 counts;\n"
 	"    uvec2 lights, reflections, reflection_table, reflection_data;\n"
 	"    uvec4 more;\n"
+	"    uvec2 meter, meter_pad;\n"
+	"    vec4 exposure;\n"
 	"};\n"
 	"vec3 unfold(vec2 f)\n"
 	"{\n"
@@ -1946,6 +2094,8 @@ static const char raster_source[] =
 	"        vec3 emissive = vec3(unpackHalf2x16(x.y), unpackHalf2x16(x.z & 0xffffu).x);\n"
 	"        vec3 dynamic = dynamic_at(point + facing_normal * 0.02, facing_normal);\n"
 	"        vec3 diffuse = max(lit + sunlight, vec3(0.0));\n"
+	"        bool metered = view == 0u && job.exposure.z > 0.5 && (job.meter.x != 0u || job.meter.y != 0u);\n"
+	"        float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;\n"
 	"        vec3 encoded = gamma > 1.001 ? pow(diffuse, vec3(1.0 / gamma)) : diffuse;\n"
 	"        if (whole)\n"
 	"        {\n"
@@ -1993,7 +2143,24 @@ static const char raster_source[] =
 	"                specular += min(distribution * visibility, 64.0) * fresnel * facing * v * 3.14159265 * s.rig[0].rgb;\n"
 	"            }\n"
 	"            vec3 kd = albedo * (1.0 - spec_share);\n"
-	"            result = kd * (encoded + dynamic) + specular + (instance == 0u ? emissive * base.rgb : emissive);\n"
+	"            /* (the exposure on the light, then held at white as CE's page\n"
+	"            held its light (a colour past white by its brightest channel, its\n"
+	"            hue kept), before the base; the glow as CE's; then the tone\n"
+	"            curve) */\n"
+	"            vec3 glow = instance == 0u ? emissive * base.rgb : emissive;\n"
+	"            /* (the exposure's meter: a lit pixel in 16 (every 4th each way),\n"
+	"            this frame before the exposure against Classic's at the pixel, CE's\n"
+	"            light target by its base and its additions: \"as bright as\n"
+	"            Classic\" is the frame's, its materials' parts with the light) */\n"
+	"            if (metered && (pixel.x & 3) == 0 && (pixel.y & 3) == 0)\n"
+	"                meter_add(job.meter, luma(kd * (encoded + dynamic) + specular + glow), luma(classic));\n"
+	"            vec3 light_ = (encoded + dynamic) * exposure;\n"
+	"            float brightest = max(light_.r, max(light_.g, light_.b));\n"
+	"            if (view == 0u && brightest > 1.0)\n"
+	"                light_ /= brightest;\n"
+	"            result = kd * light_ + specular * exposure + glow;\n"
+	"            if (view == 0u)\n"
+	"                result = tone_curved(result, int(job.exposure.y + 0.5));\n"
 	"            raster_parts[0] = albedo;\n"
 	"            raster_parts[1] = specular;\n"
 	"            raster_parts[2] = kd * (encoded + dynamic);\n"

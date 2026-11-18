@@ -44,6 +44,8 @@ render geometry and the remodel's.
 #include "scenario/scenario.h"
 #include "shaders/shader_definitions.h"
 #include "structures/structure_bsp_definitions.h"
+#include "physics/bsp3d.h"
+#include "physics/collision_bsp_definitions.h"
 #include "bitmaps/bitmap_group.h"
 #include "bitmaps/bitmap_group_internal.h"
 #include "tag_files/tag_files.h"
@@ -51,6 +53,7 @@ render geometry and the remodel's.
 #include "prism_deferred.h"
 #include "prism_scene_static.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -91,6 +94,7 @@ enum
 	LEVEL_NEAR = 1,
 	LEVEL_FAR = 2,
 	LEVEL_SHIFT = 8,
+	INDOOR = 1 << 10,
 	PAGE_SHIFT = 16,
 	PAGE_NONE = 0xffff,
 	KIND_OPAQUE = 0,
@@ -495,6 +499,61 @@ static void pages_send(
 	}
 }
 
+/* port: whether a triangle is in one of the structure's indoor clusters
+(a cluster with no sky: xgpu_stream.h's XGPU_SCENE_INDOOR): the cluster of
+its middle a little off its face, on one side and then the other (a side in
+solid has none); FALSE where neither side is in a cluster */
+static boolean triangle_indoor(
+	struct structure_bsp *bsp,
+	float const *corners)
+{
+	struct collision_bsp *collision = bsp->collision_bsp.count > 0 && bsp->collision_bsp.address ?
+		TAG_BLOCK_GET_ELEMENT(&bsp->collision_bsp, 0, struct collision_bsp) : NULL;
+	float e1[3], e2[3], n[3], length;
+	int axis, side;
+
+	if (!collision || !bsp->clusters.address || !bsp->leaves.address)
+	{
+		return FALSE;
+	}
+	for (axis = 0; axis < 3; axis++)
+	{
+		e1[axis] = corners[3 + axis] - corners[axis];
+		e2[axis] = corners[6 + axis] - corners[axis];
+	}
+	n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+	n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+	n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+	length = (float)sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+	if (!(length > 1.0e-12f))
+	{
+		return FALSE;
+	}
+	for (side = 0; side < 2; side++)
+	{
+		float offset = (side ? -0.05f : 0.05f) / length;
+		real_point3d point;
+		long leaf;
+		short cluster;
+
+		point.x = (corners[0] + corners[3] + corners[6]) / 3.0f + n[0] * offset;
+		point.y = (corners[1] + corners[4] + corners[7]) / 3.0f + n[1] * offset;
+		point.z = (corners[2] + corners[5] + corners[8]) / 3.0f + n[2] * offset;
+		leaf = bsp3d_test_point(&collision->bsp3d, 0, &point);
+		if (leaf == NONE || (leaf & LONG_MAX) >= bsp->leaves.count)
+		{
+			continue;
+		}
+		cluster = TAG_BLOCK_GET_ELEMENT(&bsp->leaves, leaf & LONG_MAX, struct structure_leaf)->cluster_index;
+		if (cluster < 0 || cluster >= bsp->clusters.count)
+		{
+			continue;
+		}
+		return TAG_BLOCK_GET_ELEMENT(&bsp->clusters, cluster, struct structure_cluster)->sky_index == NONE;
+	}
+	return FALSE;
+}
+
 /* a triangle's attributes */
 static void attributes_write(
 	unsigned long *to,
@@ -505,13 +564,14 @@ static void attributes_write(
 	short page,
 	float const lightmap[6],
 	float const base[6],
-	unsigned long traced)
+	unsigned long traced,
+	boolean indoor)
 {
 	memset(to, 0, ATTRIBUTE_WORDS * sizeof(unsigned long));
 	to[ATTRIBUTE_MATERIAL] = material;
 	to[ATTRIBUTE_SURFACE] = (unsigned long)surface;
 	to[ATTRIBUTE_KIND_PAGE] = (unsigned long)kind | ((unsigned long)level << LEVEL_SHIFT) |
-		((unsigned long)(page < 0 ? PAGE_NONE : page) << PAGE_SHIFT);
+		((unsigned long)(page < 0 ? PAGE_NONE : page) << PAGE_SHIFT) | (indoor ? INDOOR : 0);
 	memcpy(to + ATTRIBUTE_ATLAS, lightmap, 6 * sizeof(float));
 	memcpy(to + ATTRIBUTE_BASE, base, 6 * sizeof(float));
 	to[ATTRIBUTE_TRACED] = traced;
@@ -585,7 +645,7 @@ static long slice_make(
 				{
 					attributes_write(scene_static.attributes + made * ATTRIBUTE_WORDS, id,
 						material->first_surface_index + surface, kind, LEVEL_BOTH, lightmap->bitmap_index, uv, base,
-						traced);
+						traced, triangle_indoor(bsp, scene_static.positions + made * 9));
 				}
 				made++;
 				cursor->surface++;
@@ -626,7 +686,8 @@ static long slice_make(
 						attributes_write(scene_static.attributes + (made + index) * ATTRIBUTE_WORDS, id,
 							material->first_surface_index + surface, kind,
 							!far_count ? LEVEL_BOTH : level ? LEVEL_FAR : LEVEL_NEAR, lightmap->bitmap_index,
-							scene_static.lightmap + (made + index) * 6, scene_static.base + (made + index) * 6, traced);
+							scene_static.lightmap + (made + index) * 6, scene_static.base + (made + index) * 6, traced,
+							triangle_indoor(bsp, scene_static.positions + (made + index) * 9));
 					}
 				}
 				made += count;

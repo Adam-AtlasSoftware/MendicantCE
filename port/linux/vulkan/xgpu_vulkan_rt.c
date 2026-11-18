@@ -1632,7 +1632,8 @@ static int receiving_from_scene(uint32_t generation)
 		if (from[XGPU_SCENE_ATTRIBUTE_TRACED] == XGPU_SCENE_TRACED_NONE)
 			continue;
 		memcpy(rt.receiving + (size_t)traced * 9, set->positions + (size_t)triangle * 9, 36);
-		to[0] = (from[XGPU_SCENE_ATTRIBUTE_TRACED] & 0xffffu) | ((kind_page & 3u) << 16);
+		to[0] = (from[XGPU_SCENE_ATTRIBUTE_TRACED] & 0xffffu) | ((kind_page & 3u) << 16) |
+			((kind_page & XGPU_SCENE_INDOOR) ? 0x40000u : 0u);
 		memcpy(to + 1, from + XGPU_SCENE_ATTRIBUTE_BASE, 6 * 4);
 		to[7] = (from[XGPU_SCENE_ATTRIBUTE_SURFACE] & 0x3fffffffu) |
 			(((kind_page >> XGPU_SCENE_LEVEL_SHIFT) & 3u) << 30);

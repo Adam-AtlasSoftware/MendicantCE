@@ -51,33 +51,59 @@ traced as drawn (the remodel, two-sided, hid it).
 
 `display.prism_rig` `"units"` (`prism_rt.c`'s `PRISM_RT_UNITS_*`) puts every light in the bake's unit, a white surface's
 radiance (its irradiance over pi), from its tag's colour and power alone, the same numbers for every map, custom ones
-included; no map's fit (`scales.json`) is read. CE's lightmap holds the light its radiosity found as it is (linear: 1.0
-is the 8-bit page's white, Tool's radiosity stopping on a residual in 1/255 steps), and CE's frame is that light times
-the base map, so the bake's light goes into Raster's frame as CE's lightmap does.
+included; no map's fit (`scales.json`) is read. CE's lightmap holds the light its radiosity found (1.0 is the page's
+white), and CE's frame is that light times the base map, so the bake's light goes into Raster's frame as CE's lightmap
+does. The units are Tool's radiosity's, as far as the shipped pages and the public accounts of Tool's lightmapper
+(c20's tag pages; two re-implementations' notes, unreviewed) agree:
 
 | Light | Its power is | In the bake's unit |
 | --- | --- | --- |
-| The sun (the sky's narrowest light) | the irradiance it gives a surface facing it | colour × power / pi |
-| The domes (the sky's other lights) | the same | colour × power / pi |
-| The sky's ambient (its outdoor ambient radiosity) | CE's floor of light, unoccluded, at every point | colour × power × pi, added to every texel and probe (not passed on by the bounces; the sky beyond the level then gives no more) |
-| A light card or lamp surface (radiosity power) | its radiance | colour × power |
+| The sun (the sky's narrowest light) | the light it gives a white surface facing it (a directional light, no 1/pi) | colour × power |
+| The domes (the sky's other lights) | the same | colour × power |
+| The sky's ambient radiosity | CE's flat floor of light, unoccluded, at every point | colour × power, added to every texel and probe, not passed on by the bounces: the outdoor values in the structure's clusters with a sky, sky 0's indoor values in those with none |
+| A light card or lamp surface (radiosity power) | its radiance (the patch's radiosity, shot once) | colour × power |
 | A light fixture (intensity) | the irradiance it gives a surface facing it a world unit away | colour × intensity / d² |
 
-The sun's and the fixtures' are their definitions. The sky's and the cards' factors were measured against CE's own
-pages: each kind of light baked alone at 1 (`debug.prism_rig_scales`), its light at the gates' poses (`debug.gbuffer_view`
-`bake_total`) fitted to CE's light target there (`ce_deferred`'s light, the level's pixels). The sun came out at 0.84
-to 0.92 (b30's G2 and G3: 1 kept). The sky traced as a radiance from the open sky needed 5.9 on b30's open beach and
-7.9 under its overhang, and c40's canyon, CE's light there blue and even, more still: CE's outdoor ambient behaves as an
-unoccluded floor, which b30's poses put at 3.1 to 4.1 times its colour by power (pi kept). The cards first came out at
-1.3 to 2.3 times their power on a10's and c40's poses, but that was the bake's own bias (its lamps then sampled from
-the cells' seen lists alone, a10's bake at 0.4 to 0.9 of R's light: see the estimator); unbiased, a card's power is its
-radiance. The sky the rig takes is the BSP's own (the one most of its clusters
-have), whatever the window sees, so that a bake's rig is the same wherever its camera was.
+Raster's frame holds its light at white as the page held it (a colour past white divided by its brightest channel, its
+hue kept), after the exposure and before the base (below). The bake's light and R's are not held: the gates compare them
+as they are.
+
+What the units rest on (November 2026):
+
+- **The sun saturates the page.** b30's first BSP's 26 pages: 39.1% of the texels they use have their brightest channel
+  at 255, 39.6% within a 5-bit step of it, and 7% between 128 and 254; the rest is shade, 8 to 60 of 255. The sun's
+  colour by power there is 1.5 (0.91 0.89 0.80 by 1.70): a sun of power 1 or more whites out a face that looks at it,
+  which colour × power / pi (0.48) never does. CE's frames agree: the Forerunner structure's sunlit light (the frame
+  over the base) is flat at the page's white from a cosine of 0.35 up.
+- **The shade needs no fitted floor.** With each kind of light baked alone at 1 (`debug.prism_rig_scales`; draft, the
+  bounce by the linear albedo then), CE's light target over the bake's, the median per pixel at G2's and G3's poses:
+  the sunlit pixels 0.84 to 0.87 with the sun at colour × power and the page's hold (the target is under the page's
+  white there by its own factor, below), against 1.19 to 1.23 with the sun over pi; the shade 1.11 to 1.67 with the
+  sun's bounce at colour × power and the flat ambient alone, before the stored albedo raises the bounce (half to twice
+  the bounce: the shade then about 0.8 to 1.2). The floor the first fit put at 3.1 to 4.1 times the ambient (5.9 to
+  7.9 traced as a radiance from the open sky, more under cover) was the sun's and the domes' bounce missing its pi.
+- **The ambient is flat and by the cluster's sky** (Tool's, as c20 and both accounts give it: no visibility ray). An
+  interior's clusters have no sky: c40's chamber takes sky 0's indoor values (0.066 0.088 0.128), a10's none (its sky's
+  ambient powers are 0). `prism_scene_static.c` marks each drawn triangle of an indoor cluster (its middle a little off
+  its face, the collision BSP's leaf and the leaf's cluster: `XGPU_SCENE_INDOOR`); a texel takes its triangle's floor, a
+  probe the floor of the nearest structure the six axes meet (`floor_at`), R's pixel the floor of the structure it
+  shows (an object's, the structure below it).
+- **The cards' unit is 1:** a receiver gains the emitter's colour × power by the form factor, the bake's radiance.
+
+**CE's light target** (`ce_deferred`'s light, `debug.gbuffer_view` `light`, which every fit here is measured against)
+is CE's lightmap pass: the page's light by a mix of 1 and the bump map's dot product with the vertex's incident radiosity
+direction (a normalisation cube map; the mix by the vertex's alpha), plus the self-illumination. The detail maps are
+the base pass's, not in it. So the target is at or under the page's light, and its texture (a door's scratches, a
+panel's mottling) is the bump map's: where the light comes from one side at a slant (a wall under ceiling lamps) the
+target is under the page by that factor, a bias of every fit against it (by the pixel, not by the shader).
+
+The sky the rig takes is the BSP's own (the one most of its clusters have), whatever the window sees, so that a bake's
+rig is the same wherever its camera was.
 
 **The bounces' albedo.** In the light's units a surface's albedo is its base map's mean **as stored** (the byte over
-255, no curve; its detail maps' factors as CE's frame applies them; 0.03 to 0.85), the reflectance CE's frame shows (its
-light times the stored texel), and so the one the light the rig is measured against bounced: the bake's, R's and the
-drawn objects' alike (`prism_rt_albedo_stored`; the fitted rig keeps the mean made linear it was fitted with;
+255, no curve; 0.03 to 0.85; the base map alone, as Tool's radiosity reflected it: the detail maps are the frame's, and
+a shader with no base map reflects nothing), the reflectance CE's frame shows (its light times the stored texel), and so
+the one the light the rig is measured against bounced: the bake's, R's and the drawn objects' alike (`prism_rt_albedo_stored`; the fitted rig keeps the mean made linear it was fitted with;
 `HALO_PRISM_ALBEDO` `stored` or `linear` overrides it, a diagnostic). Made linear (a byte to the power 2.2) instead,
 a10's light came out far darker than CE's away from its lamps. Measured on G5's three poses, CE's light target against
 the bake's whole light, every level pixel (luminance, the pixels at either image's white left out; a10's BSP 0 at
@@ -230,11 +256,41 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
   own light from the reflection's side (the texel's or the volume's SH read at the reflection); and the sun's highlight
   (GGX, Smith's visibility, Schlick's Fresnel) by the same visibility as its diffuse light.
 
-The pixel is then base × (1 − the specular's share) × the diffuse light + the specular light + its self-illumination
-(the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give it), and the
-resolve draws it as it is: CE's specular, reflection and object-lighting layers are not added. Where the bake has
-nothing (a tile not baked yet, an object outside both cascades, the sky), the pixel is CE's own (light × base +
-additions). `debug.gbuffer_view` `raster_albedo`, `raster_specular` and `raster_diffuse` show the parts.
+The pixel is then base × (1 − the specular's share) × the diffuse light held at white + the specular light + its
+self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
+it), the exposure on both lights (below), and the resolve draws it as it is: CE's specular, reflection and
+object-lighting layers are not added. The diffuse light (the level's and the objects', the sun's in it) is held at white
+as CE's page held its light: a colour past white is divided by its brightest channel (its hue kept), after the exposure
+and before the base, so a sunlit wall whites out as Classic's does, and a sunlit object beside it with it. Where the
+bake has nothing (a tile not baked yet, an object outside both cascades, the sky), the pixel is CE's own (light × base +
+additions). `debug.gbuffer_view` `raster_albedo`, `raster_specular` and `raster_diffuse` show the parts; the views and R
+are before the exposure and the hold.
+
+### Raster's exposure
+
+`display.prism_exposure` (and its `_range`, `_speed` and `_bias`) and `display.prism_tone_curve` reach Raster's frame
+from the path tracer's settings; Raster's `"style"` is `"ce"`: the frame's middle as bright as Classic's, so that a level
+the units leave a stop off (an interior's lamps against its page, a map whose Tool settings differ) reads as Classic's.
+
+- **The meter** (`xgpu_vulkan_bake_glsl.inc`'s `EXPOSURE_COMMON`): in the frame whole, a lit pixel in 16 (every 4th
+  each way) adds two luminances to two histograms (log2 from −12 to 4, a quarter of a stop a bin, in one buffer,
+  `xgpu_vulkan_bake_meter`): Raster's frame there before the exposure (the bake's light by the material, the specular
+  light, the glow) and Classic's (CE's light target by its base, its additions added). "As bright as Classic" is the
+  frame's: metering the lights alone (the bake's against CE's light target) left Raster's frame darker than Classic's
+  where its materials take less than CE's base and additions give (c40's chamber 0.06 against 0.11 at the median).
+- **The step** (`exposure_source`, one invocation after the frame's pass, `xgpu_vulkan_bake_exposure_step`): `"ce"`
+  aims Raster's frame's median at Classic's, within the range (1.5 stops by default), plus the bias; `"auto"` at a
+  middle grey (0.18, −2 to +5 stops); `"fixed"` none. It moves toward its aim at the speed (2 stops a second by the
+  host's clock), at once the first time, keeps the exposure for the next frame, and empties the histograms. A frame
+  with no lit pixel keeps the exposure it had.
+- **The exposure** multiplies the diffuse and the specular light before the hold at white; the glow is CE's and stays.
+  **The tone curve** then: `"ce"` as it is (the display clips it), `"filmic"` (and `"local"` here) CE's light up to 0.6
+  of white and past it rolled toward white by its brightest channel, `"aces"` Narkowicz's fit.
+
+Raster's lit value is last linear and unclamped in `raster_source`'s `result` before the hold (`light_`, the exposure
+applied) and in `bake.raster_light` (RGBA16F) before the resolve draws it into the frame's target
+(`xgpu_vulkan_post.c`'s `DEFERRED_RESOLVE`, view 2: the light as it is); the composite to come takes the same meter
+(`meter_add`) and step.
 
 ## Measurements
 
@@ -249,8 +305,9 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 - R where lamps light a scene: at 4096 frames it is not converged (its median relative error 27 to 38% at G4,
   `docs/prism_gates.md`), and it comes out below the bake's light at a10 (0.6 to 0.9 of it on average, far darker at a
   tenth of its pixels): the bake against R there measures R's noise as much as the bake.
-- The sky's indoor ambient (CE's floor in its indoor clusters) is not taken (a10's and c40's skies have none, or the
-  outdoor's).
+- The sun's half-lit band (partial shadows, low cosines) comes out over CE's light (CE/bake 0.5 to 0.8 at G2 and G3):
+  Tool's sun is sixteen directions spread over its disc, on the vertices, so its shadows' edges are softer and coarser
+  than the bake's traced disc: a place where the bake is meant to differ.
 - The moving objects' sun shadows are CE's own projected ones (on the level) and none on the objects; traced ones from
   display.prism_rt's per-frame structure of the objects (`objects_blocked` reads it where the job block has it) need the
   RT backend to build that structure in Raster, which it does not yet.
