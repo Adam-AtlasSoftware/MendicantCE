@@ -2443,6 +2443,24 @@ static int report_job_zip(const char *path)
 	return saved;
 }
 
+/* (the job's thread) the frame's PNG, which the host writes on a thread
+of its own as <name>.part and renames to <name> once whole
+(host_screenshot.c), waited for: while its .part is there, and for at most
+REPORT_SHOT_WAIT_MS */
+#define REPORT_SHOT_WAIT_MS 20000
+
+static void report_shot_wait(const char *shot)
+{
+	char part[sizeof(report_job.shot) + 8];
+	struct timespec wait = { 0, 10 * 1000 * 1000 };
+	int waited;
+
+	if (snprintf(part, sizeof(part), "%s.part", shot) >= (int)sizeof(part))
+		return;
+	for (waited = 0; waited < REPORT_SHOT_WAIT_MS && access(shot, F_OK) != 0 && access(part, F_OK) == 0; waited += 10)
+		nanosleep(&wait, NULL);
+}
+
 /* (the job's thread) the zip written in reports/, or, if it cannot be,
 in the fallback folder */
 static void *report_job_write(void *unused)
@@ -2450,6 +2468,8 @@ static void *report_job_write(void *unused)
 	long long started = report_now_ns();
 
 	(void)unused;
+	if (report_job.shot[0])
+		report_shot_wait(report_job.shot);
 	report_job.saved = report_job_zip(report_job.path);
 	if (!report_job.saved && report_job.fallback[0])
 	{
