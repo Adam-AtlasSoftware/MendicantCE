@@ -517,6 +517,8 @@ pixel, the first round's limit, to fit a hold):
 | G2 b30 sunny | ae9a51c4f | 0.046, 0.035, 0.068 | 0.0062 / 0.0126 / 0.86 / 0.102 | 0.0062 / 0.0128 / 0.86 / 0.103 | fail on FLIP alone |
 | G2 b30 sunny | 6fa9b5e80 (moves only) | the same R | 0.0062 / 0.0126 / 0.86 / 0.103 | 0.0062 / 0.0128 / 0.86 / 0.103 | fail on FLIP alone |
 | G3 b30 shade | ae9a51c4f | 0.228, 0.093, 0.054 | 0.0082 / 0.0191 / 0.80 / 0.055 | 0.0082 / 0.0193 / 0.80 / 0.058 | fail on blotch |
+| G2 b30 sunny | 9dcc8df37 (moves only) | the same R | 0.0062 / 0.0126 / 0.86 / 0.103 | 0.0062 / 0.0128 / 0.86 / 0.103 | fail on FLIP alone |
+| G5 a10 | 699754c20 (prism-v4-m2's stored albedo merged, a10 baked again) | 0.034, 0.226, 0.301 | 0.080 / 0.073 / 1.56 / 0.177 | 0.074 / 0.070 / 1.61 / 0.181 | fail: R not converged; flicker too |
 
 - **G2.** R is converged where it matters (each pixel's relative standard error a median of 0.3 to 0.4%; its
   estimated relative MSE, linear, is a few pixels'). The path tracer's frame held 300 frames at each probe pose
@@ -531,6 +533,11 @@ pixel, the first round's limit, to fit a hold):
   of the ground's triangles: its history came from the wrong place, found along the motion vector and checked by a
   plane test that a wrong place on the same flat ground passes. 9dcc8df37 finds a level pixel's history by projecting
   its point into the last frame's camera.
+- **G2 a third time** (9dcc8df37: the level's history by its geometry): the same figures to the fourth place again.
+  So neither the sun's filter nor where its history is taken from darkens the moves; what does is still open. The
+  suspects left: the fix pass's gather of the visibility where its history is short (keyed on the diffuse history's
+  length for its stride), and the visibility's own hold (its fast mean against the slow spread). The next step is the
+  visibility after each pass in a moving capture (`pt_sun` shows only the last).
 - **G3.** R nearly converged (each pixel's relative standard error a median of 0.5 to 0.6%). At the first pose the
   path tracer's held still is at blotch 0.0144 against R and the light as traced in the moves at 0.0164, quality and
   performance alike: a difference under the trees that is not the bounce (not found yet), the moves' history fault on
@@ -540,7 +547,9 @@ pixel, the first round's limit, to fit a hold):
   estimated relative MSE 0.04 to 0.37 linear, 0.03 to 0.31 in the 8-bit frame's terms, falling as one over the
   frames: 0.001 would take of the order of 100,000 frames a pose. Neither the bake-guided first bounce (bd7fc9665)
   nor the visibility in the pixel's light resampling (ae9a51c4f) moved it. G5's figures measure R's noise, not the
-  path tracer. Two faults the round found on G5 are fixed: the denoiser's clamps took away light a few samples see
+  path tracer. On 699754c20 (prism-v4-m2's bounces' albedo, the base map's stored mean, merged; a10 baked again: its
+  corridors take about three times the bounced light) the error fell to 0.074 to 0.080 and the flicker rose to 1.56
+  to 1.61: the brighter corridors' noise in motion, which fails the flicker gate too. Two faults the round found on G5 are fixed: the denoiser's clamps took away light a few samples see
   (82c400552), and ReSTIR's reservoir with a hidden sample divided the next frames' light (ae9a51c4f).
 
 ## Every milestone also passes
