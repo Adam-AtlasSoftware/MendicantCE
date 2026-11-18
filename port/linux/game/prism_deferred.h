@@ -36,6 +36,9 @@ boolean prism_deferred_pathtraced(void);
 fixture, where it was placed), which the path tracer's moving objects leave
 out (xgpu_stream.h's XGPU_SCENE_INSTANCE_IN_TLAS) */
 boolean prism_bake_object_static(long object_index);
+/* port: ... with display.prism_raster_object_shadows "traced" (the moving
+objects' sun shadows traced: prism_rt.c's RT_FRAME asks for their structure) */
+boolean prism_deferred_raster_object_shadows(void);
 /* the window's draws from now on to a phase's target (render_window) */
 void prism_deferred_phase(short phase);
 /* the G-buffer pass (render_window's walk 1, render_gbuffer_pass): begun

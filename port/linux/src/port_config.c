@@ -762,6 +762,13 @@ static const struct config_setting config_settings[] =
 		"irradiance volume, the light where they are. \"classic\" by the\n"
 		"volume, but never darker than Classic lights them (what the game\n"
 		"shows stays seen). Read each frame." },
+	{ "display.prism_raster_object_shadows", _config_string, "\"traced\"", "HALO_PRISM_RASTER_OBJECT_SHADOWS",
+		_environment_value, _platform_desktop,
+		"PRISM Raster: the moving objects' (vehicles, characters, weapons) sun\n"
+		"shadows. \"traced\" by ray tracing against the objects as drawn this\n"
+		"frame: on the level, on each other and on themselves, in place of\n"
+		"CE's projected shadows (a GPU that traces rays). \"classic\" CE's\n"
+		"projected shadows on the level alone. Read each frame." },
 	{ "display.prism_sky_light", _config_string, "\"sky\"", "HALO_PRISM_SKY_LIGHT", _environment_value,
 		_platform_desktop,
 		"PRISM Raster's bake (and the path tracer's reference), the light in\n"
@@ -4738,6 +4745,7 @@ static const struct
 	{ "display.denoiser", { "prism", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
 	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },
+	{ "display.prism_raster_object_shadows", { "traced", "classic", NULL }, "traced" },
 	{ "display.prism_sky_light", { "sky", "flat", NULL }, "sky" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",

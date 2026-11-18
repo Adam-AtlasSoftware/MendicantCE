@@ -24,8 +24,11 @@ The bake reads what the renderer already has: SCENE_STATIC's level as drawn (its
 materials (each environment shader's mean albedo, its alpha map, its glow; the light cards' and lamp surfaces'
 emission) and its light rig (RT_FRAME's: the sun, the sky's ambient, the domes, the lamps), in the light's units (below:
 `display.prism_rig` `"auto"` is `"units"` with Raster). In Raster the game sends display.prism_rt's scene and rig
-whatever `display.prism_rt` says, with nothing traced in the frame (RT_FRAME's mode off). With the reach's inputs the
-game sends two more things only it has:
+whatever `display.prism_rt` says, with nothing traced in the frame (RT_FRAME's mode off): its older modes (`"shadows"`,
+`"gi"`, `"pathtraced"`) are off under `display.lighting` `"raster"` (`prism_rt.c`'s `settings_read`, logged once), and
+the level traced is the level as drawn whatever `display.prism_rt_world` says. Before, a config with `"gi"` and
+`display.prism_rt_world` `"remodel"` gave the bake a scene of no triangles, and Raster drew Classic's light. With the
+reach's inputs the game sends two more things only it has:
 
 - **The static scenery** (`prism_bake.c`'s `scenery_copy`): every placement of the scenario's scenery, machines and
   controls that nothing can move or destroy (no script names it, it is made on every difficulty, it has no animations
@@ -45,7 +48,12 @@ game sends two more things only it has:
 The map's own triangles are wound clockwise, as D3D draws them: their corners' cross product points into the level.
 SCENE_STATIC now turns each of them to its vertices' normals (`prism_scene_static.c`), so that every consumer's face
 normal points out of the level; before M2, display.prism_rt's one-sided faces were inside out with the stock world
-traced as drawn (the remodel, two-sided, hid it).
+traced as drawn (the remodel, two-sided, hid it). The remodel's triangles (`display.prism_world_geometry` `"remodel"`)
+are wound the same way (b30's first BSP: 99.96% of their area against their vertices' normals) and are turned alike
+(`prism_world_geometry_surface_triangles`). Until then the baker took a remodel texel's normal from the cross product,
+into the level, and turned it toward whichever side its first rays travelled further on, a guess that open ground over
+the void below a level loses: b30's beach baked dark, its sun mask facing away from the sun, and Raster drew it so.
+The remodel's faces are still traced two-sided.
 
 ## The light's units
 
@@ -186,7 +194,8 @@ converged against the same estimator converged:
   `B(n) = B(n0) (a0 + k · n)`, `k` the moment over 2 pi as a share of the light, `a0 = 1 - k · n0`.
 - **The fixtures:** one picked by its unshadowed light at the point among them all (16 or fewer) or 16 candidates, its
   shadow traced, its light over its share of the candidates' (exact for 16 or fewer).
-- **The sun's visibility** apart: a direction of the sun's disc (`display.prism_sun_size`'s, as R's).
+- **The sun's visibility** apart: a direction of the sun's disc (`display.prism_sun_size` `"auto"`'s, the tag's or the
+  real sun's, the wider, whatever the setting: R's at the default).
 - **The sky lights' rays** (the sun's, the domes') are tested as Tool's radiosity tests them: as far as the light's test
   distance (its tag's field: c40's moon 30 world units, b30's sun and dome 50; the rig's `rig[63]` and each dome's
   `[7]`), and a face met from its back (a one-sided face of the level seen from behind) lets them through. c40's canyon
@@ -233,6 +242,55 @@ batches' are put together (Chan's merge, by subgroup shuffles) before the texel'
 rule is asked. The samples and the rule are the ones a single invocation would have taken; the darkest texels, which
 the rule keeps longest, take them in a fraction of the frames. `HALO_BAKE_NO_SPREAD` turns it off.
 
+**The noise** (`prism_bake_filter.h`). The tiers under `max` stop on a sample budget, not on their noise: a10's texels at
+`ultra` kept a grain between two seeds (26.6% rms per texel, 9.8% light-weighted, 5.8% at the median), the mottling on
+c40's chamber walls and a10's, which the auto exposure lifts. Two steps between the samples and the file:
+
+- **The robust mean.** A texel's batches of 64 are dealt to 8 groups in turn (batch b to group b mod 8), and the
+  lightmap pass keeps each group's sum of the samples' luminance beside the statistics (28 floats a texel). Where the
+  groups disagree badly, the texel's level is the groups' median, a median of means, and its noise the median's: its
+  mean over the median by more than three of the median's standard errors (the groups' spread by their median absolute
+  deviation), and its largest sample alone a quarter or more of that excess (a firefly, not a skewed but well-sampled
+  light). Each group's mean tends to the texel's light as its samples grow, so the median does too: unbiased in the
+  limit. The level steers the filter's weights; the texel's light itself is not scaled. Scaling it to the median (the
+  first version) took the level of a10's and b30's second BSP down 0.9% in all, but half the light of b30's interior
+  walls (G4's poses 1 and 2, their light view's mean 0.43 to 0.57 of before) and a fifth of a10's darkest corners: there
+  the light comes by rare paths to small bright lamps, light the texel's neighbours should have had too. Taken as the
+  filter's level, such a texel's neighbours read it as their equal and take its light in, so the light is spread, not
+  lost (15% of a10's lit texels and 6% of b30's second BSP's are taken to their medians). Not in the draft's
+  checkpoints; at `max` alike (a converged texel's groups agree).
+- **The filter in chart space**, past the lightmap step, on a thread beside the mask and volume steps: three passes
+  of an a-trous filter (3 x 3 taps of 1/4, 1/2, 1/4, their spacing 1, 2, 4 texels) over each virtual page, a texel
+  averaged with its neighbours on the same chart (its atlas triangle's: the setup pass keeps it in the record's last
+  word) whose faces turn less than 26 degrees from its own (a cosine of 0.9; the weight falls as the square of the
+  turn's share of that) and whose level differs from its own by little against the two texels' measured noise: a weight
+  exp(-d^2 / (2 x 3^2 x (v1 + v2))), d the levels' difference, v each texel's variance of its level (the 1% rule's: its
+  stratified batches' means', or the median's where the robust mean took it), the levels and variances carried through
+  the passes. An edge the samples resolve (a lamp's pool, a shadow) stays; a difference the noise explains is averaged.
+  The three passes reach 7 texels, under a tile, so each tile is filtered from a window of its 3 x 3 tiles' texels,
+  the same result whatever tile a texel is in (no seams; the tests check it). The light, the indirect light and the
+  direction's moment are filtered alike, a weighted mean (the level kept: 1.000 to 1.001 of before); the sun's
+  visibility, the state and the samples stay as baked, and the empty texels are filled again from the filtered ones.
+  `max`, which runs to its noise floor, takes one pass (the mildest). The tile as baked and the filter's words of its
+  texels (the normal, the chart, the variance, the robust mean's factor: `ATLX`) are in the log, so a bake resumed runs
+  the filter again from them; each filtered tile is written (`ATLF`) and drawn as it comes, and the finished file holds
+  the filtered tiles as the tiles' results. It takes 2.4 to 2.6 s of one CPU core for a10's 8.9 M texels, 8 s for b30's
+  second BSP's 21.4 M and 58 s for c40's third's 40.7 M, beside the GPU's steps: the bakes' times did not grow (a10 61 s
+  against 69, b30 392 s against 423 to 430, c40 1006 s against 1058, 3070 Ti).
+
+Two bakes from two seeds (`HALO_BAKE_SEED` 1 and 2) at `ultra`, texel by texel (each lit texel's luminance, the
+difference over the pair's mean; light-weighted: the root of its square weighted by the light; the share of texels
+one bake has at twice the other's light; the level: the texels' light summed against the bake before, 3070 Ti):
+
+| BSP, `ultra` | Before: rms, light-weighted, median, at 2x | The filter alone | The filter on the robust levels | The level |
+| --- | --- | --- | --- | --- |
+| a10's first | 26.6%, 9.8%, 5.8%, 3.7% | 17.4%, 8.2%, 2.6%, 1.5% | 12.2%, 4.7%, 2.6%, 0.52% | 1.001 |
+| b30's second | 13.5%, 10.3%, 3.2%, 0.76% | 9.3%, 8.4%, 0.8%, 0.48% | 4.4%, 4.4%, 0.8%, 0.05% | 1.000 |
+
+(The before is `prism-v4-m2` 036f858b1's. The robust mean alone changes no texel's light. The filter alone is the
+filter replayed on the bake's log with each texel's level its plain mean. A fourth pass took nothing more; a weight of
+5 standard errors in place of 3, 4.5% light-weighted on a10.)
+
 A texel whose first rays meet mostly one-sided faces' backs is inside the level (the stock world's overlapping
 geometry); it and a texel no triangle holds take their light from their valid neighbours.
 
@@ -246,7 +304,7 @@ Each a list of jobs (`prism_bake_cache.h`'s ids), in this order:
 | The importance grid | One job: every cell's candidates weighed (4 points of each lamp from each of the cell's 8 points, shadows traced) | A hashed table of cells, 64 lamps and cumulative weights each |
 | The lightmap | A tile each: a batch of 4096 tiles on the GPU at a time, each texel's samples added between frames until it stops (the running texels packed into whole groups each frame, so that a batch whose texels are mostly done still fills the GPU); a finished tile written, drawn and replaced in the batch by the next | Per texel: the light less the sun's (RGB9E5), the direction (`k`, `a0`: RGBA8), the indirect light alone (RGB9E5, for M3's path tracer), the sun's visibility, the state and samples |
 | The sun mask | A tile each where the tile's texels facing the sun are neither all lit nor all dark: its 64 × 64 points (4 times the texels' density) found on its triangles again, each traced to the sun's disc (16 directions, stratified, up to 256 while they disagree) | A byte a point; a uniform tile is a state alone (dark, lit) |
-| The irradiance volume | Two cascades: 64 probes a brick (a world unit, 0.25 apart) where the player stands (the walk's floors and the two world units of air above them), and 64 a coarse brick (8 world units, 2 apart) over every reachable brick and the 12 world units of air above the floors (tree tops, the far side of a canyon: every object Raster draws has light); a batch of 262144 probes at a time | Per probe: SH L1 of the light from every direction (RGB, half floats), the sun's visibility, whether it is inside the level |
+| The irradiance volume | Two cascades: 64 probes a brick (a world unit, 0.25 apart) where the player stands (the walk's floors and the two world units of air above them), and 64 a coarse brick (8 world units, 2 apart) over every reachable brick and the 12 world units of air above the floors (tree tops, the far side of a canyon: every object Raster draws has light); a batch of 262144 probes at a time (its count of running probes read back each frame until it is 0, its results then asked for once: while the game draws, two or three of those counts are in flight, `prism_bake_batch.c`) | Per probe: SH L1 of the light from every direction (RGB, half floats), the sun's visibility, whether it is inside the level |
 | The reflection probes | One each 8-world-unit cell of the walk's floors, a world unit above them (b30's first BSP: 923; a30's: 2,185; a10's: 25); a batch of 8 at a time | A box (how far each of its six axes reaches, 1 to 64 world units) and a cube of four levels (32, 16, 8 and 4 texels a side), each level GGX-prefiltered at its roughness ((level / 3)^2: each texel the light the bake's estimator sees along the lobe's directions about it, weighed by their cosines; 16, 64 or 256 samples a texel by the quality), RGB9E5 |
 | The footprints | One job: each switchable fixture's tiles within its reach (section 2.4's relight) | The light's id, its tiles |
 
@@ -259,8 +317,19 @@ and the file renamed over `bsp<n>.pbk`. Its key (the header) holds what the bake
 name, the BSP, a hash of the level's triangles and attributes as the bake read them, the surfaces' tiers, the materials
 and alpha maps, the rig (with the port's words past its settings: the indoor floor, the fixtures' scale, the units and
 the sky's kind, the albedo's rule, the sun's test distance) and the lamps, the reach's bricks, the baker's version, the
-quality and the threshold. A file of
-another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done.
+quality and the threshold. While the bake runs a tile's result is as baked, with the filter's words of its texels
+(`ATLX`) after it and its filtered texels (`ATLF`) once the filter has run; the finished file keeps the filtered texels
+as the tile's result and drops both. A file of
+another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done (with `display.bake` `"off"`,
+or `"ask"` and not asked, nothing is made or baked: a whole bake of the key is drawn, else an unfinished log of it as
+far as it goes).
+
+The light is the map's, not the path tracer's look: the bake takes the sun's disc of `display.prism_sun_size` `"auto"`,
+the lamps of `display.prism_rt_emissive` `"lights"` (the light cards and lamp surfaces; no glows, as Tool's radiosity),
+at `display.prism_rt_emissive_scale` 1, and the albedo of `display.prism_rt_materials` `"average"`, whatever those
+settings (and `display.prism_rt_style`, which picks their defaults) are, so a bake loads in every session of the same
+light settings: `display.prism_sky_light`, `display.prism_rig`, the quality. Those values are the settings' defaults
+with the faithful style: a bake made before at the defaults keeps its key.
 
 **The reach's file.** The walk that finds where the player can be (the reach: the bricks the probes fill, the
 surfaces' tiers) is kept beside the BSP's bake (`<map>/bsp<n>.reach`, keyed by a hash of its inputs), so a BSP drawn
@@ -285,6 +354,7 @@ the first traced window) and the beach stayed CE's light 16 s coming out.
 | `debug.gbuffer_view` | `"bake_light"`, `"bake_sun"`, `"bake_texels"`, `"bake_volume"`, `"bake_total"` | Raster's views |
 | `display.prism_raster_composition` | `"ce"`, `"materials"` | CE's shaders compose Raster's light (default), or PRISM's own materials |
 | `display.prism_raster_objects` | `"volume"`, `"classic"` | Objects by the volume's light (default), or never lit under Classic |
+| `display.prism_raster_object_shadows` | `"traced"`, `"classic"` | The moving objects' sun shadows traced (default), or CE's projected ones |
 | `display.prism_sky_light` | `"sky"`, `"flat"` | The sky a light, by what each point sees of it (default), or Tool's flat fill; a change bakes again |
 | `display.prism_exposure`, `_range`, `_speed`, `_bias`, `display.prism_tone_curve` | as the path tracer's | Raster's exposure and tone curve (its style's: `"auto"` and `"filmic"`) |
 
@@ -293,7 +363,9 @@ glows, 8 the paths past the first hit, 16 the fixtures, 32 the grid, 64 the lamp
 indirect light, 256 own lamps' direct light; 512 every lamp of the cell's lists in the draft too, 1024 the resampled
 pick past it), `HALO_BAKE_SEED` another seed (two bakes' noise against each other), `HALO_BAKE_GATHER` the final
 gather, `HALO_BAKE_EMITTERS_PASS` the level's emitting faces neither blocking nor reflecting, `HALO_PRISM_ALBEDO`
-`stored` the base maps' stored mean; `HALO_RASTER_EXPOSURE_LOG` logs Raster's exposure and its meter's medians each
+`stored` the base maps' stored mean; `HALO_BAKE_NO_ROBUST` and `HALO_BAKE_NO_FILTER` leave the noise's steps out,
+`HALO_BAKE_FILTER_PASSES` sets the filter's passes (0 to 4), `HALO_BAKE_KEEP_LOG` keeps the finished bake's log beside
+it (`bsp<n>.pbk.log`: the tiles as baked and the filter's words); `HALO_RASTER_EXPOSURE_LOG` logs Raster's exposure and its meter's medians each
 frame.
 
 Settings > Mods > PRISM LIGHTING has Lighting (Classic or PRISM Raster), Bake (While Playing, When Asked, Never), Bake
@@ -310,8 +382,10 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
 - **The diffuse light.** A level pixel: its CE texel's chart map gives its virtual page; the four texels about its point
   there are read through the page's tile table (bilinear, the texels the bake has), each at the pixel's normal
   (`a0 + k · n`), and the sun's light is the rig's by the pixel's facing and the sun's visibility (the tile's state, or
-  its mask, bilinear: the level's and the static scenery's shadows), less the moving objects' shadows CE drew over its
-  lightmap pass (its projected shadow maps: their share of the light the G-buffer says that pass gave). An object pixel
+  its mask, bilinear: the level's and the static scenery's shadows) and the moving objects' shadows, traced (below; with
+  `display.prism_raster_object_shadows` `"classic"`, or where the frame has no structure of its objects, those CE drew
+  over its lightmap pass instead: its projected shadow maps, their share of the light the G-buffer says that pass
+  gave). An object pixel
   (the static scenery's too): the volume's eight probes about its point in its fine cascade, else its coarse one
   (those inside the level left out), SH at its normal, and the sun's light by its shadow traced against the bake's
   scene (the level and the static scenery). Both add the frame's dynamic lights (SCENE_LIGHTS' dynamic class: CE's
@@ -326,12 +400,41 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
   own light from the reflection's side (the texel's or the volume's SH read at the reflection); and the sun's highlight
   (GGX, Smith's visibility, Schlick's Fresnel) by the same visibility as its diffuse light.
 
+**The moving objects' sun shadows** (`display.prism_raster_object_shadows` `"traced"`, the default): the game sets
+RT_FRAME's `XGPU_RT_FLAG_RASTER_OBJECTS` with its mode off, and the RT backend (`xgpu_vulkan_rt.c`) takes a slot of its
+own for the frame, captures each object draw of the G-buffer pass as the path tracer captures the pre-pass's (the same
+`xgpu_vulkan_rt_capture`: the vertices where the GPU has them, each draw's entry and bottom-level structure kept from
+frame to frame, skinned and refitted on the GPU only where it moved; the first-person weapon, its G-buffer instance,
+left out, as CE never let it cast a shadow, and the static scenery the bake holds, whose shadows are baked: the game
+marks its draws, `XGPU_GBUFFER_FLAG_STATIC_SCENERY`, by the bake's own rule, `prism_bake_object_static`; b30's G2
+pose went from 703 draws to 175) and at the pass's end runs the path tracer's own `objects_record` and
+`scene_build`, nothing traced there. The raster job then has the top level's address and the objects' table
+(`xgpu_vulkan_rt_objects`), and `objects_visibility` traces one ray a pixel to the sun against the objects (masks 4 and 8: an
+opaque one's hit blocks it, each cutout crossed lets 1 - 0.75 x its share of texels drawn through, a smooth shade
+where the path tracer's stochastic hit, undenoised, was a dither) from every lit pixel the sun faces: the level's, so the vehicles,
+characters, weapons, crates and the Pelican shadow the ground, and the objects', so they shadow each other and
+themselves. CE's projected shadows on the level are then left out (they were the same shadows, softer and drawn in
+CE's own direction). With `"classic"`, or a GPU without ray queries, nothing is captured and CE's stay.
+
 **What composes the frame** (`display.prism_raster_composition`): by default (`"ce"`) CE's own shaders, until PRISM's
 materials reach theirs: the diffuse light (exposed, through the tone curve, below) goes into CE's light target in its light's
 place (the level's glow folded in as CE's lightmap pass folds it; an object's base colour, the G-buffer's, and glow
 with it), and the resolve draws CE's base colour times it and CE's additions (its reflections, specular lightmaps and
 specular lights) over it, as Classic's frame is drawn; the meter then takes both frames with the same base and
 additions. `"materials"` (for the materials milestone) composes the frame whole from PRISM's own materials, as follows.
+
+**What an object draws over its own light stays** (`render_deferred_window`, render.c). The relight (and the composite
+that takes its place in Path Traced) gives an object's pixel the volume's light times the G-buffer's base colour plus
+its emissive light, and it cannot see anything else CE drew into the light target there. A model's decal (a
+`shader_transparent_generic` or `_chicago` with the decal flag, or a model shader that is an alpha-blended decal) is
+drawn by CE at once, among the model's own passes, into the light target: the assault rifle's ammo counter and the
+displays on weapons are such, so the relit pixel took them away (Classic and `ce_deferred`, which keep the light
+target's pixels, showed them; Raster and Path Traced did not). From the G-buffer pass's end to the resolve
+(`render_deferred_window`) a model's decal is queued as the model's other transparent parts are, drawn over the
+resolved frame with them: after the relight and any composite, before the fog screens, with no exposure or curve on it
+(a display is lit by its own). Classic is unchanged (the flag is set only where the window is drawn for the resolve).
+Anything else an object drew at once into the light target belongs to the same rule: a pass of its own that the G-buffer
+has no twin for (a blended draw) is lost to the relight.
 
 With `"materials"` the pixel is base × (1 − the specular's share) × the diffuse light + the specular light + its
 self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
@@ -406,6 +509,10 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 ## What remains
 
 - `max`: path guiding or a light cache between texels, or an error floor nearer the eye's (Adam's decision).
+- The bake against R on equal scenes (`bake_flip`, 0.05) still fails after the noise's steps: a10 G5 0.0818 to 0.0716,
+  c40 G7 0.0623 to 0.0584 (high, the structure alone, seed 1; 3070 Ti, R's frames of `v4_m2_runs/r2/eq/refs`). What is
+  left is not the bake's grain: at G5's first pose the light alone is at 0.18 against R, the bake's pillar and floor
+  darker than R's, and R's own speckle (unconverged where lamps light the scene) in every pose.
 - R where lamps light a scene: at 4096 frames it is not converged (its median relative error 27 to 38% at G4,
   `docs/prism_gates.md`), and it comes out below the bake's light at a10 (0.6 to 0.9 of it on average, far darker at a
   tenth of its pixels): the bake against R there measures R's noise as much as the bake.
@@ -437,8 +544,12 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 - The sun's half-lit band (partial shadows, low cosines) comes out over CE's light (CE/bake 0.5 to 0.8 at G2 and G3):
   Tool's sun is sixteen directions spread over its disc, on the vertices, so its shadows' edges are softer and coarser
   than the bake's traced disc: a place where the bake is meant to differ.
-- The moving objects' sun shadows are CE's own projected ones (on the level) and none on the objects; traced ones from
-  display.prism_rt's per-frame structure of the objects (`objects_blocked` reads it where the job block has it) need the
-  RT backend to build that structure in Raster, which it does not yet.
+- The moving objects' traced sun shadows are one ray a pixel to the sun's centre: hard edged (CE's projected ones were
+  soft blobs), and an object off screen casts none, as it is not drawn in the G-buffer pass.
 - `max`: the tail spread over a subgroup, but no path guiding or light cache yet (Adam's decision on the floor stands).
-- The indirect layer's use by M3's path tracer, the remodel's atlas, BC6H for the layers and the reflection cubes.
+- The indirect layer's use by M3's path tracer, BC6H for the layers and the reflection cubes.
+- The remodel needs no atlas of its own: its corners carry CE's lightmap coordinates of the point of their surface, so
+  CE's chart map finds a remodel pixel's texels (b30's G2: every level pixel). Its charts are split finer than CE's
+  (b30's first BSP: 17,224 against 8,378: its corners on a chart's inner edges need not meet in the same
+  coordinates), each with its own density and so its own scale; a CE texel where two of them meet takes the nearer's
+  virtual page. No seam was seen at G2 and G3; a whole-BSP check of those borders is not made.

@@ -140,14 +140,15 @@ def test_sizes_multiples_of_four(driver64):
 
 
 def test_stream_types(constants):
-    # (36: M3's GBUFFER_PHASE_PATHTRACED, its profile and denoiser bits in the resolve's value; 35: M4's
+    # (37: prism-v4-raster-int's RT_FRAME flag RASTER_OBJECTS, 32, and GBUFFER_DRAW's STATIC_SCENERY; 36: M3's
+    # GBUFFER_PHASE_PATHTRACED, its profile and denoiser bits in the resolve's value; 35: M4's
     # SCENE_MATERIAL_MAPS; 34: M2's PRISM_BAKE, GBUFFER_DRAW's lightmap page; 33: the ring's streams_pending; 32:
     # SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends
     # SCENE_MATERIAL and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was GBUFFER_PHASE, its first
     # record)
-    assert constants["version"] == 36
+    assert constants["version"] == 37
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 36\b", text)
+    assert re.search(r"#define XGPU_STREAM_VERSION 37\b", text)
     # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
     # the decoder takes every one of them)
     assert constants["rt_frame"] == constants["record_types"] - 13

@@ -78,6 +78,7 @@ extern unsigned char render_enumerating;
 "pathtraced" alone */
 boolean prism_deferred_raster(void);
 boolean prism_deferred_pathtraced(void);
+boolean prism_deferred_raster_object_shadows(void);
 /* render_sky.c's (the sky's sun, as PRISM's cascaded shadows find it, and
 each of its lights) */
 boolean render_sky_sun(short sky_index, real_vector3d *direction, real_rgb_color *color, real *power);
@@ -153,6 +154,7 @@ enum
 	PRISM_RT_FLAG_LIGHT = 4,
 	PRISM_RT_FLAG_REFERENCE = 8,
 	PRISM_RT_FLAG_OBJECTS = 16,
+	PRISM_RT_FLAG_RASTER_OBJECTS = 32,
 	/* debug.pt_reference: its frames at most, its path's bytes
 	(XGPU_RT_REFERENCE_PATH) */
 	PRISM_RT_REFERENCE_FRAMES_MOST = 1 << 20,
@@ -338,6 +340,9 @@ static struct
 	unsigned long reference_generation;
 	long reference_ticks;
 	int reference_logged;
+	/* port: display.prism_rt's mode turned off under display.lighting
+	"raster", logged (once while it lasts) */
+	int raster_off_logged;
 } prism_rt;
 
 int prism_rt_mode(void);
@@ -394,6 +399,21 @@ static void settings_read(void)
 		return;
 	prism_rt.settings_read = config_changes() + 1;
 	prism_rt.mode = word_index(config_string("display.prism_rt"), modes, PRISM_RT_OFF);
+	/* port: display.lighting "raster" draws the level lit from the bake,
+	nothing traced in the frame: display.prism_rt's older modes are off under
+	it, so that the bake's scene (the level as drawn) is sent whatever they
+	say (with "gi" and display.prism_rt_world "remodel" the scene had no
+	triangles, and Raster drew Classic's light) */
+	if (prism_rt.mode != PRISM_RT_OFF && prism_deferred_raster())
+	{
+		if (!prism_rt.raster_off_logged)
+			platform_log("prism rt: display.prism_rt \"%s\" is not drawn under display.lighting \"raster\" (its light "
+				"is the bake's): ray tracing off", modes[prism_rt.mode]);
+		prism_rt.raster_off_logged = TRUE;
+		prism_rt.mode = PRISM_RT_OFF;
+	}
+	else if (!prism_deferred_raster())
+		prism_rt.raster_off_logged = FALSE;
 	prism_rt.quality = word_index(config_string("display.prism_rt_quality"), qualities, 0);
 	prism_rt.resolution = word_index(config_string("display.prism_rt_resolution"), resolutions, 0);
 	prism_rt.denoiser = word_index(config_string("display.prism_rt_denoiser"), denoisers, 0);
@@ -1785,14 +1805,19 @@ void prism_rt_frame_begin(void)
 	frame.flags = (prism_rt.cache ? 0 : PRISM_RT_FLAG_NO_CACHE) | (prism_rt.objects == 2 ? PRISM_RT_FLAG_STOCK_MODELS : 0) |
 		(light_keyed() ? PRISM_RT_FLAG_LIGHT : 0) |
 		/* (port: display.lighting "pathtraced": the moving objects traced,
-		the G-buffer pass's draws of them) */
-		(raster_scene() && prism_deferred_pathtraced() ? PRISM_RT_FLAG_OBJECTS : 0);
+		the G-buffer pass's draws of them; "raster": their sun shadows) */
+		(raster_scene() && prism_deferred_pathtraced() ? PRISM_RT_FLAG_OBJECTS : 0) |
+		(raster_scene() && prism_deferred_raster_object_shadows() ? PRISM_RT_FLAG_RASTER_OBJECTS : 0);
 	reference_frame(&frame);
 	frame.settings[0] = PRISM_RT_SUN_STRENGTH;
 	frame.settings[1] = PRISM_RT_MODEL_STRENGTH;
 	/* (the level traced is a remodel: its faces wound either way) */
 	frame.settings[2] = prism_rt.copied_world != PRISM_RT_WORLD_STOCK ? 1.0f : 0.0f;
 	rig_frame(frame.rig);
+	/* (spare[2]: the sun's disc the bake takes, display.prism_sun_size's
+	"auto" whatever the setting (the tag's or the real sun's, the wider): the
+	baked light is the map's, not the path tracer's look) */
+	frame.spare[2] = MAX(prism_rt.sun_diameter > 0.0f ? prism_rt.sun_diameter : 0.0035f, PRISM_RT_SUN_REAL);
 	/* (the sky's outdoor ambient radiosity: its colour at 0x48 and power at
 0x54 of the tag, before its fogs) */
 	if (prism_rt.sky_index != NONE)

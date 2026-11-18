@@ -2674,6 +2674,7 @@ long prism_world_geometry_surface_triangles(
 	}
 	for (triangle = first; triangle < first + count; triangle++)
 	{
+		float normal[3] = { 0.0f, 0.0f, 0.0f };
 		int corner;
 
 		if (written >= most)
@@ -2691,6 +2692,24 @@ long prism_world_geometry_surface_triangles(
 			}
 			at = vertices + vertex * vertex_size;
 			memcpy(positions + written * 9 + corner * 3, at, 3 * sizeof(float));
+			/* (its vertices' normals summed: the compressed vertex's at 12,
+			packed 11:11:10; the uncompressed's at 12, floats) */
+			if (vertex_size == 32)
+			{
+				real_vector3d unpacked = uncompress_int32_to_real_vector3d(*(unsigned long const *)(at + 12));
+
+				normal[0] += unpacked.i;
+				normal[1] += unpacked.j;
+				normal[2] += unpacked.k;
+			}
+			else if (vertex_size >= 24)
+			{
+				float const *n = (float const *)(at + 12);
+
+				normal[0] += n[0];
+				normal[1] += n[1];
+				normal[2] += n[2];
+			}
 			/* (the base map's coordinates: the compressed vertex's at 24, the
 			uncompressed's at 48) */
 			if (vertex_size == 32 || vertex_size >= 56)
@@ -2718,6 +2737,38 @@ long prism_world_geometry_surface_triangles(
 				{
 					memcpy(lightmap + written * 6 + corner * 2, at + 12, 2 * sizeof(float));
 				}
+			}
+		}
+		/* (wound to its vertices' normals, as SCENE_STATIC winds the map's
+		own triangles: the remodel's are D3D's clockwise faces too, whose
+		corners' cross product points into the level, and the baker's texels
+		took their normals, the side their rays leave from, from it) */
+		{
+			float const *p = positions + written * 9;
+			float e1[3], e2[3], face[3];
+			int axis;
+
+			for (axis = 0; axis < 3; axis++)
+			{
+				e1[axis] = p[3 + axis] - p[axis];
+				e2[axis] = p[6 + axis] - p[axis];
+			}
+			face[0] = e1[1] * e2[2] - e1[2] * e2[1];
+			face[1] = e1[2] * e2[0] - e1[0] * e2[2];
+			face[2] = e1[0] * e2[1] - e1[1] * e2[0];
+			if (face[0] * normal[0] + face[1] * normal[1] + face[2] * normal[2] < 0.0f)
+			{
+				float swap[3];
+
+				memcpy(swap, positions + written * 9 + 3, 3 * sizeof(float));
+				memcpy(positions + written * 9 + 3, positions + written * 9 + 6, 3 * sizeof(float));
+				memcpy(positions + written * 9 + 6, swap, 3 * sizeof(float));
+				memcpy(swap, base + written * 6 + 2, 2 * sizeof(float));
+				memcpy(base + written * 6 + 2, base + written * 6 + 4, 2 * sizeof(float));
+				memcpy(base + written * 6 + 4, swap, 2 * sizeof(float));
+				memcpy(swap, lightmap + written * 6 + 2, 2 * sizeof(float));
+				memcpy(lightmap + written * 6 + 2, lightmap + written * 6 + 4, 2 * sizeof(float));
+				memcpy(lightmap + written * 6 + 4, swap, 2 * sizeof(float));
 			}
 		}
 		written++;

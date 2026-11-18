@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 36
+#define XGPU_STREAM_VERSION 37
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -509,6 +509,9 @@ bits; its high 4 bits the flags */
 #define XGPU_GBUFFER_FLAG_FIRST_PERSON 4u
 /* (word 1 holds a normal: the vertices gave one) */
 #define XGPU_GBUFFER_FLAG_NORMAL 8u
+/* (GBUFFER_DRAW's alone: the object is static scenery the bake holds, its
+sun shadows baked; PRISM Raster's traced objects leave it out) */
+#define XGPU_GBUFFER_FLAG_STATIC_SCENERY 16u
 
 /* a record of no more than its header: SKIP, INVALIDATE, FLUSH,
 VISIBILITY_BEGIN, VISIBILITY_FRAME, DYNAMIC_LIGHTS_PREPARE,
@@ -2155,6 +2158,13 @@ enum
 	acceleration structures built (xgpu_vulkan_rt.c's
 	xgpu_vulkan_rt_objects_end) for the path tracer, nothing else traced */
 	XGPU_RT_FLAG_OBJECTS = 16,
+	/* display.lighting "raster" with display.prism_raster_object_shadows
+	"traced" (mode XGPU_RT_OFF): the objects of the G-buffer pass captured
+	and their structure built as XGPU_RT_FLAG_OBJECTS builds them, nothing
+	traced by the RT backend itself; Raster's resolve traces the moving
+	objects' sun shadows against it (32 here; prism-v4-raster-int had 16,
+	which M3's objects took first: XGPU_STREAM_VERSION 37) */
+	XGPU_RT_FLAG_RASTER_OBJECTS = 32,
 };
 #define XGPU_RT_REFERENCE_BOUNCES 32
 /* the reference file's path: a NUL-terminated UTF-8 string of at most this
@@ -2175,6 +2185,9 @@ struct xgpu_stream_rt_frame
 	float sun[4];
 	float sun_color[4];
 	float sky[4];
+	/* spare[0] and [1]: XGPU_RT_FLAG_REFERENCE's; spare[2]: the sun's
+	angular diameter the baker takes (display.prism_sun_size "auto"'s, the
+	tag's or the real sun's, whatever the setting: xgpu_vulkan_bake.c) */
 	float spare[4];
 	/* the light rig (XGPU_RT_RIG_*) */
 	float rig[XGPU_STREAM_RT_RIG_FLOATS];
@@ -2190,7 +2203,7 @@ geometry once for every consumer, the lights, the decals and the fog. They
 are sent only in the v4 modes (display.lighting "ce_deferred", "raster" and
 "pathtraced"); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 36) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 37) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
 xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
 display.prism_rt on: the traced level is its), the others are specified and

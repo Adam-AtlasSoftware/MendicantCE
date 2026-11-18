@@ -49,7 +49,8 @@ long prism_world_geometry_triangles(
 triangles of a level (PRISM_WORLD_GEOMETRY_LEVEL_*; `surface` its index
 among its material's), at most `most`, each three corners' places (9
 floats), base map coordinates and lightmap coordinates (6 floats each;
-positions NULL: only counted);
+positions NULL: only counted), each wound to its vertices' normals (its
+corners' cross product out of the level);
 how many (0: the far level is none apart from the near), -1 where the
 material has no remodel */
 enum

@@ -8,10 +8,12 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 36 (35: M4's `SCENE_MATERIAL_MAPS`; 36: M3's resolve's `GBUFFER_PHASE` value carries
+`XGPU_STREAM_VERSION` is 37 (35: M4's `SCENE_MATERIAL_MAPS`; 36: M3's resolve's `GBUFFER_PHASE` value carries
 `XGPU_GBUFFER_PHASE_PATHTRACED` in bit 28, the profile in bits 29 and 30 and the denoiser off in bit 31,
-`docs/prism_pathtraced.md`: taken from the word's top down while `prism-v4-m2`'s Raster bits grow from bit 16 up; no
-record was added). The records' types are in the stream's own list, after M1's first record,
+`docs/prism_pathtraced.md`: taken from the word's top down while `prism-v4-m2`'s Raster bits grow from bit 16 up; 37:
+`prism-v4-raster-int` merged, its `RT_FRAME` flag `XGPU_RT_FLAG_RASTER_OBJECTS` renumbered 16 to 32 (M3's
+`XGPU_RT_FLAG_OBJECTS` had 16; both ask for the same objects-only structure) and `GBUFFER_DRAW`'s
+`XGPU_GBUFFER_FLAG_STATIC_SCENERY` (16); no record was added). The records' types are in the stream's own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, M2's `PRISM_BAKE`,
 92, M4's `SCENE_MATERIAL_MAPS`, 93, and `XGPU_STREAM_RECORD_TYPES` is 94. The
 host's decoder takes every one, with its fixed part's size as its minimum.

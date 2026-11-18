@@ -493,6 +493,8 @@ static struct
 	float owner_now[64][3], owner_last[64][3];
 	uint8_t owner_now_seen[64], owner_last_seen[64];
 	uint64_t stock_stand_ins, far_left;
+	/* (the objects-only frame's top level: the slot it was built in) */
+	uint32_t objects_slot;
 } rt;
 
 /* the monotonic clock, in seconds (the exposure's adaptation) */
@@ -1048,16 +1050,18 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 	rt.frame = *record;
 	rt.frame_received = 1;
 	rt.frame_active = record->mode != XGPU_RT_OFF;
-	/* (port: "pathtraced"'s objects, HALO_PT_OBJECTS=0 none) */
-	rt.objects_only = !rt.frame_active && (record->flags & XGPU_RT_FLAG_OBJECTS) &&
-		!(getenv("HALO_PT_OBJECTS") && !strcmp(getenv("HALO_PT_OBJECTS"), "0"));
+	/* (port: the moving objects alone, the mode off: "pathtraced"'s
+	(HALO_PT_OBJECTS=0 none) or PRISM Raster's sun shadows') */
+	rt.objects_only = !rt.frame_active && (((record->flags & XGPU_RT_FLAG_OBJECTS) &&
+		!(getenv("HALO_PT_OBJECTS") && !strcmp(getenv("HALO_PT_OBJECTS"), "0"))) ||
+		(record->flags & XGPU_RT_FLAG_RASTER_OBJECTS));
 	if (rt.objects_only)
 		rt.frame_active = 1;
 	rt.slot_ready = 0;
-	if (rt.frame_active && slot_take())
+	if ((rt.frame_active || rt.objects_only) && slot_take())
 		rt.slot_ready = 1;
 	if (!rt.slot_ready)
-		rt.frame_active = 0;
+		rt.frame_active = rt.objects_only = 0;
 }
 
 int xgpu_vulkan_rt_scene(uint32_t *generation, const float **materials, uint32_t *material_count,
@@ -2190,7 +2194,9 @@ static VkDeviceSize capture_offsets(VkDeviceSize jobs, VkDeviceSize *groups, VkD
 	return *map + (VkDeviceSize)RT_WINDOW_DRAWS * 4;
 }
 
-void xgpu_vulkan_rt_window_begin(void)
+/* a window's capture begun where wanted (traced: the pre-pass's; the
+objects alone: the G-buffer pass's) */
+static void capture_begin(int wanted)
 {
 	struct rt_slot *slot = &rt.slots[rt.slot];
 	struct rt_capture *capture = &rt.capture;
@@ -2203,7 +2209,7 @@ void xgpu_vulkan_rt_window_begin(void)
 	memset(rt.owner_now_seen, 0, sizeof(rt.owner_now_seen));
 	capture->job_count = capture->job_groups = capture->job_triangles = 0;
 	capture->jobs = NULL;
-	if (!xgpu_vulkan_rt_active() || !rt.entries)
+	if (!wanted || !rt.entries)
 		return;
 	/* (the slot's geometry left after the windows before: the jobs, then
 	the workgroups' table, then the instances' table and the entries the
@@ -2219,6 +2225,11 @@ void xgpu_vulkan_rt_window_begin(void)
 	}
 	capture->serial = xgpu_vulkan_serial();
 	capture->open = 1;
+}
+
+void xgpu_vulkan_rt_window_begin(void)
+{
+	capture_begin(xgpu_vulkan_rt_active());
 }
 
 void xgpu_vulkan_rt_skipped(void)
@@ -2472,7 +2483,7 @@ static VkDeviceAddress slot_scratch(struct rt_slot *slot, VkDeviceSize size)
 /* the window's top-level structure: of the count instances objects_record
 wrote from the slot's first unused (identity: all are in the world) */
 static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct rt_slot *slot, uint32_t first,
-	uint32_t count)
+	uint32_t count, VkDeviceAddress *structure_address)
 {
 	VkAccelerationStructureGeometryKHR geometry;
 	VkAccelerationStructureBuildGeometryInfoKHR info;
@@ -2516,6 +2527,8 @@ static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct r
 	memset(&range, 0, sizeof(range));
 	range.primitiveCount = count;
 	vkCmdBuildAccelerationStructuresKHR(commands, 1, &info, &ranges);
+	if (structure_address)
+		*structure_address = address;
 	return info.dstAccelerationStructure;
 }
 
@@ -3462,7 +3475,7 @@ int xgpu_vulkan_rt_objects_end(const float eye[3])
 	rt.eye[1] = eye[1];
 	rt.eye[2] = eye[2];
 	rt.eye_known = 1;
-	if (!count || !scene_build(commands, slot, first, count))
+	if (!count || !scene_build(commands, slot, first, count, NULL))
 		return 0;
 	barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -3472,11 +3485,12 @@ int xgpu_vulkan_rt_objects_end(const float eye[3])
 	rt.objects_table = table;
 	rt.objects_count = count;
 	rt.objects_frame = rt.object_frame;
+	rt.objects_slot = rt.slot;
 	if (!rt.logged_pt)
 	{
 		rt.logged_pt = 1;
-		host_logf(HOST_LOG_INFO, "prism pt: objects traced: first frame %u instances, %u triangles", count,
-			rt.capture.triangle_count);
+		host_logf(HOST_LOG_INFO, "%s: objects traced: first frame %u instances, %u triangles",
+			rt.frame.flags & XGPU_RT_FLAG_OBJECTS ? "prism pt" : "prism raster", count, rt.capture.triangle_count);
 	}
 	return 1;
 }
@@ -3484,12 +3498,16 @@ int xgpu_vulkan_rt_objects_end(const float eye[3])
 int xgpu_vulkan_rt_objects(uint64_t *structure, uint64_t *table, uint32_t *count)
 {
 	*structure = *table = 0;
-	*count = 0;
+	if (count)
+		*count = 0;
 	if (!xgpu_vulkan_rt_objects_only() || rt.objects_frame != rt.object_frame || !rt.objects_structure)
 		return 0;
+	/* (its slot kept until the submission that traces it is done) */
+	rt.slots[rt.objects_slot].serial = xgpu_vulkan_serial();
 	*structure = rt.objects_structure;
 	*table = rt.objects_table;
-	*count = rt.objects_count;
+	if (count)
+		*count = rt.objects_count;
 	return 1;
 }
 
@@ -3863,7 +3881,7 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 		rt.eye[1] = pass->camera[0][1];
 		rt.eye[2] = pass->camera[0][2];
 		rt.eye_known = 1;
-		scene = scene_build(commands, slot, first, count);
+		scene = scene_build(commands, slot, first, count, NULL);
 		if (!scene)
 			return NULL;
 	}

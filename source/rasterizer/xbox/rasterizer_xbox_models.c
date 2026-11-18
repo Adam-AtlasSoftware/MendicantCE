@@ -2562,7 +2562,13 @@ struct transparent_geometry_group *_rasterizer_model_transparent_geometry_submit
 
 			if (submit_decals)
 			{
-				if (shader_is_decal(shader))
+				/* port: display.lighting "ce_deferred" (Raster, Path
+				Traced): a model's decal (a weapon's ammo counter and
+				displays, an object's glow) drawn at once goes into the light
+				target, whose object pixels the resolve's light replaces; it
+				is queued instead, drawn over the resolved frame with the
+				other transparent parts (render_deferred_window) */
+				if (shader_is_decal(shader) && !render_deferred_window)
 				{
 					SET_FLAG(
 						geometry_flags,

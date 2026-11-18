@@ -138,20 +138,22 @@ pass's scale), or NULL (world AO's pass then draws as before) */
 struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *inputs, uint32_t width,
 	uint32_t height, const struct xgpu_world_ao_pass *pass);
 
-/* port: display.lighting "pathtraced" (PRISM v4 M3; RT_FRAME's
-XGPU_RT_FLAG_OBJECTS with the mode off): whether this frame captures the
-G-buffer pass's object draws (xgpu_vulkan_rt_window_begin as the pass
-begins, xgpu_vulkan_rt_capture each draw) */
+/* port: the moving objects alone (RT_FRAME's XGPU_RT_FLAG_OBJECTS,
+display.lighting "pathtraced", or XGPU_RT_FLAG_RASTER_OBJECTS, "raster" with
+display.prism_raster_object_shadows "traced"; the mode off): whether this
+frame captures the G-buffer pass's object draws (xgpu_vulkan_rt_window_begin
+as the pass begins, xgpu_vulkan_rt_capture each draw) */
 int xgpu_vulkan_rt_objects_only(void);
 /* ... the pass ended: the captured objects skinned, their structures built
 or refitted and their top level built (eye: the camera's, the objects past
 display.prism_rt_objects' reach left to the game's own model); 0 none */
 int xgpu_vulkan_rt_objects_end(const float eye[3]);
-/* ... and what the path tracer traces this frame: the objects' top level
-(instances mask 4, a cutout's 8, custom index its row + 1; the structure's
-own instances, masks 1 and 2, are in it too) and its table (a row of four
-words an object: its triangle soup's address, 3 float3 vertices a
-triangle; its albedo, RGBA8; its coverage, a float); 0 none this frame */
+/* ... and what the path tracer or Raster's resolve (its objects_blocked, the
+sun shadows) traces this frame: the objects' top level (instances mask 4, a
+cutout's 8, custom index its row + 1; the structure's own instances, masks 1
+and 2, are in it too) and its table (a row of four words an object: its
+triangle soup's address, 3 float3 vertices a triangle; its albedo, RGBA8;
+its coverage, a float); 0 none this frame (count may be NULL) */
 int xgpu_vulkan_rt_objects(uint64_t *structure, uint64_t *table, uint32_t *count);
 
 /* display.prism_tone_curve (with display.prism_rt "pathtraced"): the 3D

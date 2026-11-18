@@ -3,8 +3,9 @@ TEST_BAKE.C
 
 The baker's host libraries on synthetic data (tools/test_prism_bake.py
 builds and runs it): port/linux/vulkan/prism_bake_reach.c (a collision bsp
-built here from boxes), prism_bake_atlas.c, prism_bake_cache.c and
-prism_bake_converge.c.
+built here from boxes), prism_bake_atlas.c, prism_bake_batch.c (the
+volume's batches, their readbacks in flight), prism_bake_cache.c,
+prism_bake_converge.c and prism_bake_filter.c.
 
 	test_bake <scratch folder>
 
@@ -13,8 +14,10 @@ non-zero if any failed.
 */
 
 #include "prism_bake_atlas.h"
+#include "prism_bake_batch.h"
 #include "prism_bake_cache.h"
 #include "prism_bake_converge.h"
+#include "prism_bake_filter.h"
 #include "prism_bake_reach.h"
 
 #include <math.h>
@@ -1236,6 +1239,359 @@ static void test_converge(void)
 	}
 }
 
+/* the irradiance volume's batches as xgpu_vulkan_bake.c runs them, with its
+four readback slots collected in their order once the frame they were
+recorded in is done, lag frames later: while the game draws, two or three
+counts of a batch are in flight and come back 0 together (b30's live bake:
+the results asked twice, every other batch skipped, the last past the
+probes' end). Each item must be written once, in its batch, and no batch
+past the end. */
+struct batch_slot
+{
+	int busy;
+	uint32_t frame, batch, finished, running, first;
+};
+
+static int batches_run(uint32_t total, uint32_t size, uint32_t lag, uint32_t work, uint32_t starve, char *why)
+{
+	struct prism_bake_batches batches;
+	struct batch_slot slots[4];
+	unsigned char *written = (unsigned char *)calloc(total ? total : 1, 1);
+	uint32_t frame, index, dispatched = 0, k;
+	int ok = 1;
+
+	if (!written)
+		return 0;
+	memset(slots, 0, sizeof(slots));
+	prism_bake_batches_start(&batches, total, size);
+	for (frame = 1; frame < 100000 && batches.done < total && ok; frame++)
+	{
+		/* (the readbacks of done frames, in slot order) */
+		for (index = 0; index < 4 && ok; index++)
+		{
+			struct batch_slot *r = &slots[index];
+
+			if (!r->busy || r->frame + lag > frame)
+				continue;
+			if (!r->finished)
+			{
+				uint32_t count = prism_bake_batches_counted(&batches, r->batch, r->running);
+
+				if (count)
+				{
+					/* (a data slot: the first free, maybe one after this one's) */
+					struct batch_slot *data = NULL;
+
+					for (k = 0; k < 4 && !data; k++)
+						if (!slots[k].busy && !(starve && frame % starve == 0))
+							data = &slots[k];
+					if (!data)
+						batches.asked = 0;
+					else
+					{
+						data->busy = 1;
+						data->frame = frame;
+						data->batch = r->batch;
+						data->finished = count;
+						data->first = batches.done;
+					}
+				}
+			}
+			else
+			{
+				int64_t at = prism_bake_batches_finished(&batches, r->batch, r->finished);
+
+				if (at >= 0)
+				{
+					if ((uint32_t)at != r->first || (uint64_t)at + r->finished > total)
+					{
+						sprintf(why, "results of %u at %ld (asked at %u)", r->finished, (long)at, r->first);
+						ok = 0;
+					}
+					for (k = 0; ok && k < r->finished; k++)
+						if (written[at + k]++)
+						{
+							sprintf(why, "item %ld written twice", (long)(at + k));
+							ok = 0;
+						}
+				}
+			}
+			r->busy = 0;
+		}
+		/* (the frame's slice: a running batch's samples and count, or the
+		next batch) */
+		if (batches.batched > batches.done)
+		{
+			uint32_t number = prism_bake_batches_counting(&batches);
+			struct batch_slot *r = NULL;
+
+			if (!number)
+				continue;
+			for (k = 0; k < 4 && !r; k++)
+				if (!slots[k].busy)
+					r = &slots[k];
+			if (!r)
+				continue;
+			dispatched++;
+			r->busy = 1;
+			r->frame = frame;
+			r->batch = number;
+			r->finished = 0;
+			r->running = dispatched >= work ? 0 : work - dispatched;
+		}
+		else if (prism_bake_batches_begin(&batches))
+			dispatched = 0;
+	}
+	for (index = 0; ok && index < total; index++)
+		if (written[index] != 1)
+		{
+			sprintf(why, "item %u written %u times (done %u of %u)", index, written[index], batches.done, total);
+			ok = 0;
+		}
+	free(written);
+	return ok;
+}
+
+static void test_batches(void)
+{
+	struct prism_bake_batches batches;
+	char why[256], name[64];
+	uint32_t lag, work;
+
+	/* b30's volume in small: a last batch shorter than the rest */
+	for (lag = 1; lag <= 3; lag++)
+		for (work = 1; work <= 4; work++)
+		{
+			why[0] = 0;
+			sprintf(name, "batches_lag%u_work%u", lag, work);
+			check(batches_run(64u * 31u + 34u, 64u, lag, work, 0, why), name, why);
+		}
+	why[0] = 0;
+	check(batches_run(64u * 7u, 64u, 3, 2, 3, why), "batches_no_slot", why);
+	why[0] = 0;
+	check(batches_run(0, 64u, 2, 1, 0, why), "batches_none", why);
+	/* (a count of another batch, or results not asked for, let go) */
+	prism_bake_batches_start(&batches, 100, 40);
+	check(prism_bake_batches_begin(&batches) == 40 && prism_bake_batches_begin(&batches) == 0 &&
+		prism_bake_batches_counted(&batches, 2, 0) == 0 && prism_bake_batches_finished(&batches, 1, 40) < 0 &&
+		prism_bake_batches_counted(&batches, 1, 5) == 0 && prism_bake_batches_counted(&batches, 1, 0) == 40 &&
+		prism_bake_batches_counting(&batches) == 0 && prism_bake_batches_counted(&batches, 1, 0) == 0 &&
+		prism_bake_batches_finished(&batches, 1, 40) == 0 && prism_bake_batches_finished(&batches, 1, 40) < 0 &&
+		batches.done == 40 && prism_bake_batches_begin(&batches) == 40 && batches.number == 2,
+		"batches_stale", "a stale count or result taken");
+	prism_bake_batches_start(&batches, 100, 40);
+	prism_bake_batches_skip(&batches, 64);
+	check(batches.done == 64 && prism_bake_batches_begin(&batches) == 36 && prism_bake_batches_begin(&batches) == 0,
+		"batches_skip", "the file's items skipped");
+}
+
+/* ---------- the robust mean and the filter (prism_bake_filter.c) */
+
+/* a texel's samples as the bake takes them: count of them, each from
+source, their groups' sums, mean and largest */
+static void robust_texel(double (*source)(void), uint32_t count, float sums[PRISM_BAKE_GROUPS], double *mean,
+	float *largest)
+{
+	uint32_t k;
+	double total = 0.0;
+
+	memset(sums, 0, PRISM_BAKE_GROUPS * sizeof(float));
+	*largest = 0.0f;
+	for (k = 0; k < count; k++)
+	{
+		double x = source();
+
+		sums[(k / PRISM_BAKE_GROUP_BATCH) % PRISM_BAKE_GROUPS] += (float)x;
+		total += x;
+		if ((float)x > *largest)
+			*largest = (float)x;
+	}
+	*mean = total / count;
+}
+
+static double source_normal(void)
+{
+	double x = 1.0 + 0.3 * gaussian();
+
+	return x > 0.0 ? x : 0.0;
+}
+
+/* a lamp's light, and rarely a path that meets a small bright lamp: a
+tenth of the light in one sample of 10,000 (mean 1.1) */
+static double source_firefly(void)
+{
+	return 1.0 + 0.2 * gaussian() + (uniform() < 1.0e-4 ? 1000.0 : 0.0);
+}
+
+/* a heavy tail (Pareto, shape 2.5, mean 5/3) */
+static double source_pareto(void)
+{
+	return pow(uniform(), -1.0 / 2.5);
+}
+
+static void filter_flat(struct prism_bake_filter_texel *t, float light, float variance, int32_t chart, float nz)
+{
+	memset(t, 0, sizeof(*t));
+	t->light[0] = t->light[1] = t->light[2] = light;
+	t->indirect[0] = t->indirect[1] = t->indirect[2] = 0.5f * light;
+	t->level = 0.2126f * light + 0.7152f * light + 0.0722f * light;
+	t->variance = variance;
+	t->normal[2] = nz;
+	t->normal[0] = nz < 1.0f ? (float)sqrt(1.0 - nz * nz) : 0.0f;
+	t->chart = chart;
+}
+
+static void test_filter(void)
+{
+	struct prism_bake_robust_parameters rp;
+	struct prism_bake_filter_parameters fp;
+	static struct prism_bake_filter_texel window[48 * 48], scratch[2 * 48 * 48], world[64 * 64];
+	struct prism_bake_filter_texel out[256], out2[256];
+	float sums[PRISM_BAKE_GROUPS], largest, variance, factor;
+	double mean, before, after, sum_out, m;
+	uint32_t g, total, k;
+	int trials, triggered, x, y, ok;
+
+	prism_bake_robust_defaults(&rp);
+	/* the groups' samples */
+	for (ok = 1, k = 0; k < 3000; k += 37)
+	{
+		for (total = 0, g = 0; g < PRISM_BAKE_GROUPS; g++)
+			total += prism_bake_group_samples(k, g);
+		ok &= total == k;
+	}
+	check(ok && prism_bake_group_samples(2048, 3) == 256 && prism_bake_group_samples(100, 0) == 64 &&
+		prism_bake_group_samples(100, 1) == 36 && prism_bake_group_samples(100, 2) == 0, "robust_groups",
+		"the groups' samples");
+	/* without a firefly the mean stands (almost always) */
+	for (trials = 0, triggered = 0; trials < 2000; trials++)
+	{
+		robust_texel(source_normal, 2048, sums, &mean, &largest);
+		variance = 1.0f;
+		triggered += prism_bake_robust_factor(sums, 2048, largest, &variance, &rp) != 1.0f;
+	}
+	check(triggered <= 10, "robust_quiet", "the mean replaced where no firefly was");
+	/* a texel at the budget with a firefly in it: taken near its light
+	without the firefly, and with less noise than the mean's */
+	for (trials = 0, triggered = 0, before = after = 0.0; trials < 2000; trials++)
+	{
+		robust_texel(source_firefly, 512, sums, &mean, &largest);
+		factor = prism_bake_robust_factor(sums, 512, largest, NULL, &rp);
+		triggered += factor != 1.0f;
+		before += (mean - 1.1) * (mean - 1.1);
+		after += (mean * factor - 1.1) * (mean * factor - 1.1);
+	}
+	check(triggered > 50 && triggered < 200 && after < 0.25 * before, "robust_firefly", "the fireflies' texels not taken in");
+	/* unbiased in the limit: a heavy tail's texels' mean light over many
+	trials, at a budget and at 32 times it */
+	for (k = 2048; k <= 65536; k *= 32)
+	{
+		for (trials = 0, m = 0.0; trials < 400; trials++)
+		{
+			robust_texel(source_pareto, k, sums, &mean, &largest);
+			m += mean * prism_bake_robust_factor(sums, k, largest, NULL, &rp);
+		}
+		m /= 400.0;
+		if (k == 2048)
+			before = fabs(m / (5.0 / 3.0) - 1.0);
+		else
+			after = fabs(m / (5.0 / 3.0) - 1.0);
+	}
+	check(after < 0.01 && after <= before + 0.002, "robust_limit", "the robust mean's bias does not fall away");
+
+	/* the filter: a flat chart's noise falls, its light stays */
+	prism_bake_filter_defaults(&fp, PRISM_BAKE_QUALITY_ULTRA);
+	check(fp.passes == 3, "filter_passes", "three passes under max");
+	prism_bake_filter_defaults(&fp, PRISM_BAKE_QUALITY_MAX);
+	check(fp.passes == 1, "filter_passes_max", "max's mildest");
+	prism_bake_filter_defaults(&fp, PRISM_BAKE_QUALITY_HIGH);
+	for (k = 0; k < 48 * 48; k++)
+		filter_flat(&window[k], (float)(1.0 + 0.1 * gaussian()), 0.01f, 7, 1.0f);
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (before = after = sum_out = 0.0, k = 0; k < 256; k++)
+	{
+		double in = window[(16 + k / 16) * 48 + 16 + k % 16].light[0] - 1.0;
+
+		before += in * in;
+		after += (out[k].light[0] - 1.0) * (out[k].light[0] - 1.0);
+		sum_out += out[k].light[0];
+	}
+	check(after < before / 8.0 && fabs(sum_out / 256.0 - 1.0) < 0.02 && out[0].variance < 0.01f / 8.0f,
+		"filter_flat", "a flat chart's noise not reduced, or its light moved");
+	/* a firefly's texel (its level its groups' median, its light as
+	sampled): its light spread over its neighbours, not lost */
+	for (k = 0; k < 48 * 48; k++)
+		filter_flat(&window[k], 1.0f, 1.0e-4f, 7, 1.0f);
+	window[24 * 48 + 24].light[0] = window[24 * 48 + 24].light[1] = window[24 * 48 + 24].light[2] = 50.0f;
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (sum_out = 0.0, m = 0.0, k = 0; k < 256; k++)
+	{
+		sum_out += out[k].light[0];
+		m = out[k].light[0] > m ? out[k].light[0] : m;
+	}
+	check(fabs(sum_out - (256.0 + 49.0)) < 3.0 && m < 5.0, "filter_firefly", "a firefly's light lost or kept in place");
+	/* an edge the samples resolve stays: half the chart at 1, half at 4,
+	each with 1% noise */
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			filter_flat(&window[y * 48 + x], (float)((x < 24 ? 1.0 : 4.0) * (1.0 + 0.01 * gaussian())),
+				(float)(1.0e-4 * (x < 24 ? 1.0 : 16.0)), 7, 1.0f);
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (ok = 1, y = 0; y < 16; y++)
+		ok &= fabs(out[y * 16 + 7].light[0] - 1.0) < 0.02 && fabs(out[y * 16 + 8].light[0] - 4.0) < 0.08;
+	check(ok, "filter_edge", "an edge the samples resolve blurred");
+	/* never across a chart's edge, nor a turn of the face; a texel of
+	chart -1 is neither read nor changed */
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			filter_flat(&window[y * 48 + x], x < 24 ? 1.0f : 1.5f, 1.0f, x < 24 ? 3 : 4, 1.0f);
+	window[20 * 48 + 20].chart = -1;
+	window[20 * 48 + 20].light[0] = 100.0f;
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (ok = 1, k = 0; k < 256; k++)
+		ok &= k == 4 * 16 + 4 ? out[k].light[0] == 100.0f : out[k].light[0] == (k % 16 < 8 ? 1.0f : 1.5f);
+	check(ok, "filter_chart", "light taken across a chart's edge or from a texel not baked");
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			filter_flat(&window[y * 48 + x], x < 24 ? 1.0f : 1.5f, 1.0f, 3, x < 24 ? 1.0f : 0.0f);
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (ok = 1, k = 0; k < 256; k++)
+		ok &= out[k].light[0] == (k % 16 < 8 ? 1.0f : 1.5f);
+	check(ok, "filter_normal", "light taken across a turn of the face");
+	/* no seams: a texel's result does not depend on where the tiles fall
+	(the same texel from two windows 8 texels apart) */
+	for (k = 0; k < 64 * 64; k++)
+		filter_flat(&world[k], (float)(1.0 + 0.2 * gaussian() + ((k % 64) > 30 ? 0.5 : 0.0)), 0.01f, 1, 1.0f);
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			window[y * 48 + x] = world[y * 64 + x];
+	prism_bake_filter_tile(window, out, scratch, &fp);
+	for (y = 0; y < 48; y++)
+		for (x = 0; x < 48; x++)
+			window[y * 48 + x] = world[(y + 8) * 64 + x + 8];
+	prism_bake_filter_tile(window, out2, scratch, &fp);
+	for (ok = 1, y = 0; y < 8; y++)
+		for (x = 0; x < 8; x++)
+			ok &= memcmp(&out[(y + 8) * 16 + x + 8], &out2[y * 16 + x], sizeof(out[0])) == 0;
+	check(ok, "filter_seams", "a texel's result depends on its tile's place");
+	/* the normals' 32 bits */
+	for (ok = 1, k = 0; k < 1000; k++)
+	{
+		float n[3], back[3], l;
+
+		n[0] = (float)gaussian();
+		n[1] = (float)gaussian();
+		n[2] = (float)gaussian();
+		l = (float)sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+		n[0] /= l;
+		n[1] /= l;
+		n[2] /= l;
+		prism_bake_normal_unpack(prism_bake_normal_pack(n), back);
+		ok &= n[0] * back[0] + n[1] * back[1] + n[2] * back[2] > 0.99999f;
+	}
+	check(ok, "filter_normals", "a normal's 32 bits");
+}
+
 int main(int argc, char **argv)
 {
 	if (argc < 2)
@@ -1249,6 +1605,8 @@ int main(int argc, char **argv)
 	test_cache(argv[1]);
 	test_cache_jobs(argv[1]);
 	test_converge();
+	test_batches();
+	test_filter();
 	printf("%s: %d failed\n", failures ? "FAILED" : "PASSED", failures);
 	return failures != 0;
 }

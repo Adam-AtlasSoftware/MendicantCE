@@ -61,8 +61,10 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 #include "xgpu_vulkan_scene.h"
 #include "host.h"
 #include "prism_bake_atlas.h"
+#include "prism_bake_batch.h"
 #include "prism_bake_cache.h"
 #include "prism_bake_converge.h"
+#include "prism_bake_filter.h"
 #include "prism_bake_reach.h"
 
 #include <errno.h>
@@ -78,15 +80,17 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 16u
+#define BAKE_VERSION 18u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
 #define MASK_FACTOR 4u
 #define MASK_SIDE (TILE * MASK_FACTOR)
 #define MASK_TEXELS (MASK_SIDE * MASK_SIDE)
-/* the accumulators' floats a texel, a probe's */
+/* the accumulators' floats a probe; a texel's (the probe's and its 8
+groups' sums of luminance: the robust mean's, prism_bake_filter.h) */
 #define ACCUMULATOR_FLOATS 20u
+#define TEXEL_ACCUMULATOR_FLOATS 28u
 /* a batch's tiles at most (its texels' working set: 2048 x 256 x 64 bytes,
 32 MB, and the records' 16 MB) */
 #define BATCH_TILES 4096u
@@ -94,9 +98,16 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 #define MASK_BATCH 256u
 /* the probes a batch */
 #define VOLUME_BATCH (64u * 4096u)
-/* a raster tile's words (2 a texel), the bake file's tile (4 a texel) */
+/* a raster tile's words (2 a texel), the bake file's tile (4 a texel), the
+filter's words of a tile (4 a texel: the normal, the chart + 1, the
+variance of the level, the robust mean's factor) */
 #define RASTER_TILE_WORDS (TILE_TEXELS * 2u)
 #define FILE_TILE_WORDS (TILE_TEXELS * 4u)
+#define AUX_TILE_WORDS (TILE_TEXELS * 4u)
+/* the filtered tiles waiting to be written and drawn at most, and those a
+frame writes */
+#define FILTER_RING 2048u
+#define FILTER_FRAME 1024u
 /* the importance grid: a cell's side, its candidates, the words a cell */
 #define GRID_CELL 2.0f
 #define GRID_CANDIDATES 128u
@@ -267,6 +278,8 @@ struct bake_readback
 	uint32_t tiles[BATCH_TILES];
 	uint32_t finished;
 	int kind;
+	/* the volume's batch it is of (prism_bake_batch.h) */
+	uint32_t batch;
 };
 
 enum
@@ -330,6 +343,14 @@ struct bake_plan
 	float *reflections;
 	int failed;
 	double seconds;
+};
+
+/* a tile the filter has made: its index, its file's words, its raster's */
+struct filter_result
+{
+	uint32_t tile;
+	uint32_t file[FILE_TILE_WORDS];
+	uint32_t raster[RASTER_TILE_WORDS];
 };
 
 /* a BSP's bake */
@@ -411,9 +432,13 @@ struct bake_state
 	uint32_t *mask_tiles;
 	uint32_t mask_tile_count, masks_done, masks_batched;
 	struct bake_buffer mask_ranges, mask_out;
-	/* the volume */
-	uint32_t probes_done, probes_batched;
-	int volume_waiting, volume_loaded;
+	/* the volume: its batches of probes (done: those written) */
+	struct prism_bake_batches volume;
+	int volume_loaded;
+	/* display.bake "off" (or "ask" and not asked) when the file was opened:
+	nothing written, nothing baked (a whole bake, or an unfinished log of
+	this key read, is drawn); begun again once a bake is wanted */
+	int idle;
 	/* the reflection probes: their places, info, texels and hashed grid on
 	the GPU, the grid's entries, those done and in the batch running */
 	struct bake_buffer reflection_points, reflection_info, reflection_data, reflection_table;
@@ -429,6 +454,22 @@ struct bake_state
 	uint32_t drafted;
 	uint64_t file_bytes;
 	int logged_resumed;
+	/* the noise (prism_bake_filter.h): the robust mean's rule and the texels
+	it took to their groups' median; the filter's parameters (passes 0:
+	none), its thread (state 0 not begun, 1 running, 2 done), the tiles it
+	has filtered waiting to be written and drawn (a ring, filter_lock's),
+	the tiles the file had filtered, the filter's time */
+	struct prism_bake_robust_parameters robust;
+	int robust_on;
+	double texels_robust;
+	struct prism_bake_filter_parameters filter;
+	pthread_t filter_thread;
+	int filter_state, filter_stop, filter_finished, filter_failed;
+	pthread_mutex_t filter_lock;
+	pthread_cond_t filter_room;
+	struct filter_result *filter_ring;
+	uint32_t filter_tail, filter_count, filter_tiles, tiles_filtered;
+	double filter_started, filter_seconds;
 };
 
 /* ---------- globals */
@@ -1681,6 +1722,7 @@ static void plan_free(struct bake_plan *plan)
 static void status_set(int word, uint32_t value);
 static void status_real(int word, float value);
 static void reach_wait(void);
+static void filter_stop(struct bake_state *b);
 
 static void folder_make(const char *path)
 {
@@ -1734,6 +1776,7 @@ static void bake_free(struct bake_state *b)
 		return;
 	if (b->thread_running)
 		pthread_join(b->thread, NULL);
+	filter_stop(b);
 	for (index = 0; index < sizeof(buffers) / sizeof(buffers[0]); index++)
 		if (buffers[index]->buffer)
 			garbage_add(buffers[index], VK_NULL_HANDLE);
@@ -1923,6 +1966,22 @@ static struct bake_state *bake_begin(void)
 	b->plan.quality = (int)b->quality;
 	/* the rig (the frame's: the sun, the sky, the domes, the lamps' scale) */
 	memcpy(b->block.rig, frame->rig, sizeof(b->block.rig));
+	/* (the map's light, not the path tracer's look: the sun's disc
+	display.prism_sun_size "auto"'s (RT_FRAME's spare[2]), the lamps
+	display.prism_rt_emissive "lights"' (the light cards and lamp surfaces,
+	no glows: Tool's radiosity's), at display.prism_rt_emissive_scale 1, the
+	albedo display.prism_rt_materials "average"'s, whatever those settings
+	are, so that a bake is the same in every session of the same light
+	settings) */
+	{
+		float *rig = (float *)b->block.rig;
+
+		if (frame->spare[2] > 0.0f && frame->spare[2] < 3.0f)
+			rig[XGPU_RT_RIG_SUN + 3] = frame->spare[2];
+		rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE] = 1.0f;
+		rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE_SCALE] = 1.0f;
+		rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_MATERIALS] = 1.0f;
+	}
 	/* (D4 amended: the `max` tier's noise floor, a share of middle grey; the
 	converge rule's error floor, rig[15].z) */
 	b->noise_floor = b->quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
@@ -1938,6 +1997,18 @@ static struct bake_state *bake_begin(void)
 		b->block.unused = seed;
 		b->seed = seed;
 	}
+	/* (the noise's steps, prism_bake_filter.h: the robust mean, and the
+	filter by the quality; HALO_BAKE_NO_ROBUST and HALO_BAKE_NO_FILTER leave
+	them out, HALO_BAKE_FILTER_PASSES sets the passes: diagnostics) */
+	prism_bake_robust_defaults(&b->robust);
+	b->robust_on = getenv("HALO_BAKE_NO_ROBUST") == NULL;
+	prism_bake_filter_defaults(&b->filter, (int)b->quality);
+	if (getenv("HALO_BAKE_FILTER_PASSES"))
+		b->filter.passes = atoi(getenv("HALO_BAKE_FILTER_PASSES"));
+	if (getenv("HALO_BAKE_NO_FILTER"))
+		b->filter.passes = 0;
+	b->filter.passes = b->filter.passes < 0 ? 0 : b->filter.passes > PRISM_BAKE_FILTER_PASSES_MOST ?
+		PRISM_BAKE_FILTER_PASSES_MOST : b->filter.passes;
 	memcpy(b->block.sun, frame->sun, sizeof(b->block.sun));
 	b->material_count = material_count;
 	/* the key */
@@ -1964,8 +2035,12 @@ static struct bake_state *bake_begin(void)
 	if (alpha_traced)
 		hash = prism_bake_hash64(hash, alpha, (size_t)alpha_words * 4);
 	b->key.material_hash = hash;
-	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, frame->rig, XGPU_RT_RIG_SETTINGS * sizeof(float));
-	hash = prism_bake_hash64(hash, &frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE], 3 * sizeof(float));
+	/* (the light: the rig the bake takes (its sun, sky and domes; the
+	lamps' words, fixed above), the sun, the port's words, the lamps and the
+	fixtures; not the frame's look settings, which the bake does not read) */
+	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, b->block.rig, XGPU_RT_RIG_SETTINGS * sizeof(float));
+	hash = prism_bake_hash64(hash, (const float *)b->block.rig + XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE,
+		3 * sizeof(float));
 	hash = prism_bake_hash64(hash, frame->sun, sizeof(frame->sun));
 	/* (the port's rig words past the settings, rig[57] on: the indoor
 	floor, the fixtures' scale, the units and the sky's kind, the albedo's
@@ -1980,6 +2055,16 @@ static struct bake_state *bake_begin(void)
 	b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->noise_floor, sizeof(b->noise_floor));
 	if (b->seed)
 		b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->seed, sizeof(b->seed));
+	{
+		/* (the noise's steps where a diagnostic changed them) */
+		struct prism_bake_filter_parameters standard;
+
+		prism_bake_filter_defaults(&standard, (int)b->quality);
+		if (!b->robust_on)
+			b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, "no robust", 9);
+		if (b->filter.passes != standard.passes)
+			b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->filter.passes, sizeof(b->filter.passes));
+	}
 	b->key.baker_version = BAKE_VERSION;
 	b->key.quality = b->quality;
 	b->key.convergence_threshold = bake.control.threshold > 0.0f ? bake.control.threshold : 0.01f;
@@ -2470,7 +2555,7 @@ static int bake_upload(struct bake_state *b)
 	/* the batch's: the texels' records, accumulators, states, running counts,
 	the setup's entries and the job blocks */
 	if (!buffer_make((VkDeviceSize)BATCH_TILES * TILE_TEXELS * 32, 0, 0, &b->texels) ||
-		!buffer_make((VkDeviceSize)BATCH_TILES * TILE_TEXELS * ACCUMULATOR_FLOATS * 4, 0, 0, &b->accumulators) ||
+		!buffer_make((VkDeviceSize)BATCH_TILES * TILE_TEXELS * TEXEL_ACCUMULATOR_FLOATS * 4, 0, 0, &b->accumulators) ||
 		!buffer_make((VkDeviceSize)BATCH_TILES * TILE_TEXELS * 4, 0, 0, &b->states) ||
 		!buffer_make((VkDeviceSize)BATCH_TILES * 4, 0, 0, &b->running) ||
 		!buffer_make((VkDeviceSize)BATCH_TILES * 32, 0, 0, &b->tile_origins) ||
@@ -2592,6 +2677,7 @@ static struct bake_readback *readback_take(VkDeviceSize size, int kind)
 		r->serial = xgpu_vulkan_serial();
 		r->kind = kind;
 		r->finished = 0;
+		r->batch = 0;
 		return r;
 	}
 	return NULL;
@@ -2823,25 +2909,45 @@ static int tile_indirect(VkCommandBuffer commands, struct bake_state *b, uint32_
 		TILE_TEXELS * 4);
 }
 
-/* a tile's results from its readback: written to the file, drawn, its
-mask asked for where its sun is mixed */
+/* the variance of a texel's luminance's mean from its accumulators: its
+stratified batches' (4 or more), else its samples' */
+static float texel_variance(const float *a, uint32_t count)
+{
+	uint32_t batches;
+
+	memcpy(&batches, &a[17], 4);
+	if (batches >= 4)
+		return (a[19] > 0.0f ? a[19] : 0.0f) / (float)(batches - 1) / (float)batches;
+	if (count > 1)
+		return (a[14] > 0.0f ? a[14] : 0.0f) / (float)(count - 1) / (float)count;
+	return 0.0f;
+}
+
+/* a tile's results from its readback: written to the file (with the
+filter's words of its texels, where it filters: their robust means'
+levels, prism_bake_filter.h), drawn, its mask asked for where its sun is
+mixed */
 static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t tile_index, const float *accumulators,
 	const uint32_t *states, const float *records)
 {
 	struct texel_result texels[TILE_TEXELS];
-	uint32_t raster[RASTER_TILE_WORDS], file[FILE_TILE_WORDS], index;
+	uint32_t raster[RASTER_TILE_WORDS], file[FILE_TILE_WORDS], aux[AUX_TILE_WORDS], index;
 	uint8_t sun_texels[TILE_TEXELS];
 	int sun_state;
 	float const *sun = b->block.sun;
+	int filtered = b->filter.passes > 0 && !b->drafting;
+
+	memset(aux, 0, sizeof(aux));
 
 	for (index = 0; index < TILE_TEXELS; index++)
 	{
-		const float *a = accumulators + (size_t)index * ACCUMULATOR_FLOATS;
+		const float *a = accumulators + (size_t)index * TEXEL_ACCUMULATOR_FLOATS;
 		const float *r = records + (size_t)index * 8;
 		struct texel_result *t = &texels[index];
-		uint32_t flags, count;
-		float lum, n[3], k;
+		uint32_t flags, count, kept;
+		float lum, n[3], k, factor = 1.0f, variance;
 		int axis;
+		int32_t chart;
 
 		memset(t, 0, sizeof(*t));
 		memcpy(&flags, &r[6], 4);
@@ -2864,6 +2970,16 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		}
 		if (!flags || (states[index] != 1 && states[index] != 2))
 			continue;
+		/* (the robust mean: the level the filter compares, the groups'
+		median where a firefly put their mean far over it; the light as
+		sampled) */
+		variance = texel_variance(a, count);
+		if (b->robust_on && !b->drafting)
+		{
+			factor = prism_bake_robust_factor(a + 20, count, a[15], &variance, &b->robust);
+			if (factor != 1.0f)
+				b->texels_robust += 1.0;
+		}
 		for (axis = 0; axis < 3; axis++)
 		{
 			t->total[axis] = a[axis] + a[3 + axis];
@@ -2887,6 +3003,15 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		if (!t->facing)
 			t->sun = 0.0f;
 		t->valid = 1;
+		/* (the filter's words: the normal, the chart (the texel's atlas
+		triangle's) + 1, the variance of the level, the robust mean's
+		factor) */
+		memcpy(&kept, &r[7], 4);
+		chart = kept && kept - 1u < b->plan.atlas.triangle_count ? b->plan.atlas.triangle_charts[kept - 1u] : -1;
+		aux[index * 4] = prism_bake_normal_pack(n);
+		aux[index * 4 + 1] = chart >= 0 ? (uint32_t)chart + 1u : 0u;
+		memcpy(&aux[index * 4 + 2], &variance, 4);
+		memcpy(&aux[index * 4 + 3], &factor, 4);
 	}
 	sun_state = tile_words(texels, raster, file, sun);
 	for (index = 0; index < TILE_TEXELS; index++)
@@ -2908,6 +3033,8 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		return;
 	}
 	file_append(b, PRISM_BAKE_RECORD_ATLAS_TILE, b->plan.tiles[tile_index].job, file, sizeof(file));
+	if (filtered)
+		file_append(b, PRISM_BAKE_RECORD_ATLAS_AUX, b->plan.tiles[tile_index].job, aux, sizeof(aux));
 	if (!tile_draw(commands, b, tile_index, raster, sun_state, sun_texels, NULL) ||
 		!tile_indirect(commands, b, tile_index, file))
 		return;
@@ -2922,6 +3049,402 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		if (texels[index].samples > b->samples_most)
 			b->samples_most = texels[index].samples;
 	}
+}
+
+/* ---------- the filter in chart space (prism_bake_filter.h): once every
+tile is baked, on a thread, a virtual page at a time and its tiles row by
+row, each tile from the file's results of it and its eight neighbours
+(their texels as baked and the filter's words), handed back to the frame,
+which writes it (ATLAS_FILTERED) and draws it */
+
+static void rgb9e5_decode(uint32_t v, float rgb[3])
+{
+	float e = exp2f((float)((int)(v >> 27) - 15 - 9));
+
+	rgb[0] = (float)(v & 511u) * e;
+	rgb[1] = (float)((v >> 9) & 511u) * e;
+	rgb[2] = (float)((v >> 18) & 511u) * e;
+}
+
+/* a tile's texels in the filter's terms from its file words and filter
+words (NULL: the tile is not there, every texel chart -1) */
+static void filter_texels(const uint32_t *file, const uint32_t *aux, struct prism_bake_filter_texel *texels)
+{
+	uint32_t index;
+
+	for (index = 0; index < TILE_TEXELS; index++)
+	{
+		struct prism_bake_filter_texel *t = &texels[index];
+		uint32_t w1, axis;
+		float lum, factor;
+
+		memset(t, 0, sizeof(*t));
+		t->chart = -1;
+		if (!file || !aux || ((file[index * 4 + 3] >> 24) & 3u) != 1u || !aux[index * 4 + 1])
+			continue;
+		rgb9e5_decode(file[index * 4], t->light);
+		rgb9e5_decode(file[index * 4 + 2], t->indirect);
+		lum = luma3(t->light);
+		w1 = file[index * 4 + 1];
+		for (axis = 0; axis < 3; axis++)
+			t->moment[axis] = ((float)((w1 >> (axis * 8)) & 255u) / 255.0f - 0.5f) * 4.0f * lum;
+		memcpy(&t->variance, &aux[index * 4 + 2], 4);
+		memcpy(&factor, &aux[index * 4 + 3], 4);
+		t->level = lum * factor;
+		prism_bake_normal_unpack(aux[index * 4], t->normal);
+		t->chart = (int32_t)aux[index * 4 + 1] - 1;
+	}
+}
+
+/* a filtered tile's words: its baked texels' light, indirect light and
+direction the filter's, the rest (the sun, the state, the samples) as
+baked, the empty texels filled again from the filtered ones */
+static void filter_words(const uint32_t *baked, struct prism_bake_filter_texel const *filtered, uint32_t *file,
+	uint32_t *raster, const float sun[4])
+{
+	struct texel_result texels[TILE_TEXELS];
+	uint32_t index;
+
+	for (index = 0; index < TILE_TEXELS; index++)
+	{
+		struct texel_result *t = &texels[index];
+		struct prism_bake_filter_texel const *f = &filtered[index];
+		uint32_t w3 = baked[index * 4 + 3], axis;
+		float lum, k;
+
+		memset(t, 0, sizeof(*t));
+		if (((w3 >> 24) & 3u) != 1u)
+			continue;
+		t->valid = 1;
+		t->state = (uint8_t)((w3 >> 8) & 255u);
+		t->samples = 1u << (((w3 >> 16) & 255u) / 8u);
+		t->facing = (w3 >> 24) & 4u ? 1 : 0;
+		t->sun = (float)(w3 & 255u) / 255.0f;
+		if (f->chart < 0)
+		{
+			/* (a texel the filter did not take: as baked) */
+			uint32_t w1 = baked[index * 4 + 1];
+
+			rgb9e5_decode(baked[index * 4], t->total);
+			rgb9e5_decode(baked[index * 4 + 2], t->indirect);
+			for (axis = 0; axis < 3; axis++)
+				t->k[axis] = ((float)((w1 >> (axis * 8)) & 255u) / 255.0f - 0.5f) * 4.0f;
+			t->a0 = (float)(w1 >> 24) / 255.0f * 4.0f - 1.0f;
+			continue;
+		}
+		memcpy(t->total, f->light, sizeof(t->total));
+		memcpy(t->indirect, f->indirect, sizeof(t->indirect));
+		lum = luma3(f->light);
+		for (axis = 0; axis < 3; axis++)
+			t->k[axis] = lum > BLACK_FLOOR ? f->moment[axis] / lum : 0.0f;
+		k = sqrtf(t->k[0] * t->k[0] + t->k[1] * t->k[1] + t->k[2] * t->k[2]);
+		if (k > 1.9f)
+			for (axis = 0; axis < 3; axis++)
+				t->k[axis] *= 1.9f / k;
+		t->a0 = 1.0f - (t->k[0] * f->normal[0] + t->k[1] * f->normal[1] + t->k[2] * f->normal[2]);
+	}
+	tile_words(texels, raster, file, sun);
+	/* (the sun's words exactly as baked: the tile's sun state and mask stand) */
+	for (index = 0; index < TILE_TEXELS; index++)
+		file[index * 4 + 3] = baked[index * 4 + 3];
+}
+
+/* a row of a virtual page's tiles, held while the rows beside it are
+filtered: each tile's file words and its texels in the filter's terms */
+struct filter_row
+{
+	int32_t y;
+	uint8_t *have;
+	uint32_t *file;
+	struct prism_bake_filter_texel *texels;
+};
+
+static void filter_row_load(struct bake_state *b, struct prism_bake_cache *reader, const int32_t *map,
+	struct bake_vpage const *vp, int32_t y, struct filter_row *row)
+{
+	int32_t x;
+	uint32_t aux[AUX_TILE_WORDS];
+
+	row->y = y;
+	for (x = 0; x < vp->tiles_x; x++)
+	{
+		int32_t tile = y >= 0 && y < vp->tiles_y ? map[y * vp->tiles_x + x] : -1;
+		struct prism_bake_record const *result, *words;
+		uint32_t *file = row->file + (size_t)x * FILE_TILE_WORDS;
+
+		row->have[x] = 0;
+		if (tile < 0)
+			continue;
+		result = prism_bake_cache_find(reader, PRISM_BAKE_RECORD_ATLAS_TILE, b->plan.tiles[tile].job);
+		words = prism_bake_cache_find(reader, PRISM_BAKE_RECORD_ATLAS_AUX, b->plan.tiles[tile].job);
+		if (!result || !words || result->size != FILE_TILE_WORDS * 4 || words->size != sizeof(aux) ||
+			words->sequence < result->sequence || prism_bake_cache_read(reader, result, file, FILE_TILE_WORDS * 4) ||
+			prism_bake_cache_read(reader, words, aux, sizeof(aux)))
+			continue;
+		filter_texels(file, aux, row->texels + (size_t)x * TILE_TEXELS);
+		row->have[x] = 1;
+	}
+}
+
+/* a result handed to the frame: waits while the ring is full; 0 once the
+filter is to stop */
+static int filter_hand(struct bake_state *b, uint32_t tile, const uint32_t *file, const uint32_t *raster)
+{
+	struct filter_result *r;
+
+	pthread_mutex_lock(&b->filter_lock);
+	while (b->filter_count >= FILTER_RING && !b->filter_stop)
+		pthread_cond_wait(&b->filter_room, &b->filter_lock);
+	if (b->filter_stop)
+	{
+		pthread_mutex_unlock(&b->filter_lock);
+		return 0;
+	}
+	/* (the slot past the frame's, this thread's until counted: the frame
+	moves the tail and the count together) */
+	r = &b->filter_ring[(b->filter_tail + b->filter_count) % FILTER_RING];
+	pthread_mutex_unlock(&b->filter_lock);
+	r->tile = tile;
+	memcpy(r->file, file, sizeof(r->file));
+	memcpy(r->raster, raster, sizeof(r->raster));
+	pthread_mutex_lock(&b->filter_lock);
+	b->filter_count++;
+	pthread_mutex_unlock(&b->filter_lock);
+	return 1;
+}
+
+static void *filter_main(void *context)
+{
+	struct bake_state *b = (struct bake_state *)context;
+	struct bake_plan *plan = &b->plan;
+	struct prism_bake_cache reader;
+	struct prism_bake_filter_texel *window = NULL, *scratch = NULL, out[TILE_TEXELS], empty;
+	struct filter_row rows[3];
+	uint32_t first = 0, vpage, file[FILE_TILE_WORDS], raster[RASTER_TILE_WORDS];
+	int32_t *map = NULL;
+	int32_t widest = 1, k;
+	float sun[4];
+
+	memset(&reader, 0, sizeof(reader));
+	memset(rows, 0, sizeof(rows));
+	memset(&empty, 0, sizeof(empty));
+	empty.chart = -1;
+	memcpy(sun, b->block.sun, sizeof(sun));
+	for (vpage = 0; vpage < plan->vpage_count; vpage++)
+		if (plan->vpages[vpage].tiles_x > widest)
+			widest = plan->vpages[vpage].tiles_x;
+	window = (struct prism_bake_filter_texel *)malloc(PRISM_BAKE_FILTER_WINDOW * PRISM_BAKE_FILTER_WINDOW *
+		sizeof(*window));
+	scratch = (struct prism_bake_filter_texel *)malloc(2 * PRISM_BAKE_FILTER_WINDOW * PRISM_BAKE_FILTER_WINDOW *
+		sizeof(*scratch));
+	for (k = 0; k < 3; k++)
+	{
+		rows[k].have = (uint8_t *)calloc((size_t)widest, 1);
+		rows[k].file = (uint32_t *)malloc((size_t)widest * FILE_TILE_WORDS * 4);
+		rows[k].texels = (struct prism_bake_filter_texel *)malloc((size_t)widest * TILE_TEXELS * sizeof(*rows[k].texels));
+		if (!rows[k].have || !rows[k].file || !rows[k].texels)
+			b->filter_failed = 1;
+	}
+	if (!window || !scratch || b->filter_failed ||
+		prism_bake_cache_open(&reader, b->new_path, &b->key, 0) != PRISM_BAKE_CACHE_CURRENT)
+	{
+		b->filter_failed = 1;
+		goto done;
+	}
+	for (vpage = 0; vpage < plan->vpage_count && !b->filter_stop; vpage++)
+	{
+		struct bake_vpage const *vp = &plan->vpages[vpage];
+		uint32_t last = first, index;
+		int32_t y, x;
+
+		/* (the plan's tiles are its virtual pages' in turn, row by row) */
+		while (last < plan->tile_count && plan->tiles[last].vpage == vpage)
+			last++;
+		if (last == first)
+			continue;
+		free(map);
+		map = (int32_t *)malloc((size_t)vp->tiles_x * vp->tiles_y * sizeof(int32_t));
+		if (!map)
+		{
+			b->filter_failed = 1;
+			break;
+		}
+		for (index = 0; index < (uint32_t)(vp->tiles_x * vp->tiles_y); index++)
+			map[index] = -1;
+		for (index = first; index < last; index++)
+			map[plan->tiles[index].y * vp->tiles_x + plan->tiles[index].x] = (int32_t)index;
+		for (k = 0; k < 3; k++)
+			rows[k].y = -1000;
+		for (index = first; index < last && !b->filter_stop; index++)
+		{
+			struct bake_tile const *tile = &plan->tiles[index];
+			struct filter_row *middle;
+			int32_t dy, dx, line;
+
+			y = tile->y;
+			x = tile->x;
+			/* (rows y - 1, y and y + 1 held: row r in rows[r mod 3]) */
+			for (dy = -1; dy <= 1; dy++)
+			{
+				struct filter_row *row = &rows[(y + dy + 3) % 3];
+
+				if (row->y != y + dy)
+					filter_row_load(b, &reader, map, vp, y + dy, row);
+			}
+			middle = &rows[y % 3];
+			if (!middle->have[x])
+				continue;
+			for (dy = -1; dy <= 1; dy++)
+			{
+				struct filter_row const *row = &rows[(y + dy + 3) % 3];
+
+				for (dx = -1; dx <= 1; dx++)
+				{
+					int there = x + dx >= 0 && x + dx < vp->tiles_x && row->have[x + dx];
+					struct prism_bake_filter_texel const *from = there ? row->texels + (size_t)(x + dx) * TILE_TEXELS :
+						NULL;
+
+					for (line = 0; line < (int32_t)TILE; line++)
+					{
+						struct prism_bake_filter_texel *to = window + ((dy + 1) * TILE + line) * PRISM_BAKE_FILTER_WINDOW +
+							(dx + 1) * TILE;
+						int32_t c;
+
+						if (from)
+							memcpy(to, from + line * TILE, TILE * sizeof(*to));
+						else
+							for (c = 0; c < (int32_t)TILE; c++)
+								to[c] = empty;
+					}
+				}
+			}
+			prism_bake_filter_tile(window, out, scratch, &b->filter);
+			filter_words(middle->file + (size_t)x * FILE_TILE_WORDS, out, file, raster, sun);
+			if (!filter_hand(b, index, file, raster))
+				break;
+		}
+		first = last;
+	}
+done:
+	prism_bake_cache_close(&reader);
+	free(map);
+	free(window);
+	free(scratch);
+	for (k = 0; k < 3; k++)
+	{
+		free(rows[k].have);
+		free(rows[k].file);
+		free(rows[k].texels);
+	}
+	pthread_mutex_lock(&b->filter_lock);
+	b->filter_finished = 1;
+	pthread_mutex_unlock(&b->filter_lock);
+	return NULL;
+}
+
+/* the filter begun once every tile is baked: 1 where it runs */
+static int filter_start(struct bake_state *b)
+{
+	if (b->filter.passes <= 0 || !b->writing || b->filter_state)
+		return 0;
+	if (b->tiles_filtered >= b->plan.tile_count)
+	{
+		/* (the file had every tile filtered) */
+		b->filter_state = 2;
+		return 0;
+	}
+	b->filter_ring = (struct filter_result *)malloc(FILTER_RING * sizeof(struct filter_result));
+	if (!b->filter_ring || fflush(b->writer.file) != 0)
+	{
+		free(b->filter_ring);
+		b->filter_ring = NULL;
+		host_logf(HOST_LOG_WARN, "prism bake: %s bsp %d: the filter cannot run (no memory): its texels as baked", b->map,
+			(int)b->bsp);
+		b->filter_state = 2;
+		return 0;
+	}
+	pthread_mutex_init(&b->filter_lock, NULL);
+	pthread_cond_init(&b->filter_room, NULL);
+	b->filter_tail = b->filter_count = b->filter_tiles = 0;
+	b->filter_stop = b->filter_finished = b->filter_failed = 0;
+	b->filter_started = now_seconds();
+	if (pthread_create(&b->filter_thread, NULL, filter_main, b) != 0)
+	{
+		pthread_mutex_destroy(&b->filter_lock);
+		pthread_cond_destroy(&b->filter_room);
+		free(b->filter_ring);
+		b->filter_ring = NULL;
+		b->filter_state = 2;
+		return 0;
+	}
+	b->filter_state = 1;
+	return 1;
+}
+
+/* the filtered tiles waiting written and drawn (FILTER_FRAME a frame at
+most); the filter's end */
+static void filter_drain(VkCommandBuffer commands, struct bake_state *b)
+{
+	uint32_t count, done = 0;
+	int finished;
+
+	if (b->filter_state != 1)
+		return;
+	pthread_mutex_lock(&b->filter_lock);
+	count = b->filter_count;
+	finished = b->filter_finished;
+	pthread_mutex_unlock(&b->filter_lock);
+	while (done < count && done < FILTER_FRAME)
+	{
+		struct filter_result const *r = &b->filter_ring[(b->filter_tail + done) % FILTER_RING];
+		struct bake_tile const *tile = &b->plan.tiles[r->tile];
+
+		if (tile->physical && !upload(commands, &b->pool, (VkDeviceSize)(tile->physical - 1) * RASTER_TILE_WORDS * 4,
+			r->raster, RASTER_TILE_WORDS * 4))
+			break;
+		/* (PRISM Path Traced's indirect pool the filtered tile's too, as a
+		loaded bake's is) */
+		if (tile->physical && !tile_indirect(commands, b, r->tile, r->file))
+			break;
+		file_append(b, PRISM_BAKE_RECORD_ATLAS_FILTERED, tile->job, r->file, sizeof(r->file));
+		done++;
+	}
+	pthread_mutex_lock(&b->filter_lock);
+	b->filter_tail = (b->filter_tail + done) % FILTER_RING;
+	b->filter_count -= done;
+	b->filter_tiles += done;
+	pthread_cond_signal(&b->filter_room);
+	pthread_mutex_unlock(&b->filter_lock);
+	if (finished && done == count)
+	{
+		pthread_join(b->filter_thread, NULL);
+		pthread_mutex_destroy(&b->filter_lock);
+		pthread_cond_destroy(&b->filter_room);
+		free(b->filter_ring);
+		b->filter_ring = NULL;
+		b->filter_state = 2;
+		b->filter_seconds = now_seconds() - b->filter_started;
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the filter: %u of %u tiles in %.1f s (%d passes)%s", b->map,
+			(int)b->bsp, b->filter_tiles, b->plan.tile_count, b->filter_seconds, b->filter.passes,
+			b->filter_failed ? ", stopped short (no memory or no file): the rest as baked" : "");
+	}
+}
+
+/* the filter let go of (the bake given up): its thread stopped */
+static void filter_stop(struct bake_state *b)
+{
+	if (b->filter_state != 1)
+		return;
+	pthread_mutex_lock(&b->filter_lock);
+	b->filter_stop = 1;
+	pthread_cond_signal(&b->filter_room);
+	pthread_mutex_unlock(&b->filter_lock);
+	pthread_join(b->filter_thread, NULL);
+	pthread_mutex_destroy(&b->filter_lock);
+	pthread_cond_destroy(&b->filter_room);
+	free(b->filter_ring);
+	b->filter_ring = NULL;
+	b->filter_state = 0;
 }
 
 /* ---------- the passes */
@@ -3384,7 +3907,8 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 			asked++;
 	if (asked > 512)
 		asked = 512;
-	r = readback_take(BATCH_TILES * 4 + (VkDeviceSize)(asked ? asked : 1) * TILE_TEXELS * (ACCUMULATOR_FLOATS * 4 + 4 + 32),
+	r = readback_take(BATCH_TILES * 4 + (VkDeviceSize)(asked ? asked : 1) * TILE_TEXELS * (TEXEL_ACCUMULATOR_FLOATS * 4 + 4 +
+		32),
 		STEP_LIGHTMAP);
 	if (!r)
 		return;
@@ -3397,9 +3921,9 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 			r->tiles[slot] = b->batch.tiles[slot];
 			if (b->batch.tiles[slot] == 0xffffffffu || b->batch.asked[slot] != 1 || r->finished >= asked)
 				continue;
-			copy_region(commands, &b->accumulators, (VkDeviceSize)slot * TILE_TEXELS * ACCUMULATOR_FLOATS * 4, &r->buffer, at,
-				TILE_TEXELS * ACCUMULATOR_FLOATS * 4);
-			at += TILE_TEXELS * ACCUMULATOR_FLOATS * 4;
+			copy_region(commands, &b->accumulators, (VkDeviceSize)slot * TILE_TEXELS * TEXEL_ACCUMULATOR_FLOATS * 4,
+				&r->buffer, at, TILE_TEXELS * TEXEL_ACCUMULATOR_FLOATS * 4);
+			at += TILE_TEXELS * TEXEL_ACCUMULATOR_FLOATS * 4;
 			copy_region(commands, &b->states, (VkDeviceSize)slot * TILE_TEXELS * 4, &r->buffer, at, TILE_TEXELS * 4);
 			at += TILE_TEXELS * 4;
 			copy_region(commands, &b->texels, (VkDeviceSize)slot * TILE_TEXELS * 32, &r->buffer, at, TILE_TEXELS * 32);
@@ -3422,8 +3946,8 @@ static void lightmap_collect(VkCommandBuffer commands, struct bake_state *b, str
 	for (index = 0; index < r->finished; index++)
 	{
 		const float *accumulators = (const float *)data;
-		const uint32_t *states = (const uint32_t *)(data + TILE_TEXELS * ACCUMULATOR_FLOATS * 4);
-		const float *records = (const float *)(data + TILE_TEXELS * (ACCUMULATOR_FLOATS * 4 + 4));
+		const uint32_t *states = (const uint32_t *)(data + TILE_TEXELS * TEXEL_ACCUMULATOR_FLOATS * 4);
+		const float *records = (const float *)(data + TILE_TEXELS * (TEXEL_ACCUMULATOR_FLOATS * 4 + 4));
 
 		slot = r->slots[index];
 		if (b->batch.tiles[slot] == r->tiles[slot] && b->batch.tiles[slot] != 0xffffffffu)
@@ -3432,7 +3956,7 @@ static void lightmap_collect(VkCommandBuffer commands, struct bake_state *b, str
 			b->batch.tiles[slot] = 0xffffffffu;
 			b->batch.asked[slot] = 0;
 		}
-		data += TILE_TEXELS * (ACCUMULATOR_FLOATS * 4 + 4 + 32);
+		data += TILE_TEXELS * (TEXEL_ACCUMULATOR_FLOATS * 4 + 4 + 32);
 	}
 	b->running_texels = 0;
 	for (slot = 0; slot < BATCH_TILES; slot++)
@@ -3666,24 +4190,29 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 			return;
 		}
 		free(table);
+		prism_bake_batches_start(&b->volume, plan->probe_count, VOLUME_BATCH);
 		barrier(commands);
 		return;
 	}
-	if (b->volume_waiting)
-		return;
-	if (b->probes_batched > b->probes_done)
+	if (b->volume.batched > b->volume.done)
 	{
-		/* (the batch running: its count of running probes read back) */
+		uint32_t number = prism_bake_batches_counting(&b->volume);
+
+		/* (the batch running: its count of running probes read back, until
+		its results are asked for) */
+		if (!number)
+			return;
 		r = readback_take(16, STEP_VOLUME);
 		if (!r)
 			return;
-		addresses[0] = b->probe_points.address + (VkDeviceSize)b->probes_done * 16;
+		r->batch = number;
+		addresses[0] = b->probe_points.address + (VkDeviceSize)b->volume.done * 16;
 		addresses[1] = b->probe_accumulators.address;
 		addresses[2] = b->probe_states.address;
 		addresses[3] = b->probe_statistics.address;
 		addresses[4] = b->probe_states.address + (VkDeviceSize)VOLUME_BATCH * 4;
 		addresses[7] = gather_cache(b);
-		count = b->probes_batched - b->probes_done;
+		count = b->volume.batched - b->volume.done;
 		run_compacted(commands, PIPELINE_VOLUME, b, b->probe_states.address, count, addresses, 5, 5, bake.samples, 64,
 			b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b), (float)BOUNCES, 1u);
 		barrier(commands);
@@ -3691,26 +4220,24 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 		r->finished = 0;
 		return;
 	}
-	if (b->probes_done >= plan->probe_count)
-		return;
 	/* the next batch begun */
-	count = plan->probe_count - b->probes_done;
-	if (count > VOLUME_BATCH)
-		count = VOLUME_BATCH;
+	count = prism_bake_batches_begin(&b->volume);
+	if (!count)
+		return;
 	vkCmdFillBuffer(commands, b->probe_accumulators.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(commands, b->probe_states.buffer, 0, (VkDeviceSize)VOLUME_BATCH * 4, 0u);
 	vkCmdFillBuffer(commands, b->probe_states.buffer, (VkDeviceSize)VOLUME_BATCH * 4, 4, count);
 	vkCmdFillBuffer(commands, b->probe_statistics.buffer, 0, VK_WHOLE_SIZE, 0u);
 	barrier(commands);
-	b->probes_batched = b->probes_done + count;
 }
 
 /* the running probes' count read: the batch's results asked for where it is
-0, or its results written (each brick's record, the raster's probes) */
+0 (once: several counts of a batch are in flight while the game draws), or
+its results written (each brick's record, the raster's probes) */
 static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struct bake_readback *r)
 {
 	struct bake_plan *plan = &b->plan;
-	uint32_t count = b->probes_batched - b->probes_done, index;
+	uint32_t count, index;
 
 	if (r->finished == 0)
 	{
@@ -3718,11 +4245,17 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 		struct bake_readback *data;
 
 		memcpy(&running, r->buffer.mapped, 4);
-		if (running != 0 || count == 0)
+		count = prism_bake_batches_counted(&b->volume, r->batch, running);
+		if (!count)
 			return;
 		data = readback_take((VkDeviceSize)count * (ACCUMULATOR_FLOATS * 4 + 4 + 36), STEP_VOLUME);
 		if (!data)
+		{
+			/* (asked again by the next count) */
+			b->volume.asked = 0;
 			return;
+		}
+		data->batch = r->batch;
 		copy_region(commands, &b->probe_accumulators, 0, &data->buffer, 0, (VkDeviceSize)count * ACCUMULATOR_FLOATS * 4);
 		copy_region(commands, &b->probe_states, 0, &data->buffer, (VkDeviceSize)count * ACCUMULATOR_FLOATS * 4,
 			(VkDeviceSize)count * 4);
@@ -3730,7 +4263,6 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 			(VkDeviceSize)count * 36);
 		data->finished = count;
 		/* (no more samples meanwhile: the batch is whole) */
-		b->volume_waiting = 1;
 		return;
 	}
 	{
@@ -3739,8 +4271,12 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 			(size_t)r->finished * ACCUMULATOR_FLOATS * 4);
 		const uint32_t *statistics = (const uint32_t *)((const char *)r->buffer.mapped +
 			(size_t)r->finished * (ACCUMULATOR_FLOATS * 4 + 4));
-		uint32_t first = b->probes_done, words[BRICK_PROBES * PROBE_WORDS], k;
+		uint32_t first, words[BRICK_PROBES * PROBE_WORDS], k;
+		int64_t at = prism_bake_batches_finished(&b->volume, r->batch, r->finished);
 
+		if (at < 0)
+			return;
+		first = (uint32_t)at;
 		for (index = 0; index < r->finished; index++)
 		{
 			const float *a = accumulators + (size_t)index * ACCUMULATOR_FLOATS;
@@ -3764,9 +4300,6 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 			(void)p;
 			file_append(b, PRISM_BAKE_RECORD_VOLUME_BRICK, brick_job(plan, first + index), words, sizeof(words));
 		}
-		b->probes_done += r->finished;
-		b->probes_batched = b->probes_done;
-		b->volume_waiting = 0;
 		(void)half_to_float;
 	}
 }
@@ -4068,10 +4601,12 @@ static int plan_write(struct bake_state *b, int with_masks)
 }
 
 /* the file: a whole bake of this key loaded (DONE), the log of an unfinished
-one resumed, or a new one made */
-static void file_open(struct bake_state *b)
+one resumed, or a new one made; where no bake is wanted (wanted 0), nothing
+made or resumed */
+static void file_open(struct bake_state *b, int wanted)
 {
 	enum prism_bake_cache_status status;
+	uint32_t differences;
 
 	status = prism_bake_cache_open(&b->cache, b->path, &b->key, 0);
 	if (status == PRISM_BAKE_CACHE_CURRENT && b->cache.done)
@@ -4082,10 +4617,34 @@ static void file_open(struct bake_state *b)
 		b->complete = 1;
 		return;
 	}
+	/* (the differences read before the cache is let go: closing clears it) */
+	differences = b->cache.differences;
 	prism_bake_cache_close(&b->cache);
+	if (!wanted)
+	{
+		/* (display.bake "off", or "ask" and not asked: no file made or
+		resumed, nothing baked; an unfinished log of this key drawn as far as
+		it goes) */
+		b->idle = 1;
+		b->writing = 0;
+		if (prism_bake_cache_open(&b->cache, b->new_path, &b->key, 0) != PRISM_BAKE_CACHE_CURRENT)
+		{
+			prism_bake_cache_close(&b->cache);
+			memset(&b->cache, 0, sizeof(b->cache));
+		}
+		if (status == PRISM_BAKE_CACHE_STALE)
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake there is of something else (differences 0x%x): "
+				"not baked (display.bake %s)", b->map, (int)b->bsp, differences,
+				bake.control.mode == XGPU_BAKE_MODE_OFF ? "\"off\"" : "\"ask\", not asked");
+		else
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: no whole bake: not baked (display.bake %s)%s", b->map,
+				(int)b->bsp, bake.control.mode == XGPU_BAKE_MODE_OFF ? "\"off\"" : "\"ask\", not asked",
+				b->cache.record_count ? ", its unfinished log drawn" : "");
+		return;
+	}
 	if (status == PRISM_BAKE_CACHE_STALE)
 		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake there is of something else (differences 0x%x): "
-			"baked again", b->map, (int)b->bsp, b->cache.differences);
+			"baked again", b->map, (int)b->bsp, differences);
 	if (prism_bake_cache_resume(&b->writer, &b->cache, b->new_path, &b->key, 0) == 0)
 	{
 		b->writing = 1;
@@ -4135,13 +4694,24 @@ static int file_compact(struct bake_state *b)
 		failed |= prism_bake_cache_append_plan(&writer, log.plan_jobs, log.plan_count) != 0;
 	for (index = 0; index < log.record_count && !failed; index++)
 	{
-		struct prism_bake_record const *record = &log.records[index];
+		struct prism_bake_record const *record = &log.records[index], *source = record;
 
 		if (record->type == PRISM_BAKE_RECORD_PLAN || record->type == PRISM_BAKE_RECORD_CHECKPOINT ||
-			record->type == PRISM_BAKE_RECORD_DONE || prism_bake_cache_find(&log, record->type, record->job) != record ||
+			record->type == PRISM_BAKE_RECORD_DONE || record->type == PRISM_BAKE_RECORD_ATLAS_AUX ||
+			record->type == PRISM_BAKE_RECORD_ATLAS_FILTERED ||
+			prism_bake_cache_find(&log, record->type, record->job) != record ||
 			(record->job != PRISM_BAKE_JOB_NONE && log.plan_count && !prism_bake_cache_in_plan(&log, record->job) &&
 			record->type != PRISM_BAKE_RECORD_FOOTPRINTS && record->type != PRISM_BAKE_RECORD_IMPORTANCE_GRID))
 			continue;
+		/* (a tile's filtered texels as its result) */
+		if (record->type == PRISM_BAKE_RECORD_ATLAS_TILE)
+		{
+			struct prism_bake_record const *filtered = prism_bake_cache_find(&log, PRISM_BAKE_RECORD_ATLAS_FILTERED,
+				record->job);
+
+			if (filtered && filtered->size == record->size && filtered->sequence > record->sequence)
+				source = filtered;
+		}
 		if (record->size > capacity)
 		{
 			void *grown = realloc(payload, record->size);
@@ -4154,7 +4724,7 @@ static int file_compact(struct bake_state *b)
 			payload = grown;
 			capacity = record->size;
 		}
-		if (prism_bake_cache_read(&log, record, payload, record->size) ||
+		if (prism_bake_cache_read(&log, source, payload, record->size) ||
 			prism_bake_cache_append(&writer, record->type, record->job, payload, record->size))
 			failed = 1;
 	}
@@ -4169,6 +4739,14 @@ static int file_compact(struct bake_state *b)
 	}
 	if (prism_bake_cache_commit(temporary, b->path))
 		return -1;
+	/* (HALO_BAKE_KEEP_LOG keeps the log as <bsp>.pbk.log: its tiles as baked
+	and the filter's words, a diagnostic) */
+	if (getenv("HALO_BAKE_KEEP_LOG"))
+	{
+		snprintf(temporary, sizeof(temporary), "%s.log", b->path);
+		if (rename(b->new_path, temporary) == 0)
+			return 0;
+	}
 	remove(b->new_path);
 	return 0;
 }
@@ -4247,10 +4825,21 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 			continue;
 		}
 		record = prism_bake_cache_find(&b->cache, PRISM_BAKE_RECORD_ATLAS_TILE, tile->job);
-		if (!record || record->size != sizeof(file) || prism_bake_cache_read(&b->cache, record, file, sizeof(file)))
+		if (!record || record->size != sizeof(file))
 			continue;
 		if (loaded >= 2048)
 			return 0;
+		{
+			/* (its filtered texels, where the log has them) */
+			struct prism_bake_record const *filtered = prism_bake_cache_find(&b->cache, PRISM_BAKE_RECORD_ATLAS_FILTERED,
+				tile->job);
+
+			if (filtered && filtered->size == sizeof(file) && filtered->sequence > record->sequence &&
+				prism_bake_cache_read(&b->cache, filtered, file, sizeof(file)) == 0)
+				b->tiles_filtered++;
+			else if (prism_bake_cache_read(&b->cache, record, file, sizeof(file)))
+				continue;
+		}
 		for (index = 0; index < TILE_TEXELS; index++)
 		{
 			uint32_t w3 = file[index * 4 + 3], valid = (w3 >> 24) & 3u;
@@ -4296,7 +4885,7 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 static void volume_load(VkCommandBuffer commands, struct bake_state *b)
 {
 	struct bake_plan *plan = &b->plan;
-	uint32_t index, words[BRICK_PROBES * PROBE_WORDS], first = b->probes_done;
+	uint32_t index, words[BRICK_PROBES * PROBE_WORDS], first = b->volume.done;
 
 	if (!b->cache.record_count || !b->probe_host)
 		return;
@@ -4313,8 +4902,7 @@ static void volume_load(VkCommandBuffer commands, struct bake_state *b)
 		memcpy(b->probe_host + (size_t)index * PROBE_WORDS, words, sizeof(words));
 		if (!upload(commands, &b->probes, (VkDeviceSize)index * PROBE_WORDS * 4, words, sizeof(words)))
 			break;
-		b->probes_done = index + BRICK_PROBES;
-		b->probes_batched = b->probes_done;
+		prism_bake_batches_skip(&b->volume, index + BRICK_PROBES);
 	}
 }
 
@@ -4447,7 +5035,7 @@ static void status_write(struct bake_state *b)
 	else if (step > STEP_MASK)
 		done += 0.1;
 	if (b->plan.probe_count)
-		done += (double)b->probes_done / (double)b->plan.probe_count * 0.1;
+		done += (double)b->volume.done / (double)b->plan.probe_count * 0.1;
 	else if (step > STEP_VOLUME)
 		done += 0.1;
 	progress = step == STEP_DONE ? 1.0f : (float)done;
@@ -4485,7 +5073,7 @@ static void bake_log_progress(struct bake_state *b)
 		"%.0f s, %u samples a dispatch (%.1f ms of GPU), %u texels running, %.0f MB written; %.0f samples a texel (the "
 		"most %u; %.0f%% by the firefly rule; %.0f%% of those converged by the noise floor), %.1f M samples a second, "
 		"%.1f s of GPU", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
-		b->mask_tile_count, b->probes_done, b->plan.probe_count, t - b->started, bake.samples, bake.gpu_milliseconds,
+		b->mask_tile_count, b->volume.done, b->plan.probe_count, t - b->started, bake.samples, bake.gpu_milliseconds,
 		b->running_texels, (double)b->file_bytes / 1048576.0, b->texels_baked > 0.0 ? (double)b->rays / b->texels_baked : 0.0,
 		b->samples_most, b->texels_baked > 0.0 ? 100.0 * b->texels_firefly_bound / b->texels_baked : 0.0,
 		b->texels_converged > 0.0 ? 100.0 * b->texels_floor / b->texels_converged : 0.0,
@@ -4500,10 +5088,12 @@ static void bake_frame(void)
 
 	garbage_collect();
 	timing_collect();
-	/* (a bake of another BSP, scene or quality, or a rebake asked: let go) */
+	wanted = bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0;
+	/* (a bake of another BSP, scene or quality, a rebake asked, or one
+	opened while none was wanted that now is: let go) */
 	if (b && (b->generation != bake.control.generation || b->bsp != bake.control.bsp_index ||
 		b->quality != (bake.control.quality > PRISM_BAKE_QUALITY_MAX ? PRISM_BAKE_QUALITY_MAX : bake.control.quality) ||
-		b->request != bake.control.request))
+		b->request != bake.control.request || (b->idle && wanted)))
 	{
 		int rebake = b->request != bake.control.request && b->generation == bake.control.generation;
 		char path[XGPU_BAKE_PATH + 164];
@@ -4518,7 +5108,6 @@ static void bake_frame(void)
 			remove(path);
 		}
 	}
-	wanted = bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0;
 	if (!b)
 	{
 		b = bake.bake = bake_begin();
@@ -4530,6 +5119,8 @@ static void bake_frame(void)
 	}
 	commands = xgpu_vulkan_compute_commands();
 	readbacks_collect(commands, b);
+	/* (the filter's tiles, while it runs beside the steps after the lightmap) */
+	filter_drain(commands, b);
 	/* (display.bake "off", or "ask" and not asked: what the file has is
 	drawn, nothing more baked) */
 	if (!wanted && !b->complete && b->step > STEP_LOAD && b->step < STEP_COMMIT)
@@ -4567,7 +5158,7 @@ static void bake_frame(void)
 			bake_fail(b, "its scene cannot be put on the GPU (no memory)");
 			break;
 		}
-		file_open(b);
+		file_open(b, wanted);
 		b->step = STEP_LOAD;
 		break;
 	case STEP_LOAD:
@@ -4621,6 +5212,7 @@ static void bake_frame(void)
 		}
 		if (!b->drafting && b->tiles_done >= b->plan.tile_count)
 		{
+			filter_start(b);
 			b->step = STEP_MASK;
 			break;
 		}
@@ -4644,15 +5236,15 @@ static void bake_frame(void)
 		/* (the bricks the file has first, a frame's staging at a time) */
 		if (!b->volume_loaded && b->probe_host)
 		{
-			uint32_t before = b->probes_done;
+			uint32_t before = b->volume.done;
 
 			volume_load(commands, b);
-			if (b->probes_done == before)
+			if (b->volume.done == before)
 				b->volume_loaded = 1;
 		}
 		else
 			volume_frame(commands, b);
-		if (b->probes_done >= b->plan.probe_count)
+		if (b->volume.done >= b->plan.probe_count)
 			b->step = STEP_REFLECTIONS;
 		break;
 	case STEP_REFLECTIONS:
@@ -4684,6 +5276,9 @@ static void bake_frame(void)
 			b->step = STEP_FOOTPRINTS;
 		break;
 	case STEP_FOOTPRINTS:
+		/* (the filter's last tiles first) */
+		if (b->filter_state == 1)
+			break;
 		footprints_make(b);
 		b->step = STEP_COMMIT;
 		break;
@@ -4708,6 +5303,10 @@ static void bake_frame(void)
 			b->map, (int)b->bsp, b->seconds, b->plan.tile_count, (double)b->plan.tile_count * TILE_TEXELS / 1.0e6,
 			b->mask_tile_count, b->plan.probe_count, (double)b->rays / 1.0e9, (double)b->file_bytes / 1048576.0, b->path,
 			b->gpu_seconds, b->texels_converged, b->texels_floor);
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the noise: %.0f texels taken to their groups' median (the robust "
+			"mean%s); the filter %d passes, %u tiles in %.1f s%s", b->map, (int)b->bsp, b->texels_robust,
+			b->robust_on ? "" : " off", b->filter.passes, b->filter_tiles, b->filter_seconds,
+			b->tiles_filtered ? ", the rest filtered in the file" : "");
 		b->step = STEP_DONE;
 		break;
 	default:
@@ -5304,7 +5903,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		*whole = 0;
 	if (!bake.made || !b || !copy || !base || !additions || !words || !extras || !view || !b->scene.address ||
 		b->step <= STEP_UPLOAD ||
-		(!b->physical_count && !b->probes_done))
+		(!b->physical_count && !b->volume.done))
 		return NULL;
 	if (b->step == STEP_FAILED)
 		return NULL;
@@ -5342,11 +5941,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	memcpy(job.corners, view->corners, sizeof(job.corners));
 	job.volume[0] = PROBE_SPACING;
 	job.volume[1] = COARSE_SPACING;
-	job.counts[0] = b->probes.buffer && b->probes_done ? b->brick_entries : 0;
+	job.counts[0] = b->probes.buffer && b->volume.done ? b->brick_entries : 0;
 	job.counts[1] = description->width;
 	job.counts[2] = description->height;
 	job.coarse = b->bricks_coarse.address;
-	job.counts[3] = b->probes.buffer && b->probes_done ? b->coarse_entries : 0;
+	job.counts[3] = b->probes.buffer && b->volume.done ? b->coarse_entries : 0;
 	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on) */
 	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
 	for (index = 0; lights && index < light_count && dynamic < RASTER_LIGHTS; index++)
@@ -5380,6 +5979,12 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		job.more[3] = REFLECTION_SIDE;
 	}
 	job.lights = dynamic ? b->raster_job.address + RASTER_LIGHTS_OFFSET : 0;
+	/* (port: the frame's moving objects' structure, display.prism_raster_
+	object_shadows "traced": their sun shadows traced against it in the frame
+	whole, CE's projected ones on the level left out; none in the bake's
+	views) */
+	if (!bake_view)
+		(void)xgpu_vulkan_rt_objects(&job.objects, &job.object_table, NULL);
 	/* (the exposure: metered and applied in the frame whole, not in the bake's
 	views, the gates' measures) */
 	{
@@ -5480,7 +6085,7 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	lookup->page_count = b->plan.page_count;
 	lookup->tiles_done = b->tiles_done;
 	lookup->tiles_planned = b->tiles_planned;
-	if (b->probes.buffer && b->probes_done)
+	if (b->probes.buffer && b->volume.done)
 	{
 		lookup->bricks = b->bricks.address;
 		lookup->coarse = b->bricks_coarse.address;

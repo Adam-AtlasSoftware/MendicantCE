@@ -4463,10 +4463,14 @@ static void gbuffer_draw(const struct draw_input *input)
 	(void)draw_pipeline(input, 0);
 	gbuffer.drawing = NULL;
 	gbuffer.drawn = 1;
-	/* (port: display.lighting "pathtraced": an object's draw captured for
-	the path tracer's objects, as drawn: every one but the first-person
-	view's, which would stand in front of the eye in the world's rays) */
-	if (gbuffer.instance && !(gbuffer.flags & XGPU_GBUFFER_FLAG_FIRST_PERSON) && gbuffer.objects &&
+	/* (port: display.lighting "pathtraced", or "raster"'s traced object
+	shadows: an object's draw captured for the objects' structure, as drawn:
+	every one but the first-person view's, which would stand in front of the
+	eye in the world's rays (and never cast CE's shadow), and the static
+	scenery the bake holds, its light and shadows baked (Path Traced's
+	SCENE_INSTANCE flag, Raster's GBUFFER_DRAW flag)) */
+	if (gbuffer.instance && !(gbuffer.flags & (XGPU_GBUFFER_FLAG_FIRST_PERSON | XGPU_GBUFFER_FLAG_STATIC_SCENERY)) &&
+		gbuffer.instance != XGPU_GBUFFER_INSTANCE_FIRST_PERSON && gbuffer.objects &&
 		!(gbuffer.instances && gbuffer.instance <= GBUFFER_INSTANCES &&
 		gbuffer.instances[gbuffer.instance].pass == gbuffer.pass_number &&
 		(gbuffer.instances[gbuffer.instance].flags & XGPU_SCENE_INSTANCE_IN_TLAS)))
