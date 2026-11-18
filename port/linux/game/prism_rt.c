@@ -335,6 +335,9 @@ static struct
 	unsigned long reference_generation;
 	long reference_ticks;
 	int reference_logged;
+	/* port: display.prism_rt's mode turned off under display.lighting
+	"raster", logged (once while it lasts) */
+	int raster_off_logged;
 } prism_rt;
 
 int prism_rt_mode(void);
@@ -391,6 +394,21 @@ static void settings_read(void)
 		return;
 	prism_rt.settings_read = config_changes() + 1;
 	prism_rt.mode = word_index(config_string("display.prism_rt"), modes, PRISM_RT_OFF);
+	/* port: display.lighting "raster" draws the level lit from the bake,
+	nothing traced in the frame: display.prism_rt's older modes are off under
+	it, so that the bake's scene (the level as drawn) is sent whatever they
+	say (with "gi" and display.prism_rt_world "remodel" the scene had no
+	triangles, and Raster drew Classic's light) */
+	if (prism_rt.mode != PRISM_RT_OFF && prism_deferred_raster())
+	{
+		if (!prism_rt.raster_off_logged)
+			platform_log("prism rt: display.prism_rt \"%s\" is not drawn under display.lighting \"raster\" (its light "
+				"is the bake's): ray tracing off", modes[prism_rt.mode]);
+		prism_rt.raster_off_logged = TRUE;
+		prism_rt.mode = PRISM_RT_OFF;
+	}
+	else if (!prism_deferred_raster())
+		prism_rt.raster_off_logged = FALSE;
 	prism_rt.quality = word_index(config_string("display.prism_rt_quality"), qualities, 0);
 	prism_rt.resolution = word_index(config_string("display.prism_rt_resolution"), resolutions, 0);
 	prism_rt.denoiser = word_index(config_string("display.prism_rt_denoiser"), denoisers, 0);
