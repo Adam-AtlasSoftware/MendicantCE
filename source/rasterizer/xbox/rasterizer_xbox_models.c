@@ -540,11 +540,13 @@ for the fog, no fog constants, no true atmospheric fog), as the host's
 screen pass fogs every opaque pixel of the G-buffer by its own distance
 (port/linux/game/prism_deferred.c); the sky's models keep theirs, and so do
 the parts the G-buffer has not (a blended part's, which writes no depth:
-alpha_blended: shader_model's alpha-blended decal) */
+alpha_blended: shader_model's alpha-blended decal) and every model drawn
+after the host's fog pass (a partly cloaked unit's, drawn with the
+transparent geometry: render.h's render_prism_deferred_fog_pending) */
 static boolean rasterizer_models_port_fog_by_host(
 	boolean alpha_blended)
 {
-	return render_prism_deferred_window && !local_sky_flag && !alpha_blended;
+	return render_prism_deferred_fog_pending && !local_sky_flag && !alpha_blended;
 }
 static boolean local_planar_fog_flag = FALSE;
 static boolean local_environment_fog_screen_flag = FALSE;

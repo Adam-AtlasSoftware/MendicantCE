@@ -169,6 +169,7 @@ boolean render_prism_shadow_pass = FALSE;
 boolean render_gbuffer_pass = FALSE;
 /* port: (render.h) */
 boolean render_prism_deferred_window = FALSE;
+boolean render_prism_deferred_fog_pending = FALSE;
 /* port: port/linux/game/prism_shadows.c */
 boolean prism_shadows_wanted(void);
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
@@ -426,6 +427,7 @@ static void render_window(
 	profile_render_window_start(TRUE);
 	prism_deferred = FALSE; /* port: (below) */
 	render_prism_deferred_window = FALSE; /* port: (below) */
+	render_prism_deferred_fog_pending = FALSE; /* port: (below) */
 	render.scene_index++;
 	memset(&parameters, 0, sizeof(parameters));
 
@@ -525,9 +527,10 @@ static void render_window(
 			prism_deferred_wanted();
 		/* port: ... and its fog and decals the host's screen passes over the
 		G-buffer, where the host draws them: the objects' own fog left out from
-		here on, the G-buffer pass's draws' too (port/linux/game/
-		prism_deferred.c) */
+		here on until the host's fog pass, the G-buffer pass's draws' too
+		(port/linux/game/prism_deferred.c) */
 		render_prism_deferred_window = prism_deferred && prism_deferred_screen_passes();
+		render_prism_deferred_fog_pending = render_prism_deferred_window;
 		if (prism_deferred)
 		{
 			prism_deferred_gbuffer_begin();
@@ -695,9 +698,14 @@ static void render_window(
 		structure_render_transparent_geometry();
 		/* port: display.lighting's v4 modes: the fog a screen pass over the
 		G-buffer's depth, the level's and the objects' (port/linux/game/
-		prism_deferred.c), not the level drawn again for it */
+		prism_deferred.c), not the level drawn again for it; a model drawn
+		after it (the game engine's below, a partly cloaked unit's with the
+		transparent geometry) is not in it, and keeps its own fog */
 		if (render_prism_deferred_window)
+		{
 			prism_deferred_fog();
+			render_prism_deferred_fog_pending = FALSE;
+		}
 		else
 		structure_render_fog();
 		game_engine_post_rasterize_objects();
@@ -733,6 +741,7 @@ static void render_window(
 		from here on (port/linux/game/prism_shadows.c) */
 		prism_shadows_window_end();
 		render_prism_deferred_window = FALSE; /* port: (above) */
+		render_prism_deferred_fog_pending = FALSE; /* port: (above) */
 #ifdef HALO_VR
 		if (render_vr_scope_pass)
 		{

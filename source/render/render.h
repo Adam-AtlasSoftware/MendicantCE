@@ -187,10 +187,14 @@ extern boolean render_gbuffer_pass;
 /* port: the window being drawn is display.lighting's v4 one whose fog and
 decals are the host's screen passes over its G-buffer
 (port/linux/game/prism_deferred.c: prism_deferred_screen_passes), not
-CE's draws: the opaque objects' draws have no fog of their own, the fog
-screen draws no geometry and the level is not drawn again for its fog
-(render_window) */
+CE's draws: the fog screen draws no geometry and the level is not drawn
+again for its fog (render_window) */
 extern boolean render_prism_deferred_window;
+/* port: ... and the host's fog pass is still to come in it: until then the
+opaque objects' draws have no fog of their own (the pass fogs their
+G-buffer's pixels); a model drawn after it (a partly cloaked unit's, the
+game engine's after the objects) keeps its own (render_window) */
+extern boolean render_prism_deferred_fog_pending;
 /* port: (render_world_ao_prepass, render_prism_shadow_pass or
 render_gbuffer_pass: a pass before the window's own, whose objects are found
 once for all) */
