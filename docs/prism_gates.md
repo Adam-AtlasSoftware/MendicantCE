@@ -486,6 +486,52 @@ percentile at 20.7 ms. The light pass is two thirds of the path tracer's time.
 30 frames alike (each tree with itself, and the new with the base); G7 alike in no pair, the base with itself
 included: its floor lamps' glows, as M0 and M2 found.
 
+**Vulkan validation** (the validation layer with synchronisation validation, `HALO_GPU_VALIDATION=1`
+`VK_KHRONOS_VALIDATION_VALIDATE_SYNC=1`, the RTX 2060 at 1280 × 720, G5's probe poses: Classic, Raster, Path Traced
+`quality` and `performance`, the denoiser off, the sun's view, a 64-frame reference): the layer loaded ("validated"),
+no VUID, no synchronisation hazard, no validation error.
+
+**The RTX 2060 at 1920 × 1080, each pass** (the moves of G2 and G5, a moving camera, `HALO_PT_TIMES_FILE`, medians;
+the frame's GPU time beside them, whose 99th percentile in the moves, 115 to 153 ms, is the capture's own hitches,
+not a measure of the mode):
+
+| Scene | Profile | Frame | Path tracer | Light | Temporal | Fix | A-trous (5) | Composite |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| G2 b30 | performance | 23.6 | 19.59 | 12.98 | 1.24 | 0.79 | 3.94 | 0.56 |
+| G2 b30 | quality | 26.5 | 23.92 | 17.52 | 1.27 | 0.76 | 3.85 | 0.57 |
+| G5 a10 | performance | 23.7 | 22.12 | 15.32 | 1.25 | 0.75 | 4.38 | 0.59 |
+| G5 a10 | quality | 29.2 | 27.67 | 20.86 | 1.24 | 0.57 | 4.40 | 0.59 |
+
+Against section 7.2's budget for the RTX 2060 (`performance` at 720p internal with the light at half rate: sun 0.6,
+ReSTIR DI 1.2, indirect 0.6, reflections 0.8, the denoiser 1.5, the resolve 0.5, about 5.2 ms for these passes): at
+native 1080p and the full rate (2.25 times the pixels, twice the rays) the light pass is 13 to 15 ms and the
+denoiser 6 to 6.4 ms. Recorded, not gated before M7.
+
+**The gate against R, round 1** (each gate run: G5 three times as fixes went in; R at 1536 frames of one path a
+pixel, the first round's limit, to fit a hold):
+
+| Scene | Tree | R's estimated relative MSE (p0, p1, p2) | quality: error / blotch / flicker / FLIP | performance | |
+| --- | --- | --- | --- | --- | --- |
+| G5 a10 | 6b0a63968 | 0.040, 0.192, 0.374 | 0.126 / 0.115 / 1.23 / 0.125 | 0.134 / 0.113 / 1.23 / 0.125 | fail: R not converged |
+| G5 a10 | ae9a51c4f | 0.040, 0.191, 0.373 | 0.134 / 0.117 / 1.24 / 0.128 | 0.145 / 0.114 / 1.25 / 0.128 | fail: R not converged |
+| G2 b30 sunny | ae9a51c4f | 0.046, 0.035, 0.068 | 0.0062 / 0.0126 / 0.86 / 0.102 | 0.0062 / 0.0128 / 0.86 / 0.103 | fail on FLIP alone |
+
+- **G2.** R is converged where it matters (each pixel's relative standard error a median of 0.3 to 0.4%; its
+  estimated relative MSE, linear, is a few pixels'). The path tracer's frame held 300 frames at each probe pose
+  against R: relative MSE 0.0013, 0.0024, 0.0035, FLIP 0.034 to 0.040; the light as traced in the moves (the
+  denoiser off) 0.0014 to 0.0038, FLIP 0.035 to 0.043. The denoised moves failed FLIP at the first pose (0.102) by
+  being darker in the foreground (5 to 9 of 255): the sun's filtered visibility dipped to 0.55 on lit sand while the
+  camera moved, the a-trous steps spreading the rocks' shadows where a moving camera's short histories gave the
+  visibility a variance everywhere. 6fa9b5e80 filters the visibility only in penumbrae; its moves are taken again
+  below.
+- **G5.** R does not converge in a hold: after 1536 frames each pixel's relative standard error is a median of 11
+  to 17% (a10's corridors are lit by bounces from lamp-lit places, and its lamps are seen through gaps), the frame's
+  estimated relative MSE 0.04 to 0.37 linear, 0.03 to 0.31 in the 8-bit frame's terms, falling as one over the
+  frames: 0.001 would take of the order of 100,000 frames a pose. Neither the bake-guided first bounce (bd7fc9665)
+  nor the visibility in the pixel's light resampling (ae9a51c4f) moved it. G5's figures measure R's noise, not the
+  path tracer. Two faults the round found on G5 are fixed: the denoiser's clamps took away light a few samples see
+  (82c400552), and ReSTIR's reservoir with a hidden sample divided the next frames' light (ae9a51c4f).
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
