@@ -612,6 +612,39 @@ base against base), so they say nothing of this branch; determinism: the game st
 Vulkan validation with synchronisation: its run met a bake being made again (BAKE_VERSION 16) and traced nothing,
 so it is asked again (not yet measured).
 
+### M3 round 3 as measured (the RTX 2060, BAKE_VERSION 16 at "high"; the tree each scene ran on is named)
+
+Round 3's changes (docs/prism_pathtraced.md): ReSTIR DI's target holds the shadow; a lamp's specular light shared
+by MIS between ReSTIR DI and the reflection's ray; the specular history by the eye's parallax; the histories
+(light and the sun's visibility) resampled by Catmull-Rom; the firefly hold's moments of the samples as traced; the
+quality profile's sun traced at every distance; the reservoirs' last pixel by its bilinear weight; an anti-firefly
+for the frame shown. The references were kept from round 2 where the scene, materials and lights are unchanged
+(`capture.py refs_v4 --live-only`); R's estimator did not change.
+
+| scene | tree | v4pt error / blotch / FLIP / flicker | v4perf | verdict |
+|---|---|---|---|---|
+| G1 | 33f4cdec9 | 0.1671 / 0.0543 / 0.164 / 2.59 | 0.1669 / 0.0543 / 0.165 / 2.61 | fail |
+| G2 | abc8d6580 | 0.0015 / 0.0070 / 0.072 / 1.13 | 0.0015 / 0.0072 / 0.071 / 1.13 | pass |
+| G3 | 0f8e17b5a | 0.0319 / 0.0331 / 0.089 / 1.12 | 0.0315 / 0.0361 / 0.094 / 1.13 | fail |
+| G4 | 6d3ab4aee | 0.1909 / 0.0827 / 0.121 / 1.42 | 0.2856 / 0.1135 / 0.146 / 1.59 | fail |
+| G5 | 6d3ab4aee | 0.1456 / 0.0788 / 0.137 / 1.03 | 0.1849 / 0.0806 / 0.144 / 1.04 | fail |
+| G6 | b98c73af4 | 0.0254 / 0.0288 / 0.073 / 0.93 | 0.0269 / 0.0384 / 0.097 / 0.95 | fail |
+| G7 | 33f4cdec9 | 0.0297 / 0.0390 / 0.061 / 1.32 | 0.0336 / 0.0411 / 0.064 / 1.32 | fail |
+
+The held frames moved much nearer R in the lamp-lit interiors (each still frame against R, the mean absolute
+difference over R's mean at 960 x 540, round 2's tree then round 3's: G4 p0 0.163 to 0.113, p1 0.283 to 0.189; G5 p0
+0.133 to 0.103, p1 0.282 to 0.182, p2 0.241 to 0.198). The gates' errors are of the moving frames, which moved
+little: a moving eye's frames keep a glitter over the semi-glossy walls (their lamps' specular pools), radial streaks
+over glossy floors (the specular history reprojected by the surface's motion, not the reflection's), and through
+G5's door windows the corridor's light is darker than R's (the histories lost at the opening each move).
+
+RTX 3070 Ti, 1080p quality: G2 13.23 / 14.91 ms (9182af125), G5 14.45 / 18.09 (0f8e17b5a), G3 12.94 / 17.33
+(abc8d6580), G4 16.24 / 18.54 (370755897): pass, G4 narrowly. RTX 2060, 1080p, G2 (33f4cdec9): performance 31.4 ms
+(the path tracer 29.5: light 20.5, temporal 3.7, fix 0.6, a-trous 4.6, composite 0.6), quality 47.0 (light 35.7).
+Vulkan validation with synchronisation (33f4cdec9, G5's poses, every state): the layer loaded, no message.
+Classic and Enhanced identity and determinism were not run again this round (no change outside the path tracer's
+mode and the capture tool).
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
