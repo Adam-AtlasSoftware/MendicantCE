@@ -648,3 +648,18 @@ def test_catmull_rom_keeps_a_moved_historys_detail_that_bilinear_blurs():
         linear = np.roll(model.resample_row(linear, 1.0 / 3.0, cubic=False), 0)
     assert cubic.max() > 2.0 * linear.max(), (cubic.max(), linear.max())
     assert (cubic >= 0.0).all()
+
+
+def test_the_firefly_hold_keeps_a_light_few_frames_see_and_still_holds_a_lone_firefly():
+    rng = np.random.default_rng(5)
+    # (a light one frame in twenty sees, 20 times its mean: the held history's mean over a still eye's frames)
+    frames = [np.where(rng.random(4000) < 0.05, 20.0, 0.0) for _ in range(400)]
+    raw = np.mean([h.mean() for h in model.held_history(frames)[150:]])
+    held = np.mean([h.mean() for h in model.held_history(frames, raw_moments=False)[150:]])
+    assert raw > 0.93, raw
+    assert held < 0.7, held
+    # (a steady light with one sample a thousand times it: held to near the light)
+    steady = [np.full(4, 1.0) for _ in range(40)]
+    steady[30] = np.full(4, 1000.0)
+    after = model.held_history(steady)[30]
+    assert after.max() < 1.5, after

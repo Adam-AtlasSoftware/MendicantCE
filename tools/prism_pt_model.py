@@ -14,6 +14,8 @@ can check them without a GPU:
   firefly_cap        the temporal pass's hold of a new sample (by its history once long, by its neighbours before)
   restir_di          ReSTIR DI's reservoir at a still pixel: its initial candidates, the last frame's reservoir, both
                      by the shadowed target (lights_restir), or by the unshadowed one (round 2's) for comparison
+  held_history       a still pixel's slow history over frames of samples, each held by firefly_cap (the long rule) with
+                     the moments of the samples as traced
   restir_gi          ReSTIR GI's reservoir at a pixel: its own bounce sample, the last frame's merged by its Jacobian
   visibility_step    the temporal pass's sun visibility history, held to the frame's own 5 x 5 range
   tree_build         the reference's light tree as xgpu_vulkan_pt.c's tree_node builds it
@@ -449,6 +451,30 @@ def restir_di(rng, pick, light, visible, candidates, last=None, m_cap=20.0, shad
     big_w = w_total / (target[kept] * m_total) if kept is not None and target[kept] > 0.0 else 0.0
     estimate = np.asarray(light[kept], float) * big_w if kept is not None and visible[kept] else np.zeros(3)
     return estimate, (kept if big_w > 0.0 else None, big_w, m_total)
+
+
+def held_history(samples, most=32.0, raw_moments=True):
+    """the temporal pass's slow history at a still pixel over its frames' samples (each frame's array, one value a
+    pixel), each sample held as firefly_cap's long rule holds it once the history has 16 frames; its moments the
+    samples as traced (raw_moments, the pass's) or as held (round 2's). Returns the slow histories after each frame"""
+    first = np.asarray(samples[0], float)
+    slow, m1, m2, n = np.zeros_like(first), np.zeros_like(first), np.zeros_like(first), 0.0
+    out = []
+    for s in samples:
+        s = np.asarray(s, float)
+        nn = min(n + 1.0, most)
+        if n >= 16.0:
+            cap = np.maximum(m1 + 8.0 * np.sqrt(np.maximum(m2 - m1 * m1, 0.0)), 1.0e-4)
+            held = np.minimum(s, cap)
+        else:
+            held = s
+        moment = s if raw_moments else held
+        slow = slow + (held - slow) / nn
+        m1 = m1 + (moment - m1) / nn
+        m2 = m2 + (moment * moment - m2) / nn
+        n = nn
+        out.append(slow.copy())
+    return out
 
 
 def restir_gi(rng, point, normal, sample, last=None, m_cap=20.0):

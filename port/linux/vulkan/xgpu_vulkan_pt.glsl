@@ -2211,8 +2211,12 @@ void main()
     }
     vec3 cd = ld > cap_d ? nd.rgb * (cap_d / ld) : nd.rgb;
     vec3 cs = ls > cap_s ? ns.rgb * (cap_s / ls) : ns.rgb;
-    ld = luma(cd);
-    ls = luma(cs);
+    /* (the moments take the sample as traced, the light's history the held
+    one: moments of held samples hold the next ones lower still, so a light
+    few frames see (a lamp one sample in twenty finds) was held to a half
+    and less of itself while the eye stood still, and a moving eye's
+    resampled histories loosened the hold: round 2's interiors darker than R
+    held still, brighter moving (tools/test_prism_pt.py, the hold's bias)) */
 
     /* the slow history (its length, at most most_d), the fast (at most
     most_fast), the moments of the diffuse luminance (the slow's m1 m2, the

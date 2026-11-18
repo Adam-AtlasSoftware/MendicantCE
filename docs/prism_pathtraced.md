@@ -172,7 +172,10 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   diffuse and specular light; the fast one holds the slow one (its luminance within the fast mean ± 2 standard
   deviations of that mean, the deviation the samples' spread the slow moments know over the fast count, the slow
   history's length cut to 4 where it is held); the luminance's moments give the variance; once the history has 16
-  frames, a new sample's luminance is held to the history's mean and 8 times its spread (the firefly clamp); while it
+  frames, a new sample's luminance is held to the history's mean and 8 times its spread (the firefly clamp; the
+  moments are of the samples as traced, the light's history of the held ones: moments of held samples held the next
+  ones lower still, so a light one frame in twenty sees was held to about half of itself under a still eye, and a
+  moving eye's resampled histories loosened the hold: round 2's interiors darker than R held still, brighter moving); while it
   is shorter (a moving camera, a disocclusion, the first frames), to 4 times the brightest of its eight neighbours two
   pixels away on the same surface, so that one sample of a small bright light (a keypad's glow met by the bounce) is
   not spread by the fix and the a-trous steps into a blob (round 1's moving a10 frames: green dots, smears). Once the
