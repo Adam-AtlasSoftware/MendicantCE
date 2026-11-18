@@ -59,15 +59,21 @@ lights), the descriptor sets' */
 #define JOB_BYTES 4096u
 #define JOB_LIGHTS_OFFSET 1024u
 #define LIGHTS_MOST 64u
+/* the frame's counters (xgpu_vulkan_pt.glsl's Counters: the history's
+diagnostics), four words in the job's block before its lights */
+#define JOB_COUNTERS_OFFSET 960u
 #define SET_SLOTS 16u
 /* the bindings (xgpu_vulkan_pt.glsl's) */
 #define BINDINGS 33u
 /* the reference's floats a pixel (the GLSL's SUMS), its noise's bound (the
-gates' reference_noise), the frames between its noise's measures */
-#define SUMS 12u
+gates' reference_noise, as the gates' frames measure it), the frames
+between its noise's measures, the fewest it sums, the gates' frames' width
+(tools/prism_gate/metrics.py's SIZE: every frame brought to 960 x 540) */
+#define SUMS 16u
 #define REFERENCE_NOISE 0.001
 #define REFERENCE_MEASURE 32u
-#define REFERENCE_LEAST 64u
+#define REFERENCE_LEAST 256u
+#define GATE_WIDTH 960.0
 /* the passes timed, the timestamps a frame (a begin and each pass's end),
 the frames' slots of them */
 #define TIMED 5u
@@ -159,7 +165,7 @@ struct pt_job
 {
 	VkDeviceAddress pages, charts, vpages, table, tiles, indirect, sun, masks;
 	VkDeviceAddress bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
-	VkDeviceAddress sums, stats, unused[6];
+	VkDeviceAddress sums, stats, meter, counters, unused[4];
 	float camera[4][4];
 	float last_camera[4][4];
 	int32_t corners[4];
@@ -171,6 +177,9 @@ struct pt_job
 	float settings[4];
 	float denoise[4];
 	float extra[4];
+	/* display.prism_exposure (0 fixed, 1 ce, 2 auto), display.prism_tone_curve
+	(0 ce, 1 filmic, 2 aces, 3 local), 1 where the frame meters */
+	float exposure[4];
 };
 
 struct pt_push
@@ -197,6 +206,13 @@ static struct
 	struct pt_buffer jobs[JOB_SLOTS];
 	uint64_t job_serial[JOB_SLOTS];
 	uint32_t job_next;
+	/* each job slot's frame, for the diagnostics' file (HALO_PT_DEBUG_FILE:
+	a line a frame once it is done): its number, flags, the view's flags,
+	how far the eye moved since the last frame's camera */
+	uint32_t job_frame[JOB_SLOTS], job_flags[JOB_SLOTS], job_view_flags[JOB_SLOTS];
+	float job_moved[JOB_SLOTS];
+	FILE *debug_file;
+	int debug_file_tried;
 	/* the images at the window's size (each its binding's), the last
 	frame's and this frame's histories by parity */
 	uint32_t width, height;
@@ -228,7 +244,7 @@ static struct
 	int ref_seen, ref_stopped, ref_converged, ref_copied;
 	uint64_t ref_stats_serial, ref_sums_serial;
 	uint32_t ref_stats_frames, ref_stats_groups;
-	double ref_noise;
+	double ref_noise, ref_noise_hdr;
 	char ref_path[XGPU_RT_REFERENCE_PATH];
 	int logged_first, logged_no_bake;
 } pt;
@@ -323,6 +339,20 @@ static void barrier(VkCommandBuffer commands)
 		VK_ACCESS_TRANSFER_WRITE_BIT;
 	vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &memory, 0, NULL, 0, NULL);
+}
+
+/* the frame's writes the host reads once it is done (the counters, the
+reference's readbacks) made visible to it */
+static void host_barrier(VkCommandBuffer commands)
+{
+	VkMemoryBarrier memory;
+
+	memset(&memory, 0, sizeof(memory));
+	memory.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	memory.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+	memory.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+	vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &memory, 0, NULL, 0, NULL);
 }
 
 /* ---------- made once */
@@ -588,9 +618,13 @@ static void times_collect(void)
 /* the sums' copy written once the GPU has made it */
 static void reference_write(void)
 {
+	/* (noise.direct, .indirect and .specular: the standard error of each
+	part's luminance's mean (the direct light, the diffuse bounce's, the
+	reflection's) over the whole's mean, where the noise is) */
 	static const char *const names[] =
 	{
-		"light.R", "light.G", "light.B", "spec.R", "spec.G", "spec.B", "Z", "samples", "noise",
+		"light.R", "light.G", "light.B", "spec.R", "spec.G", "spec.B", "Z", "samples", "noise", "noise.direct",
+		"noise.indirect", "noise.specular",
 	};
 	struct xgpu_exr_attribute attributes[3];
 	const float *sums = (const float *)pt.sums_readback.mapped;
@@ -602,7 +636,7 @@ static void reference_write(void)
 	if (!pt.ref_sums_serial || xgpu_vulkan_completed() < pt.ref_sums_serial)
 		return;
 	pt.ref_sums_serial = 0;
-	if (!sums || !pt.ref_path[0] || !(pixels = (float *)malloc((size_t)count * 9 * sizeof(float))))
+	if (!sums || !pt.ref_path[0] || !(pixels = (float *)malloc((size_t)count * 12 * sizeof(float))))
 	{
 		host_logf(HOST_LOG_WARN, "prism pt: debug.pt_reference: the sum cannot be written%s",
 			pt.ref_path[0] ? "" : " (no file named)");
@@ -611,15 +645,21 @@ static void reference_write(void)
 	for (texel = 0; texel < count; texel++)
 	{
 		const float *s = sums + texel * SUMS;
-		float *to = pixels + texel * 9;
+		float *to = pixels + texel * 12;
 		int channel;
 
 		for (channel = 0; channel < 6; channel++)
 			to[channel] = s[channel];
 		to[6] = s[8];
 		to[7] = s[8] > 0.0f ? (float)n : 0.0f;
-		/* (the luminance's mean's relative standard error) */
-		to[8] = n > 1 && s[6] > 1.0e-6f ? sqrtf(fmaxf(s[7], 0.0f) / ((float)n * (float)(n - 1))) / s[6] : 0.0f;
+		/* (the luminance's mean's relative standard error, and its parts') */
+		for (channel = 0; channel < 4; channel++)
+		{
+			float m2 = s[channel ? 8 + 2 * channel : 7];
+
+			to[8 + channel] = n > 1 && s[6] > 1.0e-6f ? sqrtf(fmaxf(m2, 0.0f) / ((float)n * (float)(n - 1))) / s[6] :
+				0.0f;
+		}
 	}
 	attributes[0].name = "prismReferenceFrames";
 	attributes[0].value = (int32_t)n;
@@ -627,20 +667,51 @@ static void reference_write(void)
 	attributes[1].value = (int32_t)(pt.ref_noise * 1.0e6 + 0.5);
 	attributes[2].name = "prismReferenceGeneration";
 	attributes[2].value = (int32_t)pt.ref_generation;
-	if (xgpu_exr_write(pt.ref_path, pt.ref_width, pt.ref_height, 9, names, pixels, attributes, 3, error, sizeof(error)))
+	if (xgpu_exr_write(pt.ref_path, pt.ref_width, pt.ref_height, 12, names, pixels, attributes, 3, error, sizeof(error)))
 		host_logf(HOST_LOG_INFO, "prism pt: debug.pt_reference: %u frames of %u paths summed (estimated relative "
-			"MSE %.6f), written to %s", n, pt.ref_paths, pt.ref_noise, pt.ref_path);
+			"MSE %.6f as the gates' frames measure it, %.6f linear), written to %s", n, pt.ref_paths, pt.ref_noise,
+			pt.ref_noise_hdr, pt.ref_path);
 	else
 		host_logf(HOST_LOG_WARN, "prism pt: debug.pt_reference: %s", error);
 	free(pixels);
 }
 
+/* the share of a pixel's independent noise's variance (relative to the
+mean squared) the gates' frames keep: theirs are this frame brought to
+GATE_WIDTH by bilinear filtering (PIL's, a triangle as wide as the scale on
+each side), each of their pixels the filter's weights' sum over the frame's
+pixels, so a pixel's variance reaches it by the squared weights: the square
+of their sum along an axis (half size: weights 1 3 3 1 over 8, 0.3125 an
+axis, 0.098 a pixel) */
+static double gate_share(uint32_t width)
+{
+	double scale = (double)width / GATE_WIDTH, sum = 0.0, squares = 0.0;
+	int k, reach;
+
+	if (scale <= 1.0)
+		return 1.0;
+	reach = (int)ceil(scale) + 1;
+	for (k = -reach; k < reach; k++)
+	{
+		double w = 1.0 - fabs((double)k + 0.5) / scale;
+
+		if (w > 0.0)
+		{
+			sum += w;
+			squares += w * w;
+		}
+	}
+	return sum > 0.0 ? (squares / (sum * sum)) * (squares / (sum * sum)) : 1.0;
+}
+
 /* its noise measured (the partial sums the GPU made): the estimated
-relative MSE of the frame, and whether it is under the bound */
+relative MSE of the frame as the gates' frames measure it (the stopping
+rule's), and linear (the whole light, unclamped: logged), and whether the
+first is under the bound */
 static void reference_noise_collect(void)
 {
 	const float *partial = (const float *)pt.stats_readback.mapped;
-	double variance = 0.0, square = 0.0;
+	double variance = 0.0, square = 0.0, shown_variance = 0.0, shown_square = 0.0;
 	uint32_t index;
 
 	if (!pt.ref_stats_serial || xgpu_vulkan_completed() < pt.ref_stats_serial || !partial)
@@ -648,13 +719,16 @@ static void reference_noise_collect(void)
 	pt.ref_stats_serial = 0;
 	for (index = 0; index < pt.ref_stats_groups; index++)
 	{
-		variance += partial[index * 2];
-		square += partial[index * 2 + 1];
+		variance += partial[index * 4];
+		square += partial[index * 4 + 1];
+		shown_variance += partial[index * 4 + 2];
+		shown_square += partial[index * 4 + 3];
 	}
-	pt.ref_noise = square > 0.0 ? variance / square : 1.0;
+	pt.ref_noise_hdr = square > 0.0 ? variance / square : 1.0;
+	pt.ref_noise = shown_square > 0.0 ? gate_share(pt.ref_width) * shown_variance / shown_square : 1.0;
 	if ((pt.ref_stats_frames % 512u) == 0u || pt.ref_noise <= REFERENCE_NOISE)
-		host_logf(HOST_LOG_INFO, "prism pt: debug.pt_reference: %u frames, estimated relative MSE %.6f",
-			pt.ref_stats_frames, pt.ref_noise);
+		host_logf(HOST_LOG_INFO, "prism pt: debug.pt_reference: %u frames, estimated relative MSE %.6f as the gates' "
+			"frames measure it (%.6f linear)", pt.ref_stats_frames, pt.ref_noise, pt.ref_noise_hdr);
 	if (pt.ref_noise <= REFERENCE_NOISE && pt.ref_stats_frames >= REFERENCE_LEAST && !pt.ref_stopped)
 	{
 		pt.ref_stopped = 1;
@@ -693,8 +767,8 @@ static int reference_take(const struct xgpu_stream_scene_view *view, uint64_t sc
 		buffer_free(&pt.stats_readback);
 		buffer_free(&pt.sums_readback);
 		if (!buffer_make((VkDeviceSize)width * height * SUMS * 4, 0, &pt.sums) ||
-			!buffer_make((VkDeviceSize)groups * 8, 0, &pt.stats) ||
-			!buffer_make((VkDeviceSize)groups * 8, 1, &pt.stats_readback) ||
+			!buffer_make((VkDeviceSize)groups * 16, 0, &pt.stats) ||
+			!buffer_make((VkDeviceSize)groups * 16, 1, &pt.stats_readback) ||
 			!buffer_make((VkDeviceSize)width * height * SUMS * 4, 1, &pt.sums_readback))
 		{
 			host_logf(HOST_LOG_WARN, "prism pt: debug.pt_reference: no memory for its sums");
@@ -726,7 +800,7 @@ static int reference_take(const struct xgpu_stream_scene_view *view, uint64_t sc
 		pt.ref_scene = scene;
 		pt.ref_count = 0;
 		pt.ref_stopped = pt.ref_converged = pt.ref_copied = 0;
-		pt.ref_noise = 1.0;
+		pt.ref_noise = pt.ref_noise_hdr = 1.0;
 		pt.ref_stats_serial = pt.ref_sums_serial = 0;
 		pt.ref_paths = paths ? (uint32_t)atoi(paths) : 1u;
 		if (pt.ref_paths < 1u || pt.ref_paths > 64u)
@@ -741,6 +815,56 @@ static int reference_take(const struct xgpu_stream_scene_view *view, uint64_t sc
 }
 
 /* ---------- the frame */
+
+/* the exposure's settings from the last RT_FRAME, as Raster's frame takes
+them (display.prism_exposure: 0 fixed, 1 ce, 2 auto; display.prism_tone_curve
+0 ce, 1 filmic, 2 aces, 3 local; prism_rt.c's style default for the v4
+modes is "ce" and the clipped curve) */
+static void exposure_settings(float exposure[4])
+{
+	uint32_t generation, material_count, alpha_words, mode = 1, curve = 0;
+	const float *materials;
+	const uint32_t *alpha;
+	const struct xgpu_stream_rt_frame *frame = NULL;
+
+	(void)xgpu_vulkan_rt_scene(&generation, &materials, &material_count, &alpha, &alpha_words, &frame);
+	if (frame)
+	{
+		mode = (uint32_t)(frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EXPOSURE] + 0.5f);
+		mode = mode > 2 ? 1 : mode;
+		curve = (uint32_t)(frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_TONE_CURVE] + 0.5f);
+		curve = curve > 3 ? 0 : curve;
+	}
+	exposure[0] = (float)mode;
+	exposure[1] = (float)curve;
+}
+
+/* a job slot's last frame, done: its line in the diagnostics' file
+(HALO_PT_DEBUG_FILE): the frame's number, whether it took the last frame's
+history, the view's flags, how far the eye moved, and the counters of the
+temporal pass (the level pixels in 16 that looked for their history, those
+whose place there was on their own surface, in the view, their history
+taken) */
+static void debug_line(uint32_t slot)
+{
+	const uint32_t *counters;
+
+	if (!pt.debug_file_tried)
+	{
+		const char *path = getenv("HALO_PT_DEBUG_FILE");
+
+		pt.debug_file_tried = 1;
+		pt.debug_file = path && path[0] ? fopen(path, "w") : NULL;
+	}
+	if (!pt.debug_file || !pt.job_frame[slot] || !pt.jobs[slot].mapped)
+		return;
+	counters = (const uint32_t *)((const char *)pt.jobs[slot].mapped + JOB_COUNTERS_OFFSET);
+	fprintf(pt.debug_file, "%u history %u view %u moved %.5f looked %u own %u in %u taken %u\n", pt.job_frame[slot],
+		(pt.job_flags[slot] & FLAG_HISTORY) ? 1u : 0u, pt.job_view_flags[slot], pt.job_moved[slot], counters[0],
+		counters[1], counters[2], counters[3]);
+	fflush(pt.debug_file);
+	pt.job_frame[slot] = 0;
+}
 
 static void write_image(VkWriteDescriptorSet *write, VkDescriptorImageInfo *info, VkDescriptorSet set, uint32_t binding,
 	struct xgpu_vulkan_image *image, int sampled)
@@ -834,8 +958,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	pt.job_next = (slot + 1) % JOB_SLOTS;
 	pt.set_next = (set_slot + 1) % SET_SLOTS;
 	slot_buffer = &pt.jobs[slot];
+	debug_line(slot);
 	job = (struct pt_job *)slot_buffer->mapped;
 	memset(job, 0, sizeof(*job));
+	memset((char *)slot_buffer->mapped + JOB_COUNTERS_OFFSET, 0, 16);
 	pt_view = (phase & XGPU_GBUFFER_PHASE_VIEW_MASK) >> XGPU_GBUFFER_PHASE_VIEW_SHIFT;
 	if (pt_view < XGPU_GBUFFER_VIEW_PT_DIFFUSE || pt_view > XGPU_GBUFFER_VIEW_PT_LAST)
 		pt_view = 0;
@@ -871,6 +997,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->reflection_data = lookup.reflection_data;
 	job->sums = pt.sums.address;
 	job->stats = pt.stats.address;
+	job->counters = slot_buffer->address + JOB_COUNTERS_OFFSET;
 	memcpy(job->camera, view->now, sizeof(job->camera));
 	memcpy(job->last_camera, (view->flags & XGPU_SCENE_VIEW_HISTORY) ? view->last : view->now, sizeof(job->last_camera));
 	memcpy(job->corners, view->corners, sizeof(job->corners));
@@ -889,6 +1016,14 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->frame[0] = ++pt.frame;
 	job->frame[1] = flags;
 	job->frame[2] = pt_view;
+	pt.job_frame[slot] = pt.frame;
+	pt.job_flags[slot] = flags;
+	pt.job_view_flags[slot] = view->flags;
+	pt.job_moved[slot] = sqrtf((view->now[0][0] - view->last[0][0]) * (view->now[0][0] - view->last[0][0]) +
+		(view->now[0][1] - view->last[0][1]) * (view->now[0][1] - view->last[0][1]) +
+		(view->now[0][2] - view->last[0][2]) * (view->now[0][2] - view->last[0][2]));
+	/* (the exposure: the frame's, metered in the frame, not in the views) */
+	exposure_settings(job->exposure);
 	/* the settings: the sun's ray within 60 world units (the baked mask
 	beyond, design section 3.8), the reflections traced below a roughness
 	of 0.35, the firefly clamp at 4 times the brightest neighbour, the
@@ -979,6 +1114,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		write_image(&writes[index], &infos[index], set, index, bound[index], index < 4 || index == IMAGE_LIGHT_IN);
 	vkUpdateDescriptorSets(pt.device.device, BINDINGS, writes, 0, NULL);
 	commands = xgpu_vulkan_compute_commands();
+	job->meter = xgpu_vulkan_bake_meter(commands);
+	job->exposure[2] = !pt_view && job->meter ? 1.0f : 0.0f;
 	for (index = 0; index < BINDINGS; index++)
 		xgpu_vulkan_image_compute_use(bound[index], !(index < 4 || index == IMAGE_LIGHT_IN));
 	groups_x = (description->width + 7) / 8;
@@ -1021,7 +1158,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 				description->width * description->height, 0, 0, pt.ref_stats_groups, 1);
 			barrier(commands);
 			memset(&copy, 0, sizeof(copy));
-			copy.size = (VkDeviceSize)pt.ref_stats_groups * 8;
+			copy.size = (VkDeviceSize)pt.ref_stats_groups * 16;
 			vkCmdCopyBuffer(commands, pt.stats.buffer, pt.stats_readback.buffer, 1, &copy);
 			pt.ref_stats_serial = xgpu_vulkan_serial();
 			pt.ref_stats_frames = pt.ref_count;
@@ -1045,6 +1182,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			stamp(commands, time_slot, index);
 		dispatch(commands, PASS_COMPOSITE, scene, slot_buffer->address, 3, 0, 0, 0, groups_x, groups_y);
 		stamp(commands, time_slot, TIMED);
+		if (job->exposure[2] > 0.5f)
+			xgpu_vulkan_bake_exposure_step(commands);
 		pt.history_valid = 0;
 	}
 	else
@@ -1085,10 +1224,15 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		}
 		dispatch(commands, PASS_COMPOSITE, scene, slot_buffer->address, source, 0, 0, 0, groups_x, groups_y);
 		stamp(commands, time_slot, TIMED);
+		/* (the exposure's step: the next frame's exposure from this one's
+		meter, as Raster's frame makes it) */
+		if (job->exposure[2] > 0.5f)
+			xgpu_vulkan_bake_exposure_step(commands);
 		pt.history_valid = !denoiser_off;
 		pt.parity ^= 1u;
 	}
 	barrier(commands);
+	host_barrier(commands);
 	pt.job_serial[slot] = xgpu_vulkan_serial();
 	pt.set_serial[set_slot] = xgpu_vulkan_serial();
 	if (time_slot < TIME_SLOTS)
@@ -1159,5 +1303,7 @@ void xgpu_vulkan_pt_shutdown(void)
 		vkDestroyQueryPool(pt.device.device, pt.queries, NULL);
 	if (pt.times_file)
 		fclose(pt.times_file);
+	if (pt.debug_file)
+		fclose(pt.debug_file);
 	memset(&pt, 0, sizeof(pt));
 }

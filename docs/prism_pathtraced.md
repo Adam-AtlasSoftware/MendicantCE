@@ -38,8 +38,8 @@ base colour multiplies it) and its specular light `S`:
 | Lamps | The emitting triangles (light cards, lamp surfaces), direct | ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S` | The same | Resampled importance over the same 8 candidates, each one's shadow traced and its visibility in its target (`lights_ris_seen`), no reservoir reused |
 | Fixtures | The scenario's light fixtures, direct | In the same reservoir (all of them, or 8 by count) | The same | The same (16) |
 | Dynamic lights | SCENE_LIGHTS' dynamic class (flashlight, plasma, muzzle flashes), direct | In the same reservoir (4), CE's falloff, its shadow traced; never reused from the last frame | The same | The same (16) |
-| The sky's floor | The units' rig's ambient: CE's outdoor ambient, unoccluded | A constant, `D` | The same | The same |
-| Indirect | Every bounce of every static light, the sun's bounce included | One cosine bounce, its hit lit from the bake: the hit's glow and albedo by its texel's light less the sun's and less the floor (or the volume's), the sun there by the mask (or the volume's visibility); a miss the sky without the domes (the pixel took them as lights) | The bake's indirect layer at the pixel where the level has its texel; else (the objects, a pixel with no texel) `quality`'s bounce | A cosine path of up to 8 bounces, next-event estimation of the sun, lamps and fixtures at each hit, the domes where it leaves |
+| The sky's floor | The units' rig's ambient, unoccluded, as Tool's: the sky's outdoor value in the structure's clusters with a sky, sky 0's indoor value in those with none (`prism-v4-m2` 4acaa7892, `XGPU_SCENE_INDOOR`) | A constant, `D`: the flag of the structure's triangle the pixel shows (a short stretch of the eye's ray about its point), an object's the structure below it (a ray down past the object) | The same | The same |
+| Indirect | Every bounce of every static light, the sun's bounce included | One cosine bounce, its hit lit from the bake: the hit's glow and albedo by its texel's light less the sun's and less the floor its triangle took (indoor or outdoor; the volume's less the floor where its probes stand), the sun there by the mask (or the volume's visibility); a miss the sky without the domes (the pixel took them as lights) | The bake's indirect layer at the pixel where the level has its texel; else (the objects, a pixel with no texel) `quality`'s bounce | A cosine path of up to 8 bounces, next-event estimation of the sun, lamps and fixtures at each hit, the domes at each hit by multiple importance sampling of a direction of their cone and the path's own cosine direction where it leaves (Veach's power heuristic: the bake's light, the quieter estimate for a cone of any width) |
 | Reflections | The light the surface's specular lobe sees, less the lights taken directly | Below a roughness of 0.35, one GGX ray (the visible normals' distribution, Heitz 2018) lit as the bounce's hit, the domes where it leaves; above it, the bake's reflection probes by the split sum | The same | A GGX ray and the same path, the domes where it leaves |
 | Emission | The surface's own (the G-buffer's emissive: an object's self-illumination; the level's, by its base colour, as CE's lightmap pass folds it in) | Added | Added | Added |
 
@@ -60,9 +60,29 @@ Why nothing is counted twice:
 - **The probes** see the lamps as the bake's paths do (by their glow), so a rough surface's reflection of a lamp is its
   RIS's specular, once.
 
+An object's normal turned from the eye (its vertices' normal at a silhouette, a two-sided card seen from behind) is
+mirrored about the plane square to the eye before anything is lit (the level's, one-sided, is turned to the eye as
+before): left turned away, GGX's terms go negative, and the reference summed negative reflections there (round 1's
+black fringes about b30's rocks and over its trees' leaves in R, 3,000 to 21,000 pixels a pose of G2 and G3).
+
 The resolve: the frame is `base colour × (1 − the specular's share) × D + S + emission`, the specular's share GGX's
 split sum (Karis's fit), F0 4% at the material table's specular 0.5, tinted half way to the base colour by the
 metalness (Raster's form). The sky's pixels are CE's frame there.
+
+**The exposure, the white hold, the tone curve** (as Raster's frame has them since `prism-v4-m2` 4acaa7892, sharing
+its meter and step, `xgpu_vulkan_bake_meter` and `xgpu_vulkan_bake_exposure_step`): `display.prism_exposure` (the v4
+modes' style default `"ce"`: the frame's middle as bright as Classic's, within `display.prism_exposure_range`; a lit
+pixel in 16 metered, this frame before the exposure against Classic's frame at the pixel, CE's light target by its
+base and its additions; the step after the composite makes the next frame's exposure) multiplies `D` and `S`; `D` is
+then held at white as CE's page held its light (a colour past white divided by its brightest channel, its hue kept)
+before the base colour multiplies it; the emission is CE's and stays; `display.prism_tone_curve` (default `"ce"`:
+the display clips) last. The units are Tool's, so the sunlit ground's light is about three times white: the hold
+gives it CE's look. The `pt_*` views are the light's own values (no exposure, no hold).
+
+**Where the gates measure: after the hold.** The gates compare the frame as drawn, the moving frames and the
+reference's alike through this composite, at a fixed exposure (`display.prism_exposure "fixed"`, the light in CE's
+scale, and the clipped tone curve: `capture.py`'s `v4pt`, `v4perf`, `v4raw` and `refs_v4`), so that no exposure that
+adapts frame by frame differs between the two. What is past white in both is white in both, as the player sees it.
 
 ## ReSTIR DI
 
@@ -138,15 +158,22 @@ is unbiased without weighing a lamp met by a sampled direction against its next-
 sampling): the surfaces a path meets are diffuse (the bake's albedo), where next-event estimation is the better
 sampler, and the pixel's glossy lobe is in the resampling's target. It `HALO_PT_REFERENCE_PATHS` paths a pixel a frame (1 by default; each path the diffuse lobe's or the specular's, picked
 by their shares, at least a tenth each, its light over its chance), and sums them as running means (Welford's,
-so a long sum keeps its precision). Every 32 frames it measures its own noise: each pixel's variance of its
-luminance's mean over the sum of the means squared, the frame's estimated relative MSE (linear, before the tone curve:
-stricter than the 8-bit frame's). Its diffuse bounce from the pixel is guided: 8 cosine-distributed directions, each traced to its hit and weighed by
+so a long sum keeps its precision). Every 32 frames it measures its own noise as the gates' frames measure the error:
+each pixel's variance of its luminance's mean by the exposure squared, none where its drawn value is held at white or
+clipped (it does not move with its noise), over the drawn luminances squared, by the share of a pixel's variance the
+gates' frames keep (`metrics.load` brings every frame to 960 × 540 by bilinear filtering: 0.098 of a pixel's
+independent noise at 1920 × 1080; R's pixels are independent, a seed a pixel and no reuse), the frame's estimated
+relative MSE. The linear estimate (the whole light, unclamped, at full size: round 1's rule) is logged beside it; in
+round 1 it was dominated by pixels far past white (G3's first pose: 0.23 linear, 5e-6 as the gates see it) and by
+the resize's share. Its EXR has each part's noise beside the whole's: `noise.direct` (the floor, sun, domes, lamps,
+fixtures and dynamic lights at the pixel), `noise.indirect` (the diffuse bounce), `noise.specular` (the reflection),
+each part's luminance's standard error over the whole's mean. Its diffuse bounce from the pixel is guided: 8 cosine-distributed directions, each traced to its hit and weighed by
 the light the bake says that hit gives back (plus a floor), one kept by its weight (resampled importance) and its path
 traced; its light over its weight by the candidates' mean weight. The bake steers only which direction is traced: the
 estimate's expectation is the path's, whatever the bake holds, so R stays the unbiased estimate of the same scene with
 no bake in its result; its noise is far less where a dark pixel's light comes from a lit place few directions reach
 (a10's corridors: R's first round, unguided, was at an estimated relative MSE of 0.04 to 0.29 after 1536 frames). It
-stops once that is at most 0.001 (the gates' `reference_noise`) with 64 frames
+stops once that is at most 0.001 (the gates' `reference_noise`) with 256 frames
 at least, or at N frames, and writes a linear OpenEXR file: `light.R/G/B` (the diffuse light's mean), `spec.R/G/B`
 (the specular light's), `Z` (the distance; 0 the sky), `samples` and `noise` (each pixel's relative standard error),
 with `prismReferenceFrames` and `prismReferenceNoisePpm` (the estimate, in millionths). The frame it holds is the

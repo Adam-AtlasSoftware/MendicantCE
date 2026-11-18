@@ -49,13 +49,19 @@ STATES = {
     # from a bake made before (the run's HALO_BAKE_FOLDER; display.bake "off": nothing baked in the run): its quality
     # and performance profiles, the denoiser off (a diagnostic), PRISM Raster, and Classic's frame as the moves' RT
     # off (the flicker's base and the keep mask's)
+    # (Path Traced's states at a fixed exposure (the light's units, CE's scale) and the clipped tone curve, the
+    # moving frames and the references alike: the gates compare the frames as drawn, the diffuse light held at white,
+    # on one side of the hold, with no exposure that adapts between them; docs/prism_pathtraced.md)
     "v4off": ('prism_set "rt off"', 'prism_set "display.lighting ce"', 'prism_set "debug.gbuffer_view off"'),
     "v4pt": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
-             'prism_set "display.denoiser prism"'),
+             'prism_set "display.denoiser prism"', 'prism_set "display.prism_exposure fixed"',
+             'prism_set "display.prism_tone_curve ce"'),
     "v4perf": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"',
-               'prism_set "display.pt_profile performance"', 'prism_set "display.denoiser prism"'),
+               'prism_set "display.pt_profile performance"', 'prism_set "display.denoiser prism"',
+               'prism_set "display.prism_exposure fixed"', 'prism_set "display.prism_tone_curve ce"'),
     "v4raw": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
-              'prism_set "display.denoiser off"'),
+              'prism_set "display.denoiser off"', 'prism_set "display.prism_exposure fixed"',
+              'prism_set "display.prism_tone_curve ce"'),
     "v4raster": ('prism_set "rt off"', 'prism_set "display.lighting raster"'),
 }
 # (the states that read the bake: entered from another, the bake is loaded again, BAKE_LOAD_FRAMES held)

@@ -48,7 +48,7 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
 {
     uvec2 pages, charts, vpages, table, tiles, indirect, sun, masks;
     uvec2 bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
-    uvec2 sums, stats, unused2[6];
+    uvec2 sums, stats, meter, counters, unused2[4];
     vec4 camera[4];
     vec4 last_camera[4];
     ivec4 corners;
@@ -60,8 +60,21 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
     vec4 settings;
     vec4 denoise;
     vec4 extra;
+    /* display.prism_exposure (0 fixed, 1 ce, 2 auto), display.prism_tone_curve
+    (0 ce, 1 filmic, 2 aces, 3 local), 1 where the frame meters (job.meter) */
+    vec4 exposure;
 };
 Job job;
+
+/* the frame's counters (job.counters, in the job's own block, zero at its
+start; the host reads them once the frame is done): [0] the level pixels
+whose history was looked for (one in 16), [1] those whose last frame's place
+was found on its own surface there, [2] those whose place was in the last
+frame's view, [3] those whose history was taken */
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer Counters
+{
+    uint v[4];
+};
 
 /* job.frame.y's flags */
 const uint FLAG_HISTORY = 1u;
@@ -70,8 +83,10 @@ const uint FLAG_DENOISER_OFF = 4u;
 const uint FLAG_REFERENCE = 8u;
 const uint FLAG_TILES = 16u;
 /* the reference's sums: floats a pixel (the diffuse light's mean, the
-specular's, the luminance's mean and squared deviations, the distance) */
-const uint SUMS = 12u;
+specular's, the luminance's mean and squared deviations, the distance, then
+the means and squared deviations of its parts' luminances: the direct, the
+diffuse bounce's, the reflection's) */
+const uint SUMS = 16u;
 
 layout(set = 0, binding = 0) uniform usampler2D words;
 layout(set = 0, binding = 1) uniform usampler2D extras;
@@ -215,6 +230,15 @@ Surface surface_at(ivec2 pixel)
     vec3 n = has_normal ? unfold(unpackSnorm2x16(w.y)) : g.eye;
     if (dot(n, ray) > 0.0 && g.instance == 0u)
         n = -n;
+    /* (an object's normal turned from the eye (its vertices' normal at a
+    silhouette, a two-sided card seen from behind) mirrored about the plane
+    square to the eye: its sideways part kept, its part along the eye made
+    toward it. Left turned away, the GGX lobe's terms go negative (the
+    reference summed negative reflections: round 1's black fringes about
+    b30's rocks and over its trees' leaves) */
+    float toward = dot(n, g.eye);
+    if (toward < 0.0 && g.instance != 0u)
+        n = normalize(n - 2.0 * toward * g.eye);
     g.normal = n;
     vec4 m = unpackUnorm4x8(w.z);
     g.roughness = clamp(m.x, 0.04, 1.0);
@@ -548,6 +572,65 @@ vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
     if (axis.w < 1.5)
         cone = smoothstep(axis.w, mix(axis.w, 1.0, 0.2), dot(-l, axis.xyz));
     return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * (1.0 - d2 / (r * r)));
+}
+
+/* the units rig's floor of light at a pixel (prism-v4-m2's rule, the bake's
+texels' and probes': its outdoor value in the structure's clusters with a
+sky, sky 0's indoor value in those with none, xgpu_stream.h's
+XGPU_SCENE_INDOOR): the flag of the structure's triangle the pixel shows (a
+short stretch of the eye's ray about its point), an object's the structure
+below it (a ray down past the object itself); nothing found, outdoor */
+bool structure_flag_hit(vec3 o, vec3 d, float t_max, out bool inside)
+{
+    inside = false;
+    vec3 nh;
+    uint t;
+    vec2 b;
+    for (int k = 0; k < 2; k++)
+    {
+        float h = hit(o, d, t_max, nh, t, b);
+        if (h < 0.0)
+            return false;
+        if (t < s.counts.x + s.counts.y)
+        {
+            inside = indoor(t);
+            return true;
+        }
+        o += d * (h + 0.01);
+        t_max -= h + 0.01;
+        if (t_max <= 0.0)
+            return false;
+    }
+    return false;
+}
+vec3 floor_light(Surface g)
+{
+    vec3 outdoor = ambient(), inside_light = ambient_indoor();
+    if (!units_rig() || all(equal(outdoor, inside_light)))
+        return outdoor;
+    bool inside = false;
+    if (g.instance == 0u)
+    {
+        vec3 d = normalize(g.point - job.camera[0].xyz);
+        structure_flag_hit(g.point - d * 0.1, d, 0.15, inside);
+    }
+    else
+        structure_flag_hit(g.point + vec3(0.0, 0.0, 0.01), vec3(0.0, 0.0, -1.0), 64.0, inside);
+    return inside ? inside_light : outdoor;
+}
+/* the floor the bake added at a ray's hit: its texel's triangle's (flag 8 in
+the bake's setup), or the volume's probes' (where they stand: the bake's
+floor_at) */
+vec3 floor_of_triangle(uint t)
+{
+    return indoor(t) ? ambient_indoor() : ambient();
+}
+vec3 floor_of_volume(vec3 p)
+{
+    vec3 outdoor = ambient(), inside_light = ambient_indoor();
+    if (!units_rig() || all(equal(outdoor, inside_light)))
+        return outdoor;
+    return mix(inside_light, outdoor, floor_at(p));
 }
 
 /* a light sample's parts at the surface: its diffuse light (the bake's
@@ -996,7 +1079,7 @@ vec3 hit_light(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance)
             float sv;
             if (bake_at(page, uv, nh, tot, indirect_light, sv))
             {
-                total = max(tot - ambient(), vec3(0.0));
+                total = max(tot - floor_of_triangle(t), vec3(0.0));
                 sun_v = sv;
             }
         }
@@ -1006,7 +1089,7 @@ vec3 hit_light(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance)
         vec4 v;
         if (volume_at(h + nh * 0.05, nh, v))
         {
-            total = max(v.rgb - ambient(), vec3(0.0));
+            total = max(v.rgb - floor_of_volume(h + nh * 0.05), vec3(0.0));
             if (sun_v < 0.0)
                 sun_v = v.w;
         }
@@ -1040,7 +1123,8 @@ vec3 ggx_sample(Surface g, out vec3 weight)
     vec3 m = normalize(vec3(alpha * nh.x, alpha * nh.y, max(nh.z, 0.0)));
     vec3 l = reflect(-v, m);
     weight = vec3(0.0);
-    if (l.z <= 0.0)
+    /* (the eye at or below the surface: no reflection, never a negative one) */
+    if (l.z <= 0.0 || v.z <= 1.0e-4)
         return g.normal;
     float a2 = alpha * alpha;
     float g1v = 2.0 * v.z / (v.z + sqrt(a2 + (1.0 - a2) * v.z * v.z));
@@ -1117,8 +1201,60 @@ vec3 hit_lamps(vec3 p, vec3 n, vec3 o, int candidates)
     return kept / kept_target * (sum / float(candidates));
 }
 
+/* the domes at a path's hit by multiple importance sampling (Veach's
+power heuristic) of two directions: one of each dome's cone (the next-event
+estimate, its shadow traced, as domes_at), weighed by its cone's density
+squared over the two's squares, and the path's own cosine direction where
+it leaves the level into the cone (domes_missed), weighed by the cosine's.
+The two weights sum to 1 at every direction of a cone, so the light is the
+bake's estimator's (which meets the domes only where its cosine paths
+leave), its noise within a few percent of the better one's however wide the
+dome (tools/test_prism_pt.py): a narrow cone is met by one cosine direction
+in hundreds (fireflies), a wide one fills the hemisphere the cosine already
+samples */
+vec3 domes_mis_at(vec3 o, vec3 n)
+{
+    vec3 sum = vec3(0.0);
+    if (term_off(1u))
+        return sum;
+    for (int i = 0; i < 4; i++)
+    {
+        vec4 a = s.rig[2 + 2 * i], r = s.rig[3 + 2 * i];
+        if (dot(r.rgb, vec3(1.0)) <= 0.0)
+            continue;
+        float solid = max(6.2831853 * (1.0 - a.w), 1.0e-4);
+        vec3 d = cone_dir(normalize(a.xyz), a.w);
+        float c = dot(n, d);
+        if (c > 0.0 && !blocked(o, d, 2000.0))
+        {
+            float pl = 1.0 / solid, pc = c / PI;
+            sum += r.rgb * c * (pl * pl / (pl * pl + pc * pc));
+        }
+    }
+    return sum;
+}
+vec3 domes_missed(vec3 d, vec3 n)
+{
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 4; i++)
+    {
+        vec4 a = s.rig[2 + 2 * i], r = s.rig[3 + 2 * i];
+        if (dot(r.rgb, vec3(1.0)) > 0.0 && dot(d, normalize(a.xyz)) >= a.w)
+        {
+            float solid = max(6.2831853 * (1.0 - a.w), 1.0e-4);
+            float pl = 1.0 / solid, pc = max(dot(n, d), 0.0) / PI;
+            sum += r.rgb * PI / solid * (term_off(1u) ? 1.0 : pc * pc / max(pl * pl + pc * pc, 1.0e-30));
+        }
+    }
+    return sum;
+}
+
 /* the reference's path (the bake's path(), but the domes taken at the first
-ray's miss where the point did not take them as lights: a reflection's) */
+ray's miss where the point did not take them as lights: a reflection's).
+At each hit the domes are taken by multiple importance sampling (above) with
+the sun's, the lamps' and the fixtures' next-event estimates, so a ray that
+leaves the level from there takes the sky's rest and the domes by their
+weights */
 vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
 {
     vec3 nh;
@@ -1136,7 +1272,7 @@ vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
         light += throughput * glow_of(t);
         vec3 oh = h + nh * 0.03;
         vec3 lh;
-        vec3 ls = sun_at(oh, nh) + hit_lamps(h, nh, oh, 4) + fixtures_ris(h, nh, oh, lh);
+        vec3 ls = sun_at(oh, nh) + hit_lamps(h, nh, oh, 4) + fixtures_ris(h, nh, oh, lh) + domes_mis_at(oh, nh);
         throughput *= albedo_of(t);
         light += throughput * ls;
         if (bounce == bounces - 1)
@@ -1149,10 +1285,11 @@ vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
             throughput /= keep;
         }
         vec3 wi = cosine_dir(nh);
+        vec3 n_from = nh;
         float t2 = hit(oh, wi, 300.0, nh, t, b);
         if (t2 < 0.0)
         {
-            light += throughput * sky_along(wi, true);
+            light += throughput * (sky_along(wi, false) + domes_missed(wi, n_from));
             break;
         }
         h = oh + wi * t2;
@@ -1279,8 +1416,9 @@ void main()
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
         noisy_d += ld;
         noisy_s += ls;
-        /* the sky's floor (the units' rig: unoccluded, as the bake adds it) */
-        clean_d += ambient();
+        /* the sky's floor (the units' rig: unoccluded, as the bake adds it;
+        the indoor one in an indoor cluster) */
+        clean_d += floor_light(g);
     }
     if (indirect_on)
     {
@@ -1421,6 +1559,29 @@ void main()
     vec4 hd, hs, hm, hms, hsun;
     float length_d;
     bool history = reproject(pixel, g, hd, hs, hm, hms, hsun, length_d);
+    /* (the counters, a level pixel in 16 that looks for its history: its
+    last frame's place in the view, the distance the last frame saw there its
+    point's in the last frame's camera (within 2%: the place is its own
+    surface's), its history taken) */
+    if (job.counters != uvec2(0u) && (pixel.x & 3) == 0 && (pixel.y & 3) == 0 && g.instance == 0u &&
+        (job.frame.y & FLAG_HISTORY) != 0u && g.has_history)
+    {
+        Counters c = Counters(job.counters);
+        atomicAdd(c.v[0], 1u);
+        vec2 at = last_pixel(g.point, vec2(pixel), g.motion, true);
+        ivec2 q = ivec2(floor(at + 0.5));
+        mat3 rays = mat3(job.last_camera[1].xyz, job.last_camera[2].xyz, job.last_camera[3].xyz);
+        float depth = abs(determinant(rays)) > 1.0e-12 ? (inverse(rays) * (g.point - job.last_camera[0].xyz)).x : 0.0;
+        if (inside(q))
+        {
+            atomicAdd(c.v[2], 1u);
+            float dl = uintBitsToFloat(imageLoad(guide_last, q).z);
+            if (abs(dl - depth) <= 0.02 * depth + 0.01)
+                atomicAdd(c.v[1], 1u);
+        }
+        if (history)
+            atomicAdd(c.v[3], 1u);
+    }
     float most_d = job.denoise.x, most_fast = job.denoise.y;
     /* (the specular's history shorter where the surface is glossy: a
     reflection moves over it as the eye does) */
@@ -1887,7 +2048,26 @@ void main()
         return;
     }
     vec3 kd = g.albedo * (1.0 - share);
-    vec3 result = kd * diffuse_light + specular_light + g.emissive;
+    /* (the frame, as Raster's: the exposure (display.prism_exposure; "ce"
+    metered against Classic's frame at the pixel, a lit pixel in 16, this
+    frame before the exposure, the step after the pass making the next
+    frame's) on the diffuse and specular light; the diffuse light then held at
+    white as CE's page held it (a colour past white divided by its brightest
+    channel, its hue kept), before the base colour; the glow as CE's; then
+    the tone curve. The live frames and the reference's alike, so that the
+    gates compare them on one side of the hold) */
+    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
+    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
+    if (metered && (pixel.x & 3) == 0 && (pixel.y & 3) == 0)
+    {
+        vec3 classic = texelFetch(light_in, pixel, 0).rgb * texelFetch(base_in, pixel, 0).rgb + additions.rgb;
+        meter_add(job.meter, luma(kd * diffuse_light + specular_light + g.emissive), luma(classic));
+    }
+    vec3 held = diffuse_light * exposure;
+    float brightest = max(held.r, max(held.g, held.b));
+    if (brightest > 1.0)
+        held /= brightest;
+    vec3 result = tone_curved(kd * held + specular_light * exposure + g.emissive, int(job.exposure.y + 0.5));
     if (any(isnan(result)) || any(isinf(result)))
         result = vec3(0.0);
     imageStore(frame_out, pixel, vec4(result, additions.a));
@@ -1934,11 +2114,17 @@ void main()
     vec3 kd = g.albedo * (1.0 - share);
     uint paths = max(uint(job.extra.y), 1u);
     vec3 ld_sum = vec3(0.0), ls_sum = vec3(0.0);
+    /* (the frame's luminance, and its parts': the light the pixel takes
+    directly (the floor, the sun, the domes, the lamps, fixtures and dynamic
+    lights), its diffuse bounce's, its reflection's) */
     float y_sum = 0.0, y2_sum = 0.0;
+    vec3 parts_sum = vec3(0.0);
+    seed_for(pixel, n * 64u, 7u);
+    vec3 floor_ = floor_light(g);
     for (uint k = 0u; k < paths; k++)
     {
         uint frame = n * 64u + k;
-        vec3 ld = ambient(), ls = vec3(0.0);
+        vec3 ld = floor_, ls = vec3(0.0);
         vec3 sd, ss;
         sun_parts(g, sd, ss);
         if (dot(sd, sd) > 0.0)
@@ -1957,14 +2143,16 @@ void main()
         lights_ris_seen(g, o, 8, 16, 16, dl, sl);
         ld += dl;
         ls += sl;
+        float y_direct = luma(kd * ld + ls);
         /* (one path a sample: the diffuse lobe's or the specular's, chosen by
         their shares (at least a tenth each), its light over its chance) */
         float chance = clamp(luma(share) / max(luma(share) + luma(kd), 1.0e-4), 0.1, 0.9);
+        vec3 bounce = vec3(0.0), reflection = vec3(0.0);
         seed_for(pixel, frame, 6u);
         if (rnd() >= chance)
         {
             seed_for(pixel, frame, 4u);
-            ld += guided_bounce(g, o) / (1.0 - chance);
+            bounce = guided_bounce(g, o) / (1.0 - chance);
         }
         else
         {
@@ -1972,8 +2160,14 @@ void main()
             seed_for(pixel, frame, 5u);
             vec3 r = ggx_sample(g, weight);
             if (dot(weight, weight) > 0.0)
-                ls += weight * reference_path(o, r, 8, true) / chance;
+                reflection = weight * reference_path(o, r, 8, true) / chance;
         }
+        if (any(isnan(bounce)) || any(isinf(bounce)))
+            bounce = vec3(0.0);
+        if (any(isnan(reflection)) || any(isinf(reflection)))
+            reflection = vec3(0.0);
+        ld += bounce;
+        ls += reflection;
         if (any(isnan(ld)) || any(isinf(ld)))
             ld = vec3(0.0);
         if (any(isnan(ls)) || any(isinf(ls)))
@@ -1983,6 +2177,7 @@ void main()
         float y = luma(kd * ld + ls);
         y_sum += y;
         y2_sum += y * y;
+        parts_sum += vec3(y_direct, luma(kd * bounce), luma(reflection));
     }
     /* (this frame's paths as one sample of their mean: Welford's update of
     the running means and of the luminance's squared deviations) */
@@ -2009,27 +2204,67 @@ void main()
     sums.v[at + 6u] = mean_y;
     sums.v[at + 7u] = m2_y;
     sums.v[at + 8u] = g.distance;
+    /* (the parts' means and squared deviations, likewise: where the noise
+    is, written beside the whole's) */
+    vec3 part = parts_sum / float(paths);
+    for (uint k = 0u; k < 3u; k++)
+    {
+        float pm = n == 1u ? 0.0 : sums.v[at + 9u + 2u * k], p2 = n == 1u ? 0.0 : sums.v[at + 10u + 2u * k];
+        float pd = part[k] - pm;
+        pm += pd / fn;
+        p2 += pd * (part[k] - pm);
+        sums.v[at + 9u + 2u * k] = pm;
+        sums.v[at + 10u + 2u * k] = p2;
+    }
 }
 
 //@pass reference_stats
 layout(local_size_x = 256) in;
-/* the reference's noise: each workgroup's sum over its pixels of the
-variance of their luminance's mean (the squared deviations over n (n - 1))
-and of the mean squared, into job.stats (two floats a workgroup); the CPU
-adds them: their ratio is the frame's estimated relative MSE.
-parameters.x the frames summed, y the pixels */
-shared vec2 partial[256];
+/* the reference's noise: each workgroup's sums over its pixels into job.stats
+(four floats a workgroup), the CPU adding them up: the variance of the
+luminance's mean (the squared deviations over n (n - 1)) and the mean
+squared, linear (the whole light, unclamped: the HDR estimate, logged); and
+the same as the frame shows them, which the gates measure: the exposure on
+the light (exposure_of, as composite), a pixel held at white or past it in
+any channel of the drawn frame (the display's clip) taking no variance (its
+drawn value does not move with its noise), the drawn luminance squared. The
+CPU scales the second ratio by the gates' frame's share of a pixel's
+variance (their frames brought to 960 x 540 by bilinear filtering). The
+pixels' noises are independent (no reuse, a seed a pixel), so the
+filtering's squared weights carry it. parameters.x the frames summed, y the
+pixels */
+shared vec4 partial[256];
 void main()
 {
+    s = Scene(push.scene);
     job = Job(push.job);
     uint index = gl_GlobalInvocationID.x;
     uint n = push.parameters.x;
-    vec2 value = vec2(0.0);
+    vec4 value = vec4(0.0);
     if (index < push.parameters.y && n > 1u)
     {
         Floats sums = Floats(job.sums);
-        float mean = sums.v[index * SUMS + 6u], m2 = sums.v[index * SUMS + 7u];
-        value = vec2(max(m2, 0.0) / (float(n) * float(n - 1u)), mean * mean);
+        uint at = index * SUMS;
+        float mean = sums.v[at + 6u], m2 = sums.v[at + 7u];
+        float variance = max(m2, 0.0) / (float(n) * float(n - 1u));
+        value.xy = vec2(variance, mean * mean);
+        ivec2 pixel = ivec2(int(index % job.counts.y), int(index / job.counts.y));
+        Surface g = surface_at(pixel);
+        if (g.present)
+        {
+            bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
+            float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
+            vec3 share = specular_share(g);
+            vec3 kd = g.albedo * (1.0 - share);
+            vec3 light_ = vec3(sums.v[at], sums.v[at + 1u], sums.v[at + 2u]) * exposure;
+            vec3 spec = vec3(sums.v[at + 3u], sums.v[at + 4u], sums.v[at + 5u]) * exposure;
+            float brightest = max(light_.r, max(light_.g, light_.b));
+            vec3 drawn = kd * (brightest > 1.0 ? light_ / brightest : light_) + spec + g.emissive;
+            bool clipped = brightest > 1.0 || max(drawn.r, max(drawn.g, drawn.b)) >= 1.0;
+            vec3 shown = clamp(drawn, vec3(0.0), vec3(1.0));
+            float y = luma(shown);
+            value.zw = vec2(clipped ? 0.0 : variance * exposure * exposure, y * y);
+        }
     }
     partial[gl_LocalInvocationID.x] = value;
     barrier();
@@ -2042,7 +2277,9 @@ void main()
     if (gl_LocalInvocationID.x == 0u)
     {
         Floats stats = Floats(job.stats);
-        stats.v[gl_WorkGroupID.x * 2u] = partial[0].x;
-        stats.v[gl_WorkGroupID.x * 2u + 1u] = partial[0].y;
+        stats.v[gl_WorkGroupID.x * 4u] = partial[0].x;
+        stats.v[gl_WorkGroupID.x * 4u + 1u] = partial[0].y;
+        stats.v[gl_WorkGroupID.x * 4u + 2u] = partial[0].z;
+        stats.v[gl_WorkGroupID.x * 4u + 3u] = partial[0].w;
     }
 }

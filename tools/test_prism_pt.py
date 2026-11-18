@@ -129,8 +129,8 @@ def test_the_reference_noise_is_the_means_error():
 
 
 def test_the_reference_stops_on_its_noise_or_its_frames():
-    assert model.reference_stops(0.0009, 64, 4096, 64)
-    assert not model.reference_stops(0.0009, 32, 4096, 32)
+    assert model.reference_stops(0.0009, 256, 4096, 256)
+    assert not model.reference_stops(0.0009, 224, 4096, 224)
     assert not model.reference_stops(0.002, 1024, 4096, 1024)
     assert model.reference_stops(0.5, 1024, 1024, 1024)
     # (a pixel's relative variance v a frame: its mean's v / n; the frames to the bound, v / 0.001)
@@ -146,6 +146,101 @@ def test_the_reference_stops_on_its_noise_or_its_frames():
             a = np.array(x)
             noise = model.reference_noise(a.mean(0), ((a - a.mean(0)) ** 2).sum(0), n)
     assert 0.8 * v / model.REFERENCE_NOISE <= n <= 1.3 * v / model.REFERENCE_NOISE + 32
+
+
+def test_the_gate_share_is_the_gates_bilinear_resize():
+    """the share of a pixel's independent noise the gates' frames keep (metrics.load: PIL's bilinear resize to 960 x
+    540), measured through PIL itself on white noise"""
+    from PIL import Image
+    assert model.gate_share(960) == 1.0
+    assert model.gate_share(1920) == pytest.approx((2.0 * (0.375 ** 2 + 0.125 ** 2)) ** 2, rel=1e-9)
+    rng = np.random.default_rng(7)
+    for width, gate in ((1920, 960), (1280, 960)):
+        height, gate_height = width * 9 // 16, gate * 9 // 16
+        noise = rng.standard_normal((height, width)).astype(np.float32)
+        small = np.asarray(Image.fromarray(noise, mode="F").resize((gate, gate_height), Image.BILINEAR))
+        kept = float(small[4:-4, 4:-4].var())
+        assert kept == pytest.approx(model.gate_share(width, gate), rel=0.08)
+
+
+def test_the_shown_noise_estimates_the_gates_error():
+    """the stopping rule's estimate (the drawn values' variance, none where clipped, by the gates' share) against the
+    error a sum of the same frames truly leaves in the gates' frames (clipped at white, resized by PIL as metrics.load
+    does), over many runs: within a fifth; the linear estimate, which counts the clipped pixels' noise and not the
+    resize, far above it"""
+    from PIL import Image
+    rng = np.random.default_rng(13)
+    width, height, gate = 192, 108, 96
+    truth = rng.uniform(0.05, 0.9, (height, width))
+    truth[:, :40] = rng.uniform(1.5, 3.0, (height, 40))
+    spread = truth * rng.uniform(0.5, 4.0, (height, width))
+    frames = 64
+
+    def shown(image):
+        clipped = np.minimum(image, 1.0).astype(np.float32)
+        return np.asarray(Image.fromarray(clipped, mode="F").resize((gate, gate * height // width), Image.BILINEAR))
+
+    reference = shown(truth)
+    estimates, linear, errors = [], [], []
+    for _ in range(60):
+        x = truth + spread * rng.standard_normal((frames, height, width)) / np.sqrt(4.0)
+        means = x.mean(0)
+        m2s = ((x - means) ** 2).sum(0)
+        clipped = means >= 1.0
+        estimates.append(model.reference_noise_shown(means, m2s, frames, clipped, width=width, gate_width=gate))
+        linear.append(model.reference_noise(means, m2s, frames))
+        errors.append(float(((shown(means) - reference) ** 2)[2:-2, 2:-2].mean() / (reference ** 2)[2:-2, 2:-2].mean()))
+    assert np.mean(estimates) == pytest.approx(np.mean(errors), rel=0.2)
+    assert np.mean(linear) > 5.0 * np.mean(errors)
+
+
+def test_a_normal_turned_from_the_eye_is_mirrored_and_its_reflection_never_negative():
+    rng = np.random.default_rng(17)
+    eye = np.array([0.0, 0.0, 1.0])
+    for _ in range(200):
+        n = rng.standard_normal(3)
+        n /= np.linalg.norm(n)
+        m = model.mirror_normal(n, eye)
+        assert m @ eye >= -1e-12
+        assert np.linalg.norm(m) == pytest.approx(1.0)
+        if n @ eye < 0.0:
+            # (its sideways part kept)
+            assert np.allclose(m[:2] / np.linalg.norm(m[:2]), n[:2] / np.linalg.norm(n[:2]))
+        else:
+            assert np.allclose(m, n)
+    # (the lobe's weight: never negative, 0 with the eye below the surface)
+    for v_z in (-0.3, -1e-5, 0.0, 1e-5):
+        assert model.ggx_weight(v_z, 0.5, 0.3) == 0.0
+    for v_z in rng.uniform(1e-3, 1.0, 50):
+        assert model.ggx_weight(v_z, float(rng.uniform(1e-3, 1.0)), float(rng.uniform(0.05, 1.0))) >= 0.0
+
+
+@pytest.mark.parametrize("axis,cos_most", [((0.3, 0.2, 0.93), 0.95), ((0.9, 0.0, 0.2), 0.6), ((0.0, 0.0, 1.0), 0.2)])
+def test_the_domes_by_both_directions_are_the_cosine_paths_light(axis, cos_most):
+    """a dome (sky_along's radiance r pi / its cone's solid angle within the cone) seen by a surface facing z: the
+    cosine paths' estimate (the sky where they leave), the next-event estimate (domes_at: a direction of the cone, r
+    by its cosine, none below the surface) and the reference's at a hit (domes_mis_at and domes_missed: both, by the
+    power heuristic) have one expectation; the power heuristic's noise is never far above the better one's"""
+    rng = np.random.default_rng(19)
+    axis = np.asarray(axis, float)
+    axis /= np.linalg.norm(axis)
+    r = 0.7
+    solid = 2.0 * np.pi * (1.0 - cos_most)
+    count = 400_000
+    u, a = rng.random(count), rng.random(count) * 2.0 * np.pi
+    d = np.stack([np.sqrt(u) * np.cos(a), np.sqrt(u) * np.sin(a), np.sqrt(1.0 - u)], 1)
+    paths = np.where(d @ axis >= cos_most, r * np.pi / solid, 0.0)
+    c = model.cone_sample(rng, axis, cos_most, count)[:, 2]
+    nee = np.where(c > 0.0, r * c, 0.0)
+    assert nee.mean() == pytest.approx(paths.mean(), rel=0.02, abs=1e-4)
+    pl = 1.0 / solid
+    pcl = np.maximum(c, 0.0) / np.pi
+    nee_weighted = np.where(c > 0.0, r * c * pl * pl / (pl * pl + pcl * pcl), 0.0)
+    pc = d[:, 2] / np.pi
+    missed = np.where(d @ axis >= cos_most, r * np.pi / solid * pc * pc / (pl * pl + pc * pc), 0.0)
+    both = nee_weighted + missed
+    assert both.mean() == pytest.approx(paths.mean(), rel=0.02, abs=1e-4)
+    assert both.std() <= 1.1 * min(nee.std(), paths.std())
 
 
 def test_the_temporal_history_keeps_a_sparse_light():

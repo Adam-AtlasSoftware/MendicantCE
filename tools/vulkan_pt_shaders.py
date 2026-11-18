@@ -5,7 +5,7 @@ their GLSL (port/linux/vulkan/xgpu_vulkan_pt.glsl).
 Run with a C preprocessor (cc), glslangValidator and spirv-val on PATH:
     python3 tools/vulkan_pt_shaders.py
 Each pass is the baker's BAKE_COMMON (port/linux/vulkan/xgpu_vulkan_bake_glsl.inc: the bake's scene and its light
-functions, which the C preprocessor gives), then the file's common part ("//@common"), then the pass's own ("//@pass
+functions, which the C preprocessor gives) and EXPOSURE_COMMON (the exposure's meter and the tone curve), then the file's common part ("//@common"), then the pass's own ("//@pass
 <name>"), so that the path tracer traces the bake's scene by the bake's own functions. The generated C embeds SPIR-V;
 the game does not need a shader compiler. --check verifies that the checked-in words still match their source.
 """
@@ -32,17 +32,23 @@ MARK = re.compile(r"^//@(common|pass (\w+))\s*$", re.M)
 
 
 def bake_common() -> str:
-    """the baker's BAKE_COMMON as its GLSL text"""
+    """the baker's BAKE_COMMON, then its EXPOSURE_COMMON (the exposure's meter, its read and the tone curve, which
+    Raster's frame and the composite share), as their GLSL text"""
     cc = shutil.which("cc") or shutil.which("clang") or shutil.which("gcc")
     if not cc:
         raise SystemExit("no C preprocessor (cc) on PATH")
-    probe = f'#include "{BAKE}"\nstatic const char bake_common_source[] = BAKE_COMMON;\n'
+    probe = (f'#include "{BAKE}"\nstatic const char bake_common_source[] = BAKE_COMMON;\n'
+             'static const char exposure_common_source[] = EXPOSURE_COMMON;\n')
     text = subprocess.run([cc, "-E", "-P", "-x", "c", "-"], input=probe, check=True, capture_output=True,
                           text=True).stdout
+    found = {}
     for match in DECLARATION.finditer(text):
-        if match.group(1) == "bake_common":
-            return "".join(ast.literal_eval(s) for s in STRINGS.findall(match.group(2)))
-    raise SystemExit(f"{BAKE}: no BAKE_COMMON")
+        if match.group(1) in ("bake_common", "exposure_common"):
+            found[match.group(1)] = "".join(ast.literal_eval(s) for s in STRINGS.findall(match.group(2)))
+    for name in ("bake_common", "exposure_common"):
+        if name not in found:
+            raise SystemExit(f"{BAKE}: no {name.upper()}")
+    return found["bake_common"] + found["exposure_common"]
 
 
 def sources() -> dict[str, str]:

@@ -5,7 +5,12 @@ can check them without a GPU:
   ris_lights         the light pass's resampled importance over the lamps (a mixture of densities, as the grid's
                      lamp_pick), the fixtures and the dynamic lights (each kind its own domain, by count)
   welford_frame      the reference pass's running means and squared deviations (one frame's paths as one sample)
-  reference_noise    reference_stats' estimated relative MSE of the frame, and the C side's stopping rule
+  reference_noise    reference_stats' estimated relative MSE of the frame (linear), and the C side's stopping rule
+  reference_noise_shown  the same as the gates' frames measure it: the drawn value's variance (none where it is held
+                     at white or clipped), the gates' half-size bilinear frames' share of it (gate_share)
+  mirror_normal      the G-buffer's object normal turned from the eye, mirrored about the plane square to it
+  ggx_weight         the GGX visible-normals sample's weight (Fresnel by G2 / G1), as ggx_sample computes it
+  cone_sample        a direction of a dome's cone (the bake's cone_dir), for its next-event estimate
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
   atrous_step        an a-trous step's weights: the 3 x 3 kernel, the plane, the normal, the instance, the luminance
 """
@@ -13,7 +18,8 @@ import numpy as np
 
 KERNEL = (1.0 / 2.0, 1.0 / 4.0)
 REFERENCE_NOISE = 0.001
-REFERENCE_LEAST = 64
+REFERENCE_LEAST = 256
+GATE_WIDTH = 960
 
 
 def luma(c):
@@ -95,6 +101,73 @@ def reference_noise(means, m2s, n):
     variance = np.maximum(m2s, 0.0) / (float(n) * float(n - 1))
     square = float((means * means).sum())
     return float(variance.sum()) / square if square > 0.0 else 1.0
+
+
+def gate_share(width, gate_width=GATE_WIDTH):
+    """xgpu_vulkan_pt.c's gate_share: the share of a pixel's independent variance the gates' frames keep, theirs
+    this frame brought to gate_width by bilinear filtering (a triangle as wide as the scale on each side): the square
+    of the weights' squares' sum along an axis"""
+    scale = width / gate_width
+    if scale <= 1.0:
+        return 1.0
+    reach = int(np.ceil(scale)) + 1
+    w = np.array([1.0 - abs(k + 0.5) / scale for k in range(-reach, reach)])
+    w = w[w > 0.0]
+    a = (w * w).sum() / w.sum() ** 2
+    return float(a * a)
+
+
+def reference_noise_shown(means_y, m2s, n, clipped, exposure=1.0, shown_y=None, width=1920, gate_width=GATE_WIDTH):
+    """reference_stats' second pair and the C side's ratio: each pixel's variance of its luminance's mean by the
+    exposure squared, none where its drawn value is held at white or clipped (clipped: a bool array), over the drawn
+    luminances squared (shown_y; default the means by the exposure, clipped at 1), by the gates' share"""
+    means_y = np.asarray(means_y, float)
+    if n < 2:
+        return 1.0
+    variance = np.maximum(np.asarray(m2s, float), 0.0) / (float(n) * float(n - 1)) * exposure * exposure
+    variance = np.where(np.asarray(clipped, bool), 0.0, variance)
+    y = np.minimum(means_y * exposure, 1.0) if shown_y is None else np.asarray(shown_y, float)
+    square = float((y * y).sum())
+    return gate_share(width, gate_width) * float(variance.sum()) / square if square > 0.0 else 1.0
+
+
+def mirror_normal(n, eye):
+    """surface_at's rule for an object's normal: turned from the eye (n . eye < 0), mirrored about the plane square
+    to the eye (its sideways part kept, its part along the eye made toward it)"""
+    n = np.asarray(n, float)
+    eye = np.asarray(eye, float)
+    toward = float(n @ eye)
+    if toward >= 0.0:
+        return n
+    m = n - 2.0 * toward * eye
+    return m / np.linalg.norm(m)
+
+
+def ggx_weight(v_z, l_z, roughness, f0=0.04, v_dot_m=1.0):
+    """ggx_sample's weight for a sampled direction (local frame: z the normal), Fresnel by G2 / G1, and 0 where the
+    eye is at or below the surface or the direction is"""
+    if l_z <= 0.0 or v_z <= 1.0e-4:
+        return 0.0
+    alpha = max(roughness * roughness, 1.0e-3)
+    a2 = alpha * alpha
+    g1v = 2.0 * v_z / (v_z + np.sqrt(a2 + (1.0 - a2) * v_z * v_z))
+    g1l = 2.0 * l_z / (l_z + np.sqrt(a2 + (1.0 - a2) * l_z * l_z))
+    g2 = g1v * g1l / max(g1v + g1l - g1v * g1l, 1.0e-4)
+    fresnel = f0 + (1.0 - f0) * (1.0 - min(max(v_dot_m, 0.0), 1.0)) ** 5
+    return fresnel * g2 / max(g1v, 1.0e-4)
+
+
+def cone_sample(rng, axis, cos_most, count):
+    """the bake's cone_dir: directions uniform over the cone about axis (unit) whose half angle's cosine is
+    cos_most"""
+    axis = np.asarray(axis, float)
+    t = np.cross(axis, [0.0, 0.0, 1.0]) if abs(axis[2]) < 0.95 else np.cross(axis, [1.0, 0.0, 0.0])
+    t /= np.linalg.norm(t)
+    b = np.cross(axis, t)
+    c = 1.0 + (cos_most - 1.0) * rng.random(count)
+    sn = np.sqrt(np.maximum(1.0 - c * c, 0.0))
+    a = rng.random(count) * 2.0 * np.pi
+    return c[:, None] * axis + sn[:, None] * (np.cos(a)[:, None] * t + np.sin(a)[:, None] * b)
 
 
 def reference_stops(noise, frames_measured, frames, count):
