@@ -207,13 +207,38 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    return vec3(r * cos(a), r * sin(a), z);\n" \
 	"}\n" \
 	"\n" \
+	"/* a sky light's rays (the sun's, a dome's) tested as Tool's radiosity\n" \
+	"tests them: as far as the light's test distance (the rig's: rig[15].w the\n" \
+	"sun's, a dome's its colour's w; 0 the whole level), and blocked by a face\n" \
+	"met from its front or a two-sided one, not by a one-sided face's back */\n" \
+	"float sun_reach() { return s.rig[15].w > 0.0 ? s.rig[15].w : 2000.0; }\n" \
+	"float dome_reach(vec4 r) { return r.w > 0.0 ? r.w : 2000.0; }\n" \
+	"bool sky_blocked(vec3 o, vec3 d, float reach)\n" \
+	"{\n" \
+	"    for (int k = 0; k < 4; k++)\n" \
+	"    {\n" \
+	"        vec3 nh;\n" \
+	"        uint t;\n" \
+	"        vec2 b;\n" \
+	"        float h = hit(o, d, reach, nh, t, b);\n" \
+	"        if (h < 0.0)\n" \
+	"            return false;\n" \
+	"        if (dot(nh, nh) > 0.0)\n" \
+	"            return true;\n" \
+	"        o += d * (h + 0.01);\n" \
+	"        reach -= h + 0.01;\n" \
+	"        if (reach <= 0.0)\n" \
+	"            return false;\n" \
+	"    }\n" \
+	"    return true;\n" \
+	"}\n" \
 	"/* the sun's visibility from o (a direction of its disc) */\n" \
 	"float sun_visible(vec3 o)\n" \
 	"{\n" \
 	"    if (s.sun.w <= 0.0)\n" \
 	"        return 0.0;\n" \
 	"    vec3 d = cone_dir(s.sun.xyz, cos(0.5 * s.rig[0].w));\n" \
-	"    return blocked(o, d, 2000.0) ? 0.0 : 1.0;\n" \
+	"    return sky_blocked(o, d, sun_reach()) ? 0.0 : 1.0;\n" \
 	"}\n" \
 	"vec3 sun_at(vec3 o, vec3 n)\n" \
 	"{\n" \
@@ -237,7 +262,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"            continue;\n" \
 	"        vec3 d = cone_dir(normalize(a.xyz), a.w);\n" \
 	"        float c = dot(n, d);\n" \
-	"        if (c > 0.0 && !blocked(o, d, 2000.0))\n" \
+	"        if (c > 0.0 && !sky_blocked(o, d, dome_reach(r)))\n" \
 	"        {\n" \
 	"            sum += r.rgb * c;\n" \
 	"            moment += luma(r.rgb) * d;\n" \
@@ -935,7 +960,7 @@ static const char lightmap_source[] =
 	"    float batch_sum = ac.v[base + 16u], batch_mean = ac.v[base + 18u], batch_m2 = ac.v[base + 19u];\n"
 	"    uint batches = floatBitsToUint(ac.v[base + 17u]);\n"
 	"    seed = hash_u(index ^ hash_u(push.parameters.w * 2654435761u ^ hash_u(count + 0x9e3779b9u + lane * 0x632be5abu +\n"
-	"        floatBitsToUint(s.rig[15].w) * 0x85ebca6bu)));\n"
+	"        s.unused.x * 0x85ebca6bu)));\n"
 	"    int bounces = int(push.values.w);\n"
 	"    /* (a remodel's face, two-sided, its normal turned toward its open side\n"
 	"    once: the side whose rays travel further before they meet the level) */\n"
@@ -1120,7 +1145,7 @@ static const char mask_source[] =
 	"            vec2 u = k < side * side ? (vec2(k % side, k / side) + vec2(rnd(), rnd())) / float(side) : vec2(rnd(), rnd());\n"
 	"            float c = mix(1.0, cos_most, u.x), sn = sqrt(max(1.0 - c * c, 0.0)), a = u.y * 6.2831853;\n"
 	"            vec3 d = normalize(c * s.sun.xyz + sn * (cos(a) * t + sin(a) * b));\n"
-	"            lit += blocked(o, d, 2000.0) ? 0u : 1u;\n"
+	"            lit += sky_blocked(o, d, sun_reach()) ? 0u : 1u;\n"
 	"            rays++;\n"
 	"        }\n"
 	"        v = float(lit) / float(max(rays, 1u));\n"
@@ -1238,7 +1263,7 @@ static const char volume_source[] =
 	"    float batch_m2 = uintBitsToFloat(stats.v[index * 9u + 8u]);\n"
 	"    uint batches = stats.v[index * 9u + 6u];\n"
 	"    seed = hash_u(index ^ hash_u(push.parameters.w * 2654435761u ^ hash_u(count + 0x7f4a7c15u +\n"
-	"        floatBitsToUint(s.rig[15].w) * 0x85ebca6bu)));\n"
+	"        s.unused.x * 0x85ebca6bu)));\n"
 	"    int bounces = int(push.values.w);\n"
 	"    vec4 shr = vec4(0.0), shg = vec4(0.0), shb = vec4(0.0);\n"
 	"    float sun = 0.0, back = 0.0;\n"
@@ -1282,7 +1307,7 @@ static const char volume_source[] =
 	"            if (dot(r.rgb, vec3(1.0)) <= 0.0)\n"
 	"                continue;\n"
 	"            vec3 dd = cone_dir(normalize(a.xyz), a.w);\n"
-	"            if (!blocked(p, dd, 2000.0))\n"
+	"            if (!sky_blocked(p, dd, dome_reach(r)))\n"
 	"            {\n"
 	"                vec3 e = r.rgb * 3.14159265;\n"
 	"                vec4 yd = sh(dd);\n"
@@ -2063,7 +2088,7 @@ static const char raster_source[] =
 	"                /* (an object's sun: its shadow traced against the level and\n"
 	"                the static scenery, the volume's visibility being coarse) */\n"
 	"                if (!level && s.sun.w > 0.0 && dot(facing_normal, s.sun.xyz) > 0.0)\n"
-	"                    sunv = blocked(point + facing_normal * 0.04, s.sun.xyz, 2000.0) ? 0.0 : 1.0;\n"
+	"                    sunv = sky_blocked(point + facing_normal * 0.04, s.sun.xyz, sun_reach()) ? 0.0 : 1.0;\n"
 	"            }\n"
 	"        }\n"
 	"        else if (view == 15u)\n"
@@ -2077,7 +2102,7 @@ static const char raster_source[] =
 	"        /* (the moving objects' sun shadows: traced where the frame has their\n"
 	"        structure) */\n"
 	"        if (s.sun.w > 0.0 && sunv > 0.0 && facing > 0.0 && view == 0u &&\n"
-	"            objects_blocked(point + facing_normal * 0.04, s.sun.xyz, 2000.0))\n"
+	"            objects_blocked(point + facing_normal * 0.04, s.sun.xyz, sun_reach()))\n"
 	"            sunv = 0.0;\n"
 	"        /* (a level's pixel: the moving objects' shadows CE drew over its\n"
 	"        lightmap pass (its projected shadow maps), their share of the\n"
@@ -2181,7 +2206,16 @@ static const char raster_source[] =
 	"                light_ /= brightest;\n"
 	"            result = light_ + (instance == 0u ? emissive : vec3(0.0));\n"
 	"            if (instance != 0u)\n"
+	"            {\n"
 	"                result = light_ * unpackUnorm4x8(w.x).rgb + emissive;\n"
+	"                /* (an object never lit under Classic's light for its pixel: the\n"
+	"                volume's raised to CE's own (the light target's there, the\n"
+	"                object's lit colour), its colour kept; over it, the volume's;\n"
+	"                display.prism_raster_objects \"volume\": the volume's alone) */\n"
+	"                float lr = luma(result), lc = luma(old.rgb);\n"
+	"                if (view == 0u && (push.parameters.w & 4u) == 0u && lr < lc)\n"
+	"                    result = lr > 1.0e-4 ? result * (lc / lr) : old.rgb;\n"
+	"            }\n"
 	"            /* (the meter, like with like: Raster's light and CE's by the same\n"
 	"            base, the same additions added) */\n"
 	"            if (metered && (pixel.x & 3) == 0 && (pixel.y & 3) == 0)\n"

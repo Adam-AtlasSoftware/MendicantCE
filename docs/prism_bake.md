@@ -159,6 +159,13 @@ converged against the same estimator converged:
 - **The fixtures:** one picked by its unshadowed light at the point among them all (16 or fewer) or 16 candidates, its
   shadow traced, its light over its share of the candidates' (exact for 16 or fewer).
 - **The sun's visibility** apart: a direction of the sun's disc (`display.prism_sun_size`'s, as R's).
+- **The sky lights' rays** (the sun's, the domes') are tested as Tool's radiosity tests them: as far as the light's test
+  distance (its tag's field: c40's moon 30 world units, b30's sun and dome 50; the rig's `rig[63]` and each dome's
+  `[7]`), and a face met from its back (a one-sided face of the level seen from behind) lets them through. c40's canyon
+  under G6 is roofed along the moon's direction about 105 world units up (the collision BSP agrees with the render
+  geometry), and CE's page has the moon on its floor: with the rule, 43 to 50% of G6's level pixels see the moon (none
+  before), in the page's colour, though the bake there is now 1.6 to 1.7 times the page's light. b30 does not change
+  (G2's and G3's sunlit and shaded pixels against the page within 2%). R takes the same rule.
 
 **When a texel stops (D4).** Each texel's samples are added until the relative standard error of its mean luminance is
 at most 1% (`docs/prism_gates.md`: the standard error itself, not a confidence interval), with at least 64 samples.
@@ -317,6 +324,13 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
   draft bakes): a10 0.42 to 0.47, c40's chamber 0.63 to 0.75, b30 0.86 to 1.01 (G2) and 0.89 to 0.91 (G3). The
   specular's share is taken from the diffuse (a metal's most), and CE's additions (its reflection cube maps, specular
   lightmaps and specular lights) are not drawn: a debt of the materials milestone, which `"ce"` leaves out.
+- **Objects are never lit under Classic** (`display.prism_raster_objects`, `"classic"` the default with CE's
+  composition): an object's pixel lit by the volume under the light CE gives that pixel (CE's light target there, the
+  object's lit colour) is raised to it, its colour kept; over it, the volume's. What the game shows stays seen: the
+  Chief in c40's chamber comes out at Classic's 0.122 (the volume alone 0.022 to 0.024). The volume there holds 0.26 to
+  0.27 (the light's unit, bluish), 0.4 of the lightmap's light on the floor under him (0.65): his sides face the walls,
+  the lamps are above. CE lights him at about 1.36 (his Classic colour over his base colour), four times its own floor
+  light there (0.31): CE's object lighting is generous, not the volume wrong. `"volume"` takes the volume alone.
 - Objects in the sun come out 15 to 30% brighter beside the sunlit ground than Classic draws them (Raster over Classic
   at G2's poses: sunlit objects 1.14 to 1.33, the sunlit level 0.88 to 1.16; in the shade alike, 0.90 to 1.04): the
   volume's light and the traced sun against CE's object lighting.

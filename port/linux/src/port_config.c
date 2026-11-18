@@ -755,6 +755,13 @@ static const struct config_setting config_settings[] =
 		"roughness and metalness, the reflections from the bake's probes (until\n"
 		"PRISM's materials reach CE's shaders, darker than Classic where CE's\n"
 		"reflections and specular layers light a surface). Read each frame." },
+	{ "display.prism_raster_objects", _config_string, "\"classic\"", "HALO_PRISM_RASTER_OBJECTS", _environment_value,
+		_platform_desktop,
+		"PRISM Raster, with CE's composition: how the objects (characters,\n"
+		"vehicles, weapons, scenery) are lit. \"classic\" by the baked\n"
+		"irradiance volume, but never darker than Classic lights them (what\n"
+		"the game shows stays seen). \"volume\" by the volume alone. Read each\n"
+		"frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"
@@ -4702,6 +4709,7 @@ static const struct
 	{ "display.pt_profile", { "quality", "performance", NULL }, "quality" },
 	{ "display.denoiser", { "prism", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
+	{ "display.prism_raster_objects", { "classic", "volume", NULL }, "classic" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
 		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", "pt_diffuse",

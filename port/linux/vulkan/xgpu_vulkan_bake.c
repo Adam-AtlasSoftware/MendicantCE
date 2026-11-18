@@ -78,7 +78,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 13u
+#define BAKE_VERSION 14u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -1917,13 +1917,14 @@ static struct bake_state *bake_begin(void)
 	b->noise_floor = b->quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
 		bake.control.noise_floor <= 10.0f ? bake.control.noise_floor * 0.18f : 0.0f;
 	b->block.rig[15][2] = b->noise_floor;
-	/* (HALO_BAKE_SEED: the samples from another seed, a diagnostic: rig[15].w
-	its bits, mixed into each texel's and probe's seed; 0 as before) */
+	/* (HALO_BAKE_SEED: the samples from another seed, a diagnostic: the
+	scene block's spare word, mixed into each texel's and probe's seed; 0 as
+	before. rig[15].w is the sun's test distance) */
 	{
 		const char *seed_text = getenv("HALO_BAKE_SEED");
 		uint32_t seed = seed_text ? (uint32_t)strtoul(seed_text, NULL, 10) : 0u;
 
-		memcpy(&b->block.rig[15][3], &seed, 4);
+		b->block.unused = seed;
 		b->seed = seed;
 	}
 	memcpy(b->block.sun, frame->sun, sizeof(b->block.sun));
@@ -5083,7 +5084,7 @@ void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
 
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
-	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int *whole)
+	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume, int *whole)
 {
 	struct bake_state *b = bake.bake;
 	const struct xgpu_vulkan_image_description *description;
@@ -5226,6 +5227,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	the light alone, CE's composition) */
 	if (materials && (!bake_view || bake_view >= XGPU_GBUFFER_VIEW_RASTER_ALBEDO))
 		flags |= 2u;
+	/* (display.prism_raster_objects "volume": an object's light the volume's
+	alone, not held at Classic's) */
+	if (objects_volume)
+		flags |= 4u;
 	barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_RASTER]);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipeline_layouts[PIPELINE_RASTER], 0, 1, &set, 0,

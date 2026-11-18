@@ -90,12 +90,14 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_VIEW_SHIFT 8
 #define PHASE_RASTER 0x10000ul
 #define PHASE_RASTER_MATERIALS 0x20000ul
+#define PHASE_RASTER_OBJECTS_VOLUME 0x40000ul
 /* display.lighting "pathtraced" (xgpu_stream.h's
-XGPU_GBUFFER_PHASE_PATHTRACED), its profile (display.pt_profile) and its
-denoiser off (display.denoiser "off") */
-#define PHASE_PATHTRACED 0x40000ul
-#define PHASE_PT_PROFILE_SHIFT 19
-#define PHASE_PT_DENOISER_OFF 0x200000ul
+XGPU_GBUFFER_PHASE_PATHTRACED, from the word's top down, so that Raster's
+bits, from bit 16 up, never meet it), its profile (display.pt_profile) and
+its denoiser off (display.denoiser "off") */
+#define PHASE_PATHTRACED 0x10000000ul
+#define PHASE_PT_PROFILE_SHIFT 29
+#define PHASE_PT_DENOISER_OFF 0x80000000ul
 /* the views the bake's relight shows (Raster's), the path tracer's */
 #define VIEW_BAKE_FIRST 12ul
 #define VIEW_PT_FIRST 20ul
@@ -160,7 +162,7 @@ the nodes an instance sends (xgpu_stream.h's XGPU_SCENE_INSTANCE_NODES) */
 static struct
 {
 	unsigned long settings_read;
-	boolean wanted, raster, raster_materials, pathtraced;
+	boolean wanted, raster, raster_materials, raster_objects_volume, pathtraced;
 	unsigned long pt_profile;
 	boolean pt_denoiser_off;
 	unsigned long view;
@@ -215,6 +217,11 @@ static void settings_read(
 	whole, for the materials milestone) */
 	value = config_string("display.prism_raster_composition");
 	prism_deferred.raster_materials = value && !strcmp(value, "materials");
+	/* (display.prism_raster_objects: "classic", the default, an object never
+	lit under the light CE gives its pixel; "volume" the irradiance volume's
+	light alone) */
+	value = config_string("display.prism_raster_objects");
+	prism_deferred.raster_objects_volume = value && !strcmp(value, "volume");
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
@@ -727,7 +734,8 @@ void prism_deferred_phase(
 		}
 		else if (prism_deferred.raster)
 		{
-			value |= PHASE_RASTER | (prism_deferred.raster_materials ? PHASE_RASTER_MATERIALS : 0);
+			value |= PHASE_RASTER | (prism_deferred.raster_materials ? PHASE_RASTER_MATERIALS : 0) |
+				(prism_deferred.raster_objects_volume ? PHASE_RASTER_OBJECTS_VOLUME : 0);
 		}
 		break;
 	}

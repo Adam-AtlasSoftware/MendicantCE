@@ -1277,20 +1277,36 @@ vec3 ggx_sample(Surface g, out vec3 weight)
 }
 
 
-/* the sun's ray from o toward a direction of its disc: 1 seen, 0 blocked,
-and where blocked the distance to a blocker (the first the query meets, not
-always the nearest: the penumbra's width for the filter) */
+/* the sun's ray from o toward a direction of its disc, tested as the bake's
+sky_blocked tests it (prism-v4-m2 61370f51f: Tool's rule, as far as the sun's
+test distance, sun_reach, and a one-sided face met from its back letting it
+through, up to 4 of them): 1 seen, 0 blocked, and where blocked the distance
+to the blocker (the penumbra's width for the filter) */
 float sun_ray(vec3 o, out float blocker)
 {
     vec3 d = cone_dir(s.sun.xyz, cos(0.5 * s.rig[0].w));
-    rayQueryEXT q;
-    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), gl_RayFlagsTerminateOnFirstHitEXT, 15u, o, 0.0, d,
-        2000.0);
-    ALPHA_PROCEED(q)
+    float reach = sun_reach(), travelled = 0.0;
     blocker = 0.0;
-    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT)
-        return 1.0;
-    blocker = rayQueryGetIntersectionTEXT(q, true);
+    for (int k = 0; k < 4; k++)
+    {
+        vec3 nh;
+        uint t;
+        vec2 b;
+        float h = hit(o, d, reach, nh, t, b);
+        if (h < 0.0)
+            return 1.0;
+        if (dot(nh, nh) > 0.0)
+        {
+            blocker = travelled + h;
+            return 0.0;
+        }
+        o += d * (h + 0.01);
+        travelled += h + 0.01;
+        reach -= h + 0.01;
+        if (reach <= 0.0)
+            return 1.0;
+    }
+    blocker = travelled;
     return 0.0;
 }
 
@@ -1365,7 +1381,7 @@ vec3 domes_mis_at(vec3 o, vec3 n)
         float solid = max(6.2831853 * (1.0 - a.w), 1.0e-4);
         vec3 d = cone_dir(normalize(a.xyz), a.w);
         float c = dot(n, d);
-        if (c > 0.0 && !blocked(o, d, 2000.0))
+        if (c > 0.0 && !sky_blocked(o, d, dome_reach(r)))
         {
             float pl = 1.0 / solid, pc = c / PI;
             sum += r.rgb * c * (pl * pl / (pl * pl + pc * pc));
