@@ -119,13 +119,13 @@ found safe:
   sphere's angle from the point; nought past a right angle, the lamps being one-sided): a wall's lamps facing away
   from the point no longer draw its picks. `HALO_PT_TREE_CANDIDATES` (1 to 8, 1 by default) sets how many of the 8
   initial candidates come from the tree (the rest the grid's), each weighed by its own source's probability.
-- **Temporal reuse only.** The last frame's reservoir at the surface's place there (the G-buffer's motion), reused only
+- **Temporal reuse by default.** The last frame's reservoir at the surface's place there (the G-buffer's motion), reused only
   where its guide is this surface's (the same instance, the normal, the plane: as the denoiser's history, so no sample
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
   frames. The last frame's pixel is one of the 2 × 2 about the surface's place there, chosen by its bilinear
   weight (the nearest gave a lucky sample to every pixel that maps to it when the eye moves toward a surface: blocks
-  that grew along the move, G4's floor streaking); ReSTIR GI's alike. A dynamic light's sample is not reused (their order changes from frame to frame). There is no spatial
-  reuse: in `prism-pt` it spread a pick's choice over patches.
+  that grew along the move, G4's floor streaking); ReSTIR GI's alike. A dynamic light's sample is not reused (their order changes from frame to frame). Spatial reuse is
+  off by default (below): in `prism-pt` it spread a pick's choice over patches, and here its blobs in motion remain.
 - **The target holds the shadow.** The initial reservoir is resampled by the unshadowed light (its candidates' shadows
   are not traced); its kept sample's shadow is then traced, and the last frame's sample's from this pixel, and the two
   are combined by generalized resampled importance (Lin et al. 2022) with the shadowed light at this pixel as the
@@ -139,6 +139,20 @@ found safe:
   pixel of 40 lamps, 6 seen: both unbiased, the shadowed target's frame-to-frame spread a fifth of the unshadowed
   one's. (Round 1's first attempt, a hidden sample's weight set to nought after a choice made by the unshadowed target
   with its confidence counted, is not this: it took a ninth of a sparsely seen light at G5's first pose.)
+- **Spatiotemporal reuse, off by default** (`HALO_PT_RESTIR_SPATIAL=<1 to 4>`, since round 4): besides the last
+  frame's reservoir at the place, that many of the last frame's reservoirs at points of a disc of 2 to 16 pixels
+  about it, each this surface's by the same test, its sample's shadow traced from this pixel. Round 6 found it biased
+  dark: a neighbour's confidence was counted whatever its sample, so a pixel whose neighbours see lamps it cannot see
+  lost their share (1/M: G4's floor in motion about a third darker than R, its first pose's error 0.0916 to 0.2236).
+  A neighbour's confidence now counts only where the kept sample lights the neighbour's point, in front of it and seen
+  from it (Bitterli et al. 2020's Z: a shadow ray from the neighbour, none where the kept sample is that neighbour's
+  own), so the reuse is unbiased again (`HALO_PT_RESTIR_Z=0`: counted where the neighbour's own sample lit this pixel,
+  no ray; measured worse than none, 0.1971). At G4 with one neighbour and 4 candidates: the moving frames' error
+  against R 0.1814 to 0.1249, FLIP 0.119 to 0.096, the blotch 0.0823 to 0.0782, the flicker 1.34 to 1.40; the walls'
+  sparkles gone from a still frame after a few hundred frames, but in motion the reuse's correlated samples show as
+  blobs the size of the disc where the base shows salt. It costs about 1.4 ms of the RTX 3070 Ti's light pass at 1080p
+  (G4: 18.7 against 17.3 ms), which is why it is not on.
+- `HALO_PT_CANDIDATES` (1 to 8, 8 by default): the live frames' initial lamp candidates a pixel.
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
 
 ## ReSTIR GI
@@ -376,7 +390,7 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
 
 ## What is not done yet
 
-- **ReSTIR's spatial reuse** (left out on purpose, above) and the unbiased (ray-traced) reuse's correction.
+- **ReSTIR DI's spatial reuse by default** (in, off: its cost and its blobs in motion, above).
 - **ReSTIR GI's spatial reuse** (its temporal reuse is in), the dynamic objects' occlusion of the baked light
   (`performance`'s short AO rays), traced-light upscaling and the async queue (M5, M6).
 - **The transparent layer** (water and glass, traced reflection and refraction): after the seven gate scenes pass.
