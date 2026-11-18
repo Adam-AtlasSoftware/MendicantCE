@@ -449,4 +449,9 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
   display.prism_rt's per-frame structure of the objects (`objects_blocked` reads it where the job block has it) need the
   RT backend to build that structure in Raster, which it does not yet.
 - `max`: the tail spread over a subgroup, but no path guiding or light cache yet (Adam's decision on the floor stands).
-- The indirect layer's use by M3's path tracer, the remodel's atlas, BC6H for the layers and the reflection cubes.
+- The indirect layer's use by M3's path tracer, BC6H for the layers and the reflection cubes.
+- The remodel needs no atlas of its own: its corners carry CE's lightmap coordinates of the point of their surface, so
+  CE's chart map finds a remodel pixel's texels (b30's G2: every level pixel). Its charts are split finer than CE's
+  (b30's first BSP: 17,224 against 8,378: its corners on a chart's inner edges need not meet in the same
+  coordinates), each with its own density and so its own scale; a CE texel where two of them meet takes the nearer's
+  virtual page. No seam was seen at G2 and G3; a whole-BSP check of those borders is not made.
