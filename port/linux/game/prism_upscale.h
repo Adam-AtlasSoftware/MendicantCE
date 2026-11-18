@@ -26,5 +26,8 @@ void prism_upscale_player_end(void);
 /* display.upscaler is not "off" (d3d8_device.c's anti-aliasing: none by
 multisampling or supersampling under an upscaler) */
 int prism_upscale_setting_on(void);
+/* display.denoiser is "off", in a build that upscales (prism_rt.c: the path
+tracer's own filter off; elsewhere the setting is "prism"'s) */
+int prism_upscale_denoiser_off(void);
 
 #endif

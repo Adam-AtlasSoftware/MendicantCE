@@ -160,6 +160,14 @@ int prism_upscale_setting_on(
 	return prism_upscale.upscaler != _upscaler_none;
 }
 
+int prism_upscale_denoiser_off(
+	void)
+{
+	settings_read();
+
+	return prism_upscale.denoiser == _denoiser_off;
+}
+
 void prism_upscale_player_begin(
 	short local_player_index)
 {

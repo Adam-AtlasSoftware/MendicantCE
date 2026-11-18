@@ -1658,9 +1658,11 @@ struct xgpu_render_target *xgpu_render_target_find(unsigned long data)
 		pass's scale) */
 		if (entry->target.data == data && !entry->target.depth && (!best || entry->last_rendered > best->last_rendered ||
 			/* (display.upscaler: a screen target's view and the target itself
-			drawn in the same frame, the one of the scale drawn at now) */
-			(entry->last_rendered == best->last_rendered && best->target.scale[0] != screen_scale[0] &&
-			entry->target.scale[0] == screen_scale[0]))
+			drawn in the same frame, the one of the scale drawn at now; only
+			while views are drawn smaller, so that the builds that never do,
+			and the frames of the setting off, find their targets as before) */
+			(view_scale.scale[0] != 0.0f && entry->last_rendered == best->last_rendered &&
+			best->target.scale[0] != screen_scale[0] && entry->target.scale[0] == screen_scale[0]))
 #ifdef HALO_VR
 			&& (vr_gl.pass == HALO_VR_PASS_NONE || entry->kind != _render_target_screen ||
 				((entry->target.layers > 1) == (vr_gl.pass == HALO_VR_PASS_EYES) &&

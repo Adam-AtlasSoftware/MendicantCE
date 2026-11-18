@@ -1735,10 +1735,12 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	platform_frame_rate_apply();
 #else
 	host_vulkan_device_choose(config_string("display.vulkan_device"));
+#if !defined(HALO_ANDROID) && !defined(HALO_VR)
 	{
 		/* (display.upscaler's and display.denoiser's plugins, opened from the
 		data folder's plugins as the device is made; none named, none
-		opened) */
+		opened; not in the builds that never upscale, Android's and the VR
+		build's: port/linux/game/prism_upscale.c) */
 		const char *upscaler = config_string("display.upscaler");
 		const char *denoiser = config_string("display.denoiser");
 		char folder[1024];
@@ -1747,6 +1749,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 		host_vulkan_plugins_choose(!strncmp(upscaler, "plugin:", 7) ? upscaler + 7 : "",
 			!strncmp(denoiser, "plugin:", 7) ? denoiser + 7 : "", folder);
 	}
+#endif
 	if (!host_vulkan_window_open((unsigned int)(uintptr_t)platform_window,
 		(config_boolean("debug.gpu_stats") ? HOST_VULKAN_DEBUG_STATISTICS : 0) |
 		(config_boolean("debug.gpu_validation") || config_boolean("debug.gl_debug") ? HOST_VULKAN_DEBUG_VALIDATION : 0) |

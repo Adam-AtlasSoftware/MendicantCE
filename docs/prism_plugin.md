@@ -88,7 +88,8 @@ cc -shared -fPIC -fvisibility=hidden -I build/linux_x86_64/third_party/vulkan-he
 through a function the caller passes. It is part of the renderer of every Vulkan host. The guest names the plugins
 before its window opens (`host_vulkan_plugins_choose`, a host import beside `host_vulkan_device_choose`):
 display.upscaler's and display.denoiser's `"plugin:<name>"` names, and the folder, the data folder's `plugins`
-(`HALO_PRISM_PLUGINS` names another). With no plugin named, nothing is opened and nothing is asked of the device.
+(`HALO_PRISM_PLUGINS` names another). With no plugin named, nothing is opened and nothing is asked of the device;
+the builds that never upscale (Android's and the VR build's) name none.
 
 `port/linux/vulkan/xgpu_vulkan_upscale.c` drives the lifecycle:
 
@@ -194,7 +195,8 @@ or display.denoiser set back to `"prism"` with no upscaler on) has the tracer's 
   own filter and FSR 3.1 resolves the view.
 
 display.denoiser `"off"` traces the light raw, the tracer's own filter off whatever display.prism_rt_denoiser
-says (`port/linux/game/prism_rt.c`): a diagnostic, and the light a plugin is given.
+says (`port/linux/game/prism_rt.c`): a diagnostic, and the light a plugin is given. In the builds that never upscale
+the setting is `"prism"`'s (`prism_upscale_denoiser_off`).
 
 The path tracer of display.prism_rt is the mode PRISM v4's M3 replaces; the hooks are its light's and the view's, not
 its own, so that M3's path tracer takes them as they are.
