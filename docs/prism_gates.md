@@ -449,7 +449,9 @@ centre's. The level's fog, the fog screen's density and the atmosphere are CE's 
 
 **Classic's identity** against 1e95379ef (`identity.py`): `frames`, b30 and a10, with the game's defaults and with the
 Classic preset, 46 of 46 frames byte-identical in every comparison (each tree with itself, the new with the base);
-`stills` with the Classic preset, G2, G4, G5 and G7, 30 of 30 alike in every comparison. **Determinism**
+`stills` with the Classic preset, G2, G4, G5 and G7, 30 of 30 alike in every comparison, and with the kit's settings
+(on the RTX 2060: the remodelled world geometry), G2, G4 and G5 30 of 30 alike in every comparison, G7 alike in no run
+of either tree, as before (its floor lamps' glows). **Determinism**
 (`identity.py determinism`, a10): each tree with itself and the new with the base, all alike (1476 to 1478 ticks, the
 game state and the seeds).
 
@@ -472,9 +474,8 @@ cube map's decal refused), the G-buffer twins (`tools/test_gbuffer_twins.py`: th
 constants of a part, a replacement mesh's pieces and the first-person weapon), the render stream and manifest,
 PRISM's gates' tools, the bake and the VR effects: 4211 passed, 4 skipped.
 
-Not measured: the kit's settings' stills (`identity.py stills --config` the kit's: the remodelled world geometry,
-over the 3070 Ti lane's memory; it waited behind the milestones' runs on the RTX 2060), the frame times of the fog and
-decal passes and of the twins' second run, and the objects' motion on V1 and V2.
+Not measured: the frame times of the fog and decal passes and of the twins' second run, and the objects' motion on V1
+and V2.
 
 ## M2: the bake and PRISM Raster
 
