@@ -791,6 +791,7 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
 
 /* (below: a lamp from the grid's mixture or the light tree) */
 uint lamp_pick_mixed(vec3 p, vec3 n, out float probability);
+uint lamp_pick_live(vec3 p, vec3 n, int c, int count, out float probability);
 
 /* the initial reservoir: resampled importance over the candidates (as
 lights_ris: each kind its own domain, its candidates' weight over its
@@ -812,7 +813,7 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
         for (int c = 0; c < lamp_count; c++)
         {
             float probability;
-            uint lamp = lamp_pick_mixed(p, g.normal, probability);
+            uint lamp = lamp_pick_live(p, g.normal, c, lamp_count, probability);
             if (probability <= 0.0)
                 continue;
             uint at = lamp * 16u;
@@ -1109,6 +1110,22 @@ float grid_probability(vec3 p, uint l)
     if (near > 0u)
         probability += share_near * list_probability(near_at, near, l);
     return probability;
+}
+/* the live frames' candidate c of count: the last from the light tree, the
+others from the grid, each weighed by its own source's probability (its
+candidate's weight target / (count x probability)). Both sources reach every
+lamp of power (the grid by its power share, the tree by its importance), so
+the sum stays unbiased (each candidate's term an unbiased estimate of the
+lamps' light over count); the tree's one candidate finds the lamps the
+grid's lists miss near a cell's surfaces (round 1's a10 fireflies) at one
+tree descent a pixel. The mixture for every candidate (lamp_pick_mixed, the
+reference's) cost two descents a candidate: 12 ms of the RTX 3070 Ti's
+light pass at 1080p, G2 and G5 alike. */
+uint lamp_pick_live(vec3 p, vec3 n, int c, int count, out float probability)
+{
+    if (!tree_on() || c != count - 1)
+        return lamp_pick(p, probability);
+    return tree_pick(p, n, probability);
 }
 uint lamp_pick_mixed(vec3 p, vec3 n, out float probability)
 {

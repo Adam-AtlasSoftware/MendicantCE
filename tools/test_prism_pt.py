@@ -569,3 +569,22 @@ def test_a_glossy_lobes_lamp_by_its_own_direction_is_the_next_event_estimates_li
     brdf = dist * g2_n * (f0 + (1.0 - f0) * (1.0 - vh) ** 5) / (4.0 * v[2] * np.maximum(nl, 1e-6))
     by_light = np.where(nl > 0.0, brdf * nl * radiance * solid, 0.0)
     assert by_lobe.mean() == pytest.approx(by_light.mean(), rel=0.03)
+
+
+def test_live_candidates_own_sources_unbiased():
+    """the live frames' lamp candidates (lamp_pick_live): count - 1 from the grid, the last from the tree, each
+    weighed by its own source's probability: the RIS sum's expectation is the lamps' light whatever the sources, as
+    long as each reaches every lamp (here the grid nearly misses lamp 3, the tree favours it)"""
+    import numpy as np
+    rng = np.random.default_rng(7)
+    light = np.array([1.0, 0.5, 0.2, 4.0, 0.1])
+    grid = np.array([0.4, 0.3, 0.25, 0.001, 0.049])
+    tree = np.array([0.2, 0.1, 0.05, 0.6, 0.05])
+    count, trials = 8, 200000
+    sums = np.zeros(trials)
+    for c in range(count):
+        p = tree if c == count - 1 else grid
+        pick = rng.choice(5, size=trials, p=p)
+        sums += light[pick] / p[pick] / count
+    mean, error = sums.mean(), sums.std() / np.sqrt(trials)
+    assert abs(mean - light.sum()) < 4.0 * error + 1e-9
