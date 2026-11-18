@@ -1599,6 +1599,11 @@ const int GUIDE = 8;
 /* the roughness under which the reference takes a lamp's specular light by
 the reflection's own direction, not by next-event estimation */
 const float REFERENCE_GLOSSY = 0.3;
+/* the reference's paths' bounces at most (xgpu_stream.h's
+XGPU_RT_REFERENCE_BOUNCES, the bake's paths' alike since prism-v4-m2
+bb2a6b1a4: 8 cut a room with walls of albedo 0.85 short), Russian roulette
+past the second */
+const int REFERENCE_BOUNCES = 32;
 const float GUIDE_FLOOR = 0.002;
 vec3 guided_bounce(Surface g, vec3 o)
 {
@@ -1618,7 +1623,7 @@ vec3 guided_bounce(Surface g, vec3 o)
     }
     if (kept_w <= 0.0)
         return vec3(0.0);
-    return reference_path(o, kept, 8, false, false) / kept_w * (sum / float(GUIDE));
+    return reference_path(o, kept, REFERENCE_BOUNCES, false, false) / kept_w * (sum / float(GUIDE));
 }
 
 /* a pixel's seed for one use (decorrelated uses: the sun, the lights, the
@@ -2436,11 +2441,15 @@ void main()
         vec3 classic = texelFetch(light_in, pixel, 0).rgb * texelFetch(base_in, pixel, 0).rgb + additions.rgb;
         meter_add(job.meter, luma(kd * diffuse_light + specular_light + g.emissive), luma(classic));
     }
+    /* (the hold at white only under the "ce" curve, the display's clip:
+    Adam's direction of 21:34, the light physically lit, a rolled-off curve
+    taking what is past white) */
+    int curve = int(job.exposure.y + 0.5);
     vec3 held = diffuse_light * exposure;
     float brightest = max(held.r, max(held.g, held.b));
-    if (brightest > 1.0)
+    if (curve == 0 && brightest > 1.0)
         held /= brightest;
-    vec3 result = tone_curved(kd * held + specular_light * exposure + g.emissive, int(job.exposure.y + 0.5));
+    vec3 result = tone_curved(kd * held + specular_light * exposure + g.emissive, curve);
     if (any(isnan(result)) || any(isinf(result)))
         result = vec3(0.0);
     imageStore(frame_out, pixel, vec4(result, additions.a));
@@ -2453,7 +2462,7 @@ materials and lights traced unbiased with no bake, no reuse and no
 denoiser: the sun (a ray to its disc), the domes, the lamps, the fixtures
 and the dynamic lights (resampled importance, unbiased for its one ray), the
 floor, the indirect light by the bake's own estimator (a cosine path of up
-to 8 bounces, Russian roulette past the second, every hit's sun and lamps
+to 32 bounces, Russian roulette past the second, every hit's sun and lamps
 by next-event estimation), the reflection by a GGX ray and the same path
 (one of the two lobes a sample, by their shares); extra.y of these a pixel
 each frame, summed (Welford's running mean, so
@@ -2546,7 +2555,7 @@ void main()
             seed_for(pixel, frame, 5u);
             vec3 r = ggx_sample(g, weight);
             if (dot(weight, weight) > 0.0)
-                reflection = weight * reference_path(o, r, 8, true, glossy) / chance;
+                reflection = weight * reference_path(o, r, REFERENCE_BOUNCES, true, glossy) / chance;
         }
         if (any(isnan(bounce)) || any(isinf(bounce)))
             bounce = vec3(0.0);
@@ -2645,11 +2654,19 @@ void main()
             vec3 light_ = vec3(sums.v[at], sums.v[at + 1u], sums.v[at + 2u]) * exposure;
             vec3 spec = vec3(sums.v[at + 3u], sums.v[at + 4u], sums.v[at + 5u]) * exposure;
             float brightest = max(light_.r, max(light_.g, light_.b));
-            vec3 drawn = kd * (brightest > 1.0 ? light_ / brightest : light_) + spec + g.emissive;
-            bool clipped = brightest > 1.0 || max(drawn.r, max(drawn.g, drawn.b)) >= 1.0;
-            vec3 shown = clamp(drawn, vec3(0.0), vec3(1.0));
-            float y = luma(shown);
-            value.zw = vec2(clipped ? 0.0 : variance * exposure * exposure, y * y);
+            int curve = int(job.exposure.y + 0.5);
+            bool held = curve == 0 && brightest > 1.0;
+            vec3 drawn = kd * (held ? light_ / brightest : light_) + spec + g.emissive;
+            /* (the drawn value through the tone curve; its slope where the
+            curve rolls off scales the noise the frame shows, estimated by the
+            luminance's curved value against a step of the variance's spread) */
+            vec3 shown = tone_curved(drawn, curve);
+            float y = luma(clamp(shown, vec3(0.0), vec3(1.0)));
+            float sd = sqrt(variance) * exposure, ly = luma(drawn);
+            float slope = ly > 1.0e-6 ? (luma(clamp(tone_curved(drawn * ((ly + sd) / ly), curve), vec3(0.0), vec3(1.0))) - y) /
+                max(sd, 1.0e-9) : 1.0;
+            bool clipped = held || max(shown.r, max(shown.g, shown.b)) >= 1.0;
+            value.zw = vec2(clipped ? 0.0 : variance * exposure * exposure * slope * slope, y * y);
         }
     }
     partial[gl_LocalInvocationID.x] = value;

@@ -926,7 +926,7 @@ static const struct config_setting config_settings[] =
 		"\"ce\" follows the traced or baked light so that the frame's middle\n"
 		"stays as bright as CE's (within display.prism_exposure_range); \"auto\"\n"
 		"adapts freely, as an eye does; \"style\" the style's (faithful fixed,\n"
-		"remix ce; PRISM Raster ce)." },
+		"remix ce; PRISM Raster ce; PRISM Path Traced auto)." },
 	{ "display.prism_exposure_range", _config_real, "1.5", "HALO_PRISM_EXPOSURE_RANGE", _environment_value,
 		_platform_desktop,
 		"PRISM path tracing, exposure \"ce\": how far it may move from CE's, in\n"
@@ -945,7 +945,7 @@ static const struct config_setting config_settings[] =
 		"\"aces\" the film industry's curve; \"local\" each region's light\n"
 		"compressed about its own level, so that a dark room beside a sunlit\n"
 		"doorway stays readable; \"style\" the style's (faithful ce, remix\n"
-		"local)." },
+		"local, PRISM Path Traced filmic)." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"

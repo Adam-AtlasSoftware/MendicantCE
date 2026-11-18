@@ -39,7 +39,7 @@ base colour multiplies it) and its specular light `S`:
 | Fixtures | The scenario's light fixtures, direct | In the same reservoir (all of them, or 8 by count) | The same | The same (16) |
 | Dynamic lights | SCENE_LIGHTS' dynamic class (flashlight, plasma, muzzle flashes), direct | In the same reservoir (4), CE's falloff, its shadow traced; never reused from the last frame | The same | The same (16) |
 | The sky's floor | The units' rig's ambient, unoccluded, as Tool's: the sky's outdoor value in the structure's clusters with a sky, sky 0's indoor value in those with none (`prism-v4-m2` 4acaa7892, `XGPU_SCENE_INDOOR`) | A constant, `D`: the flag of the structure's triangle the pixel shows (a short stretch of the eye's ray about its point), an object's the structure below it (a ray down past the object) | The same | The same |
-| Indirect | Every bounce of every static light, the sun's bounce included | One cosine bounce, its hit lit from the bake: the hit's glow and albedo by its texel's light less the sun's and less the floor its triangle took (indoor or outdoor; the volume's less the floor where its probes stand), the sun there by the mask (or the volume's visibility); a miss the sky without the domes (the pixel took them as lights) | The bake's indirect layer at the pixel where the level has its texel; else (the objects, a pixel with no texel) `quality`'s bounce | A cosine path of up to 8 bounces, next-event estimation of the sun, lamps and fixtures at each hit, the domes at each hit by multiple importance sampling of a direction of their cone and the path's own cosine direction where it leaves (Veach's power heuristic: the bake's light, the quieter estimate for a cone of any width) |
+| Indirect | Every bounce of every static light, the sun's bounce included | One cosine bounce, its hit lit from the bake: the hit's glow and albedo by its texel's light less the sun's and less the floor its triangle took (indoor or outdoor; the volume's less the floor where its probes stand), the sun there by the mask (or the volume's visibility); a miss the sky without the domes (the pixel took them as lights) | The bake's indirect layer at the pixel where the level has its texel; else (the objects, a pixel with no texel) `quality`'s bounce | A cosine path of up to 32 bounces (prism-v4-m2 bb2a6b1a4, the bake's alike), next-event estimation of the sun, lamps and fixtures at each hit, the domes at each hit by multiple importance sampling of a direction of their cone and the path's own cosine direction where it leaves (Veach's power heuristic: the bake's light, the quieter estimate for a cone of any width) |
 | Reflections | The light the surface's specular lobe sees, less the lights taken directly | Below a roughness of 0.35, one GGX ray (the visible normals' distribution, Heitz 2018) lit as the bounce's hit, the domes where it leaves; above it, the bake's reflection probes by the split sum | The same | A GGX ray and the same path, the domes where it leaves |
 | Emission | The surface's own (the G-buffer's emissive: an object's self-illumination; the level's, by its base colour, as CE's lightmap pass folds it in) | Added | Added | Added |
 
@@ -69,20 +69,30 @@ The resolve: the frame is `base colour × (1 − the specular's share) × D + S 
 split sum (Karis's fit), F0 4% at the material table's specular 0.5, tinted half way to the base colour by the
 metalness (Raster's form). The sky's pixels are CE's frame there.
 
-**The exposure, the white hold, the tone curve** (as Raster's frame has them since `prism-v4-m2` 4acaa7892, sharing
-its meter and step, `xgpu_vulkan_bake_meter` and `xgpu_vulkan_bake_exposure_step`): `display.prism_exposure` (the v4
-modes' style default `"ce"`: the frame's middle as bright as Classic's, within `display.prism_exposure_range`; a lit
-pixel in 16 metered, this frame before the exposure against Classic's frame at the pixel, CE's light target by its
-base and its additions; the step after the composite makes the next frame's exposure) multiplies `D` and `S`; `D` is
-then held at white as CE's page held its light (a colour past white divided by its brightest channel, its hue kept)
-before the base colour multiplies it; the emission is CE's and stays; `display.prism_tone_curve` (default `"ce"`:
-the display clips) last. The units are Tool's, so the sunlit ground's light is about three times white: the hold
-gives it CE's look. The `pt_*` views are the light's own values (no exposure, no hold).
+**The exposure, the tone curve, the white hold** (Raster's meter and step, shared: `xgpu_vulkan_bake_meter` and
+`xgpu_vulkan_bake_exposure_step`; Adam's direction of 21:34 on November 17: the light modern, path traced and
+physically lit by default, darker than Classic where it is, only the characters' art and the textures' style
+matching Classic). `display.prism_exposure` multiplies `D` and `S` (the mode's style default `"auto"`, an eye's: the
+frame's middle toward a middle grey within its range, moving at `display.prism_exposure_speed`; `"ce"` pins it to
+Classic's, `"fixed"` is the light's own scale); `display.prism_tone_curve` takes what is past white (the mode's style
+default `"filmic"`); the diffuse light is held at white as CE's page held it (a colour past white divided by its
+brightest channel, its hue kept) only under the `"ce"` curve, the display's clip. The emission is CE's and stays. The
+`pt_*` views are the light's own values (no exposure, no curve, no hold).
 
-**Where the gates measure: after the hold.** The gates compare the frame as drawn, the moving frames and the
-reference's alike through this composite, at a fixed exposure (`display.prism_exposure "fixed"`, the light in CE's
-scale, and the clipped tone curve: `capture.py`'s `v4pt`, `v4perf`, `v4raw` and `refs_v4`), so that no exposure that
-adapts frame by frame differs between the two. What is past white in both is white in both, as the player sees it.
+**Why `"filmic"`.** The frame is CE's: its base colours are the textures as stored, multiplied by the light, written as
+they are (no transfer curve), so a curve that changes the values under white changes the textures' look, which must
+stay Classic's. `"filmic"` is the identity up to 0.6 of white and rolls off past it by the brightest channel (the hue
+kept): nothing under 0.6 moves, so a dark place stays dark and there is no grey wash, and the sunlit ground about
+three times white comes down to white smoothly instead of clipping. Narkowicz's `"aces"` fit lifts a middle grey by a
+half (0.18 to 0.27) and darkens the deepest shadows, both under white, and shifts bright colours toward white channel
+by channel; `"local"` is `"filmic"` here (no local operator in this pass). The frames each gives at G2, G3 and an
+interior are taken by `jobs/dev_scene.sh`'s look stills (`look/`); see `docs/prism_gates.md`.
+
+**Where the gates measure.** The gates compare the frame as drawn, the moving frames and the reference's alike through
+this composite, at a fixed exposure (`display.prism_exposure "fixed"`, the light in CE's scale) and the default curve
+(`"filmic"`, no hold): `capture.py`'s `v4pt`, `v4perf`, `v4raw`, `v4sun`, `v4hist` and `refs_v4`. No exposure that
+adapts between them differs; the eye's exposure would put a moving camera's frames and a still reference at different
+levels.
 
 ## ReSTIR DI
 

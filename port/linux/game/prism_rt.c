@@ -1558,13 +1558,16 @@ they are) */
 	settings[PRISM_RT_SETTING_MATERIALS] = (float)prism_rt.material_tier;
 	settings[PRISM_RT_SETTING_BOUNCES] = (float)prism_rt.bounces;
 	/* (the style's exposure: remix's and PRISM Raster's "ce", the frame's
-	middle as bright as Classic's; faithful's fixed) */
+	middle as bright as Classic's; faithful's fixed; port: PRISM Path Traced's
+	"auto", an eye's, and its curve "filmic", rolled off past 0.6 of white:
+	the light physically lit, darker than Classic where it is) */
 	settings[PRISM_RT_SETTING_EXPOSURE] = (float)(prism_rt.exposure >= 0 ? prism_rt.exposure :
-		remix || prism_deferred_raster() ? 1 : 0);
+		prism_deferred_pathtraced() ? 2 : remix || prism_deferred_raster() ? 1 : 0);
 	settings[PRISM_RT_SETTING_EXPOSURE_RANGE] = prism_rt.exposure_range;
 	settings[PRISM_RT_SETTING_EXPOSURE_SPEED] = prism_rt.exposure_speed;
 	settings[PRISM_RT_SETTING_EXPOSURE_BIAS] = prism_rt.exposure_bias;
-	settings[PRISM_RT_SETTING_TONE_CURVE] = (float)(prism_rt.tone_curve >= 0 ? prism_rt.tone_curve : remix ? 3 : 0);
+	settings[PRISM_RT_SETTING_TONE_CURVE] = (float)(prism_rt.tone_curve >= 0 ? prism_rt.tone_curve :
+		prism_deferred_pathtraced() ? 1 : remix ? 3 : 0);
 	/* (a lightmap's texel: the rebaked pages' a quarter of CE's) */
 	settings[PRISM_RT_SETTING_PAGE_TEXEL] = prism_rt.rebaked ? 0.12f : 0.4f;
 	settings[PRISM_RT_SETTING_ALPHA] = prism_rt.alpha_traced ? 1.0f : 0.0f;
