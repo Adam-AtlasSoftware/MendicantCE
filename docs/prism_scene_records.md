@@ -8,8 +8,9 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 35 (M3: the resolve's `GBUFFER_PHASE` value carries `XGPU_GBUFFER_PHASE_PATHTRACED`, the
-profile and the denoiser, `docs/prism_pathtraced.md`; no record was added). The records' types are in the stream's
+`XGPU_STREAM_VERSION` is 35 (M3: the resolve's `GBUFFER_PHASE` value carries `XGPU_GBUFFER_PHASE_PATHTRACED` in bit
+18, the profile in bits 19 and 20 and the denoiser off in bit 21, `docs/prism_pathtraced.md`, above `prism-v4-m2`'s
+`XGPU_GBUFFER_PHASE_RASTER_MATERIALS` in bit 17; no record was added). The records' types are in the stream's
 own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, M2's `PRISM_BAKE`,
 92, and `XGPU_STREAM_RECORD_TYPES` is 93. The

@@ -256,8 +256,15 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
   own light from the reflection's side (the texel's or the volume's SH read at the reflection); and the sun's highlight
   (GGX, Smith's visibility, Schlick's Fresnel) by the same visibility as its diffuse light.
 
-The pixel is then base × (1 − the specular's share) × the diffuse light held at white + the specular light + its
-self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
+**What composes the frame** (`display.prism_raster_composition`): by default (`"ce"`) CE's own shaders, until PRISM's
+materials reach theirs: the diffuse light (exposed, held at white, below) goes into CE's light target in its light's
+place (the level's glow folded in as CE's lightmap pass folds it; an object's base colour, the G-buffer's, and glow
+with it), and the resolve draws CE's base colour times it and CE's additions (its reflections, specular lightmaps and
+specular lights) over it, as Classic's frame is drawn; the meter then takes both frames with the same base and
+additions. `"materials"` (for the materials milestone) composes the frame whole from PRISM's own materials, as follows.
+
+With `"materials"` the pixel is base × (1 − the specular's share) × the diffuse light held at white + the specular
+light + its self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
 it), the exposure on both lights (below), and the resolve draws it as it is: CE's specular, reflection and
 object-lighting layers are not added. The diffuse light (the level's and the objects', the sun's in it) is held at white
 as CE's page held its light: a colour past white is divided by its brightest channel (its hue kept), after the exposure
@@ -305,6 +312,14 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 - R where lamps light a scene: at 4096 frames it is not converged (its median relative error 27 to 38% at G4,
   `docs/prism_gates.md`), and it comes out below the bake's light at a10 (0.6 to 0.9 of it on average, far darker at a
   tenth of its pixels): the bake against R there measures R's noise as much as the bake.
+- PRISM's own materials (`"materials"`) leave the frame darker than Classic's at equal light: Raster's frame (the
+  exposure fixed) over Classic's, over the bake's light over CE's light target (the frames' and the lights' medians,
+  draft bakes): a10 0.42 to 0.47, c40's chamber 0.63 to 0.75, b30 0.86 to 1.01 (G2) and 0.89 to 0.91 (G3). The
+  specular's share is taken from the diffuse (a metal's most), and CE's additions (its reflection cube maps, specular
+  lightmaps and specular lights) are not drawn: a debt of the materials milestone, which `"ce"` leaves out.
+- Objects in the sun come out 15 to 30% brighter beside the sunlit ground than Classic draws them (Raster over Classic
+  at G2's poses: sunlit objects 1.14 to 1.33, the sunlit level 0.88 to 1.16; in the shade alike, 0.90 to 1.04): the
+  volume's light and the traced sun against CE's object lighting.
 - The sun's half-lit band (partial shadows, low cosines) comes out over CE's light (CE/bake 0.5 to 0.8 at G2 and G3):
   Tool's sun is sixteen directions spread over its disc, on the vertices, so its shadows' edges are softer and coarser
   than the bake's traced disc: a place where the bake is meant to differ.

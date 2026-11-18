@@ -89,12 +89,13 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_GBUFFER_END 5ul
 #define PHASE_VIEW_SHIFT 8
 #define PHASE_RASTER 0x10000ul
+#define PHASE_RASTER_MATERIALS 0x20000ul
 /* display.lighting "pathtraced" (xgpu_stream.h's
 XGPU_GBUFFER_PHASE_PATHTRACED), its profile (display.pt_profile) and its
 denoiser off (display.denoiser "off") */
-#define PHASE_PATHTRACED 0x20000ul
-#define PHASE_PT_PROFILE_SHIFT 18
-#define PHASE_PT_DENOISER_OFF 0x100000ul
+#define PHASE_PATHTRACED 0x40000ul
+#define PHASE_PT_PROFILE_SHIFT 19
+#define PHASE_PT_DENOISER_OFF 0x200000ul
 /* the views the bake's relight shows (Raster's), the path tracer's */
 #define VIEW_BAKE_FIRST 12ul
 #define VIEW_PT_FIRST 20ul
@@ -159,7 +160,7 @@ the nodes an instance sends (xgpu_stream.h's XGPU_SCENE_INSTANCE_NODES) */
 static struct
 {
 	unsigned long settings_read;
-	boolean wanted, raster, pathtraced;
+	boolean wanted, raster, raster_materials, pathtraced;
 	unsigned long pt_profile;
 	boolean pt_denoiser_off;
 	unsigned long view;
@@ -209,6 +210,11 @@ static void settings_read(
 	prism_deferred.pt_profile = value && !strcmp(value, "performance") ? 0 : 1;
 	value = config_string("display.denoiser");
 	prism_deferred.pt_denoiser_off = value && !strcmp(value, "off");
+	/* (display.prism_raster_composition: "ce", the default, CE's shaders
+	compose Raster's light; "materials" Raster's own materials the frame
+	whole, for the materials milestone) */
+	value = config_string("display.prism_raster_composition");
+	prism_deferred.raster_materials = value && !strcmp(value, "materials");
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
@@ -721,7 +727,7 @@ void prism_deferred_phase(
 		}
 		else if (prism_deferred.raster)
 		{
-			value |= PHASE_RASTER;
+			value |= PHASE_RASTER | (prism_deferred.raster_materials ? PHASE_RASTER_MATERIALS : 0);
 		}
 		break;
 	}

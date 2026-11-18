@@ -426,19 +426,24 @@ diffuse light by the albedo) */
 #define XGPU_GBUFFER_VIEW_RASTER_SPECULAR 18u
 #define XGPU_GBUFFER_VIEW_RASTER_DIFFUSE 19u
 #define XGPU_GBUFFER_PHASE_RASTER 0x10000u
+/* (with it: display.prism_raster_composition "materials", Raster's own
+materials compose the frame whole; else CE's compose Raster's light: it
+goes into the light target, CE's base and additions with it) */
+#define XGPU_GBUFFER_PHASE_RASTER_MATERIALS 0x20000u
 #define XGPU_GBUFFER_PHASE_VIEW_MASK 0xff00u
 /* XGPU_GBUFFER_PHASE_PATHTRACED, or'd into the resolve's value in its
 place (M3, stream version 35): display.lighting "pathtraced" (PRISM Path
 Traced, design section 1.5; docs/prism_pathtraced.md): every CE light off,
 the opaque pixels lit by the path tracer (xgpu_vulkan_pt.c) from the G-buffer
 and the bake, and the resolve draws that frame as it is; its profile
-(display.pt_profile: XGPU_PT_PROFILE_*) in bits 18 and 19, bit 20 the
+(display.pt_profile: XGPU_PT_PROFILE_*) in bits 19 and 20, bit 21 the
 denoiser off (display.denoiser "off"); its views from 20 (debug.gbuffer_view
-"pt_*": XGPU_GBUFFER_VIEW_PT_*) */
-#define XGPU_GBUFFER_PHASE_PATHTRACED 0x20000u
-#define XGPU_GBUFFER_PHASE_PT_PROFILE_SHIFT 18
-#define XGPU_GBUFFER_PHASE_PT_PROFILE_MASK 0xc0000u
-#define XGPU_GBUFFER_PHASE_PT_DENOISER_OFF 0x100000u
+"pt_*": XGPU_GBUFFER_VIEW_PT_*). Bit 17 is XGPU_GBUFFER_PHASE_RASTER_MATERIALS
+(prism-v4-m2), so these start at bit 18 */
+#define XGPU_GBUFFER_PHASE_PATHTRACED 0x40000u
+#define XGPU_GBUFFER_PHASE_PT_PROFILE_SHIFT 19
+#define XGPU_GBUFFER_PHASE_PT_PROFILE_MASK 0x180000u
+#define XGPU_GBUFFER_PHASE_PT_DENOISER_OFF 0x200000u
 #define XGPU_PT_PROFILE_PERFORMANCE 0u
 #define XGPU_PT_PROFILE_QUALITY 1u
 /* (the path tracer's views: the diffuse light (denoised, the albedo left

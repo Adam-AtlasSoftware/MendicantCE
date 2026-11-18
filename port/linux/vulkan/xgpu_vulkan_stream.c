@@ -4860,6 +4860,9 @@ struct raster_context
 	/* (display.lighting "pathtraced": the resolve's value, its profile,
 	denoiser and view) */
 	uint32_t phase;
+	/* display.prism_raster_composition "materials": Raster's own materials
+	compose the frame whole (else CE's compose Raster's light) */
+	int materials;
 };
 
 static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
@@ -4868,7 +4871,7 @@ static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light,
 	struct raster_context *raster = (struct raster_context *)context;
 
 	return xgpu_vulkan_bake_raster(light, base, additions, raster->words, raster->extras, raster->view, raster->bake_view,
-		whole);
+		raster->materials, whole);
 }
 
 /* display.lighting "pathtraced": the frame lit by the path tracer
@@ -4993,6 +4996,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			context.bake_view = raster && view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT &&
 				view <= (int)XGPU_GBUFFER_VIEW_RASTER_DIFFUSE ? (uint32_t)view : 0;
 			context.phase = value;
+			context.materials = (value & XGPU_GBUFFER_PHASE_RASTER_MATERIALS) != 0;
 			held = view != 0;
 			if (context.bake_view)
 				view = 2;
