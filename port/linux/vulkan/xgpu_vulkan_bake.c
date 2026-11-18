@@ -385,6 +385,8 @@ struct bake_state
 	/* (the finished texels whose last samples the firefly rule asked for:
 	their largest sample over their mean wanted more than their noise did) */
 	double texels_firefly_bound;
+	/* HALO_BAKE_SEED's (0 none) */
+	uint32_t seed;
 	/* the `max` tier's noise floor (radiance; 0 none) and the texels it
 	stopped (converged with their light below it) */
 	float noise_floor;
@@ -1910,6 +1912,15 @@ static struct bake_state *bake_begin(void)
 	b->noise_floor = b->quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
 		bake.control.noise_floor <= 10.0f ? bake.control.noise_floor * 0.18f : 0.0f;
 	b->block.rig[15][2] = b->noise_floor;
+	/* (HALO_BAKE_SEED: the samples from another seed, a diagnostic: rig[15].w
+	its bits, mixed into each texel's and probe's seed; 0 as before) */
+	{
+		const char *seed_text = getenv("HALO_BAKE_SEED");
+		uint32_t seed = seed_text ? (uint32_t)strtoul(seed_text, NULL, 10) : 0u;
+
+		memcpy(&b->block.rig[15][3], &seed, 4);
+		b->seed = seed;
+	}
 	memcpy(b->block.sun, frame->sun, sizeof(b->block.sun));
 	b->material_count = material_count;
 	/* the key */
@@ -1945,6 +1956,8 @@ static struct bake_state *bake_begin(void)
 	b->key.light_hash = hash;
 	b->key.settings_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
 	b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->noise_floor, sizeof(b->noise_floor));
+	if (b->seed)
+		b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->seed, sizeof(b->seed));
 	b->key.baker_version = BAKE_VERSION;
 	b->key.quality = b->quality;
 	b->key.convergence_threshold = bake.control.threshold > 0.0f ? bake.control.threshold : 0.01f;
