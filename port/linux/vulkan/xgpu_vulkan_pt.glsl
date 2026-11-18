@@ -1068,8 +1068,8 @@ but each candidate's shadow traced and its visibility in its target, so the
 kept sample is a seen one and a pixel that sees a lamp through a gap is not
 lit by one sample in many: unbiased (the target is the integrand's own where
 the light is seen), its noise the candidates' alone */
-void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int dynamic_count, out vec3 diffuse,
-    out vec3 specular)
+void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int dynamic_count, bool lamps_specular,
+    out vec3 diffuse, out vec3 specular)
 {
     diffuse = vec3(0.0);
     specular = vec3(0.0);
@@ -1099,7 +1099,7 @@ void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int d
             if (dot(g.normal, l) <= 0.0 || !lamp_visible(o, l, d))
                 continue;
             vec3 dif, spe;
-            parts(g, l, radiance * dot(g.normal, l), false, dif, spe);
+            parts(g, l, radiance * dot(g.normal, l), !lamps_specular, dif, spe);
             float target = luma(dif) + luma(spe);
             float w = target * inverse_pdf / probability / float(lamp_count);
             if (!(w > 0.0) || isinf(w))
@@ -1525,7 +1525,26 @@ At each hit the domes are taken by multiple importance sampling (above) with
 the sun's, the lamps' and the fixtures' next-event estimates, so a ray that
 leaves the level from there takes the sky's rest and the domes by their
 weights */
-vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
+/* a lamp's radiance toward a ray that meets its triangle's face from the
+front (its material's emission, as s.lamps holds it; the same front as
+lamp_direction's), else nothing: the level's triangles alone, as the bake's
+lamps are */
+vec3 lamp_met(uint t, vec3 d)
+{
+    if (t >= s.counts.x + s.counts.y)
+        return vec3(0.0);
+    uint m = material_of(t);
+    if (m >= s.counts.w || (uint(material_value(m, 3u)) & 1u) == 0u || term_off(2u) || s.rig[10].w < 0.5 ||
+        s.counts.z == 0u || s.lamp.x <= 0.0)
+        return vec3(0.0);
+    vec3 a0 = corner(t, 0u), a1 = corner(t, 1u), a2 = corner(t, 2u);
+    vec3 ne = cross(a1 - a0, a2 - a0);
+    if (dot(ne, ne) <= 1.0e-20 || dot(ne, -d) <= 0.0)
+        return vec3(0.0);
+    return vec3(material_value(m, 4u), material_value(m, 5u), material_value(m, 6u)) * s.rig[11].x;
+}
+
+vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first, bool lamps_first)
 {
     vec3 nh;
     uint t;
@@ -1536,7 +1555,7 @@ vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first)
     if (dot(nh, nh) <= 0.0)
         return vec3(0.0);
     vec3 h = o + d * th;
-    vec3 throughput = vec3(1.0), light = vec3(0.0);
+    vec3 throughput = vec3(1.0), light = lamps_first ? lamp_met(t, d) : vec3(0.0);
     for (int bounce = 0; bounce < bounces && dot(nh, nh) > 0.0; bounce++)
     {
         light += throughput * glow_of(t);
@@ -1577,6 +1596,9 @@ whatever the bake holds (the floor keeps every direction's chance above 0),
 so the reference stays the unbiased, bake-free estimate, its noise far
 less where a dark pixel's light comes from a lit place few directions see */
 const int GUIDE = 8;
+/* the roughness under which the reference takes a lamp's specular light by
+the reflection's own direction, not by next-event estimation */
+const float REFERENCE_GLOSSY = 0.3;
 const float GUIDE_FLOOR = 0.002;
 vec3 guided_bounce(Surface g, vec3 o)
 {
@@ -1596,7 +1618,7 @@ vec3 guided_bounce(Surface g, vec3 o)
     }
     if (kept_w <= 0.0)
         return vec3(0.0);
-    return reference_path(o, kept, 8, false) / kept_w * (sum / float(GUIDE));
+    return reference_path(o, kept, 8, false, false) / kept_w * (sum / float(GUIDE));
 }
 
 /* a pixel's seed for one use (decorrelated uses: the sun, the lights, the
@@ -2491,7 +2513,16 @@ void main()
         ld += domes_at(o, g.normal, m);
         vec3 dl, sl;
         seed_for(pixel, frame, 3u);
-        lights_ris_seen(g, o, 8, 16, 16, dl, sl);
+        /* (a glossy lobe (roughness under REFERENCE_GLOSSY) takes the lamps'
+        specular light by its own direction, the reflection's path meeting the
+        lamp's face; a rougher one by next-event estimation, the lobe in the
+        resampling's target: each lamp's specular light by one of the two, so
+        nothing is counted twice nor left out. Round 1's references were
+        noisiest at a10's glossy trim, where few candidate points of a lamp
+        fall in a narrow lobe's highlight: a pixel's relative standard error
+        near 1 at 1536 frames, its specular light most of its light) */
+        bool glossy = g.roughness < REFERENCE_GLOSSY;
+        lights_ris_seen(g, o, 8, 16, 16, !glossy, dl, sl);
         ld += dl;
         ls += sl;
         float y_direct = luma(kd * ld + ls);
@@ -2511,7 +2542,7 @@ void main()
             seed_for(pixel, frame, 5u);
             vec3 r = ggx_sample(g, weight);
             if (dot(weight, weight) > 0.0)
-                reflection = weight * reference_path(o, r, 8, true) / chance;
+                reflection = weight * reference_path(o, r, 8, true, glossy) / chance;
         }
         if (any(isnan(bounce)) || any(isinf(bounce)))
             bounce = vec3(0.0);

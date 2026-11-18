@@ -187,7 +187,13 @@ every pixel the same scene, materials and lights unbiased with no bake, no reuse
 column). Its lamps are reached by next-event estimation alone: at the pixel and at every hit a lamp's point is
 resampled from 8 (4 at a hit) candidates of the grid's and the light tree's mixture (above), which can pick every lamp,
 by their unshadowed light there (at the pixel the GGX lobe's with the diffuse), and a ray that meets a lamp's triangle
-takes only its glow. That
+takes only its glow; but a glossy pixel (roughness under 0.3) takes its lamps' specular light by its reflection's
+own direction instead: its GGX ray's path meeting a lamp's face from the front takes that lamp's radiance, and its
+next-event estimate takes the lamps' diffuse light alone (a narrow lobe's highlight is met by few of a lamp's candidate
+points: round 1's references were noisiest at a10's glossy trim, a pixel's relative standard error near 1 at 1536
+frames, its specular light most of its light). Each lamp's specular light is taken by one of the two, so nothing is
+counted twice; the live frames keep next-event estimation for every roughness (their GGX reflectance clamped at 64,
+as Raster's: a very glossy highlight of a lamp is a little brighter in the reference). That
 is unbiased without weighing a lamp met by a sampled direction against its next-event estimate (multiple importance
 sampling): the surfaces a path meets are diffuse (the bake's albedo), where next-event estimation is the better
 sampler, and the pixel's glossy lobe is in the resampling's target. It `HALO_PT_REFERENCE_PATHS` paths a pixel a frame (1 by default; each path the diffuse lobe's or the specular's, picked

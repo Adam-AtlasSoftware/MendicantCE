@@ -517,3 +517,55 @@ def test_the_visibility_history_is_held_to_the_frames_own_range():
     # (and it seldom snaps: a frame's 25 samples all alike one frame in thousands)
     snaps = np.mean([abs(b - a) > 0.25 for a, b in zip(slow[100:], slow[101:])])
     assert snaps < 0.005
+
+
+def _vndf(rng, v, alpha, count):
+    """GGX's visible normals (Heitz 2018) about z for the eye v: the reflected directions, as ggx_sample makes them"""
+    vh = np.array([alpha * v[0], alpha * v[1], v[2]])
+    vh /= np.linalg.norm(vh)
+    lensq = vh[0] ** 2 + vh[1] ** 2
+    t1 = np.array([-vh[1], vh[0], 0.0]) / np.sqrt(lensq) if lensq > 0 else np.array([1.0, 0.0, 0.0])
+    t2 = np.cross(vh, t1)
+    u1, u2 = rng.random(count), rng.random(count)
+    r, phi = np.sqrt(u1), 2.0 * np.pi * u2
+    p1, p2 = r * np.cos(phi), r * np.sin(phi)
+    sh = 0.5 * (1.0 + vh[2])
+    p2 = (1.0 - sh) * np.sqrt(np.maximum(1.0 - p1 * p1, 0.0)) + sh * p2
+    nh = p1[:, None] * t1 + p2[:, None] * t2 + np.sqrt(np.maximum(0.0, 1.0 - p1 * p1 - p2 * p2))[:, None] * vh
+    m = np.stack([alpha * nh[:, 0], alpha * nh[:, 1], np.maximum(nh[:, 2], 0.0)], 1)
+    m /= np.linalg.norm(m, axis=1)[:, None]
+    return 2.0 * (m @ v)[:, None] * m - v, m
+
+
+def test_a_glossy_lobes_lamp_by_its_own_direction_is_the_next_event_estimates_light():
+    """the reference's split: a glossy lobe takes a lamp's specular light by the reflection's own direction meeting the
+    lamp (ggx_sample's weight by the lamp's radiance), a rougher one by next-event estimation (a direction of the lamp
+    by GGX's reflectance and cosine): one light either way (a lamp a cone of directions of uniform radiance)"""
+    rng = np.random.default_rng(43)
+    v = np.array([0.5, 0.0, 0.8660254])
+    axis = np.array([-0.45, 0.05, 0.89])
+    axis /= np.linalg.norm(axis)
+    cos_most, radiance, roughness, f0 = 0.995, 9.0, 0.3, 0.04
+    alpha = roughness * roughness
+    a2 = alpha * alpha
+    count = 2_000_000
+    l, m = _vndf(rng, v, alpha, count)
+    inside = (l @ axis >= cos_most) & (l[:, 2] > 0.0)
+    g1v = 2.0 * v[2] / (v[2] + np.sqrt(a2 + (1.0 - a2) * v[2] ** 2))
+    lz = np.maximum(l[:, 2], 1e-6)
+    g1l = 2.0 * lz / (lz + np.sqrt(a2 + (1.0 - a2) * lz * lz))
+    g2 = g1v * g1l / (g1v + g1l - g1v * g1l)
+    fresnel = f0 + (1.0 - f0) * (1.0 - np.clip(m @ v, 0.0, 1.0)) ** 5
+    by_lobe = np.where(inside, fresnel * g2 / g1v * radiance, 0.0)
+    # (next-event: a direction of the lamp's cone, its BRDF by its cosine by the cone's solid angle)
+    solid = 2.0 * np.pi * (1.0 - cos_most)
+    d = model.cone_sample(rng, axis, cos_most, count)
+    h = d + v
+    h /= np.linalg.norm(h, axis=1)[:, None]
+    nh, nl, vh = h[:, 2], np.maximum(d[:, 2], 0.0), np.clip(h @ v, 0.0, 1.0)
+    dist = a2 / (np.pi * (nh * nh * (a2 - 1.0) + 1.0) ** 2)
+    g1l_n = 2.0 * np.maximum(nl, 1e-6) / (np.maximum(nl, 1e-6) + np.sqrt(a2 + (1.0 - a2) * nl * nl))
+    g2_n = g1v * g1l_n / (g1v + g1l_n - g1v * g1l_n)
+    brdf = dist * g2_n * (f0 + (1.0 - f0) * (1.0 - vh) ** 5) / (4.0 * v[2] * np.maximum(nl, 1e-6))
+    by_light = np.where(nl > 0.0, brdf * nl * radiance * solid, 0.0)
+    assert by_lobe.mean() == pytest.approx(by_light.mean(), rel=0.03)
