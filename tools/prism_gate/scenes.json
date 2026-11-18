@@ -6,6 +6,7 @@
   "start_tick": 600,
   "bsp": null,
   "live": false,
+  "separate": false,
   "steps": 40,
   "step_frames": 3,
   "settle": 900,
@@ -35,7 +36,8 @@
   {"id": "G7", "start_tick": 30, "name": "c40_interior", "map": "c40", "tests": "Lamp strips, hologram ring",
    "keys": ["362.0 -716.0 75.0 -90 -5 0 70", "362.0 -708.0 75.0 -90 -5 0 70", "362.0 -708.0 75.0 0 -5 0 70",
             "360.0 -712.0 75.0 150 -3 0 70"]},
-  {"id": "S1", "name": "a30_canyon", "map": "a30", "tests": "Cliffs and rocks of the remodel at night, the canyon's fog",
+  {"id": "S1", "name": "a30_canyon", "map": "a30", "separate": true,
+   "tests": "Cliffs and rocks of the remodel at night, the canyon's fog",
    "keys": ["6.514 -112.327 63.409 82.12 1.63 0 70", "7.07 -108.37 63.41 82.12 1.63 0 70",
             "7.07 -108.37 63.41 122 1.63 0 70"]},
   {"id": "S2a", "name": "b30_water", "map": "b30", "tests": "Water",
@@ -43,6 +45,9 @@
   {"id": "S2b", "name": "a10_cryo_glass", "map": "a10", "tests": "Glass (the cryo tubes)",
    "keys": ["-54.5 -0.5 0.7 -85 -5 0 60", "-53.0 -2.0 0.7 -95 -5 0 60"]},
   {"id": "S3", "name": "a50_hangar", "map": "a50", "bsp": 2, "tests": "The hangar's lamps (the flashlight: not yet)",
-   "keys": ["43.089 -41.815 -18.758 132.49 4.28 0 70", "41.0 -39.5 -18.758 132.49 4.28 0 70"]}
+   "keys": ["43.089 -41.815 -18.758 132.49 4.28 0 70", "41.0 -39.5 -18.758 132.49 4.28 0 70"]},
+  {"id": "S4", "name": "c10_swamp", "map": "c10", "separate": true,
+   "tests": "The swamp: foliage, alpha-tested leaves, the ground's fog over the water, wrecks in the fog",
+   "keys": ["-125.484 -37.985 42.5 180 -10 0 70", "-125.484 -37.985 42.5 90 -10 0 70"]}
  ]
 }

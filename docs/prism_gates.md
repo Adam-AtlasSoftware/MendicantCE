@@ -27,11 +27,15 @@ keys (`x y z yaw pitch roll field-of-view`, world units and degrees) and what it
 | S2a | b30 (the shore) | Water |
 | S2b | a10 (the cryo bay) | Glass (the cryo tubes) |
 | S3 | a50, BSP 2 (the hangar) | The hangar's lamps (the flashlight: not yet) |
+| S4 | c10 (the swamp) | Foliage, alpha-tested leaves, the ground's fog over the water, wrecks in the fog |
 
 G1 to G7 are the path tracer's gate scenes, their keys as `prism-pt`'s gate checked them (inside the level, every
 probe pose seeing surfaces). S1 to S3 are the design's stills, their poses from earlier PRISM captures, checked in
-play for out-of-level and sky-only frames; the design's S2 is two scenes (b30's water, a10's glass). S4 and V1 and
-V2 are listed in "Not yet frozen" below.
+play for out-of-level and sky-only frames; the design's S2 is two scenes (b30's water, a10's glass). S4 is a pan
+across c10's swamp, chosen from a grid of poses about the player's start (every one held in play: the swamp's ground
+fog over its water, the lily pads, the ferns and broadleaf plants, the moss boulders, the crashed dropship). S1 and S4
+are `"separate"`: their equivalence takes each state in a run of its own ("M1's rest", below). S3's flashlight, V1
+and V2 are listed in "Not yet frozen" below.
 
 A scene is changed only with a note here saying why: every milestone's figures are measured on these.
 
@@ -314,8 +318,8 @@ part each queued group's own draw named (`rasterizer_xbox_environment_fog.c`, `m
 by listing a30's rocks (`debug_object_place "list rock"`) and holding the camera inside the fog by each: with the
 kit's settings, BSP 0, at `-68.54 -81.83 39.30 120 -15 0 70`, `-88.11 -63.71 39.53 120 -15 0 70`,
 `-85.38 -50.75 39.96 240 -15 0 70` and `-45.47 -63.22 41.32 240 -15 0 70`, M0's tree draws the shell (2 to 3% of the
-frame's pixels differ) and M1's does not. The design's fog as a screen pass (no geometry drawn for fog at all) is
-still to come.
+frame's pixels differ) and M1's does not. In the v4 modes the fog is now the design's screen pass, with no geometry
+drawn for it at all ("M1's rest", below).
 
 ### The scene records: SCENE_STATIC, SCENE_LIGHTS, SCENE_INSTANCE and the motion
 
@@ -360,6 +364,71 @@ The frame times (medians of 600-frame blocks, `ce` against `ce_deferred`, the G-
 c1 is M1's G-buffer build's to the rounding (SCENE_STATIC and SCENE_LIGHTS cost the frame nothing measurable). c2's
 second target (16 bytes a pixel more written, the motion's arithmetic) adds 0.15 to 0.2 ms to the G-buffer pass on
 the 3070 Ti and 0.5 ms on the 2060, the worst on the stock world 0.37 ms of 2.5 and 1.44 ms of 4.0: within budget.
+
+## M1's rest: the fog and the decals as screen passes, the objects' own motion
+
+In the v4 modes (`display.lighting` `ce_deferred` and `raster`; the Vulkan backend, a target of one sample) the window's
+fog and the level's decals are screen passes over the G-buffer rather than CE's draws, and an object's motion is its
+own vertices' (`docs/prism_scene_records.md`: `SCENE_FOG`, `SCENE_DECAL`, the motion).
+
+- **The fog.** In CE's fog pass's place each opaque pixel takes the fog CE gives its surface, from its distance: the
+  level's as CE's fog pass draws it (the density tables' curves, sampled as their 16 texels are), an object's as its
+  draws' vertex programs give it. Nothing is drawn for the fog: the level is not drawn again, the opaque objects'
+  draws have no fog of their own, and the fog screen's density is written into the alpha from the depth, so it
+  draws neither the level nor the objects again (the a30 rock shell's bug class: no stock part is drawn for the fog).
+  Two differences from CE are kept, both within the gate: an object's atmospheric fog is each pixel's own distance's
+  (CE's draws take one for the whole object, its centre's), and its planar fog each pixel's (CE's, each vertex's,
+  interpolated across the triangle). A blended part of an object (shader_model's alpha-blended decal), which the
+  G-buffer has not, keeps its own fog.
+- **The decals.** The primary, secondary and light layers' decals are projected by their boxes into the target
+  their draws would have gone to (the base colour, or the light), with CE's blend functions, colour and intensity, on
+  the level's pixels inside the box that face it. The water's layer and the alpha-tested layer are CE's draws still
+  (CE's texture pass leaves out the pixels under an alpha-tested decal by the stencil its draw writes).
+- **The motion.** An object's G-buffer twin runs its vertex program again on the last frame's constants (the pass
+  before's projection, each node moved back as its `SCENE_INSTANCE` node moved), so a skinned limb's motion is its
+  own nodes' and weights', not its part's first node's.
+
+**Equivalence where the frames move by the frames drawn.** The fog screen's layers move with the wind by each frame's
+time, even with the game stopped, so Classic's frame and the deferred frame held one after the other in one run differ
+wherever a fog screen is seen (Classic against itself 75 frames later: a mean FLIP of 0.09 to 0.10 at a30's poses in
+the fog). A scene marked `"separate"` (S1, S4), and every live scene (V1, V2), takes Classic's frame in one run and the
+deferred frame and its views in another, the same frames held in both, so that each pose's two frames fall on the same
+frame of the path (`capture.py`'s `equivalence_timeline`).
+
+### M1's rest as measured
+
+Measured on the RTX 2060 (November 2026), the Classic preset (`config.classic.toml`), Classic and the v4 mode each in
+a run of its own on the same path (`pairs`: the game stopped by its clock, the fog screen's layers where they were in
+every run), the worst of each pose's mean FLIP, the largest difference of a channel and the share of the pixels over
+2 of 255:
+
+| Where | Poses | `ce_deferred` against Classic | `raster` against Classic |
+| --- | --- | --- | --- |
+| a30, in the canyon's fog (the rock shell's poses) and S1's first probe | 4 | FLIP 0.0051 to 0.0071, at most 3 of 255, no pixel over 2 | the same (no bake: CE's light) |
+| c10, the swamp (S4's keys and two poses beside them) | 4 | FLIP 0.0096 to 0.0164, at most 28 to 39 of 255, 1.2 to 4.6% over 2 | |
+
+S1's probe poses in one run (the fog pass alone, before the decals and the motion): FLIP 0.0067 to 0.0071, at most 3.
+At c10 the pixels over 2 of 255 are objects': the lily pads, the moss boulders and the crashed dropship take each
+pixel's own fog where CE gave each object one, its centre's (the pads and the wreck span many units of the swamp's
+fog), and a few thin parts of the plants were drawn unfogged (58bfb76f7 keeps an object's blended parts' own fog
+since; not measured again yet). Both are within `equivalence_flip` (0.05). The level's fog, the fog screen's density and the atmosphere are
+CE's to the rounding (a30).
+
+The CPU's checks of this build: `tools/harness` (the new cases: the decal box from its projection, the record sent
+in the draw's place, none for another decal's slot or the map before; the fog record's eye densities, each with
+negative controls), the scene records' layouts (stream 35), the post shaders' SPIR-V and the Vulkan passes, the
+G-buffer twins' SPIR-V (`tools/test_gbuffer_twins.py`: an object's twin's second run on the last frame's constants
+and its two clip positions, spirv-val), the render stream and manifest, PRISM's gates' tools: all pass
+(`test_world_ao.py` fails to link at the base as here, `test_prism_rt_glsl.py` and `test_host_vr_vulkan.py`'s GPU
+timestamps likewise).
+
+Not measured yet: the RTX 2060's queue started the milestone agents' runs first from 15:33 on, and these waited
+behind them; the RTX 3070 Ti is not used for them. Still to run, on the RTX 2060, with the build of 389f813d4: the
+equivalence and material-source gates on every frozen scene (`capture.py equivalence`, S1 and S4 in runs of their
+own), the decals at G2 against M1's tree (the base's `ce_deferred` drew CE's decals over the base colour; the
+projection draws them there too, by their boxes), Classic's identity (`identity.py frames`, `stills`, `determinism`
+against 1e95379ef), Vulkan validation with synchronisation validation (`ce`, `ce_deferred`, `raster` at G2 and S1),
+the camera pan's motion check at G5 against the base, and the objects' motion on V1 and V2 once they are frozen.
 
 ## M2: the bake and PRISM Raster
 
@@ -462,13 +531,27 @@ and the design's others: no change to `HALO_PORT_NETWORK_VERSION`, Vulkan valida
 
 ## Not yet frozen
 
-S4 (c10's swamp: the pose tried is an interior), S3's flashlight (the player's light is where the player is, not
-the scene's camera; `debug_object_place "player at <x> <y> <z> <yaw>"` now stands the player there, and
-`units_set_desired_flashlight_state (players) true` turns the light on, but in a first try at S3's pose the light was
-not seen and a hint of the HUD was drawn over the frame), V1 (a Warthog driven across b30's beach before a still camera: the Warthog placed by name was
-not made) and V2 (a50's firefight with the AI kept: the poses tried show no fight) need their poses or setup found
-in play before they join `scenes.json`. The harness has what they need: a live scene (`"live": true`: the AI kept, the
-clock running during its moves, each state its own run so that every state sees the same world; its references
-made by replaying the run to the probe's step and stopping there), a scene's own setup commands and scripted
-input (`"setup"`, `"input"`: `debug_object_place "player seat W-driver"` puts the player's own unit in a placed
-vehicle for `debug.test_input` to drive), and `metrics.ghost_trail`.
+S3's flashlight, V1 and V2 need their setup found in play before they join `scenes.json`; what has been tried
+(`debug_object_place` now writes what it made or refused to the log, so a hidden run says it):
+
+- **S3's flashlight.** The player stood at S3's camera (`debug_object_place "player at 44.10 -42.92 -19.36 132.49"`)
+  falls about 7 units to the hangar's floor (`player pose` at z -26.2), below S3's view, which looks a little up: the
+  light is not seen. Pressing the flashlight button (`debug.test_input` `script:21 flashlight`) brings the HUD's hint
+  "Use Q when zoomed in to activate night vision" over the frame even with `show_hud_help_text 0` (the harness sets its
+  rules once, at the path's start). To try next: the light turned on by `units_set_desired_flashlight_state (players)
+  true` (no button) with the harness's stop, the player stood ahead of the camera along its view, and the player's view
+  turned up into S3's frame (`script:21 aim=132.49,20`).
+- **V1.** The Warthog placed by tag path is made (`debug_object_place "vehicles\warthog\warthog -66.4 13.13 4.5 -20"` at
+  b30's start, tick 600) and the player is seated (`player seat W-driver`), but `script:21-40 move=0,1` drove nothing
+  (the Warthog stayed where it landed, -68.8 9.5 1.3), likely as b30's insertion still holds the player at that tick. To
+  try next: the path started after the insertion (`start_tick` 2400 or 3600), half throttle, a camera beside the
+  Warthog's way (its motion within the motion view's 8 pixels a frame).
+- **V2.** a50's opening firefight is on the cliff top about the player's start (the player at 30.8 -33.0 87.3; the
+  marines at x 21 to 36, the grunts, jackals and an elite at x -5 to 14, y -17 to -40, z 87 to 89, moving), not where
+  the first pose tried looked. To try next: cameras about it, 15 to 30 units from the Covenant.
+
+The harness has what they need: a live scene (`"live": true`: the AI kept, the clock running during its moves, each
+state its own run so that every state sees the same world; its references made by replaying the run to the probe's
+step and stopping there), a scene's own setup commands and scripted input (`"setup"`, `"input"`: `debug_object_place
+"player seat W-driver"` puts the player's own unit in a placed vehicle for `debug.test_input` to drive), and
+`metrics.ghost_trail`.

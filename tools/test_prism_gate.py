@@ -260,6 +260,8 @@ def test_the_stills_path_reads_in_an_older_build():
 def test_the_capture_set_is_frozen_as_the_design_names_it():
     scenes = capture.load_scenes()
     assert {f"G{i}" for i in range(1, 8)} <= set(scenes)
+    # (the fog screen's scenes: their equivalence in runs of their own)
+    assert {"S1", "S4"} <= set(scenes) and scenes["S1"]["separate"] and scenes["S4"]["separate"]
     for scene in scenes.values():
         assert len(scene["keys"]) >= 2 and scene["map"] and scene["tests"]
         assert scene["reference_frames"] == 4096

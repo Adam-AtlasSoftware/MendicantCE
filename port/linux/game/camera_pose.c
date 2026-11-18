@@ -615,9 +615,11 @@ flashlight where the camera is) */
 			!object_header_try_and_get(placed_objects[placed_object_count - 1]))
 		{
 			console_printf(FALSE, "debug_object_place: no player's unit, or no vehicle placed for the seat");
+			platform_log("debug_object_place: no player's unit, or no vehicle placed for the seat");
 			return;
 		}
 		unit_scripting_enter_vehicle(player->unit_index, placed_objects[placed_object_count - 1], seat);
+		platform_log("debug_object_place: the player's unit put in seat %s", seat);
 		return;
 	}
 	tag_index = camera_pose_object_tag(name);
@@ -628,6 +630,7 @@ flashlight where the camera is) */
 
 		/* (the map's vehicles and bipeds named, to choose from) */
 		console_printf(FALSE, "debug_object_place: no object tag %s in this map", name);
+		platform_log("debug_object_place: no object tag %s in this map", name);
 		tag_iterator_new(&iterator, 'vehi');
 		while ((other = tag_iterator_next(&iterator)) != NONE)
 		{
@@ -652,6 +655,7 @@ flashlight where the camera is) */
 		if (placed_object_count == 0 || !object_header_try_and_get(placed_objects[placed_object_count - 1]))
 		{
 			console_printf(FALSE, "debug_object_place: no vehicle placed for the seat");
+			platform_log("debug_object_place: no vehicle placed for the seat");
 			return;
 		}
 		object_get_origin(placed_objects[placed_object_count - 1], &data.position);
@@ -696,6 +700,8 @@ flashlight where the camera is) */
 	if (object_index == NONE)
 	{
 		console_printf(FALSE, "debug_object_place: %s was not made", name);
+		platform_log("debug_object_place: %s was not made at %.3f %.3f %.3f", name, data.position.x, data.position.y,
+			data.position.z);
 		return;
 	}
 	if (seat[0])
@@ -703,6 +709,8 @@ flashlight where the camera is) */
 		unit_scripting_enter_vehicle(object_index, placed_objects[placed_object_count - 1], seat);
 	}
 	placed_objects[placed_object_count++] = object_index;
+	platform_log("debug_object_place: %s made at %.3f %.3f %.3f", name, data.position.x, data.position.y,
+		data.position.z);
 }
 
 /* ---------- the scenario's places in the loaded structure (debug_scenario_places) */
