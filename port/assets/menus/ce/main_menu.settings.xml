@@ -98,7 +98,7 @@
 		<string text="MODS"/>
 	</strings>
 	<strings name="main_menu/settings/tab_about">
-		<string text="The window, the frame rate and the graphics."/>
+		<string text="The window, the frame rate, the lighting and the graphics."/>
 		<string text="The sound and its devices, 3D audio, the volumes and voice chat."/>
 		<string text="The mouse, the controller and the keys."/>
 		<string text="Internet play, sharing maps and updates."/>
@@ -115,7 +115,7 @@
 		<string text="Goes back without these changes."/>
 	</strings>
 	<strings name="main_menu/settings/still_captions">
-		<string text="CLASSIC"/>
+		<string text="XBOX"/>
 		<string text="ENHANCED"/>
 	</strings>
 	<widget name="main_menu/settings/stepped_left" controller="1" width="16" height="16" bitmap="bitmaps/arrow_sm_left" wide="120 0">

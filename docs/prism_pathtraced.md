@@ -282,6 +282,11 @@ scene changes.
 | `debug.gbuffer_view` | `"pt_diffuse"`, `"pt_specular"`, `"pt_sun"`, `"pt_direct"`, `"pt_indirect"`, `"pt_history"`, `"pt_noisy"` | The diffuse light (denoised), the specular, the sun's visibility, the direct or indirect light alone (each denoised), the history's length, the diffuse light as traced |
 | `debug.pt_reference` | frames | The reference, at most that many frames |
 
+Settings > Video > Lighting > PRISM Path Traced; Lighting Settings then shows Profile and Denoiser, the image's Exposure,
+Exposure Bias and Tone Curve, and the Light Bake (this mode reads the bake); Ray Tracing shows the traced scene's rows
+(Traced Models, Keep Shapes, Cutout Shadows). None of `display.prism_rt`'s settings reaches this mode
+(docs/prism_settings.md).
+
 `HALO_PT_REFERENCE_LIVE=1` (a diagnosis) makes `debug.pt_reference` sum the light pass's own estimate in R's place
 (its light as traced, ReSTIR's reservoirs reused from frame to frame, no denoiser) into the same EXR: its mean against
 R's says what the live estimator holds apart from what the denoiser does.

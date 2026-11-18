@@ -24,12 +24,14 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_orientation" x="28" y="250" platform="android"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_screen_layout" x="28" y="271" platform="android"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_first_person" x="28" y="292"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_movies" x="28" y="313"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_12" x="28" y="340"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" x="28" y="360"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_battery_saver" x="28" y="381"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_brightness_settings" x="28" y="402"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_advanced_graphics" x="28" y="423"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_11" x="28" y="319"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics_android" x="28" y="339" platform="android"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_battery_saver_android" x="28" y="360" platform="android"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_lighting" x="28" y="381" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_lighting_settings" x="28" y="402" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_ray_tracing" x="28" y="423" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_brightness_settings" x="28" y="444"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_advanced_graphics" x="28" y="465"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/tabs" y="76"/>
 	</widget>
@@ -210,37 +212,53 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_movies" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/movies_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/movies_spinner" x="188"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_11" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_11_title"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/movies_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_11_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="11" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/movies_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.movies" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics_android" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="android" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ENHANCED|XBOX|PRISM EXTRAS|CUSTOM" setting="display.graphics" values="enhanced|classic|prism|custom" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_12" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_12_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_battery_saver_android" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="android" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_android_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_android_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/section_12_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="12" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_android_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_spinner" x="188"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ENHANCED|CLASSIC|PRISM|CUSTOM" setting="display.graphics" values="enhanced|classic|prism|custom" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_android_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|ON|AUTO" setting="display.battery_saver" values="off|on|auto" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_battery_saver" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_spinner" x="188"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_lighting" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/battery_saver_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|ON|AUTO" setting="display.battery_saver" values="off|on|auto" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="CLASSIC|PRISM REBAKED|PATH TRACED" setting="display.lighting" values="ce|raster|pathtraced" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_lighting_settings" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/lighting_settings_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/lighting_settings_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting_settings_label"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting_settings_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="15" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_ray_tracing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/ray_tracing_settings_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/ray_tracing_settings_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing_label"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="16" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_brightness_settings" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/brightness_screen"/>
@@ -248,7 +266,7 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness_settings_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness_settings_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="15" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness_settings_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="17" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_advanced_graphics" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/advanced_graphics_screen"/>
@@ -256,7 +274,7 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced_graphics_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced_graphics_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="16" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced_graphics_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="18" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels">
 		<string text="DISPLAY"/>
@@ -270,15 +288,17 @@
 		<string text="ORIENTATION"/>
 		<string text="SCREEN LAYOUT ›"/>
 		<string text="FIRST PERSON ›"/>
-		<string text="STARTUP MOVIES"/>
 		<string text="GRAPHICS"/>
 		<string text="QUALITY"/>
 		<string text="BATTERY SAVER"/>
+		<string text="LIGHTING"/>
+		<string text="LIGHTING SETTINGS ›"/>
+		<string text="RAY TRACING ›"/>
 		<string text="BRIGHTNESS ›"/>
 		<string text="ADVANCED GRAPHICS ›"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/help_strings">
-		<string text="The window, the frame rate and the graphics."/>
+		<string text="The window, the frame rate, the lighting and the graphics."/>
 		<string text=""/>
 		<string text="How the game takes the screen. Fullscreen sets the display to the game's resolution; borderless covers the screen with a window, so that other windows open over it at once; windowed is a window you can move and resize. F11 switches between the window and the screen."/>
 		<string text="What fullscreen and borderless draw at. Native is the display's own, the sharpest; a lower one is lighter on a slow computer, and softer. Fullscreen sets the display to it; borderless scales it."/>
@@ -290,11 +310,13 @@
 		<string text="Which way up you hold the device. Portrait has a strip of buttons along the top, the picture under it and the touch controls below it. Auto turns with the device."/>
 		<string text="Where the picture sits on a screen taller than it, its shape, and the frame around it in portrait."/>
 		<string text="Your weapon's field of view and whether it is drawn, the Panini projection, how far you see, your legs and arms, your shield's color, and the view from a vehicle's passenger seat."/>
-		<string text="Plays the Xbox's intro movie as the game starts, and its attract movies on an idle main menu. Any button skips the intro.|They are the bink folder of your Xbox disc image, copied with the maps. Without them, put the disc's bink folder beside your maps folder."/>
 		<string text=""/>
-		<string text="Enhanced: smoother edges, sharper textures and shadows, smoother lighting. Classic looks as the Xbox did. PRISM: Enhanced with the levels' light smoothed and ambient occlusion.|Changing one shows CUSTOM."/>
+		<string text="Enhanced: smoother edges, sharper textures and shadows, smoother model light. Xbox: as the Xbox drew it. PRISM Extras: Enhanced with PRISM's finer Classic light. Its light settings are Lighting Classic's.|Changing one shows CUSTOM."/>
 		<string text="Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns it on while the device runs on its battery. Your own settings come back as it turns off."/>
+		<string text="How the world is lit. Classic: the game's own light. PRISM Rebaked: light baked on this computer (sun, sky, lamps, bounces). PRISM Path Traced: every light traced each frame. The PRISM lightings need a graphics card that traces rays.|Lighting Settings and Ray Tracing show what applies to the lighting chosen."/>
+		<string text="The settings of the lighting chosen: Classic's shadows, lights and PRISM extras; PRISM Rebaked's and Path Traced's look, exposure and the light bake."/>
+		<string text="The ray traced features of the lighting chosen: Classic's ray traced shadows and light, PRISM Rebaked's traced object shadows, and the shapes every mode traces."/>
 		<string text="How bright the picture is: its gamma, and on an HDR display, HDR's look, how bright white and the HUD are, and the display's peak."/>
-		<string text="Anti-aliasing, texture filtering, model detail, shadows, the lighting and the shields' glow, smooth motion and the tick rate."/>
+		<string text="The quality preset, battery saver, anti-aliasing, texture filtering, model detail, smooth motion, the shields' glow and the tick rate."/>
 	</strings>
 </menus>
