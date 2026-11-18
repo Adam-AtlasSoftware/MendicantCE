@@ -513,6 +513,9 @@ same run (the bake's loading: a barrier's `VK_ACCESS_2_HOST_READ_BIT` under `ALL
 `WRITE_AFTER_WRITE` hazard between two of its buffer copies, 9 times; each then cut by the duplicate limit), none
 from the materials.
 
+Not measured yet: the G-buffer pass's time with the pack against without (it needs the RTX 2060 alone), and the RTX
+3070 Ti's numbers.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
