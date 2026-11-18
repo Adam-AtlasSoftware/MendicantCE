@@ -499,6 +499,18 @@ from the first, keeping each map's mean where CE's fade toward grey (b30's metal
 a distance; now CE's own levels), and the maps' base colour was put over the base at the resolve, after the decals
 (a10's corridor dirt lost; now right after the diffuse texture pass, `GBUFFER_PHASE`'s `BASE_TEXTURED`).
 
+**Every milestone's checks** (the final tree against 1e95379ef, the RTX 2060's shared lane, the data folder with the
+pack in it): `identity.py frames` b30 and a10, 46 of 46 frames byte-identical each (each tree with itself, the new
+with the base); `stills` (the kit's settings, RT off) G2, G5 and G4, 30 of 30 each (G7 left out: its lamps' glows part
+every run of either tree, as above); `determinism` (a10, `--simulation`) all alike, 1,476 ticks, each tree with itself
+and the new with the base. Vulkan validation with synchronisation validation, G2's probes, the pack on:
+`ce_deferred` and `raster` 0 messages, 0 hazards, 0 VUIDs (the tree before the albedo target asked for independent
+blending had 9 of VUID-VkPipelineColorBlendStateCreateInfo-pAttachments-00605 in each). Raster with its bake loaded
+whole (G5's probes, 200 frames a pose, the RTX 3070 Ti's light lane): 20 messages, the same 20 as 1e95379ef's in the
+same run (the bake's loading: a barrier's `VK_ACCESS_2_HOST_READ_BIT` under `ALL_COMMANDS`, 9 times, and a
+`WRITE_AFTER_WRITE` hazard between two of its buffer copies, 9 times; each then cut by the duplicate limit), none
+from the materials.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:
