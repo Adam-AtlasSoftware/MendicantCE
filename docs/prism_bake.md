@@ -333,6 +333,19 @@ with it), and the resolve draws CE's base colour times it and CE's additions (it
 specular lights) over it, as Classic's frame is drawn; the meter then takes both frames with the same base and
 additions. `"materials"` (for the materials milestone) composes the frame whole from PRISM's own materials, as follows.
 
+**What an object draws over its own light stays** (`render_deferred_window`, render.c). The relight (and the composite
+that takes its place in Path Traced) gives an object's pixel the volume's light times the G-buffer's base colour plus
+its emissive light, and it cannot see anything else CE drew into the light target there. A model's decal (a
+`shader_transparent_generic` or `_chicago` with the decal flag, or a model shader that is an alpha-blended decal) is
+drawn by CE at once, among the model's own passes, into the light target: the assault rifle's ammo counter and the
+displays on weapons are such, so the relit pixel took them away (Classic and `ce_deferred`, which keep the light
+target's pixels, showed them; Raster and Path Traced did not). From the G-buffer pass's end to the resolve
+(`render_deferred_window`) a model's decal is queued as the model's other transparent parts are, drawn over the
+resolved frame with them: after the relight and any composite, before the fog screens, with no exposure or curve on it
+(a display is lit by its own). Classic is unchanged (the flag is set only where the window is drawn for the resolve).
+Anything else an object drew at once into the light target belongs to the same rule: a pass of its own that the G-buffer
+has no twin for (a blended draw) is lost to the relight.
+
 With `"materials"` the pixel is base × (1 − the specular's share) × the diffuse light + the specular light + its
 self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
 it), the exposure on both lights and the tone curve over the whole (below), and the resolve draws it as it is: CE's
