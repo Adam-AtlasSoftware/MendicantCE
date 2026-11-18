@@ -245,9 +245,13 @@ typedef int (*host_render_screenshot_writer)(unsigned char *bgra, uint32_t width
 void host_render_stream_set_screenshot_writer(host_render_screenshot_writer writer);
 /* host_screenshot.c's, with SDL: YYYY-MM-DD_HH.MM.SS.png in local time
 (host_screenshot_name: the how manyth of its second, collision, from 0,
-adds _2, _3 and on) */
+adds _2, _3 and on). The name is answered at once and the file written on
+a thread of its own (as <name>.part, renamed once whole): it appears a
+moment later; host_screenshot_finish waits for every one being written
+(at exit too) */
 int host_screenshot_write(unsigned char *bgra, uint32_t width, uint32_t height, const char *directory, char *name,
 	uint32_t name_size);
+void host_screenshot_finish(void);
 void host_screenshot_name(char *name, uint32_t name_size, int year, int month, int day, int hour, int minute,
 	int second, unsigned collision);
 

@@ -4927,11 +4927,27 @@ static float half_value(uint16_t half)
 	return half & 0x8000 ? -magnitude : magnitude;
 }
 
+/* every half float's value, made once: a 4K HDR frame read back (the
+screenshot key's, Save Report's) is 33 million of them, whose ldexpf each
+took the render thread about 150 ms */
+static const float *half_values(void)
+{
+	static float *values;
+	uint32_t half;
+
+	if (!values && (values = malloc(65536 * sizeof(*values))) != NULL)
+	{
+		for (half = 0; half < 65536; half++)
+			values[half] = half_value((uint16_t)half);
+	}
+	return values;
+}
+
 /* a channel of the frame's values as 8 bits, as an SDR display shows it
 (clamped to [0, 1]) */
-static unsigned char half_byte(uint16_t half)
+static unsigned char half_byte(const float *values, uint16_t half)
 {
-	float value = half_value(half);
+	float value = values ? values[half] : half_value(half);
 
 	return (unsigned char)(value <= 0.0f ? 0 : value >= 1.0f ? 255 : (int)(value * 255.0f + 0.5f));
 }
@@ -4947,6 +4963,7 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 	VkDeviceSize size = (VkDeviceSize)width * height * (halves || deep ? 8 : 4);
 	VkCommandBuffer commands;
 	VkBufferImageCopy copy;
+	const float *values;
 
 	if (image->description.samples > 1 || (image->aspect & VK_IMAGE_ASPECT_DEPTH_BIT))
 		return 0;
@@ -4979,6 +4996,7 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT,
 		VK_ACCESS_HOST_READ_BIT);
 	xgpu_vulkan_wait(xgpu_vulkan_fence());
+	values = halves ? half_values() : NULL;
 	for (row = 0; row < height; row++)
 	{
 		unsigned char *to = (unsigned char *)pixels + (size_t)row * bytes_per_row;
@@ -4993,16 +5011,22 @@ int xgpu_vulkan_read_pixels(struct xgpu_vulkan_image *image, uint32_t layer, voi
 			{
 				if (tone_map)
 				{
-					float rgba[4] = { half_value(from[pixel * 4]), half_value(from[pixel * 4 + 1]),
-						half_value(from[pixel * 4 + 2]), half_value(from[pixel * 4 + 3]) };
+					float rgba[4];
+					int channel;
 
+					for (channel = 0; channel < 4; channel++)
+					{
+						uint16_t half = from[pixel * 4 + channel];
+
+						rgba[channel] = values ? values[half] : half_value(half);
+					}
 					xgpu_hdr_sdr_pixel(rgba, to + pixel * 4);
 					continue;
 				}
-				to[pixel * 4] = half_byte(from[pixel * 4 + 2]);
-				to[pixel * 4 + 1] = half_byte(from[pixel * 4 + 1]);
-				to[pixel * 4 + 2] = half_byte(from[pixel * 4]);
-				to[pixel * 4 + 3] = half_byte(from[pixel * 4 + 3]);
+				to[pixel * 4] = half_byte(values, from[pixel * 4 + 2]);
+				to[pixel * 4 + 1] = half_byte(values, from[pixel * 4 + 1]);
+				to[pixel * 4 + 2] = half_byte(values, from[pixel * 4]);
+				to[pixel * 4 + 3] = half_byte(values, from[pixel * 4 + 3]);
 			}
 		}
 		else if (deep)
