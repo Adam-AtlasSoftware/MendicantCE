@@ -8,12 +8,12 @@ lights, the decals and the fog. These are new records of the renderer's command 
 
 ## What is there now
 
-`XGPU_STREAM_VERSION` is 35 (M3: the resolve's `GBUFFER_PHASE` value carries `XGPU_GBUFFER_PHASE_PATHTRACED` in bit
-28, the profile in bits 29 and 30 and the denoiser off in bit 31, `docs/prism_pathtraced.md`: taken from the word's top
-down while `prism-v4-m2`'s Raster bits grow from bit 16 up; no record was added). The records' types are in the stream's
-own list, after M1's first record,
+`XGPU_STREAM_VERSION` is 36 (35: M4's `SCENE_MATERIAL_MAPS`; 36: M3's resolve's `GBUFFER_PHASE` value carries
+`XGPU_GBUFFER_PHASE_PATHTRACED` in bit 28, the profile in bits 29 and 30 and the denoiser off in bit 31,
+`docs/prism_pathtraced.md`: taken from the word's top down while `prism-v4-m2`'s Raster bits grow from bit 16 up; no
+record was added). The records' types are in the stream's own list, after M1's first record,
 `GBUFFER_PHASE` (82): `SCENE_MATERIAL` is 83 and so on to `SCENE_FOG`, 90, then `SCENE_VIEW`, 91, M2's `PRISM_BAKE`,
-92, and `XGPU_STREAM_RECORD_TYPES` is 93. The
+92, M4's `SCENE_MATERIAL_MAPS`, 93, and `XGPU_STREAM_RECORD_TYPES` is 94. The
 host's decoder takes every one, with its fixed part's size as its minimum.
 
 M1 sends six of them, and `SCENE_VIEW`. With `display.lighting` `ce_deferred` (`port/linux/game/prism_deferred.c`), in its G-buffer pass
@@ -75,6 +75,16 @@ light, the level's lightmap pass's with no lightmap) and the distance along the 
 part's rigid motion: a skinned part's vertices take its first node's. `debug.gbuffer_view` `motion` and `emissive`
 show them.
 
+M4 adds `SCENE_MATERIAL_MAPS` (93; `docs/prism_materials.md`), sent after the map's `SCENE_MATERIAL`s (and again as
+the texture store answers again) for each shader a pack or a mod gives a material of PRISM's format 2, in the deferred
+modes with `display.material_packs`: its tier (the pack's or a mod's; the automatic tier's forgets the maps it had),
+its model, its flags (the normal map's coordinates, the environment shader's type and detail functions), the texture
+store's ids of its images (albedo, normal, ORM, the three detail maps, emissive, height) and its numbers (the factors,
+specular, translucency, the detail maps' scales). The G-buffer pass draws the material's opaque draws by its family's
+uber-shader, which samples them. `GBUFFER_PHASE` gains a value, `BASE_TEXTURED` (6), sent in the deferred modes once
+the diffuse texture pass is drawn, before the decals: where a material's maps drew the level's base colour, the host
+puts it over the base target there, so that the decals lie over it.
+
 M2 adds `PRISM_BAKE` (92), sent with `display.lighting` `"raster"` (`port/linux/game/prism_bake.c`): each frame the
 in-game baker's control (the map and BSP, `display.bake`, `display.bake_quality`, the rebakes asked for, the bake
 folder's and the status block's guest addresses, the GPU time a frame may give the bake), and once a BSP the reach's
@@ -108,12 +118,14 @@ entries are sent; the record's size is its fixed part and those entries.
 | `SCENE_DECAL` | Per live decal | Decal id, bitmap and sequence frame, CE's framebuffer blend function (alpha, multiply, double multiply, add, subtract, min, max, alpha multiply add), flags (emissive, normal), the box (centre and three half-extent axes), colour, texture rectangle | 120 |
 | `SCENE_FOG` | Each frame | Flags; the camera cluster's atmospheric fog (colour, maximum density, start and opaque distances); up to 8 fog planes seen, each its index, flags (inside), plane, colour and maximum density, opaque distance and depth | 48 + 64 per plane (at most 560) |
 | `SCENE_VIEW` | At each G-buffer pass's begin | Flags (history); the camera this frame and last (eye and near plane, the axis at the screen's middle and the far plane, its change a unit of the screen's x and y); the view's corners in the target's pixels, this frame's and last | 176 |
+| `SCENE_MATERIAL_MAPS` | After the map's `SCENE_MATERIAL`s, for each shader a pack or a mod gives a material (again as the texture store answers) | Material id (0 refused); tier (pack, mod; the automatic tier's forgets); model (`XGPU_GBUFFER_MODEL_*`, 15 the automatic tier's); flags (the normal at CE's bump map's coordinates, foliage, the environment shader's type and detail functions); 8 images' texture store ids (albedo, normal, ORM, primary, secondary and micro detail, emissive, height); 24 scalars (albedo and emissive factors, normal scale, roughness, metal, occlusion, specular, translucency, the detail maps' scales, height scale) | 148 |
 | `PRISM_BAKE` | Each frame in Raster (the control); once a BSP (the reach's inputs, sliced) | Phase (control, reach input, reach end), generation, first, count, total, data and size; display.bake, the quality, the rebakes asked for, flags (menus, foreground, reach sent); the map's checksum, the BSP; the bake folder's and the status block's guest addresses; the frame's GPU budget, the threshold; the map's name | 144 |
 
 ### The capacities
 
 - 8 bitmap slots: base, primary, secondary and micro detail, bump, multipurpose (or self-illumination), reflection,
   and one more (glass tint, water ripples): every bitmap a family's tag names that the material model reads.
+- 8 maps a material of the pack or mod tier: the images its format names that the G-buffer reads or will.
 - 32 scalars: CE's numbers for those, with room for the families' others.
 - 64 nodes: CE's `MAXIMUM_NODES_PER_MODEL`.
 - 256 lights a record: every fixture and dynamic light a CE map draws at once, with room; a frame with more sends
@@ -125,7 +137,8 @@ entries are sent; the record's size is its fixed part and those entries.
 
 Each encoder writes into a buffer the caller gives and returns the bytes written, or 0:
 
-- 0 when the buffer is too small, a required id is 0, or an enum is past its last value (family, phase, blend);
+- 0 when the buffer is too small, a required id is 0, or an enum is past its last value (family, phase, blend, a
+  material's maps' tier or model);
 - counts past their capacity are cut to it;
 - a light of an unknown type or class, and a fog plane with no normal, is left out, the others kept in order;
 - an instance given no last-frame matrices is marked `NO_HISTORY` and sends this frame's twice.

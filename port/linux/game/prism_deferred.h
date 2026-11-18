@@ -15,7 +15,10 @@ enum
 	/* the specular and reflection passes */
 	_prism_deferred_additions,
 	/* the frame put together from them, before the transparent geometry */
-	_prism_deferred_resolve
+	_prism_deferred_resolve,
+	/* (in the base phase: the diffuse texture pass drawn, the decals next;
+	PRISM v4's materials' base colour put over it) */
+	_prism_deferred_base_textured
 };
 
 /* display.lighting "ce_deferred", "raster" or "pathtraced" (read once a frame at

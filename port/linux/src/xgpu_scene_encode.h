@@ -36,6 +36,14 @@ uint32_t xgpu_scene_encode_material(void *out, uint32_t room, uint32_t material,
 	uint32_t family, uint32_t material_type, uint32_t shader_flags, uint32_t detail_functions, uint32_t flags,
 	const uint32_t *bitmaps, uint32_t bitmap_count, const float *scalars, uint32_t scalar_count);
 
+/* a material's maps (PRISM v4 M4): tier XGPU_GBUFFER_TIER_PACK or _MOD,
+or _AUTO (the maps forgotten; anything else refused), model 0 to 15 (past
+it refused); maps: map_count of the texture store's ids by XGPU_SCENE_MAP_*
+(the rest 0) */
+uint32_t xgpu_scene_encode_material_maps(void *out, uint32_t room, uint32_t material, uint32_t tier,
+	uint32_t model, uint32_t flags, const uint32_t *maps, uint32_t map_count, const float *scalars,
+	uint32_t scalar_count);
+
 /* transforms: NULL, or transform_count slots' two rows (the rest the
 identity); change_colors: rgb each */
 uint32_t xgpu_scene_encode_material_animate(void *out, uint32_t room, uint32_t material,

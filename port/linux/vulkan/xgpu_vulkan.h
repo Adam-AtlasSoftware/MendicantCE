@@ -196,6 +196,10 @@ struct xgpu_vulkan_capabilities
 	images too (XGPU_VULKAN_BINDING_MATERIAL on): where a pixel shader may
 	sample that many images */
 	int materials;
+	/* a pipeline's colour targets may each be written its own way
+	(independentBlend): the G-buffer's albedo target, which only a pack's
+	twins write (PRISM v4 M4's materials; none where it cannot be) */
+	int independent_blend;
 };
 void xgpu_vulkan_capabilities(struct xgpu_vulkan_capabilities *capabilities);
 
@@ -492,6 +496,10 @@ struct xgpu_vulkan_pipeline_description
 	/* a second colour target's format (XGPU_VULKAN_FORMAT_NONE: none; the
 	G-buffer's, xgpu_vulkan_set_second_target), written whole, unblended */
 	uint8_t color2_format;
+	/* a third's (the G-buffer's albedo target, xgpu_vulkan_set_third_target)
+	and the channels written there (0 none: a draw whose shader writes
+	nothing there), unblended */
+	uint8_t color3_format, color3_mask;
 };
 
 /* the pipeline of a description, made the first time; VK_NULL_HANDLE if it
@@ -548,6 +556,9 @@ from now on draw into both, its own layer 0 and one view, cleared to zero
 with the first; only pipelines made with its format (color2_format) draw
 there */
 void xgpu_vulkan_set_second_target(struct xgpu_vulkan_image *color2);
+/* a third beside them (NULL none), as the second: drawn with the second
+only, and only by pipelines made with its format (color3_format) */
+void xgpu_vulkan_set_third_target(struct xgpu_vulkan_image *color3);
 /* views is 1, 2 or 4, relative to the image view's first layer. */
 void xgpu_vulkan_set_target_views(struct xgpu_vulkan_image *color, struct xgpu_vulkan_image *depth,
 	uint32_t layer, uint32_t views);

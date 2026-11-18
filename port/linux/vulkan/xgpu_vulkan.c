@@ -360,8 +360,9 @@ struct segment
 	/* the targets' first layer and views */
 	uint32_t layer, views;
 	struct pass_attachment color, depth;
-	/* (a second colour attachment: xgpu_vulkan_set_second_target) */
-	struct pass_attachment color2;
+	/* (a second and a third colour attachment: xgpu_vulkan_set_second_target,
+	_third_target) */
+	struct pass_attachment color2, color3;
 };
 
 /* a frame's visibility tests: its queries, and the slot and area of each */
@@ -508,9 +509,10 @@ static struct
 	} samplers[SAMPLER_CACHE];
 	uint32_t sampler_count;
 
-	/* the targets bound, and the pass drawing into them; a second colour
-	target beside the first (xgpu_vulkan_set_second_target: the G-buffer's) */
-	struct xgpu_vulkan_image *color, *depth, *color2;
+	/* the targets bound, and the pass drawing into them; a second and a
+	third colour target beside the first (xgpu_vulkan_set_second_target and
+	_third_target: the G-buffer's) */
+	struct xgpu_vulkan_image *color, *depth, *color2, *color3;
 	uint32_t layer, views;
 	int pass_active;
 	uint32_t pass_width, pass_height;
@@ -1553,8 +1555,9 @@ static void aside_pass(uint32_t index, struct segment *segment)
 {
 	if (!vk.aside)
 		return;
-	/* (a pass of two colour targets: no piece of a chain, nor its head) */
-	if (segment->color2.image)
+	/* (a pass of two or three colour targets: no piece of a chain, nor its
+	head) */
+	if (segment->color2.image || segment->color3.image)
 	{
 		aside_break();
 		return;
@@ -1595,7 +1598,7 @@ and resolves, the pieces between executed in it */
 static void pass_play(VkCommandBuffer main, uint32_t first, uint32_t last)
 {
 	struct segment *segment = &vk.segments[first], *end = &vk.segments[last];
-	VkRenderingAttachmentInfo color[2], depth, stencil;
+	VkRenderingAttachmentInfo color[3], depth, stencil;
 	VkRenderingInfo rendering;
 	uint32_t index;
 
@@ -1617,12 +1620,18 @@ static void pass_play(VkCommandBuffer main, uint32_t first, uint32_t last)
 		}
 		rendering.colorAttachmentCount = 1;
 		rendering.pColorAttachments = color;
-		/* (a second colour attachment: stored, always) */
+		/* (a second colour attachment, and a third: stored, always) */
 		if (segment->color2.info.imageView)
 		{
 			color[1] = segment->color2.info;
 			color[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 			rendering.colorAttachmentCount = 2;
+			if (segment->color3.info.imageView)
+			{
+				color[2] = segment->color3.info;
+				color[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+				rendering.colorAttachmentCount = 3;
+			}
 		}
 	}
 	if (segment->depth.info.imageView)
@@ -2666,7 +2675,7 @@ void xgpu_vulkan_image_destroy(struct xgpu_vulkan_image *image)
 
 	if (!image)
 		return;
-	if (vk.color == image || vk.depth == image || vk.color2 == image)
+	if (vk.color == image || vk.depth == image || vk.color2 == image || vk.color3 == image)
 	{
 		pass_end();
 		if (vk.color == image)
@@ -2675,6 +2684,8 @@ void xgpu_vulkan_image_destroy(struct xgpu_vulkan_image *image)
 			vk.depth = NULL;
 		if (vk.color2 == image)
 			vk.color2 = NULL;
+		if (vk.color3 == image)
+			vk.color3 = NULL;
 	}
 	if (image == vk.chain_color || image == vk.chain_depth)
 		aside_break();
@@ -4079,8 +4090,8 @@ static VkPipeline pipeline_build(const struct xgpu_vulkan_pipeline_description *
 	VkPipelineRenderingCreateInfo rendering;
 	VkGraphicsPipelineCreateInfo info;
 	VkFormat color_format = vulkan_format(description->color_format);
-	VkFormat color_formats[2];
-	VkPipelineColorBlendAttachmentState blend_attachments[2];
+	VkFormat color_formats[3];
+	VkPipelineColorBlendAttachmentState blend_attachments[3];
 	VkFormat depth_format = description->depth_format ? vk.depth_format : VK_FORMAT_UNDEFINED;
 	static const VkDynamicState dynamic_states[] =
 	{
@@ -4194,6 +4205,7 @@ static VkPipeline pipeline_build(const struct xgpu_vulkan_pipeline_description *
 	/* (a second colour target: unblended, every channel written) */
 	color_formats[0] = color_format;
 	color_formats[1] = vulkan_format(description->color2_format);
+	color_formats[2] = vulkan_format(description->color3_format);
 	if (color_format != VK_FORMAT_UNDEFINED && description->color2_format)
 	{
 		blend_attachments[0] = blend_attachment;
@@ -4201,6 +4213,13 @@ static VkPipeline pipeline_build(const struct xgpu_vulkan_pipeline_description *
 		blend_attachments[1].colorWriteMask = 15;
 		blend.attachmentCount = 2;
 		blend.pAttachments = blend_attachments;
+		/* (and a third: the channels the draw writes there, unblended) */
+		if (description->color3_format)
+		{
+			memset(&blend_attachments[2], 0, sizeof(blend_attachments[2]));
+			blend_attachments[2].colorWriteMask = description->color3_mask & 15;
+			blend.attachmentCount = 3;
+		}
 	}
 	if (description->color_read && vk.capabilities.raster_order)
 		blend.flags = VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT;
@@ -4213,7 +4232,8 @@ static VkPipeline pipeline_build(const struct xgpu_vulkan_pipeline_description *
 	memset(&rendering, 0, sizeof(rendering));
 	rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
 	rendering.viewMask = description->view_mask;
-	rendering.colorAttachmentCount = color_format != VK_FORMAT_UNDEFINED ? (description->color2_format ? 2 : 1) : 0;
+	rendering.colorAttachmentCount = color_format != VK_FORMAT_UNDEFINED ? (description->color2_format ?
+		(description->color3_format ? 3 : 2) : 1) : 0;
 	rendering.pColorAttachmentFormats = color_formats;
 	rendering.depthAttachmentFormat = depth_format;
 	rendering.stencilAttachmentFormat = depth_format;
@@ -4374,7 +4394,7 @@ static void pass_segment_begin(const VkRenderingInfo *rendering)
 	struct segment *segment = segment_add();
 	uint32_t index = vk.segment_count - 1;
 	VkCommandBufferInheritanceRenderingInfo inheritance;
-	VkFormat color_formats[2] = { VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED };
+	VkFormat color_formats[3] = { VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED, VK_FORMAT_UNDEFINED };
 	struct xgpu_vulkan_image *sized = vk.color ? vk.color : vk.depth;
 
 	segment->pass = 1;
@@ -4405,6 +4425,13 @@ static void pass_segment_begin(const VkRenderingInfo *rendering)
 			color_formats[1] = vk.color2->format;
 			inheritance.colorAttachmentCount = 2;
 		}
+		if (rendering->colorAttachmentCount > 2)
+		{
+			segment->color3.image = vk.color3;
+			segment->color3.info = rendering->pColorAttachments[2];
+			color_formats[2] = vk.color3->format;
+			inheritance.colorAttachmentCount = 3;
+		}
 	}
 	if (rendering->pDepthAttachment)
 	{
@@ -4429,7 +4456,7 @@ static void pass_segment_begin(const VkRenderingInfo *rendering)
 /* the pass drawing into the bound targets, begun */
 static int pass_begin(uint32_t clear_parts, const float clear_color[4], float clear_depth, uint32_t clear_stencil)
 {
-	VkRenderingAttachmentInfo colors[2], depth, stencil, *color = &colors[0];
+	VkRenderingAttachmentInfo colors[3], depth, stencil, *color = &colors[0];
 	VkRenderingInfo rendering;
 	struct xgpu_vulkan_image *size_of = vk.color ? vk.color : vk.depth;
 
@@ -4470,6 +4497,16 @@ static int pass_begin(uint32_t clear_parts, const float clear_color[4], float cl
 				return 0;
 			rendering.colorAttachmentCount = 2;
 			vk.color2->used = vk.serial;
+			/* (and the third, alike) */
+			if (vk.color3)
+			{
+				colors[2] = colors[1];
+				colors[2].imageView = attachment_view(vk.color3, 0, 1);
+				if (!colors[2].imageView)
+					return 0;
+				rendering.colorAttachmentCount = 3;
+				vk.color3->used = vk.serial;
+			}
 		}
 		if (vk.depth && (vk.depth->description.width < rendering.renderArea.extent.width ||
 			vk.depth->description.height < rendering.renderArea.extent.height))
@@ -4575,6 +4612,14 @@ void xgpu_vulkan_set_second_target(struct xgpu_vulkan_image *color2)
 	vk.color2 = color2;
 }
 
+void xgpu_vulkan_set_third_target(struct xgpu_vulkan_image *color3)
+{
+	if (color3 == vk.color3)
+		return;
+	pass_end();
+	vk.color3 = color3;
+}
+
 /* the draw set's constants' range (draw_set_make), which the uniforms' fits
 in: one range of the ring for both, as the anti-aliasing passes have it */
 #define CLEAR_UNIFORMS_RANGE (192 * 16)
@@ -4621,7 +4666,7 @@ int xgpu_vulkan_clear_prepare(uint32_t parts)
 void xgpu_vulkan_clear(const int32_t (*rectangles)[4], uint32_t count, uint32_t parts, const float color[4], float depth,
 	uint32_t stencil)
 {
-	VkClearAttachment attachments[3];
+	VkClearAttachment attachments[4];
 	VkClearRect *rects;
 	uint32_t attachment_count = 0, rect_count = 0, index, clear_parts = 0;
 	struct xgpu_vulkan_pipeline_description description;
@@ -4692,13 +4737,21 @@ void xgpu_vulkan_clear(const int32_t (*rectangles)[4], uint32_t count, uint32_t 
 			attachments[attachment_count].colorAttachment = 0;
 			memcpy(attachments[attachment_count].clearValue.color.float32, color, 4 * sizeof(float));
 			attachment_count++;
-			/* (the second colour target's, to zero) */
+			/* (the second colour target's, to zero, and the third's) */
 			if (vk.color2 && vk.views == 1 && !vk.layer)
 			{
 				attachments[attachment_count].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 				attachments[attachment_count].colorAttachment = 1;
 				memset(&attachments[attachment_count].clearValue, 0, sizeof(attachments[attachment_count].clearValue));
 				attachment_count++;
+				if (vk.color3)
+				{
+					attachments[attachment_count].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+					attachments[attachment_count].colorAttachment = 2;
+					memset(&attachments[attachment_count].clearValue, 0,
+						sizeof(attachments[attachment_count].clearValue));
+					attachment_count++;
+				}
 			}
 		}
 	}
@@ -7689,6 +7742,9 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	features.features.textureCompressionBC = available.features.textureCompressionBC;
 	features.features.textureCompressionASTC_LDR = available.features.textureCompressionASTC_LDR;
 	features.features.fragmentStoresAndAtomics = available.features.fragmentStoresAndAtomics;
+	/* (the G-buffer's albedo target, written by some of the pass's draws
+	alone: a colour target's write mask its own) */
+	features.features.independentBlend = available.features.independentBlend;
 	features.features.shaderImageGatherExtended = VK_FALSE;
 	timeline.timelineSemaphore = VK_TRUE;
 	query_reset.hostQueryReset = VK_TRUE;
@@ -7853,6 +7909,7 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
 		VK_FORMAT_FEATURE_TRANSFER_DST_BIT);
 	vk.capabilities.fragment_stores = available.features.fragmentStoresAndAtomics;
+	vk.capabilities.independent_blend = available.features.independentBlend;
 	vk.capabilities.scaled_shorts = format_has(VK_FORMAT_R16G16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&
 		format_has(VK_FORMAT_R16G16B16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&
 		format_has(VK_FORMAT_R16G16B16A16_SSCALED, 1, VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) &&

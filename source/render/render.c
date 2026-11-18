@@ -649,6 +649,12 @@ static void render_window(
 			prism_deferred_phase(_prism_deferred_base);
 		}
 		structure_render_diffuse_texture();
+		/* port: (and the level's base colour of PRISM v4's pack and mod
+		materials put over the texture pass's, before the decals over it) */
+		if (prism_deferred)
+		{
+			prism_deferred_phase(_prism_deferred_base_textured);
+		}
 
 		rasterizer_decals_begin(_decal_layer_primary);
 		for (rendered_cluster_index = 0;

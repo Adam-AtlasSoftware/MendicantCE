@@ -41,7 +41,12 @@ shader it draws (GBUFFER_DRAW) from the map's material table: every shader
 of the map, once, before its first G-buffer pass (SCENE_MATERIAL, the
 material ids the shaders' order in the tags: alike in every run), resolved
 by the host at its automatic tier (or a mod's, where display.prism_materials
-gives the shader one). The level's base colour is the base target's.
+gives the shader one), and after each its maps, where a pack or a mod gives
+the shader PRISM's material (SCENE_MATERIAL_MAPS, prism_materials.c: the
+pack and mod tiers, which the G-buffer pass's uber-shaders draw). The level's
+base colour is the base target's, or the pack's where it has one: put over
+the texture pass's once that is drawn (GBUFFER_PHASE_BASE_TEXTURED), so that
+the decals lie over it.
 
 Only the primary window's view, not a mirror's nor the VR mode's eyes, and
 only where the host draws it (the Vulkan backend; the others ignore the
@@ -62,6 +67,7 @@ nothing changes.
 #include "structures/structure_bsp_definitions.h"
 #include "render/render_cameras.h"
 #include "render_cameras_internal.h"
+#include "mods.h"
 
 #include <stdlib.h>
 
@@ -87,6 +93,7 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_RESOLVE 3ul
 #define PHASE_GBUFFER_BEGIN 4ul
 #define PHASE_GBUFFER_END 5ul
+#define PHASE_BASE_TEXTURED 6ul
 #define PHASE_VIEW_SHIFT 8
 #define PHASE_RASTER 0x10000ul
 #define PHASE_RASTER_MATERIALS 0x20000ul
@@ -177,6 +184,8 @@ static struct
 	void const *scenario;
 	boolean table_made;
 	long material_count;
+	/* prism_materials.c's generation the materials' maps were sent at */
+	unsigned long maps_generation;
 	void const *slot_shaders[MATERIAL_SLOTS];
 	unsigned short slot_materials[MATERIAL_SLOTS];
 	/* the G-buffer pass's draws' instance and flags now, and the record sent
@@ -387,6 +396,28 @@ static void material_add(
 	}
 	xgpu_backend_scene_material((unsigned long)prism_deferred.material_count, hash, family,
 		field_short(shader, SHADER_MATERIAL_TYPE), shader_flags, detail_functions & 0xff, flags, scalars, SCALARS);
+	/* (its maps, where a pack or a mod gives it PRISM's material) */
+	prism_materials_scene(shader, (unsigned long)prism_deferred.material_count, FALSE);
+
+	return;
+}
+
+/* the map's materials' maps sent again (prism_materials.c read them again,
+or the texture store answered again): every material's, the automatic
+tier's where it has none now */
+static void materials_maps_again(
+	void)
+{
+	unsigned long slot;
+
+	for (slot = 0; slot < MATERIAL_SLOTS; slot++)
+	{
+		if (prism_deferred.slot_shaders[slot])
+		{
+			prism_materials_scene(prism_deferred.slot_shaders[slot], prism_deferred.slot_materials[slot], TRUE);
+		}
+	}
+	prism_deferred.maps_generation = prism_materials_generation();
 
 	return;
 }
@@ -415,6 +446,7 @@ static void materials_make(
 	prism_deferred.scenario_index = global_scenario_index;
 	prism_deferred.scenario = scenario;
 	prism_deferred.table_made = TRUE;
+	prism_deferred.maps_generation = prism_materials_generation();
 	if (!scenario)
 	{
 		return;
@@ -585,6 +617,10 @@ void prism_deferred_gbuffer_begin(
 	void)
 {
 	materials_make();
+	if (prism_deferred.material_count && prism_deferred.maps_generation != prism_materials_generation())
+	{
+		materials_maps_again();
+	}
 	prism_deferred.pass_number++;
 	prism_deferred.instance = 0;
 	prism_deferred.draw_flags = 0;
@@ -724,6 +760,13 @@ void prism_deferred_phase(
 {
 	unsigned long value;
 
+	/* (a moment of the base phase, not a phase of its own: the maps' base
+	colour under the decals) */
+	if (phase == _prism_deferred_base_textured)
+	{
+		xgpu_backend_gbuffer_phase(PHASE_BASE_TEXTURED);
+		return;
+	}
 	switch (phase)
 	{
 	case _prism_deferred_base:

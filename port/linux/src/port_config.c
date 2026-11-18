@@ -772,6 +772,16 @@ static const struct config_setting config_settings[] =
 		"no sky only what comes in. \"flat\" Tool's fill: the same light at\n"
 		"every point (the sky's outdoor value where the cluster has a sky, its\n"
 		"indoor value where it has none). A change bakes again." },
+	{ "display.material_packs", _config_boolean, "true", "HALO_MATERIAL_PACKS", _environment_value,
+		_platform_desktop,
+		"PRISM v4's materials from packs and mods (docs/prism_materials.md), with\n"
+		"display.lighting \"ce_deferred\" or \"raster\": where the material pack\n"
+		"(made on this machine by prism_packs.py's v4_materials step) or a mod\n"
+		"gives a shader a material, the G-buffer draws its maps (its colour with\n"
+		"CE's painted light taken out, its bump, roughness and metal) in place of\n"
+		"the one made from CE's shader as the map loads; false: every shader's\n"
+		"made from CE's. Needs a graphics card that draws display.prism_materials'\n"
+		"materials. Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"

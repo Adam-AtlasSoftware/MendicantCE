@@ -43,7 +43,7 @@ tag cache at the game's address; the fork's Linux package carries it as
 bin/openh1-map-extract, PRISM's pack tools' extractor (tools/prism_packs).
 
 usage: map_extract [--data <data root>] [--out <folder>] [--tag <text>]...
-	[--only bitmaps,models,bsps] [--mips] [--scale <factor>] [--list] <map>
+	[--only bitmaps,models,bsps,shaders] [--mips] [--scale <factor>] [--list] <map>
 
 <map> is a map's name (b30), read from <data root>/maps/<map>.map, or a
 path to a .map file. Output goes to <out>/<map>/ (default out: extract):
@@ -53,6 +53,11 @@ path to a .map file. Output goes to <out>/<map>/ (default out: extract):
 	models/<tag>.gltf, .bin        nodes, markers, regions, permutations, LODs, skinned
 	models/<tag>/<perm> <lod>.jms  JMS (8200), one per permutation and level of detail
 	bsps/<tag>.gltf, .bin          the render mesh, lightmap UVs as TEXCOORD_1
+	shaders/<tag>.json             each environment and model shader: the fields
+	                               PRISM's materials read (its type, detail
+	                               functions and scales, bump scale, specular,
+	                               reflection and self-illumination numbers,
+	                               material type, translucency) and its maps
 With --tag, only the tags whose names contain one of the texts are written
 (with the bitmaps their shaders use, and an object's model); --only limits
 the kinds. --list prints the map's tags and exits. glTF is Y up: a root
@@ -152,6 +157,8 @@ enum
 
 	BITMAP_GROUP_TAG = 'bitm',
 	MODEL_GROUP_TAG = 'mode',
+	SHADER_ENVIRONMENT_GROUP_TAG = 'senv',
+	SHADER_MODEL_GROUP_TAG = 'soso',
 	STRUCTURE_BSP_GROUP_TAG = 'sbsp',
 	SHADER_GROUP_TAG = 'shdr',
 	OBJECT_GROUP_TAG = 'obje',
@@ -637,7 +644,7 @@ static struct
 	long loaded_bsp; /* the tag index of the bsp in the tag cache, or NONE */
 	/* what is written */
 	unsigned char *selected; /* by tag index: 1 asked for, 2 a dependency */
-	int want_bitmaps, want_models, want_bsps;
+	int want_bitmaps, want_models, want_bsps, want_shaders;
 	/* each bitmap's uses: "<group>.<field>" by "<user>" */
 	struct bitmap_use { long bitmap; long user; char field[96]; } *uses;
 	long use_count, use_capacity;
@@ -1857,6 +1864,172 @@ static void bitmaps_of_proc(void *context, char const *field, unsigned long grou
 	(void)field;
 	if (group == BITMAP_GROUP_TAG && globals.want_bitmaps)
 		bitmap_export(tag_index);
+}
+
+/* ---------- shaders
+
+An environment or model shader's fields that PRISM's materials read
+(tools/prism_packs/art/prism_v4_materials.py), by their offsets in the tag
+as the game reads them (rasterizer_xbox_environment.c's and
+rasterizer_xbox_models.c's shader definitions, shaders.c's checked
+offsets), with the bitmaps it names by field. */
+
+static float shader_real(unsigned char const *shader, long offset)
+{
+	float value;
+
+	memcpy(&value, shader + offset, sizeof(value));
+	return value;
+}
+
+static long shader_short(unsigned char const *shader, long offset)
+{
+	short value;
+
+	memcpy(&value, shader + offset, sizeof(value));
+	return value;
+}
+
+static void shader_reals(FILE *json, char const *name, unsigned char const *shader, long offset, int count)
+{
+	int index;
+
+	fprintf(json, ",\n  \"%s\": [", name);
+	for (index = 0; index < count; index++)
+	{
+		if (index)
+			fprintf(json, ", ");
+		json_float(json, shader_real(shader, offset + 4 * index));
+	}
+	fprintf(json, "]");
+}
+
+static void shader_value(FILE *json, char const *name, double value)
+{
+	fprintf(json, ",\n  \"%s\": ", name);
+	json_float(json, value);
+}
+
+/* a bitmap reference's tag's name ("" none) */
+static void shader_map(FILE *json, char const *name, unsigned char const *shader, long offset, int *first)
+{
+	long index;
+
+	memcpy(&index, shader + offset + 12, sizeof(index));
+	if (!instance_get(index))
+		return;
+	fprintf(json, "%s\n    \"%s\": ", *first ? "" : ",", name);
+	json_string(json, tag_name(index));
+	*first = 0;
+}
+
+static void shader_export(long tag_index)
+{
+	struct tag_instance *instance = instance_get(tag_index);
+	unsigned char const *shader;
+	char tag[1024], path[2200], group[5];
+	int environment, first = 1;
+	FILE *json;
+
+	if (!instance || (instance->group_tag != SHADER_ENVIRONMENT_GROUP_TAG &&
+		instance->group_tag != SHADER_MODEL_GROUP_TAG) || !instance->base_address)
+		return;
+	environment = instance->group_tag == SHADER_ENVIRONMENT_GROUP_TAG;
+	shader = instance->base_address;
+	tag_path(tag_index, tag, sizeof(tag));
+	snprintf(path, sizeof(path), "%s/shaders/%s.json", globals.out, tag);
+	json = open_output(path, "w");
+	fprintf(json, "{\n  \"tag\": ");
+	json_string(json, tag_name(tag_index));
+	fprintf(json, ",\n  \"group\": \"%s\"", group_string(instance->group_tag, group));
+	/* (the shader's own: radiosity, the physics' material type) */
+	shader_value(json, "radiosity_power", shader_real(shader, 0x04));
+	shader_reals(json, "radiosity_color", shader, 0x08, 3);
+	shader_reals(json, "tint_color", shader, 0x14, 3);
+	fprintf(json, ",\n  \"material_type\": %ld", shader_short(shader, 0x22));
+	fprintf(json, ",\n  \"flags\": %ld,\n  \"type\": %ld", shader_short(shader, 0x28) & 0xffff,
+		shader_short(shader, 0x2A));
+	if (environment)
+	{
+		fprintf(json, ",\n  \"diffuse_flags\": %ld", shader_short(shader, 0x6C) & 0xffff);
+		fprintf(json, ",\n  \"detail_function\": %ld,\n  \"micro_detail_function\": %ld",
+			shader_short(shader, 0xB0), shader_short(shader, 0xF4));
+		shader_value(json, "primary_detail_scale", shader_real(shader, 0xB4));
+		shader_value(json, "secondary_detail_scale", shader_real(shader, 0xC8));
+		shader_value(json, "micro_detail_scale", shader_real(shader, 0xF8));
+		shader_reals(json, "material_color", shader, 0x10C, 3);
+		shader_value(json, "bump_scale", shader_real(shader, 0x124));
+		shader_reals(json, "runtime_bump_scale", shader, 0x138, 2);
+		/* (the texture animation's u and v: each its periodic function (0
+		one, 1 zero, the rest move), period and scale) */
+		fprintf(json, ",\n  \"texture_animation\": [%ld, ", shader_short(shader, 0x150));
+		json_float(json, shader_real(shader, 0x154));
+		fprintf(json, ", ");
+		json_float(json, shader_real(shader, 0x158));
+		fprintf(json, ", %ld, ", shader_short(shader, 0x15C));
+		json_float(json, shader_real(shader, 0x160));
+		fprintf(json, ", ");
+		json_float(json, shader_real(shader, 0x164));
+		fprintf(json, "]");
+		fprintf(json, ",\n  \"self_illumination_flags\": %ld", shader_short(shader, 0x180) & 0xffff);
+		shader_reals(json, "primary_on_color", shader, 0x19C, 3);
+		shader_reals(json, "secondary_on_color", shader, 0x1D8, 3);
+		shader_reals(json, "plasma_on_color", shader, 0x214, 3);
+		shader_value(json, "self_illumination_map_scale", shader_real(shader, 0x250));
+		fprintf(json, ",\n  \"specular_flags\": %ld", shader_short(shader, 0x27C) & 0xffff);
+		shader_value(json, "specular_brightness", shader_real(shader, 0x290));
+		shader_reals(json, "specular_perpendicular_color", shader, 0x2A8, 3);
+		shader_reals(json, "specular_parallel_color", shader, 0x2B4, 3);
+		fprintf(json, ",\n  \"reflection_flags\": %ld,\n  \"reflection_type\": %ld",
+			shader_short(shader, 0x2D0) & 0xffff, shader_short(shader, 0x2D2));
+		shader_value(json, "reflection_lightmap_brightness_scale", shader_real(shader, 0x2D4));
+		shader_value(json, "reflection_perpendicular", shader_real(shader, 0x2F4));
+		shader_value(json, "reflection_parallel", shader_real(shader, 0x2F8));
+		fprintf(json, ",\n  \"maps\": {");
+		shader_map(json, "base_map", shader, 0x88, &first);
+		shader_map(json, "primary_detail_map", shader, 0xB8, &first);
+		shader_map(json, "secondary_detail_map", shader, 0xCC, &first);
+		shader_map(json, "micro_detail_map", shader, 0xFC, &first);
+		shader_map(json, "bump_map", shader, 0x128, &first);
+		shader_map(json, "self_illumination_map", shader, 0x254, &first);
+		shader_map(json, "reflection_cube_map", shader, 0x324, &first);
+	}
+	else
+	{
+		shader_value(json, "translucency", shader_real(shader, 0x38));
+		fprintf(json, ",\n  \"change_color_source\": %ld", shader_short(shader, 0x4C));
+		fprintf(json, ",\n  \"self_illumination_flags\": %ld,\n  \"self_illumination_color_source\": %ld",
+			shader_short(shader, 0x6C) & 0xffff, shader_short(shader, 0x70));
+		shader_reals(json, "self_illumination_lower", shader, 0x78, 3);
+		shader_reals(json, "self_illumination_upper", shader, 0x84, 3);
+		shader_reals(json, "map_scale", shader, 0x9C, 2);
+		fprintf(json, ",\n  \"detail_function\": %ld,\n  \"detail_mask\": %ld", shader_short(shader, 0xD4),
+			shader_short(shader, 0xD6));
+		shader_value(json, "detail_scale", shader_real(shader, 0xD8));
+		shader_value(json, "detail_v_scale", shader_real(shader, 0xEC));
+		shader_value(json, "reflection_perpendicular", shader_real(shader, 0x144));
+		shader_reals(json, "reflection_perpendicular_tint", shader, 0x148, 3);
+		shader_value(json, "reflection_parallel", shader_real(shader, 0x154));
+		shader_reals(json, "reflection_parallel_tint", shader, 0x158, 3);
+		fprintf(json, ",\n  \"maps\": {");
+		shader_map(json, "base_map", shader, 0xA4, &first);
+		shader_map(json, "multipurpose_map", shader, 0xBC, &first);
+		shader_map(json, "detail_map", shader, 0xDC, &first);
+		shader_map(json, "reflection_cube_map", shader, 0x164, &first);
+	}
+	fprintf(json, "%s}\n}\n", first ? "" : "\n  ");
+	fclose(json);
+	fprintf(globals.index, "%s\n    {\"kind\": \"shader\", \"tag\": ", globals.index_first ? "" : ",");
+	globals.index_first = 0;
+	json_string(globals.index, tag_name(tag_index));
+	fprintf(globals.index, ", \"json\": ");
+	{
+		char relative[1200];
+
+		snprintf(relative, sizeof(relative), "shaders/%s.json", tag);
+		json_string(globals.index, relative);
+	}
+	fprintf(globals.index, "}");
 }
 
 /* ---------- glTF */
@@ -3494,7 +3667,7 @@ static int name_matches(char const *name, char **patterns, int pattern_count)
 static void usage(void)
 {
 	fprintf(stderr, "usage: map_extract [--data <data root>] [--out <folder>] [--tag <text>]... "
-		"[--only bitmaps,models,bsps] [--mips] [--scale <factor>] [--list] [--verbose] <map>\n");
+		"[--only bitmaps,models,bsps,shaders] [--mips] [--scale <factor>] [--list] [--verbose] <map>\n");
 	exit(2);
 }
 
@@ -3510,7 +3683,7 @@ int main(int argc, char **argv)
 	char name[256];
 
 	globals.scale = 1.0f;
-	globals.want_bitmaps = globals.want_models = globals.want_bsps = 1;
+	globals.want_bitmaps = globals.want_models = globals.want_bsps = globals.want_shaders = 1;
 	for (i = 1; i < argc; i++)
 	{
 		if (!strcmp(argv[i], "--data") && i + 1 < argc)
@@ -3526,6 +3699,7 @@ int main(int argc, char **argv)
 			globals.want_bitmaps = strstr(kinds, "bitmap") != NULL;
 			globals.want_models = strstr(kinds, "model") != NULL;
 			globals.want_bsps = strstr(kinds, "bsp") != NULL;
+			globals.want_shaders = strstr(kinds, "shader") != NULL;
 		}
 		else if (!strcmp(argv[i], "--mips"))
 			globals.mips = 1;
@@ -3649,6 +3823,17 @@ int main(int argc, char **argv)
 
 			if (globals.selected[index] && instance->group_tag == BITMAP_GROUP_TAG)
 				bitmap_export(instance->tag_index);
+		}
+	}
+	if (globals.want_shaders)
+	{
+		for (index = 0; index < globals.tags->tag_count; index++)
+		{
+			struct tag_instance *instance = &globals.tags->instances[index];
+
+			if (globals.selected[index] && (instance->group_tag == SHADER_ENVIRONMENT_GROUP_TAG ||
+				instance->group_tag == SHADER_MODEL_GROUP_TAG))
+				shader_export(instance->tag_index);
 		}
 	}
 	fprintf(globals.index, "\n  ],\n  \"validator_messages\": %ld,\n  \"warnings\": %ld\n}\n", validator_messages,

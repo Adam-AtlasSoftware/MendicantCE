@@ -117,10 +117,45 @@ enum
 	/* (a model lit for each vertex, its ambient light apart: xgpu.h's
 	XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX) */
 	XGPU_SPIRV_LOCATION_LIGHT_AMBIENT, XGPU_SPIRV_LOCATION_LIGHT_POINT,
+	/* (a G-buffer twin of the level drawn by its pack's material: the
+	vertices' own texture coordinates, the base map's: xgpu_spirv_options
+	gbuffer_base_uv) */
+	XGPU_SPIRV_LOCATION_BASE_UV,
 };
 
 /* the G-buffer twins' uniforms (xgpu_spirv_uniforms' gbuffer), vec4s */
 #define XGPU_SPIRV_GBUFFER_UNIFORMS 5
+
+/* a G-buffer twin drawn by its material's maps, the pack's or a mod's
+(PRISM v4 M4: xgpu_spirv_options gbuffer_pack; SCENE_MATERIAL_MAPS): its
+family's uber-shader, an environment shader's on the level's twins, a model
+shader's on an object's. Its images are in the material bindings
+(XGPU_MATERIAL_BINDING + XGPU_SPIRV_PACK_IMAGE_*, every one declared, a
+stand-in where there is none); its numbers in the uniforms' material member
+(whose own use, display.prism_materials', a twin never has):
+  [0] the albedo's factor (rgb), the normal's scale
+  [1] roughness, metalness (the ORM's factors), the occlusion's strength,
+      specular (F0's scale, 0.5 the dielectric 4%)
+  [2] the primary detail map's scale (u, v), the secondary's
+  [3] the micro detail map's scale (u, v); the material's flags
+      (SCENE_MATERIAL_MAPS': its type, detail functions and the normal's
+      coordinates) and the images resident (bit XGPU_SPIRV_PACK_IMAGE_*),
+      each a float
+  [4] the view's axis at the screen's middle (xyz)
+  [5] [6] its change a unit of the screen's x, and y
+  [7] the view's corners in the target's pixels (left, top, right, bottom)
+The automatic tier's roughness, metalness and specular stay in the G-buffer
+uniforms' [0], for an image not resident yet. */
+enum
+{
+	XGPU_SPIRV_PACK_IMAGE_ALBEDO,
+	XGPU_SPIRV_PACK_IMAGE_NORMAL,
+	XGPU_SPIRV_PACK_IMAGE_ORM,
+	XGPU_SPIRV_PACK_IMAGE_PRIMARY_DETAIL,
+	XGPU_SPIRV_PACK_IMAGE_SECONDARY_DETAIL,
+	XGPU_SPIRV_PACK_IMAGE_MICRO_DETAIL,
+	XGPU_SPIRV_PACK_IMAGES,
+};
 
 /* the draw's values both stages read, laid out alike in C and in the
 shaders' uniform block (std140: vec4s, and floats in fours): the backend's
@@ -246,6 +281,15 @@ struct xgpu_spirv_options
 	shader hands on the world normal (lit), which word 1 is of (else 0) */
 	int gbuffer;
 	BOOL gbuffer_normal;
+	/* (a G-buffer twin of a material of the pack or mod tier, its family's
+	uber-shader (XGPU_SPIRV_PACK_IMAGE_*, above): its maps' base colour,
+	normal, roughness and metalness, and the base colour also in the
+	G-buffer's albedo target (location 2: RGBA8, its alpha the occlusion,
+	0 where the base colour is not the maps'); gbuffer_base_uv: the level's
+	vertex shader hands on the base map's coordinates, the vertices' own
+	(attribute 4)) */
+	BOOL gbuffer_pack;
+	BOOL gbuffer_base_uv;
 };
 #define XGPU_SPIRV_GBUFFER_OBJECT 1
 #define XGPU_SPIRV_GBUFFER_LEVEL 2

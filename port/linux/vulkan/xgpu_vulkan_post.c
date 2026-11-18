@@ -213,7 +213,7 @@ static struct xgpu_vulkan_pipeline_description *pipeline_of(int program, uint8_t
 {
 	return format == XGPU_VULKAN_FORMAT_RGBA16F && (program == XGPU_VULKAN_POST_FXAA ||
 		program == XGPU_VULKAN_POST_SMAA_BLEND || program == XGPU_VULKAN_POST_PANINI ||
-		program == XGPU_VULKAN_POST_DEFERRED_RESOLVE) ?
+		program == XGPU_VULKAN_POST_DEFERRED_RESOLVE || program == XGPU_VULKAN_POST_ALBEDO_OVER) ?
 		&post.half_float[program] : &post.pipelines[program];
 }
 
@@ -526,6 +526,50 @@ int xgpu_vulkan_post_deferred_resolve(struct xgpu_vulkan_image *target, struct x
 		bounds[0] = 2.0f;
 	pass_draw(XGPU_VULKAN_POST_DEFERRED_RESOLVE, target, 0, rectangle, light ? light : post.color, base,
 		view == 8 && depth ? depth : additions, bounds);
+	post.gbuffer = NULL;
+	return 1;
+}
+
+/* PRISM v4 M4's materials of the pack and mod tiers: the level's base colour
+of their maps over the base target (ALBEDO_OVER: each level pixel of such a
+material whose albedo target has its colour, its red, green and blue alone;
+the others discarded), before the resolve reads it */
+int xgpu_vulkan_post_albedo_over(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *albedo,
+	struct xgpu_vulkan_image *gbuffer)
+{
+	const struct xgpu_vulkan_image_description *description;
+	struct xgpu_vulkan_pipeline_description *pipeline;
+	int32_t rectangle[4];
+
+	if (!base || !albedo || !gbuffer)
+		return 0;
+	description = xgpu_vulkan_image_description(base);
+	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
+		description->samples > 1)
+		return 0;
+	if (!post.vertex)
+		post.vertex = xgpu_vulkan_shader(xgpu_vulkan_post_vertex.words, xgpu_vulkan_post_vertex.count);
+	if (!post.pixel[XGPU_VULKAN_POST_ALBEDO_OVER])
+		post.pixel[XGPU_VULKAN_POST_ALBEDO_OVER] = xgpu_vulkan_shader(
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_ALBEDO_OVER].words,
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_ALBEDO_OVER].count);
+	if (!post.vertex || !post.pixel[XGPU_VULKAN_POST_ALBEDO_OVER] || !sampler_make())
+		return 0;
+	if (!images_fit(0, description->format, description->width, description->height))
+		return 0;
+	pipeline = pipeline_of(XGPU_VULKAN_POST_ALBEDO_OVER, description->format);
+	memset(pipeline, 0, sizeof(*pipeline));
+	pipeline->vertex_shader = post.vertex;
+	pipeline->pixel_shader = post.pixel[XGPU_VULKAN_POST_ALBEDO_OVER];
+	pipeline->primitive_class = XGPU_VULKAN_CLASS_TRIANGLES;
+	pipeline->color_mask = 7;
+	pipeline->color_format = description->format;
+	pipeline->samples = 1;
+	rectangle[0] = rectangle[1] = 0;
+	rectangle[2] = (int32_t)description->width;
+	rectangle[3] = (int32_t)description->height;
+	post.gbuffer = gbuffer;
+	pass_draw(XGPU_VULKAN_POST_ALBEDO_OVER, base, 0, rectangle, albedo, NULL, NULL, NULL);
 	post.gbuffer = NULL;
 	return 1;
 }

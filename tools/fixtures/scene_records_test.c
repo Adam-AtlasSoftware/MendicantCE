@@ -136,6 +136,14 @@ static void layout(void)
 	FIELD(xgpu_stream_prism_bake, noise_floor);
 	FIELD(xgpu_stream_prism_bake, pad);
 	FIELD(xgpu_stream_prism_bake, map_name);
+	SIZE(xgpu_stream_scene_material_maps);
+	FIELD(xgpu_stream_scene_material_maps, header);
+	FIELD(xgpu_stream_scene_material_maps, material);
+	FIELD(xgpu_stream_scene_material_maps, tier);
+	FIELD(xgpu_stream_scene_material_maps, model);
+	FIELD(xgpu_stream_scene_material_maps, flags);
+	FIELD(xgpu_stream_scene_material_maps, maps);
+	FIELD(xgpu_stream_scene_material_maps, scalars);
 }
 
 /* (the bytes, 4-byte aligned) */
@@ -186,6 +194,19 @@ static void encode(void)
 		0, 0, NULL, 0, NULL, 0));
 	show("material_room", xgpu_scene_encode_material(buffer, sizeof(struct xgpu_stream_scene_material) - 4, 7, hash,
 		0, 0, 0, 0, 0, NULL, 0, NULL, 0));
+	show("maps", xgpu_scene_encode_material_maps(buffer, sizeof(buffer), 7, XGPU_GBUFFER_TIER_PACK,
+		XGPU_GBUFFER_MODEL_FOLIAGE, XGPU_SCENE_MAPS_FLAG_NORMAL_AT_BUMP | (2u << XGPU_SCENE_MAPS_DETAIL_SHIFT), bitmaps,
+		10, scalars, 40));
+	show("maps_forget", xgpu_scene_encode_material_maps(buffer, sizeof(buffer), 9, XGPU_GBUFFER_TIER_AUTO, 0, 0, NULL,
+		0, NULL, 0));
+	show("maps_none", xgpu_scene_encode_material_maps(buffer, sizeof(buffer), 0, XGPU_GBUFFER_TIER_PACK, 0, 0, NULL,
+		0, NULL, 0));
+	show("maps_tier", xgpu_scene_encode_material_maps(buffer, sizeof(buffer), 7, XGPU_GBUFFER_TIER_CLASS, 0, 0, NULL,
+		0, NULL, 0));
+	show("maps_model", xgpu_scene_encode_material_maps(buffer, sizeof(buffer), 7, XGPU_GBUFFER_TIER_MOD, 16, 0, NULL,
+		0, NULL, 0));
+	show("maps_room", xgpu_scene_encode_material_maps(buffer, sizeof(struct xgpu_stream_scene_material_maps) - 4, 7,
+		XGPU_GBUFFER_TIER_MOD, 0, 0, NULL, 0, NULL, 0));
 	for (index = 0; index < 5; index++)
 	{
 		colors[index][0] = (float)index;
@@ -297,6 +318,7 @@ static void constants(void)
 	printf("scene_fog %u\n", (unsigned)XGPU_STREAM_SCENE_FOG);
 	printf("scene_view %u\n", (unsigned)XGPU_STREAM_SCENE_VIEW);
 	printf("prism_bake %u\n", (unsigned)XGPU_STREAM_PRISM_BAKE);
+	printf("scene_material_maps %u\n", (unsigned)XGPU_STREAM_SCENE_MATERIAL_MAPS);
 	printf("scene_record_types %u\n", (unsigned)XGPU_STREAM_SCENE_RECORD_TYPES);
 }
 

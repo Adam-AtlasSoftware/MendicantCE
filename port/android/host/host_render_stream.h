@@ -102,6 +102,10 @@ struct host_render_backend
 	follow */
 	void (*scene_material)(void *context, const struct xgpu_stream_scene_material *record);
 	void (*gbuffer_draw)(void *context, const struct xgpu_stream_gbuffer_draw *record);
+	/* SCENE_MATERIAL_MAPS: a material's maps where a pack or a mod gives
+	its shader PRISM's material (its tier checked to be one of them, or the
+	automatic tier's, which forgets them) */
+	void (*scene_material_maps)(void *context, const struct xgpu_stream_scene_material_maps *record);
 	/* SCENE_STATIC: data its slice's (NULL none), checked to lie in the stream */
 	void (*scene_static)(void *context, const struct xgpu_stream_scene_static *record, const void *data);
 	/* SCENE_LIGHTS: count lights, checked to lie in the record */

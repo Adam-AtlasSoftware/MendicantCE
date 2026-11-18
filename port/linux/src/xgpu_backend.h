@@ -164,6 +164,14 @@ void xgpu_backend_scene_material(unsigned long material, const unsigned long has
 	int scalar_count);
 void xgpu_backend_gbuffer_draw(unsigned long material, unsigned long instance, unsigned long flags,
 	unsigned long lightmap);
+/* SCENE_MATERIAL_MAPS (xgpu_stream.h; port/linux/game/prism_materials.c): a
+material's maps, where a pack or a mod gives its shader PRISM's material:
+its tier (XGPU_GBUFFER_TIER_PACK or _MOD; _AUTO forgets the maps it had),
+model, flags (XGPU_SCENE_MAPS_FLAG_*), the texture store's ids of its images
+(XGPU_SCENE_MATERIAL_MAPS of them by XGPU_SCENE_MAP_*) and its scalars
+(XGPU_SCENE_MATERIAL_MAP_SCALARS) */
+void xgpu_backend_scene_material_maps(unsigned long material, unsigned long tier, unsigned long model,
+	unsigned long flags, const unsigned long *maps, const float *scalars);
 /* SCENE_STATIC (xgpu_stream.h): the level's geometry as drawn, a slice at
 a time (port/linux/game/prism_scene_static.c): phase XGPU_SCENE_STATIC_*,
 count items from first of total (triangles, attributes, pages or levels'

@@ -645,6 +645,91 @@ Vulkan validation with synchronisation (33f4cdec9, G5's poses, every state): the
 Classic and Enhanced identity and determinism were not run again this round (no change outside the path tracer's
 mode and the capture tool).
 
+## M4, part 1: the pack and mod materials
+
+M4's first part (`docs/prism_materials.md`) is judged on b30 and a10 with the material pack built from the player's
+own maps (`prism_packs.py build v4_materials`) in the data folder's `mods/prism_v4_materials`, each capture made twice
+by the same tree: with `display.material_packs` off (`HALO_MATERIAL_PACKS=false`: M1's G-buffer as it was) and on.
+
+```sh
+python3 tools/prism_gate/capture.py equivalence G2 G5 --stage <tree> --data <data> --config <classic toml> \
+    --out <off> --env HALO_MATERIAL_PACKS=false
+python3 tools/prism_gate/capture.py equivalence G2 G5 --stage <tree> --data <data> --config <classic toml> \
+    --out <on> --env HALO_MATERIAL_PACKS=true
+python3 tools/prism_gate/gate.py equivalence <off>
+python3 tools/prism_gate/gate.py material_source <on>
+python3 tools/prism_gate/capture.py bake G2 G5 --stage <tree> --data <data> --config <classic toml> --out <dir> \
+    --env HALO_MATERIAL_PACKS=<false or true> --env HALO_BAKE_FOLDER=<bakes> --env HALO_BAKE_QUALITY=ultra
+```
+
+- **The packs off**: M1's equivalence (`equivalence_flip`) and material source (`material_source_coverage`) hold as
+  they did: no `SCENE_MATERIAL_MAPS` is sent and the G-buffer pass has no albedo target.
+- **The packs on**: the material source's coverage holds (the automatic tier or better; `gate.py material_source`
+  reports the pack's and the mods' shares of the opaque pixels beside it), and the G-buffer's views (`albedo`,
+  `normal`, `roughness`, `material_source`) and the frames (`ce_deferred`'s, PRISM Raster's) are recorded at the same
+  poses as with the packs off. The deferred frame is not Classic's by design (the base colour is the pack's, with
+  CE's painted light taken out), so `equivalence_flip` does not apply to it; its FLIP against Classic is recorded.
+- **The pack itself**: each material's own gate as it is made: the low band of its composite base colour against
+  its source's, CIEDE2000 at most 1.0 on average and 3 at the 95th percentile.
+
+### M4 as measured
+
+The RTX 2060, November 2026, the stock world (`config.classic.toml`), the pack of b30 and a10. The equivalence and
+Raster captures are 89e6217d7's tree's; the final tree only asks the device for independent blending besides (the
+albedo target's own write mask), and the every-milestone checks below are its.
+
+**The pack** (`prism_v4_materials.py`, four workers, the processor alone; b30 90 s, a10 79 s):
+
+| Map | Environment shaders | De-lit (strength) | Characters' model shaders | Gate (low-band CIEDE2000, worst mean / p95) |
+| --- | --- | --- | --- | --- |
+| b30 | 21 of 22 (`b30_invisible`: no base map) | 12 at 0.7, 1 at 0 (the gate), 8 none (R² under 0.1) | 51 of 51 (40 from Bold, 3 base_local, 8 CE) | environment 0.48 / 0.75, characters 0.99 / 2.69 |
+| a10 | 43 of 45 (`+ladder stair`, `monitor glow`: no base map) | 21 at 0.7, 3 at 0.42, 2 at 0.21, 2 at 0, 15 none | 44 of 44 (33 Bold, 3 base_local, 8 CE) | environment 1.00 / 2.11, characters 0.97 / 2.69 |
+
+Bold's and base_local's base maps against CE's (the characters' source, reported): a low-band CIEDE2000 of 0.09 (b30)
+and 0.13 (a10) on average at the median shader, 0.64 at the worst. b30's 24 detail layers (19 shaders) keep CE's own
+mip levels (a10's environment shaders have none).
+
+**The packs off.** `gate.py equivalence`: G2 0.0035 (poses 0.0027, 0.0035, 0.0031), G5 0.0020 (0.0020, 0.0010, 0.0015),
+M1's to the digit; the frames byte for byte those of the tree before the two fixes below (30 of 30 each).
+Material source 1.000000 at every pose, no pixel missed, extra or without a material.
+
+**The packs on.** Material source 1.000000 at every pose; the pack's share of the opaque pixels G2 0.952, 0.896, 0.833
+(the rest b30's trees and rocks: scenery, at the automatic tier), G5 0.645, 0.297, 0.739 (a10's doors, panels and
+machines: devices and scenery). Classic's frames of the same runs byte for byte those with the packs off (3 of 3
+each). The deferred frame against Classic: G2 0.0587 (0.0410, 0.0587, 0.0521), G5 0.0067 (0.0067, 0.0045, 0.0056);
+against the packs off, 0.041 to 0.059 (G2) and 0.004 to 0.006 (G5). PRISM Raster with the pack against without:
+G2 0.057 to 0.080, G5 0.005 to 0.022 (both read the ultra bakes whole). On the pack's pixels the base colour is the
+packs-off one's within 1.5% at the median (G2 1.007 to 1.015, G5 0.996 to 1.000); the normal carries CE's bump maps
+(the vertices' alone before), the roughness the pack's texels.
+
+Two faults the first captures found, fixed before the numbers above: the pack's detail maps had their levels halved
+from the first, keeping each map's mean where CE's fade toward grey (b30's metal walls 1.2 to 1.3 times too bright at
+a distance; now CE's own levels), and the maps' base colour was put over the base at the resolve, after the decals
+(a10's corridor dirt lost; now right after the diffuse texture pass, `GBUFFER_PHASE`'s `BASE_TEXTURED`).
+
+**Every milestone's checks** (the final tree against 1e95379ef, the RTX 2060's shared lane, the data folder with the
+pack in it): `identity.py frames` b30 and a10, 46 of 46 frames byte-identical each (each tree with itself, the new
+with the base); `stills` (the kit's settings, RT off) G2, G5 and G4, 30 of 30 each (G7 left out: its lamps' glows part
+every run of either tree, as above); `determinism` (a10, `--simulation`) all alike, 1,476 ticks, each tree with itself
+and the new with the base. Vulkan validation with synchronisation validation, G2's probes, the pack on:
+`ce_deferred` and `raster` 0 messages, 0 hazards, 0 VUIDs (the tree before the albedo target asked for independent
+blending had 9 of VUID-VkPipelineColorBlendStateCreateInfo-pAttachments-00605 in each). Raster with its bake loaded
+whole (G5's probes, 200 frames a pose, the RTX 3070 Ti's light lane): 20 messages, the same 20 as 1e95379ef's in the
+same run (the bake's loading: a barrier's `VK_ACCESS_2_HOST_READ_BIT` under `ALL_COMMANDS`, 9 times, and a
+`WRITE_AFTER_WRITE` hazard between two of its buffer copies, 9 times; each then cut by the duplicate limit), none
+from the materials.
+
+**A device that draws no materials.** The pack's uber-shaders sample the textures' set's material bindings, which the
+set has only where the device draws `display.prism_materials`' materials; the review's fix reads no pack or mod
+material there and binds no albedo target. `HALO_MATERIALS_OFF=1` (the knob that stands for such a device), G2's
+probes, the pack in the data folder, `ce_deferred` with Vulkan validation and synchronisation validation (a short
+check on the RTX 3070 Ti, 89 s): 0 messages, as the same run without the knob; the material source view has no pack
+pixel (its blue 0.000 at each pose, against 0.835, 0.893 and 0.805 without the knob) and every opaque pixel at the
+automatic tier.
+
+Not measured yet: the G-buffer pass's time with the pack against without (it needs the RTX 2060 alone), and the RTX
+3070 Ti's numbers.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:

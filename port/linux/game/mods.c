@@ -116,6 +116,8 @@ static void mods_update(
 	/* (display.prism_materials' files, whose images go with the texture
 	store's record) */
 	mods_globals.pbr_count = mod_pbr_update(remove_all, at_load);
+	/* (and PRISM v4's materials of the pack and mod tiers, theirs too) */
+	(void)prism_materials_update(remove_all, at_load);
 	mods_globals.texture_count = mod_textures_update(remove_all, at_load);
 	mods_globals.mesh_count = mod_meshes_update(remove_all, at_load);
 	/* (the texture cache's size follows the mods' bitmaps: as the map
@@ -397,6 +399,7 @@ static void mods_let_go(
 	mod_textures_tags_unloaded();
 	mod_meshes_tags_unloaded();
 	mod_pbr_tags_unloaded();
+	prism_materials_tags_unloaded();
 	mods_globals.map_loaded = FALSE;
 	mods_globals.enabled = FALSE;
 	mods_globals.loose_sounds_enabled = FALSE;
