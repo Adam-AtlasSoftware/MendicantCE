@@ -3786,18 +3786,36 @@ static void stream_world_ao_field(void *context, const struct xgpu_stream_world_
 
 /* display.prism_rt: the structure's triangles and each frame's settings
 (xgpu_vulkan_rt.c) */
+static double stream_clock(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (double)t.tv_sec + (double)t.tv_nsec * 1.0e-9;
+}
+
 static void stream_rt_static(void *context, const struct xgpu_stream_rt_static *record, const void *data)
 {
+	double started = stream_clock();
+
 	(void)context;
 	xgpu_vulkan_rt_static(record, data);
+	/* (a diagnostic: a slow record logged, HALO_RASTER_EXPOSURE_LOG's runs) */
+	if (stream_clock() - started > 0.25 && getenv("HALO_RASTER_EXPOSURE_LOG"))
+		host_logf(HOST_LOG_INFO, "prism rt: RT_STATIC part %u took %.2f s", (unsigned)record->phase,
+			stream_clock() - started);
 }
 
 /* PRISM v4's SCENE_STATIC: the level's geometry, kept for every consumer
 (xgpu_vulkan_scene.c) */
 static void stream_scene_static(void *context, const struct xgpu_stream_scene_static *record, const void *data)
 {
+	double started = stream_clock();
+
 	(void)context;
 	xgpu_vulkan_scene_static(record, data);
+	if (stream_clock() - started > 0.25 && getenv("HALO_RASTER_EXPOSURE_LOG"))
+		host_logf(HOST_LOG_INFO, "prism scene: SCENE_STATIC took %.2f s", stream_clock() - started);
 }
 
 /* PRISM v4's SCENE_LIGHTS: the frame's light table, kept (xgpu_vulkan_scene.c) */

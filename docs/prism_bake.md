@@ -262,6 +262,14 @@ the sky's kind, the albedo's rule, the sun's test distance) and the lamps, the r
 quality and the threshold. A file of
 another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done.
 
+**The reach's file.** The walk that finds where the player can be (the reach: the bricks the probes fill, the
+surfaces' tiers) is kept beside the BSP's bake (`<map>/bsp<n>.reach`, keyed by a hash of its inputs), so a BSP drawn
+again takes it at once: b30's first BSP's walk takes 16 s on the CPU, during which Raster drew CE's light. Its BSP
+change (b30's beach into the structure and back, 3070 Ti) now holds the frame 0.9 and 1.9 s, Raster's light whole
+again 1.5 to 3 s after it (the tiles loaded 2048 a frame), where before the frame stopped 20 s going in (the path
+tracer's lamp grid, made on the frame's thread for the structure's 1871 lamps although nothing was traced: now made at
+the first traced window) and the beach stayed CE's light 16 s coming out.
+
 ## The settings
 
 | Setting | Values | |
