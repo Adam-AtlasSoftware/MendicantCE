@@ -1390,9 +1390,12 @@ static void crosshairs_draw(
 												zoom; display.scale_scoped_fov's keeps
 												the unzoomed size (#594). Let go, the view eases
 												back out after the zoom level has gone, and the
-												reticle with it, as it eased in (#747) */
+												reticle with it, as it eased in (#747).
+												Warnings (RELOAD and the like) are not
+												the reticle: they keep the view's scale
+												on every map */
 												state_index == _crosshair_state_zoom ||
-													custom_edition_hud_warning(state_index) ? FALSE :
+													hud_crosshair_state_warning(state_index) ? FALSE :
 												TEST_FLAG(item->flags, _hud_crosshair_not_on_default_zoom_bit) ||
 													TEST_FLAG(item->flags, _hud_crosshair_show_sniper_data_bit) ||
 													(crosshair->states[_crosshair_state_zoom].value.reference_data > 0 ||
