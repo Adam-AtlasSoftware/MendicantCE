@@ -176,7 +176,7 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   moments are of the samples as traced, the light's history of the held ones: moments of held samples held the next
   ones lower still, so a light one frame in twenty sees was held to about half of itself under a still eye, and a
   moving eye's resampled histories loosened the hold: round 2's interiors darker than R held still, brighter moving); while it
-  is shorter (a moving camera, a disocclusion, the first frames), to 4 times the brightest of its eight neighbours two
+  is shorter (a moving camera, a disocclusion, the first frames), to 4 times the brightest of its eight neighbours two (the specular to 16 times)
   pixels away on the same surface, so that one sample of a small bright light (a keypad's glow met by the bounce) is
   not spread by the fix and the a-trous steps into a blob (round 1's moving a10 frames: green dots, smears). Once the
   history is long, no light is held to its neighbours: where a lamp is seen by few samples (through a gap) a sample

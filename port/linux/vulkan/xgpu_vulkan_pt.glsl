@@ -2256,8 +2256,13 @@ void main()
         }
         if (any_ && short_d)
             cap_d = min(cap_d, max(4.0 * most_d, 1.0e-3));
+        /* (the specular's at 16 times: a glossy floor's reflection of a lamp
+        strip is a few rays in many that meet it, its neighbours' samples
+        dark, and 4 times them took it away wherever a moving eye's history
+        was short: round 3's G5, the corridor's floor through the door
+        windows without the strips R reflects) */
         if (any_ && short_s)
-            cap_s = min(cap_s, max(4.0 * most_s, 1.0e-3));
+            cap_s = min(cap_s, max(16.0 * most_s, 1.0e-3));
     }
     vec3 cd = ld > cap_d ? nd.rgb * (cap_d / ld) : nd.rgb;
     vec3 cs = ls > cap_s ? ns.rgb * (cap_s / ls) : ns.rgb;
