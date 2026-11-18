@@ -864,8 +864,10 @@ static boolean scenery_part_copy(
 	return good;
 }
 
-/* the static scenery's triangles (the scenery's, the machines', the
-controls' and the light fixtures' placements); FALSE if no memory */
+/* the static scenery's triangles (the scenery's, the controls' and the
+light fixtures' placements; not the machines': doors and lifts move, and
+Tool's radiosity never had them, so they neither block nor reflect the
+bake's light); FALSE if no memory */
 static boolean scenery_copy(
 	struct reach_input *input,
 	struct scenario *scenario)
@@ -884,6 +886,10 @@ static boolean scenery_copy(
 	palettes[3] = &scenario->light_fixtures_palette;
 	for (kind = 0; kind < 4; kind++)
 	{
+		if (kind == 1)
+		{
+			continue;
+		}
 		for (index = 0; placements[kind]->address && index < placements[kind]->count; index++)
 		{
 			struct scenario_object_datum const *placement = (struct scenario_object_datum const *)
