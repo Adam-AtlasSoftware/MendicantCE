@@ -39,7 +39,11 @@ highlights it cannot show.
   (`faithful`, `punchy`), `display.hdr_paper_white_nits` (80 to 500 nits,
   or 0, the default: the system's SDR white; the older
   `display.hdr_paper_white`, in percent of the system's SDR white, is still
-  read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below).
+  read while it is 0), `display.hdr_ui_nits` (the UI's brightness, below),
+  `display.hdr_sdr_curve` (`auto`, `srgb`, `2.2`: the shadows' curve, under
+  "Choices"), `display.hdr_peak_nits` (the display's peak, below),
+  `display.hdr_highlight_boost` (the lights' gain, below), `display.hdr_gamut`
+  (the highlights' colors, below).
   On a renderer that draws HDR (the menus' `platform="hdr"`), Video
   Setup's Brightness page has a row for each under its HDR section, and a
   DISPLAY PEAK row that shows the display's peak and SDR white as the
@@ -52,6 +56,47 @@ highlights it cannot show.
   ratio above it; the first-person weapon's displays and the
   self-illumination are the 3D view's and stay with paper white. It is
   never brighter than the display's peak.
+- **Peak brightness** (`display.hdr_peak_nits`, #1122): the display's peak
+  in nits, 200 to 10000, for a display that reports a wrong one, or 0, the
+  default: the system's (the picture as before). Only what is past paper
+  white changes. With a peak of the player's, the curve also takes what
+  Windows' DXGI reports of the display (`IDXGIOutput6::GetDesc1`, the HDR
+  Calibration app's values where it has run; logged as `hdr: DXGI: ...`):
+  its full-frame peak, toward which the shoulder holds the bright parts (a
+  shoulder toward it summed with one that rises flat from paper white
+  toward the rest of the peak, so a small core still reaches the peak:
+  `xgpu_hdr_highlight`), and its black, under 4 times which the encoding
+  lifts the light into the display's range (`xgpu_hdr_black`). Without
+  them (0: other systems, or System's peak) both are the curve as before.
+- **Highlight boost** (`display.hdr_highlight_boost`, #1123): 0 (the
+  default: the picture as before, exactly) to 4. Each level gains the
+  light an emitter adds by a quarter more, its brightest channel no
+  further than its ceiling (nor than itself where it is already past):
+  the self-illumination of models and level geometry toward
+  self-illumination's 2 times paper white (`xgpu_hdr_self_illuminate_boost`),
+  and, before the fixed-function blend adds it, the colour of a draw the
+  game marks as light (`HALO_HDR_KIND_EMITTER`: the lens flares and the
+  sun's glow, glows, self-illuminated particles; the first-person
+  weapon's toward the weapon's ceiling) toward the lights' 3 times
+  (`xgpu_hdr_boost_emitter`). The level is in the tag's ceiling bits of
+  the self-illumination's and the emitter's tags (`XGPU_HDR_BOOST`,
+  `XGPU_HDR_EMITTER`), so a change makes those draws' pipelines again.
+  Not boosted: contrails and particle systems' particles (unmarked), and
+  an additive emitter that also writes alpha (blended in its shader).
+- **Highlight colors** (`display.hdr_gamut`, #1124): `srgb` (the default,
+  the picture as before) or `expanded`. The frame is sRGB's, so no color
+  past it exists; `expanded` makes the highlights more vivid on purpose.
+  In the encoding, a pixel whose brightest channel is past paper white
+  (or the UI's white, the brighter) has its chroma in Oklab scaled by up
+  to 1.5, from none at white to all of it at 4 times, its hue and
+  lightness kept. The room along its hue in the target gamut (and under
+  the peak) is found by 12 halvings, and the chroma is compressed softly
+  into it (a shoulder from three quarters of the room on): no flat patches,
+  no hue shift. The target: the display's primaries where DXGI reports
+  them (by their triangle's area, between sRGB's, P3's and BT.2020's,
+  never past BT.2020), Display P3 on macOS and iOS, DCI-P3 (D65)
+  elsewhere (`xgpu_hdr_gamut`). The swapchain's HDR metadata still names
+  sRGB's primaries.
 - **Fallback**: `auto` turns HDR on only on an HDR display; off, and on an
   SDR display, the frame is the 8-bit one, byte for byte. Highlights roll
   off under a soft shoulder to the display's peak (its EDR headroom, which
@@ -116,11 +161,27 @@ already past white (a decal over a wall a plasma bolt lights) therefore
 does not dim that light, and over a pixel under white it stops where the 8-bit
 target stopped. A float target cannot clamp a blend, so the backend blends
 such a draw in its pixel shader, reading the pixel it draws over (Metal's
-programmable blending; Vulkan's local reads of the colour attachment, in
-rasterization order where the device has it, else after a framebuffer-local
-barrier before the draw), with the key's blend (`XGPU_HDR_BLEND_*`) and its
-fixed-function blending off. One less the destination's colour is never
-below 0 there.
+programmable blending; Vulkan's local reads of the colour attachment), with
+the key's blend (`XGPU_HDR_BLEND_*`) and its fixed-function blending off.
+One less the destination's colour is never below 0 there.
+
+The draw must read the pixel as its own earlier triangles left it: two
+triangles of one draw over the same pixel (batched decals, a text's glyphs,
+a shield's front and back) each blend over the other, in the order they
+were drawn, as fixed-function blending orders them. Metal's programmable
+blending is ordered so. Vulkan orders the reads where the device has
+`VK_EXT_rasterization_order_attachment_access` (tilers); where it has the
+fragment shader interlock instead (NVIDIA's and RADV's desktop GPUs), the
+draw reads and writes its target as a storage image inside the interlock's
+critical section, in the triangles' order, the draws before and after it
+ordered by barriers (`port/linux/vulkan/README.md`, "HDR"); elsewhere only
+draws are ordered, after a framebuffer-local barrier before each, and a
+draw's own triangles over the same pixel blend over the pixel as it was
+before the draw: the second wins, the first is lost under it. Decals that
+overlap are never one draw on any device
+(`rasterizer_decal_batch_overlaps`): without the order, a scorch over a
+scorch in one draw lost the one under it inside a lighter patch with
+straight edges.
 
 **Expansion** brightens a glow where it is bright (its brightest channel
 from 0.6 up; the light of the world's from 0.4, which the game draws
@@ -356,9 +417,40 @@ the stream's ring carries it, written by the host). A backend declares
   alone would make plasma cores deep blue where the game shows them
   white-hot; the SDR colour alone would wash out a glow that is barely past
   white (the counter). The mix keeps both looks.
-- **sRGB's curve, not a 2.2 power.** Untagged 8-bit content on a Mac reaches
-  the panel through its sRGB-curve transfer, so sRGB's curve keeps the
-  shadows where the SDR picture has them.
+- **The SDR curve of the platform** (`display.hdr_sdr_curve`, #1120). The
+  encoding takes the frame's values to light by the curve an SDR display of
+  the platform shows them with, so that HDR's shadows are where the SDR
+  picture has them. Untagged 8-bit content on a Mac reaches the panel
+  through its sRGB-curve transfer, so `auto` is sRGB's curve on macOS and
+  iOS. Most PC monitors and TVs show SDR at gamma 2.2, far darker near
+  black (code 1 sixty times, code 10 four times), so `auto` is 2.2 elsewhere:
+  a 2.2 power to code 25, sRGB's curve from code 51 up, joined by a
+  smoothstep (never falling), so only the shadows move. `srgb` and `2.2`
+  choose either everywhere. No black floor is added: with 2.2, code 1 is
+  0.001 nit, as on the SDR display.
+- **One last pass, dithered** (#1108). The frame's last pass (the encoding
+  program) draws the picture at its size in the swapchain: it scales the
+  frame (Vulkan's sharp upscale in one tap), encodes it (HDR's encoding, or
+  `display.gamma`'s curve over SDR), then dithers by a static triangular
+  noise of up to one output level (1/255 for 8 bits, 1/1023 for HDR10's PQ),
+  narrowed near black and white so it never rounds past them, and none at
+  them. On Vulkan its image is copied 1:1 into the swapchain (a blit has no
+  arithmetic and would scale the pattern); on Metal it draws into the drawable. scRGB's and
+  EDR's half floats are not dithered. The dither only helps where the
+  frame has more bits than the output: the HDR frame's half floats (about
+  11 bits, enough for 8-bit SDR and 10-bit PQ), or a curve between them.
+  With `display.output_depth` "8" the SDR frame is BGRA8 (every blend
+  rounded to 1/255 before the last pass), so at gamma 1 it is the
+  swapchain's codes already and is copied byte for byte, undithered; at
+  other gammas the dither keeps the curve's mean but cannot smooth the
+  steps an 8-bit frame already has. With "10" ("auto" on a computer,
+  #1152) the SDR frame is RGBA16, 16-bit unsigned normalized: it clamps
+  and blends as BGRA8 does (the same picture; half floats would keep what
+  a blend takes past 1, and destination alpha past 1, which only HDR's tags
+  keep in range), at 65535 levels, and the last pass dithers it to a 10-bit
+  SDR swapchain where the surface lists one, else to 8 bits. It costs
+  twice the frame's memory and bandwidth (3840x2160: 66 MB, against 33),
+  so "auto" keeps 8 bits on phones and tablets and with battery saver.
 - **sRGB's gamut.** The EDR layer is tagged extended linear sRGB, as the
   owner asked: no colour is pushed into P3. The SDR layer stays untagged (it
   is unchanged), which on a P3 panel shows the game's colours slightly more
@@ -375,9 +467,11 @@ the stream's ring carries it, written by the host). A backend declares
   draw would cost a full-screen copy per HUD bitmap; a separate pass would
   break the game's order of draws. Where the device also has
   `VK_EXT_rasterization_order_attachment_access`, the reads are ordered as
-  Metal's are; without it, each tagged draw is ordered after those before
-  it by a framebuffer-local barrier, and only two triangles of the same
-  tagged draw over the same pixel are unordered.
+  Metal's are; where it has `VK_EXT_fragment_shader_interlock` instead,
+  the tagged draws that write no depth are interlocked (above, "ceiling");
+  otherwise each tagged draw is ordered after those before it by a
+  framebuffer-local barrier, and only two triangles of the same tagged draw
+  over the same pixel are unordered.
 - **HDR10 on Linux, scRGB where asked or on Windows.** Linux compositors'
   HDR (KDE's, GNOME's, gamescope's) is PQ's; Windows' compositor is scRGB's.
   Both encodings are the shared one; the swapchain takes the one the

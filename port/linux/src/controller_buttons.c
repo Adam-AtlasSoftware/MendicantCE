@@ -1,9 +1,15 @@
 /* Device identity, for the remapping editor's labels and capture. It does
  * not change input mappings. */
 #include "controller_buttons.h"
+#include "port_config.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
+
+#ifdef HALO_GUEST
+/* port/android/guest/runtime/guest_host.h: the pad's SDL GUID, the host's */
+void host_sdl_gamepad_guid(unsigned int gamepad, char *buffer, unsigned int size);
+#endif
 
 /* Updated by the game's input polling, read by menus/HUD on the same thread. */
 static struct controller_device controller_devices[4];
@@ -36,6 +42,12 @@ static int controller_family_from_type(SDL_GamepadType type)
     }
 }
 
+unsigned int controller_extras_reserved(unsigned short vendor, unsigned short product)
+{
+    if (vendor != 0x28de || (product != 0x1205 && (product < 0x1302 || product > 0x1305))) return 0;
+    return (1u << 5) | (0xfu << 7);
+}
+
 void controller_device_read(void *handle, struct controller_device *device)
 {
     SDL_Gamepad *gamepad = handle;
@@ -43,6 +55,8 @@ void controller_device_read(void *handle, struct controller_device *device)
     if (!gamepad) return;
     device->type = SDL_GetGamepadType(gamepad);
     device->family = controller_family_from_type((SDL_GamepadType)device->type);
+    device->playstation = device->type == SDL_GAMEPAD_TYPE_PS3 ? 3 : device->type == SDL_GAMEPAD_TYPE_PS4 ? 4 :
+        device->type == SDL_GAMEPAD_TYPE_PS5 ? 5 : 0;
 #ifndef HALO_GUEST
     {
         char const *name = SDL_GetGamepadName(gamepad);
@@ -52,12 +66,22 @@ void controller_device_read(void *handle, struct controller_device *device)
         snprintf(device->name, sizeof(device->name), "%s", name ? name : "Unknown controller");
         /* (Valve's 28de:1205, SDL's Steam Deck driver: its own labels) */
         if (device->vendor == 0x28de && device->product == 0x1205) device->family = CONTROLLER_STEAM_DECK;
-        device->paddles = (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_PADDLE1) ? 1u : 0u) |
-            (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1) ? 2u : 0u) |
-            (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_PADDLE2) ? 4u : 0u) |
-            (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2) ? 8u : 0u);
+        {
+            /* (in controller_remap_paddles' order) */
+            static SDL_GamepadButton const extras[] = {
+                SDL_GAMEPAD_BUTTON_LEFT_PADDLE1, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE1,
+                SDL_GAMEPAD_BUTTON_LEFT_PADDLE2, SDL_GAMEPAD_BUTTON_RIGHT_PADDLE2, SDL_GAMEPAD_BUTTON_TOUCHPAD,
+                SDL_GAMEPAD_BUTTON_MISC1, SDL_GAMEPAD_BUTTON_MISC2, SDL_GAMEPAD_BUTTON_MISC3,
+                SDL_GAMEPAD_BUTTON_MISC4, SDL_GAMEPAD_BUTTON_MISC5, SDL_GAMEPAD_BUTTON_MISC6};
+            unsigned int i;
+            for (i = 0; i < sizeof(extras) / sizeof(extras[0]); i++)
+                if (SDL_GamepadHasButton(gamepad, extras[i])) device->paddles |= 1u << i;
+            device->paddles &= ~controller_extras_reserved(device->vendor, device->product);
+        }
     }
+    SDL_GUIDToString(SDL_GetJoystickGUID(SDL_GetGamepadJoystick(gamepad)), device->guid, (int)sizeof(device->guid));
 #else
+    host_sdl_gamepad_guid((unsigned int)(unsigned long)gamepad, device->guid, (unsigned int)sizeof(device->guid));
     /* The guest's SDL bridge exposes the family but not a device name
      * (port/android/guest/runtime/guest_sdl.c): the host's handle, which
      * stays the same while the pad is open, tells one pad from another. */
@@ -67,4 +91,48 @@ void controller_device_read(void *handle, struct controller_device *device)
         device->family == CONTROLLER_PLAYSTATION ? "PlayStation controller" :
         device->family == CONTROLLER_SWITCH ? "Switch controller" : "Unknown controller");
 #endif
+}
+
+int controller_button_style_index(char const *name)
+{
+    static char const *names[] = {"classic", "gems", "menu_gems", "xbox_modern",
+        "ps_classic", "ps_gems", "ps_dark_gems", "ps_modern",
+        "switch_classic", "switch_gems", "switch_modern"};
+    int i;
+    if (!name) return 0;
+    if (!strcmp(name, "dark_gems")) return 2;
+    for (i = 0; i < 11; i++) if (!strcmp(name, names[i])) return i;
+    return 0;
+}
+
+int controller_button_style_family(int style)
+{
+    return style < 0 || style >= 11 ? CONTROLLER_UNKNOWN :
+        style < 4 ? CONTROLLER_XBOX : style < 8 ? CONTROLLER_PLAYSTATION : CONTROLLER_SWITCH;
+}
+
+char const *controller_button_family_setting(int family)
+{
+    switch (family)
+    {
+    case CONTROLLER_XBOX: return "display.hud_button_style_xbox";
+    case CONTROLLER_PLAYSTATION: return "display.hud_button_style_ps";
+    case CONTROLLER_SWITCH: return "display.hud_button_style_switch";
+    default: return "display.hud_button_style";
+    }
+}
+
+int controller_button_style_for_port(short port)
+{
+    struct controller_device device;
+    int style;
+    /* Always identify devices, even when automatic glyph selection is off;
+     * the Steam Deck's own controls draw as an Xbox pad's. */
+    controller_device_get(port, &device);
+    if (device.family == CONTROLLER_STEAM_DECK) device.family = CONTROLLER_XBOX;
+    if (!config_boolean("input.auto_button_detection") || !device.family)
+        return controller_button_style_index(config_string("display.hud_button_style"));
+    style = controller_button_style_index(config_string(controller_button_family_setting(device.family)));
+    if (controller_button_style_family(style) == device.family) return style;
+    return device.family == CONTROLLER_PLAYSTATION ? 4 : device.family == CONTROLLER_SWITCH ? 8 : 0;
 }

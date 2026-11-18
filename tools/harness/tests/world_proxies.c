@@ -1108,13 +1108,20 @@ its pages were baked with it, and a page without a layer walks it) */
 	CHECK(count == 5 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_box] == 0 && dynamic_count == 1 &&
 		owners[0] == 41, "baked: %ld, %ld dynamic", count, dynamic_count);
 	fake.instances[0].baked = 0;
-	/* a piece of scenery with no collision geometry (a shrub: one sphere of
-	its bound, which held the ground inside it wholly occluded, #666): its
-	field in place of its sphere; on its way, neither */
+	/* a piece of scenery with no collision geometry (a shrub: once one
+	sphere of its bound, which held the ground inside it wholly occluded,
+	#666; now the box of what it draws, #773): its field in place of its
+	box; on its way, neither */
 	memset(&fake.sources[5], 0, sizeof(fake.sources[5]));
 	fake.sources[5].shape_class = _world_proxies_source_box;
 	fake.sources[5].node_count = 1;
 	fake.sources[5].bounding_radius = 1.5f;
+	fake.sources[5].drawn = 1;
+	fake.sources[5].drawn_bounds[0][0] = -0.8f;
+	fake.sources[5].drawn_bounds[0][1] = -0.8f;
+	fake.sources[5].drawn_bounds[1][0] = 0.8f;
+	fake.sources[5].drawn_bounds[1][1] = 0.8f;
+	fake.sources[5].drawn_bounds[1][2] = 1.2f;
 	fake.sources[5].nodes[0].parent = -1;
 	identity(&fake.sources[5].nodes[0].default_frame, 0.0f, 0.0f, 0.0f);
 	fake.source_known[5] = 1;
@@ -1122,7 +1129,7 @@ its pages were baked with it, and a page without a layer walks it) */
 	add_instance(42, 5, 2.0f, 0.0f, 0.0f);
 	field_known = 0;
 	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
-	CHECK(count == 1 && (int)proxies[0].v[0][3] == _world_proxy_sphere, "the shrub without: %ld", count);
+	CHECK(count == 1 && (int)proxies[0].v[0][3] == _world_proxy_box, "the shrub without: %ld", count);
 	fake.instances[0].field_awaited = 1;
 	count = world_proxies_window(camera, proxies, owners, WORLD_PROXY_MAXIMUM_PER_WINDOW, &dynamic_count);
 	CHECK(count == 0, "the shrub's on its way: %ld", count);
@@ -1132,7 +1139,75 @@ its pages were baked with it, and a page without a layer walks it) */
 	memset(kinds, 0, sizeof(kinds));
 	for (index = 0; index < count; index++)
 		kinds[(int)proxies[index].v[0][3]]++;
-	CHECK(count == 3 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_sphere] == 0, "the shrub with: %ld", count);
+	CHECK(count == 3 && kinds[_world_proxy_field] == 1 && kinds[_world_proxy_box] == 0, "the shrub with: %ld", count);
+	/* (a definition of one shape of any kind: its field stands in for it) */
+	memset(&fake.sources[4], 0, sizeof(fake.sources[4]));
+	fake.sources[4].shape_class = _world_proxies_source_sphere;
+	fake.sources[4].node_count = 1;
+	fake.sources[4].bounding_radius = 1.0f;
+	fake.sources[4].nodes[0].parent = -1;
+	identity(&fake.sources[4].nodes[0].default_frame, 0.0f, 0.0f, 0.0f);
+	fake.source_known[4] = 1;
+	CHECK(world_proxies_definition(4) && world_proxy_set_fielded(world_proxies_definition(4), 0), "one sphere's field");
+}
+
+/* items and scenery without collision geometry (#773): a grenade on the
+floor, whose bounding sphere (a bound for culling and pickups, about its
+origin, twice its size) held the floor about it wholly occluded, a dark
+disc several times the grenade; and a floor marker that draws nothing
+opaque (a glowing triangle on the floor), whose sphere half under the
+floor darkened a disc about it */
+static void drawn_case(void)
+{
+	float const up[3] = { 0.0f, 0.0f, 1.0f };
+	struct world_proxy_set const *set;
+	struct world_proxy proxy;
+	float floor[3], occlusion;
+	int k;
+
+	world_proxies_map_unloaded();
+	memset(&fake.sources[6], 0, sizeof(fake.sources[6]));
+	fake.sources[6].shape_class = _world_proxies_source_box;
+	fake.sources[6].node_count = 1;
+	fake.sources[6].bounding_radius = 0.2f;
+	fake.sources[6].drawn = 1;
+	fake.sources[6].drawn_bounds[0][0] = -0.05f;
+	fake.sources[6].drawn_bounds[0][1] = -0.035f;
+	fake.sources[6].drawn_bounds[0][2] = -0.03f;
+	fake.sources[6].drawn_bounds[1][0] = 0.05f;
+	fake.sources[6].drawn_bounds[1][1] = 0.035f;
+	fake.sources[6].drawn_bounds[1][2] = 0.03f;
+	fake.sources[6].nodes[0].parent = -1;
+	identity(&fake.sources[6].nodes[0].default_frame, 0.0f, 0.0f, 0.0f);
+	fake.source_known[6] = 1;
+	set = world_proxies_definition(6);
+	CHECK(set && set->count == 1 && set->shapes[0].kind == _world_proxy_box, "the grenade: %d shapes",
+		set ? set->count : -1);
+	for (k = 0; k < 3; k++)
+	{
+		float half = 0.5f * (fake.sources[6].drawn_bounds[1][k] - fake.sources[6].drawn_bounds[0][k]);
+
+		CHECK(fabsf(set->shapes[0].axes[k][k] - half) < 1.0e-5f && fabsf(set->shapes[0].a[k]) < 1.0e-5f,
+			"the grenade's box %d: %g, not %g", k, set->shapes[0].axes[k][k], half);
+	}
+	/* the floor 0.15 from its middle (inside its bounding sphere): hardly
+	shaded */
+	identity(&fake.frames[0][0], 0.0f, 0.0f, 0.0f);
+	CHECK(world_proxies_place(6, fake.frames[0], 1, &proxy, 1) == 1, "the grenade placed");
+	floor[0] = 0.15f;
+	floor[1] = 0.0f;
+	floor[2] = -0.03f;
+	occlusion = world_proxy_occlusion(&proxy, floor, up);
+	CHECK(occlusion < 0.1f, "the floor beside the grenade: %g", occlusion);
+	/* the marker: no shapes at all */
+	memset(&fake.sources[7], 0, sizeof(fake.sources[7]));
+	fake.sources[7].shape_class = _world_proxies_source_box;
+	fake.sources[7].node_count = 1;
+	fake.sources[7].bounding_radius = 0.3f;
+	fake.sources[7].nodes[0].parent = -1;
+	identity(&fake.sources[7].nodes[0].default_frame, 0.0f, 0.0f, 0.0f);
+	fake.source_known[7] = 1;
+	CHECK(world_proxies_definition(7) == NULL, "the floor marker has shapes");
 }
 
 static void none_case(void)
@@ -1186,6 +1261,8 @@ int main(int argc, char **argv)
 		field_case();
 	else if (!strcmp(name, "none"))
 		none_case();
+	else if (!strcmp(name, "drawn"))
+		drawn_case();
 	else
 		return 2;
 	return 0;

@@ -1083,6 +1083,12 @@ struct sdf_object_buckets
 	float sines[SDF_OBJECT_BUCKETS], cosines[SDF_OBJECT_BUCKETS];
 	short firsts[SDF_OBJECT_BUCKETS + 1];
 	short rays[WORLD_SDF_OBJECT_RAYS];
+	/* the rays in the buckets' order, by axis (a bucket's run of them
+	tested together: world_sdf_object_slice), and each ray's place in it */
+	float ordered[3][WORLD_SDF_OBJECT_RAYS];
+	short places[WORLD_SDF_OBJECT_RAYS];
+	/* the buckets' axes by axis (their cones tested together) */
+	float axes_by_axis[3][SDF_OBJECT_BUCKETS];
 };
 
 static int sdf_object_bucket(float const ray[3])
@@ -1145,7 +1151,10 @@ static void sdf_object_buckets_make(float const (*rays)[3], struct sdf_object_bu
 		float cosine;
 
 		bucket = sdf_object_bucket(rays[j]);
+		buckets->places[j] = (short)(buckets->firsts[bucket] + counts[bucket]);
 		buckets->rays[buckets->firsts[bucket] + counts[bucket]++] = (short)j;
+		for (k = 0; k < 3; k++)
+			buckets->ordered[k][buckets->places[j]] = rays[j][k];
 		cosine = sdf_dot(buckets->axes[bucket], rays[j]);
 		/* (a little wider: the cones' test is never the reason a ray is missed) */
 		cosine -= 1.0e-3f;
@@ -1156,6 +1165,8 @@ static void sdf_object_buckets_make(float const (*rays)[3], struct sdf_object_bu
 		float c = buckets->cosines[bucket];
 
 		buckets->sines[bucket] = c < 1.0f ? sqrtf(1.0f - c * c) : 0.0f;
+		for (k = 0; k < 3; k++)
+			buckets->axes_by_axis[k][bucket] = buckets->axes[bucket][k];
 	}
 }
 
@@ -1204,13 +1215,14 @@ void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct
 	float const point[3]), void *context, unsigned long z, unsigned long first_row, unsigned long end_row, float *values,
 	unsigned char *solid)
 {
-	float const (*rays)[3] = tables->rays;
 	float const (*normals)[3] = tables->normals;
 	float const *weights = tables->weights;
 	struct sdf_object_buckets const *buckets = &tables->buckets;
-	/* (each direction's light let through: the product of 1 less the
-	opacity of each triangle it crosses; 0 once an opaque one blocks it) */
+	/* (each direction's light let through, in the buckets' order: the
+	product of 1 less the opacity of each triangle it crosses; 0 once an
+	opaque one blocks it) */
 	float through[WORLD_SDF_OBJECT_RAYS];
+	float const *xs = buckets->ordered[0], *ys = buckets->ordered[1], *zs = buckets->ordered[2];
 	float occlusions[WORLD_SDF_OBJECT_NORMALS];
 	unsigned long x, y;
 	long k, j, triangle;
@@ -1260,7 +1272,8 @@ void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct
 				{
 					float la = sqrtf(sdf_dot(a, a)), lb = sqrtf(sdf_dot(b, b)), lc = sqrtf(sdf_dot(c, c)), axis_vector[3];
 					float length, cosine, sine;
-					int bucket;
+					int bucket, narrow;
+					unsigned char missed[SDF_OBJECT_BUCKETS];
 
 					for (axis = 0; axis < 3; axis++)
 						axis_vector[axis] = a[axis] / la + b[axis] / lb + c[axis] / lc;
@@ -1272,28 +1285,37 @@ void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct
 						sdf_dot(axis_vector, c) / (length * lc) : cosine;
 					cosine -= 1.0e-3f;
 					sine = cosine > -1.0f && cosine < 1.0f ? sqrtf(1.0f - cosine * cosine) : 0.0f;
+					/* (the two cones meet where the angle between their axes is
+					at most the sum of theirs: cos(between) >= cos(sum); a cone of
+					90 degrees or more meets every bucket. Every bucket's test at
+					once, then the rays of those it meets) */
+					narrow = cosine > 0.0f && length > 1.0e-6f;
+					for (bucket = 0; narrow && bucket < SDF_OBJECT_BUCKETS; bucket++)
+					{
+						float between = (axis_vector[0] * buckets->axes_by_axis[0][bucket] +
+							axis_vector[1] * buckets->axes_by_axis[1][bucket] +
+							axis_vector[2] * buckets->axes_by_axis[2][bucket]) / length;
+
+						missed[bucket] = between < cosine * buckets->cosines[bucket] - sine * buckets->sines[bucket];
+					}
 					for (bucket = 0; bucket < SDF_OBJECT_BUCKETS; bucket++)
 					{
 						short ray;
 
-						/* (the two cones meet where the angle between their axes is
-						at most the sum of theirs: cos(between) >= cos(sum); a cone
-						of 90 degrees or more meets every bucket) */
-						if (cosine > 0.0f && length > 1.0e-6f && sdf_dot(axis_vector, buckets->axes[bucket]) / length <
-							cosine * buckets->cosines[bucket] - sine * buckets->sines[bucket])
-						{
+						if (narrow && missed[bucket])
 							continue;
-						}
 						/* (a direction within the triangle's corners as seen from the
-						point: a positive mix of them) */
+						point: a positive mix of them. Without branches, so that the
+						bucket's run is tested a few rays at once: a ray blocked
+						already stays 0) */
 						for (ray = buckets->firsts[bucket]; ray < buckets->firsts[bucket + 1]; ray++)
 						{
-							j = buckets->rays[ray];
-							if (through[j] > 0.0f && side * sdf_dot(rays[j], ab) >= 0.0f &&
-								side * sdf_dot(rays[j], bc) >= 0.0f && side * sdf_dot(rays[j], ca) >= 0.0f)
-							{
-								through[j] *= passed;
-							}
+							float to_ab = side * (xs[ray] * ab[0] + ys[ray] * ab[1] + zs[ray] * ab[2]);
+							float to_bc = side * (xs[ray] * bc[0] + ys[ray] * bc[1] + zs[ray] * bc[2]);
+							float to_ca = side * (xs[ray] * ca[0] + ys[ray] * ca[1] + zs[ray] * ca[2]);
+							int within = (to_ab >= 0.0f) & (to_bc >= 0.0f) & (to_ca >= 0.0f);
+
+							through[ray] = within ? through[ray] * passed : through[ray];
 						}
 					}
 				}
@@ -1305,7 +1327,7 @@ void world_sdf_object_slice(struct world_sdf_object_tables const *tables, struct
 				for (j = 0; j < WORLD_SDF_OBJECT_RAYS; j++)
 				{
 					float const *row = weights + j * WORLD_SDF_OBJECT_NORMALS;
-					float blocked = 1.0f - through[j];
+					float blocked = 1.0f - through[buckets->places[j]];
 
 					if (blocked <= 0.0f)
 						continue;

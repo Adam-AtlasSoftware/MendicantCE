@@ -207,8 +207,17 @@ can't be re-read.
   other (repeated switches once leaked the device's groups, #506). A campaign map's other BSPs are baked in the
   background the first time the game switches to them (proxies alone until then), never in the switch. A map that
   is played while its field still waits behind the main menu's others has its bake put first.
+- **Only the field drawn in a game** (`sdf_schedule_said`, `sdf_bake_next_locked`): while a game is played, no other
+  field is baked: the start-up pass's others (and a BSP left) wait, their copies kept, for the main menu, where the
+  game is idle. A bake of another field that is running when a game begins, or when the field drawn is queued behind
+  it, stops where it is (`sdf_yield`: its threads take no more items) and begins again after it, from its copies.
+  So a game's frames never share the processors with the fields of maps nobody is playing: on the M1 Max whose
+  playtest found this (build 1845), the start-up pass's 24 fields took 13 minutes behind the main menu and
+  in the first games. A bake stops only before the static scenery's pages (they rewrite the copies' shapes), which
+  take at most a few seconds. With `"world"` off no bake runs, and one running stops: turning it off in the menu
+  while the start-up pass's fields were baking once let them run on for 11 minutes for nothing.
 - **Threads:** the processors less 3 (`world_sdf_bake_threads`; at least 1, at most 32; `HALO_WORLD_SDF_THREADS`
-  overrides, for measuring). The 3 are the game's thread, the renderer's (the command stream's) and the sound's with
+  overrides, for measuring), and at most 2 for a pass begun while a game is played (`WORLD_SDF_PLAY_THREADS`). The 3 are the game's thread, the renderer's (the command stream's) and the sound's with
   the system's own (its compositor and drivers): 5 on an M2 or a Steam Deck, 29 on a 5900X. Each thread is lowered
   with `setpriority(PRIO_PROCESS, 0, 19)`, which each host applies to the calling thread: Linux and Android as
   nice 19 and `SCHED_IDLE` (only a processor nothing else wants), macOS and iOS as `QOS_CLASS_BACKGROUND` (the
@@ -237,7 +246,10 @@ can't be re-read.
   that, not the bake's threads, was #651's stutter. When the bake finishes, the field uploads a few slices a frame (at most 512 KB a frame) and then **fades in over 1 s**
   (`world_sdf_fade`), with no hitch and no pop. We chose proxies-only over falling back to GTAO: GTAO's pre-pass
   would cost more than the whole new feature on the Deck, and switching would pop.
-- **Measured and stated:** each bake logs `world sdf: <map> bsp <n>: ... within <bounds>, <w>x<h>x<d> cells, <n>
+- **Measured and stated:** a field found in the cache logs `world sdf: <map> bsp <n>: its field cached (baked in
+  <ms> ms on <t> threads)`; a bake that stopped for the field drawn, `its bake stopped for the field drawn`. An object's field taken from those kept by their geometry logs `<name>'s occlusion field: <n>
+  triangles, <w>x<h>x<d> voxels, the same geometry's baked before (world_sdf/objects)`, and the bake's line counts them
+  (`<n> objects' occlusion fields (<n> of them baked before, ...)`). Each bake logs `world sdf: <map> bsp <n>: ... within <bounds>, <w>x<h>x<d> cells, <n>
   bricks, voxel <v>; static scenery <n> placements, <n> shapes, <n> of <n> lightmap pages in <n> layers of <w>x<h>
   (<ms> ms); in <ms> ms on <t> threads, <bytes> in memory, <bytes> cached`, and the header records the times and
   threads. Once the start-up pass's last bake is done it logs `world sdf: the first start's <n> of <n> fields baked
@@ -257,7 +269,8 @@ never shipped, and never trusted without checks.
 - **Key:** the map's cache file header checksum (`menu_picture_map_checksum`'s source) plus `WORLD_SDF_VERSION`. A
   different map under the same name, or a new version, is baked again. A good file is reused forever.
 - **Format** (little-endian, written field by field, not as a struct):
-  - an 80-byte `struct world_sdf_header`: magic `WSDF`, version (5: the scenery's occlusion fields), map checksum,
+  - an 80-byte `struct world_sdf_header`: magic `WSDF`, version (6: a box without collision geometry of what it
+    draws, in the pages; 5: the scenery's occlusion fields), map checksum,
     bsp index, the cells along x/y/z, origin, voxel, range, deflated size, bake ms, bake threads, brick count, the
     static scenery's part's bytes and its pages' bake ms, the vehicles' part's bytes and their bake ms;
   - then the cells (4 bytes each, x fastest, then y, then z), the bricks (729 bytes each), the static scenery's
@@ -310,7 +323,10 @@ baked in the BSP's own lightmap space:
 every static placement, not just the 64 nearest shapes. A static placement's own draws take the field from the
 pixel's own depth inside it (each tap's distance less `min(d(p), 0)`), relative to no reference. That keeps a
 rock's ground contact while its surface, which sits on its collision, isn't darkened by itself. Their reference
-is sent as −1 (`WORLD_AO_REFERENCE_NO_FIELD`).
+is sent as −1 (`WORLD_AO_REFERENCE_NO_FIELD`). A placement whose definition has no collision geometry (a shrub, a
+fern: `world_proxies_source_solid`) isn't in the field, so this doesn't apply: its draws take their reference as a
+moving object's do. Taken relative to none, a shrub by a cliff was darkened twice, by the field and by the lightmap
+its ambient light is sampled from, which already holds the cliff (#781).
 
 **The window.** The dynamic objects' shapes come first, nearest first; the static scenery's that the drawn field
 holds come after them (`world_proxies_window`'s dynamic count, `parameters[1].y`). A draw walks only the shapes
@@ -374,7 +390,10 @@ normal, and measured against the exact boxes a single cone was off by 17/255 on 
   Pelican 46×40×29 at 0.41, a30's pine 20×20×27 at 0.46.
 - **Each voxel:** 256 fixed directions (a Fibonacci sphere's), each let through by the triangles it crosses, each
   passing on 1 − its opacity of what's left (an opaque one: none). Rays are bucketed on a cube's faces, and a triangle
-  tests only the buckets its cone meets. The occlusion at 96 normals is their directions' cosines' sum, each by its
+  tests only the buckets its cone meets: every bucket's cone at once, then each bucket's rays as one run, without
+  branches (the rays stored by axis in the buckets' order), so that both are tested a few at a time; the same
+  numbers as one by one, bit for bit, in half the time (a 228-triangle field 2.7 s to 1.4 s on one M1 Max
+  performance core). The occlusion at 96 normals is their directions' cosines' sum, each by its
   share blocked. t and v are its clamped least squares fit, weighted 0.02 plus each normal's
   occlusion: a surface under a vehicle faces it, and its contact darkening is what shows.
 - **Solid:** a voxel inside, by the nodes' own BSP point tests, takes its outside neighbours' mean, step by step.
@@ -384,7 +403,13 @@ normal, and measured against the exact boxes a single cone was off by 17/255 on 
 
 **Cache and schedule:** in each BSP's field file, keyed on the map's checksum and the bake version, one entry per
 object tag (its definition, grid, voxel, reach, bounds and texels). It's baked with the field, in the first start's
-pass and on a first load, written whole, checked on read, and redone if missing, stale or damaged. A piece of
+pass and on a first load, written whole, checked on read, and redone if missing, stale or damaged. Each one baked is
+kept apart too, by its geometry (`sdf_object_cache_load`): `<data>/world_sdf/objects/<hash>.wsdo`, named by a 64-bit
+FNV-1a hash of `WORLD_SDF_VERSION`, its grid, bounds, triangles, opacities and solids, and holding the magic `HSFO`,
+the version, the hash, the part's size, the objects' part of the one object and a CRC-32. Another map's bake takes
+it from there instead of baking it again (its definition its own map's); one that fails a check is baked again. A
+Warthog, a flag base or a storage crate is in many maps: the 217 objects' fields the playtest that found this baked
+(build 1845, an M1 Max) were 119 objects', the flag base's 11 times. A piece of
 scenery's alpha-tested textures are loaded for it as a draw loads them, when its geometry is copied (a few, once a
 BSP). On the GPU the fields share one 3D atlas within 8 MB (`world_sdf_objects_place`): in columns along z, rows of
 them along x and the rows along y, of the depth and width that place the most, in order, in the least bytes (one
@@ -456,18 +481,84 @@ distance under a quarter voxel; a step is at least half a voxel. A distance coun
 ray starting inside solid (a model's surface within its own capsules) leaves it without hitting it, as front faces
 alone would. It returns whether it hit, how far, and what (structure or objects).
 
-### Hardware ray queries later (#602)
+### Hardware ray queries (#602)
 
-The same call is what a hardware backend implements: `rayQueryEXT` (`VK_KHR_ray_query`) in SPIR-V, Metal's
-`intersector` (M3 and later, A17 Pro) in MSL.
-- **Acceleration structures** from the scene (`world_scene.h`): the structure's collision triangles a BLAS per BSP,
-  built once a map; each object's shapes a BLAS of procedural AABBs (capsules and boxes intersected in a small
-  intersection function) or its collision mesh, instanced in a TLAS refit each frame from the same motion test.
-- **The mask** is the instance mask: bit 0 the structure, bit 1 the objects. **Front faces alone**: cull back-facing
-  triangles; a procedural shape reports no hit from inside.
-- **t_max and the hit:** the ray query's committed t, or a miss.
-- **Choosing:** per device at start (the ray query feature, `supportsRaytracing` and the GPU family); the distance
-  field is the fallback everywhere else, and the result the hardware's is compared against.
+`display.ambient_occlusion = "ray_traced"`: `"world"`, with the dynamic objects' rays (the pass's `world_ao_traced`)
+cast by the GPU's ray queries through the objects' own collision meshes, in place of the step through the
+distance-field scene. Everything else is `"world"`'s: the level's field and its reference on the models, the static
+scenery's pages and shapes, the pre-pass, the quarter-resolution pass, the upsampling and the history. Vulkan only
+(the Linux builds, Windows, Android), where the device has `VK_KHR_ray_query`, `VK_KHR_acceleration_structure` and
+buffer device addresses, and is not a processor's (llvmpipe); elsewhere, Metal included, it draws as `"world"` and
+says why once in the log. Off by default.
+
+- **The scene** (`world_rt.h`, `port/linux/game/world_rt.c`; read through `world_rt_game.c` and the proxies'
+  instances). The meshes, each made once a map as first needed and let go of at its end:
+  - the loaded structure BSP's collision geometry (as `world_scene.c` fans it: 41,354 triangles at a10, 27,914 at
+    a30, 5,468 at Blood Gulch), made again for another BSP;
+  - each definition's nodes' collision geometry, a mesh a node (the first permutation's BSP of the collision node of
+    the node's index, as the collision tests take them), turned to face out by the sign of the volume it holds;
+  - an item with none (a grenade) a box about its bounding sphere, `WORLD_RT_BOX_SHARE` (0.6) of its radius, up to
+    1 wu across. Anything else with none has no mesh: an emitter's, a wire's or the sky's ring's sphere is not its
+    shape.
+
+  The instances, each frame: the structure, and every dynamic object's meshes on its nodes as drawn (the
+  `render_interpolation.c` pose the proxies take). The static scenery the field and its pages hold, held weapons and
+  the first-person weapon are left out, as the proxies leave them out. a10's start: 154 meshes (96,388 triangles),
+  931 instances a frame; Blood Gulch: 45 meshes, 89 instances.
+
+  Collision meshes rather than the proxies' shapes: they are the objects' own shape, rigid on each node (so each is
+  a bottom-level structure built once, and only the instances move: no refit or skinning), what the proxies are
+  fitted to already, and an order of magnitude fewer triangles than the render models. The shapes are what a
+  distance field can hold, not what a ray tracer needs.
+- **The command stream** (version 21): `WORLD_AO_MESH` (a mesh's triangles; id 0 every mesh let go of),
+  `WORLD_AO_INSTANCES` (the frame's: a 3x4 transform, the mesh, the owner and the kind), the backend's
+  `ray_queries` in `INITIALIZE`'s answer, each draw's owner among the instances (`world_ao[2]` of the uniforms, its
+  datum index plus one), and the pass's `history[3]` 2. The pre-pass's twins write the owner into the inputs' last
+  word.
+- **The backend** (`port/linux/vulkan/xgpu_vulkan_rt.c`): each mesh a bottom-level structure (fast to trace), the
+  frame's new ones built in one call into 16 MB buffers of their own; the instances a top-level structure built
+  again each frame (fast to build) before the first pass that reads it, three in turn. The builds go in the early
+  commands, before the submission's draws, so no pass is ended for them. The occlusion set names the latest scene
+  (or an empty one) at binding 8. The pass's pipeline with ray queries is made with the map's; until it and the
+  scene are, the pass steps through the distance-field scene as `"world"`'s does.
+- **The rays** (`world_ao_traced_rays`, `xgpu_spirv.c`): the same 4 cosine-weighted rays a pixel from the same point,
+  0.1 to 2 wu, the same history blended in. Each takes the nearest front face it meets (`gl_RayFlagsCullBackFacing`):
+  an object's (its instance not opaque, so that each candidate but the pixel's own owner is committed) counts
+  1 − (t / 2)², the structure's (opaque, either way facing) stops the ray and counts nothing, since the lightmaps and
+  the field hold the level's own occlusion. So an object behind a wall or floor no longer shades through it, as the
+  distance-field scene's objects channel did. Every pixel casts them: the scene holds every dynamic object drawn, not
+  the cascades' reach. The dynamic objects' occlusion fields (the vehicles') are not walked: their meshes are traced.
+  The facing was checked on the GPU: a box wound counterclockwise seen from outside, placed about the camera, shades
+  nothing inside it unflipped and the floor inside it flipped (`HALO_VULKAN_RT_FLIP=1`).
+- **Measured** (RTX 4090, release, a10's start held still: fixed-step frames, offscreen, unpaced, windowed; the
+  medians of 600-frame windows of `HALO_GPU_STATS`' GPU time a frame, and of `HALO_VULKAN_DRAW_TIMES=10`'s pass,
+  `aofe`, in runs of their own):
+
+  | | 1920x1080 frame / pass | 3840x2160 frame / pass |
+  | --- | --- | --- |
+  | `"off"` | 0.368 ms / none | 0.640 ms / none |
+  | `"world"` | 0.517 ms / 0.066 ms | 1.297 ms / 0.245 ms |
+  | `"ray_traced"` | 0.708 ms / 0.115 ms | 1.547 ms / 0.369 ms |
+
+  The pass is 0.05 ms (1080p) and 0.12 ms (4K) dearer than the distance field's step; the rest of the frame's
+  difference (0.14 ms at 1080p, 0.13 at 4K) is the top-level structure's build of 931 instances each frame and its
+  barrier. The Spark's GB10 builds and traces it (the pass with ray queries, no error); its timings
+  are not taken yet (the machine went off the network mid-run).
+- **Compared** (a10's and b30's starts, the same frames; the occlusion as the shaded frame over `"off"`'s): on the
+  level, contact shade where an object's real shape meets it (a door in its frame, a body on the grass) and none
+  through floors; on the models, the same field and reference, so alike. The mean over a10's frame is 0.947 with
+  `"world"`, 0.945 with `"ray_traced"`; `"world"`'s soft halo on the wall behind a10's first crewman and consoles is
+  mostly gone (4 rays from a wall a metre from a crewman see little of him). At b30's start `"world"` darkens the
+  whole beach by about a fifth (a mean of 0.79 against 0.94; most likely the vehicles' occlusion fields, whose reach is 20 to
+  90 wu, are walked over it); `"ray_traced"`'s 2 wu rays do not: only what is near shades.
+- **Validated**: Vulkan's validation layers on the 4090 (a10, a30, Blood Gulch, the map changes between them): no
+  messages.
+- **Left**: the models' structure term by rays (needs the reference by rays too: a small pass at each object's
+  lighting point), which would drop the field's bake for `"ray_traced"`; a refit of the top-level structure where
+  only transforms change; the vehicles' long-reach occlusion, which the fields have and 2 wu rays have not; Metal's
+  `intersector` (M3, A17 Pro); the Deck (RADV), the Frame and phones, each measured first (#432's rule). llvmpipe's
+  (Mesa 25 on the Spark) crashed in its own code as the scene was built again each frame, not root-caused; it is left
+  without ray queries.
 
 ## Proxies (`world_proxies.h`)
 
@@ -485,8 +576,13 @@ Each object definition gets up to 16 shapes, made the first time it's drawn and 
   its occlusion field is drawn, the field stands in for the boxes ([The objects' occlusion fields](#the-objects-occlusion-fields)).
 - **Scenery, machines, controls, light fixtures, items (weapons and equipment on the ground, garbage):** one box,
   every node's collision geometry in node 0's space (where a piece of scenery's occlusion field is drawn, the field
-  instead); with no collision geometry, a sphere of the bounding radius at
-  its bounding centre.
+  instead). With no collision geometry, the box of what its model draws opaque (its most detailed geometry, its
+  regions' first permutations, `object_mesh_get_model`), and no shape when it draws nothing opaque (glass, a glowing
+  floor marker, an effect). It was a sphere of the bounding radius at its bounding centre, a bound for culling and
+  pickups: a frag grenade's 0.2 wu about its origin, twice the grenade and half under the floor, and Blood Gulch's and
+  Hang 'Em High's floor arrows' 0.3 wu, which draw nothing opaque. The floor inside the sphere was wholly occluded: a
+  hard-edged dark patch several times a grenade's size (a disc walked, a polygon from the distance-field scene's
+  voxels traced), and a round blotch about each arrow in the static scenery's pages (#773).
 - **Anything else** with a model: its bounding sphere.
 - **None:** projectiles, sound scenery, a weapon or equipment held (its holder covers it, and it would shade the
   hands holding it), invisible objects, and any shape under 0.05 wu across.
@@ -550,6 +646,21 @@ A_obj = mix(A_sdf(p, n), A_obj, reference_weight)          (block parameters[1][
 
 A Spartan in a corridor isn't darker overall than the floor's light says. But its side facing a wall, its underside
 and a Warthog's belly over the ground are darker, which is what the eye misses today.
+
+**Foliage: a two-sided shader's cards** (#781). A plant's leaves are cards drawn with a two-sided model shader
+(`_shader_model_two_sided_bit`: its back faces drawn again, the normal reversed). A card is thin, drawn alike from
+both sides and lit through either face, and its normal is no surface's: the cone along a horizontal card's normal
+finds the ground under it, and along a card facing a cliff the cliff, though the card is open to the sky. A shrub on
+Blood Gulch went near black, card by card. So a card's field term is that of its most open direction of three: the
+sky's (up, as the reference finds it) and its two faces' (`world_ao_cards_occlusion`: the first of them where alike),
+and its shapes and rays are found about that direction. The game says which draws are cards
+(`world_ao_cards`, hooked in `_rasterizer_model_draw`; the draw's uniforms' `world_ao[3]`), the pre-pass's twin puts
+`XGPU_WORLD_AO_INPUT_CARDS` in its inputs, and the pass (or an inline draw) finds the other two cones for those pixels
+alone. A canopy is then darkened where it is enclosed (under an overhang and against a wall at once, or by a vehicle
+beside it), not where a card happens to face. Measured (Vulkan, the GB10; mean luminance of the changed pixels, AO
+off / before / after): the shrub of #781's report 0.258 / 0.120 / 0.249, a pine by Sidewinder's base 0.096 / 0.038 /
+0.073, b30's trees from its start 0.396 / 0.291 / 0.297; nothing but the cards changed in those frames (and a30's
+lifepod's ceiling grilles, also a two-sided shader's).
 
 ### Proxies' occlusion
 
@@ -690,7 +801,7 @@ objects, strength on the level, fade, proxy count; `parameters[1]` reference wei
 proxies; then the grid: `grid[0]` the camera, `grid[1]` each axis's scale and 1 / cell; then 1,024 uvec4 cells, two
 cells' 64-bit masks each (cell i's word w at `cells[i / 2][2 (i % 2) + w]`).
 
-**Command stream (version 16):**
+**Command stream (version 16; 21 with "ray_traced"'s records, [Hardware ray queries](#hardware-ray-queries-602)):**
 - `XGPU_STREAM_WORLD_AO_WINDOW` carries the block (`active` 0: withdrawn);
 - `XGPU_STREAM_WORLD_AO_FIELD` carries a slab of slices of a part, the table (4 bytes a texel), the atlas (1), the
   static scenery's pages (1) or the vehicles' fields' atlas (8: four halves) (`width` 0: release every part). The table comes first; the field is drawn with once both have their last slices. The
@@ -736,12 +847,13 @@ ignored.
 
 ## Settings
 
-- `display.ambient_occlusion`: `"off"` (default) | `"world"`. GTAO's `"subtle"` and `"strong"` (#574) are retired,
+- `display.ambient_occlusion`: `"off"` (default) | `"world"` | `"ray_traced"` ([Hardware ray
+  queries](#hardware-ray-queries-602)). GTAO's `"subtle"` and `"strong"` (#574) are retired,
   with their pre-pass and passes: their stripes on flat surfaces and at door and screen edges were not worth keeping.
   A config.toml or `HALO_AMBIENT_OCCLUSION` with either is read as `"world"`, and the file is written with it
   (port_config.c's `config_renamed_words`).
 - `"world"` works in VR's eye passes and with Metal's multisampling.
-- The menu (`tools/port_settings.py`, AMBIENT OCCLUSION) has OFF and WORLD.
+- The menu (`tools/port_settings.py`, AMBIENT OCCLUSION) has OFF, WORLD and RAY TRACED.
 - Classic's preset writes `"off"`, which bypasses everything.
 - `debug.world_ao_view` (D): the surfaces it shades drawn as the term alone, in grey. `debug.world_ao_test` (D): a
   made-up field (a plane about the camera) and shapes in place of B's and C's, to check the shading alone. `debug.world_proxies_view`

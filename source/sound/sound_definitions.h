@@ -66,6 +66,41 @@ enum detail_dont_play_flags
 #define sound_definition_get(index) ((struct sound_definition *)tag_get(SOUND_DEFINITION_TAG, (index)))
 #define looping_sound_definition_get(index) ((struct looping_sound_definition *)tag_get(LOOPING_SOUND_DEFINITION_TAG, (index)))
 
+/* port: a permutation imported from a Halo PC map or a mod and kept as 16-bit
+PCM at its own rate (port/linux/game/custom_edition_sounds.c), so nothing is
+lost to a conversion: its compression is none and its sample_buffer_size,
+which nothing else reads, is its rate (at most the mixer's 48 kHz). Its sound
+is still an Xbox ADPCM one of the channels' formats, so the sound manager
+picks a channel for it as before; the channel plays it in its own format
+(sound_dsound_xbox.c, dsound_channel_use_format). The rate, or 0 for any
+other permutation. */
+#define SOUND_PERMUTATION_PCM_MINIMUM_RATE 1000
+#define SOUND_PERMUTATION_PCM_MAXIMUM_RATE 48000
+#define sound_permutation_pcm_rate(permutation) \
+	((permutation)->compression == 0 && \
+		(permutation)->sample_buffer_size >= SOUND_PERMUTATION_PCM_MINIMUM_RATE && \
+		(permutation)->sample_buffer_size <= SOUND_PERMUTATION_PCM_MAXIMUM_RATE ? \
+		(long)(permutation)->sample_buffer_size : 0L)
+/* port: the next of the pieces of 16-bit PCM at its own rate a long
+permutation (`permutation`, of the pitch range `range`) is split into
+(port/linux/game/mod_sounds.c's range_split, OpenH1 issue 1167), or NONE: a
+permutation after the range's actual ones, at the same rate. A sound whose
+permutations are not linked plays a split one's pieces in turn and goes on
+as it did, its next pick one of the actual ones; one that repeated forever
+still does. */
+#define sound_permutation_next_piece(range, permutation) \
+	(sound_permutation_pcm_rate(permutation) && \
+		(permutation)->next_permutation_index >= (range)->actual_permutation_count && \
+		(permutation)->next_permutation_index < (range)->permutations.count && \
+		sound_permutation_pcm_rate(&((struct sound_permutation const *)(range)->permutations.address)[ \
+			(permutation)->next_permutation_index]) == sound_permutation_pcm_rate(permutation) ? \
+		(short)(permutation)->next_permutation_index : (short)NONE)
+/* port: the permutation that plays after `permutation` of `range`: a
+linked sound's next, or the next piece (sound_permutation_next_piece) */
+#define sound_permutation_next(definition, range, permutation) \
+	(TEST_FLAG((definition)->flags, _sound_definition_linked_permutations_bit) ? \
+		(short)(permutation)->next_permutation_index : sound_permutation_next_piece(range, permutation))
+
 /* ---------- structures */
 
 struct real_bounds
@@ -97,7 +132,10 @@ struct sound_pitch_range
 	real natural_pitch;
 	struct real_bounds bend_bounds;
 	short actual_permutation_count;
-	short unused;
+	/* port: its played bits past played_permutation_mask's 32 (OpenH1
+	issue 1170), the entry (one on) of sound_definitions.c's
+	sound_pitch_range_played_beyond; 0, as the validator resets it, for none */
+	short played_beyond_index;
 	real playback_rate;
 	unsigned long played_permutation_mask;
 	short previous_permutation_index;
@@ -226,5 +264,9 @@ short sound_definition_port_speech_permutation(
 	struct sound_definition *definition,
 	short pitch_range_index,
 	unsigned long *seed);
+/* port: the played bits past 32 of the last map's pitch ranges let go
+(OpenH1 issue 1170: sound_initialize_for_new_map) */
+void sound_definitions_played_beyond_clear(
+	void);
 
 #endif // __SOUND_DEFINITIONS_H

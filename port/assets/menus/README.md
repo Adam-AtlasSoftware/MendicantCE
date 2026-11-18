@@ -9,9 +9,10 @@ controller, the keyboard and the mouse, on every port.
 | Path | Contents |
 | --- | --- |
 | `ce/*.xml` | The PC version's screens, one file for each folder of its tags, laid out as it has them; `ce/strings.xml` their text, `ce/bitmaps.xml` their pictures |
-| `ce/shell/...png` | The pictures, drawn from the high-res redraws in `svg/` (up to 4x), else a placeholder |
-| `NON_HANDDRAWN.md` | The pictures that are not redraws: those drawn from the Xbox's map (the player's own), and the placeholders, to be redrawn |
+| `ce/shell/...png` | The pictures, drawn from the high-res redraws in `svg/` (up to 4x), else empty (no picture shows) |
+| `NON_HANDDRAWN.md` | The pictures that are not redraws: those drawn from the Xbox's map (the player's own), and the empty frames, to be redrawn |
 | `UNWIRED.md` | The menus' functions that do nothing yet: the lists they fill are empty, and the settings they change do not change |
+| `model/` | The menu engine's model of the generated screens (`docs/menu_engine.md`): `settings.xml`, the settings screens' rows and geometries (`tools/port_settings.py`), `look/`, every widget's look (`tools/menu_look.py`; Settings' in its tall layout), `behaviour/`, every widget's behaviour (`tools/menu_behaviour.py`), and `nodes.xml`, the setup screens' nodes and their rows' conditions (`tools/menu_nodes.py`) |
 | `menus.json` | The files the game embeds |
 
 `tools/ce_menus.py` writes all of them from the PC version's tags and the
@@ -37,31 +38,37 @@ one screen (by its name, `main_menu/settings_select/...`), for looking at it.
 ## Writing them again
 
 `tools/ce_menus.py` writes every file in `ce/` and `menus.json` again,
-the settings screens too (it runs `tools/port_settings.py`'s):
+the settings screens too (it runs `tools/port_settings.py`'s).
+`tools/menus_regen.sh` runs it with its inputs, kept in a folder outside the
+repository (`$MENU_INPUTS`, else `~/dev/menu-inputs`; the tags are the
+game's data, never committed):
 
 ```sh
-python3 tools/ce_menus.py \
-    --tags <halopc-restored>/tags \
-    --definitions <invader>/src/tag/hek/definition \
-    --redraws <ui-svg-handmade> \
-    --placeholder <placeholder.png> \
-    --pictures <extracted-ui-assets-fixed>
+tools/menus_regen.sh --fetch   # gets the inputs, once
+tools/menus_regen.sh           # writes the menus again
+git status                     # only the screens meant to change
 ```
 
-- `--tags`: the PC version's tags (its `ui\shell` widgets, strings and
-  bitmaps).
-- `--definitions`: Invader's tag definitions, which say how the tags are
-  laid out.
-- `--redraws`: the hand-made SVG redraws, copied to `svg/`.
-- `--placeholder`: the picture drawn where a picture has no redraw and the
-  Xbox's map has not got it.
-- `--pictures` (optional): the PC version's pictures, of which only where
-  each sits in its frame is read.
+`--fetch` needs `git` and `python3`; the run needs `rsvg-convert`
+(`librsvg2-bin`, Homebrew's `librsvg`). The inputs, as ce_menus.py's
+options:
 
-It needs `rsvg-convert`, Pillow, NumPy and SciPy. It writes every file, so
-`git status` should show only the screens meant to change; then
-`ninja linux_x86_64` (or `ninja linux_arm64`, `ninja android`) embeds them
-in the game.
+- `--tags`: the PC version's tags (its `ui\shell` widgets, strings and
+  bitmaps): `tags/` of [halopc-restored](https://github.com/Aerocatia/halopc-restored)
+  at the commit `HALOPC_RESTORED_COMMIT` in `menus_regen.sh`.
+- `--definitions`: Invader's tag definitions, which say how the tags are
+  laid out: `src/tag/hek/definition` of
+  [Invader](https://github.com/SnowyMouse/invader) at `INVADER_COMMIT`.
+- `--redraws`: the hand-made SVG redraws (ui-svg-handmade), copied to
+  `svg/`. `svg/` has every redraw the menus draw, so `menus_regen.sh` copies
+  it into the inputs' `redraws/` before each run; a new redraw goes there.
+
+ce_menus.py needs Pillow, NumPy, SciPy and fontTools (`--fetch` puts them in
+the inputs' `venv/`). Its output does not depend on the computer: the titles
+are laid out by FreeType alone (not Raqm, which some Pillows have), and a
+picture drawn the same as before keeps its file (zlib's builds compress it
+differently). It writes every file; then `ninja linux_x86_64` (or
+`ninja linux_arm64`, `ninja android`) embeds them in the game.
 
 A settings screen (Controls Setup, Gamepads, Mouse, Audio, Video or Network
 Setup) is changed in `tools/port_settings.py`, not in its XML, and written
@@ -74,6 +81,32 @@ the campaign's) without the PC version's tags: their entries in
 files of those no screen names any more removed, and `menus.json`. The
 rest of `ce/bitmaps.xml` stays as it is. It needs `rsvg-convert`, Pillow and
 NumPy.
+
+## Merging
+
+The files `tools/ce_menus.py` writes (`ce/`, `port_svg/`, `model/`,
+`menus.json`, `NON_HANDDRAWN.md`, `UNWIRED.md`) stay committed, so that no
+build (Android, iOS, Windows, the releases) needs the PC version's tags, and
+are never merged by hand. Once per clone:
+
+```sh
+tools/git_setup.sh
+```
+
+sets up the `menus-generated` merge driver (`.gitattributes`): a merge takes
+our side of a generated file without a conflict, and its post-merge hook
+writes the menus again from the merged sources when both sides changed
+them, folded into the merge commit. A merge stopped by a conflict in a
+source (`tools/port_settings.py`, say): resolve that, then the one command
+
+```sh
+tools/menus_regen.sh --resolve
+```
+
+writes the menus again, fetching the inputs if needed, and stages them,
+whatever their conflicts; `git commit` finishes. CI's merge checks run
+`tools/menus_regen.sh --check`, which fails when the committed files are not
+what the generator writes (a merge or a change made without it).
 
 ## Elements
 
@@ -164,7 +197,12 @@ touchscreen's wide screens (where the menus are laid out for touch: the
 `anchor_right` move the widget (and what is in it) to the screen's left or
 right edge, by as much as the screen is wider than the menus' 640 on that
 side; `stretch` draws its picture wider by both sides' width, from its left
-(a panel that reaches from the menus' middle to the right edge). And
+(a panel that reaches from the menus' middle to the right edge); `foot` moves
+the widget (and what is in it) up by the tall layout's footer's lift (16
+units, `tools/port_settings.py`'s `TALL_FOOT_LIFT`), above a phone's safe area
+at the screen's foot, and `above_foot` makes it that much shorter (a panel that
+reaches down to the footer; its picture there the menus' `<picture>_touch`,
+which a look's picture is on a touchscreen wherever the menus have one). And
 everywhere, `keep_ends`: the widget's picture drawn at the widget's width
 with its ends as they are, its middle stretched or shortened (a tab laid out
 narrower than its picture).
@@ -177,12 +215,22 @@ extra width on a narrower one (16:10's 128 of 212), none at 4:3. A move
 carries what is in the widget, as an anchor does; a widened picture keeps
 its ends and stretches its middle. `-106 0` keeps a widget as far from the
 screen's left edge as the 640 have it from theirs, `106 0` from the right;
-`-106 212` stretches it across. `tools/port_settings.py`'s `wide`,
+`-106 212` stretches it across (each of dx and dw within -424 to 424: a
+widget may grow by more than the extra width, Settings' rows by what the
+panel beside them gives up). `tools/port_settings.py`'s `wide`,
 `WIDE_LEFT`, `WIDE_RIGHT` and `wide_spread` (tabs) write them, and
 `tools/harness/menu_layout.py` lays a screen out at a width for its tests.
 Their rows, panels, tabs and buttons keep `WIDE_MARGIN` (24 units) from the
 screen's edges at every width. Widgets anchored on a touchscreen keep their anchors; the game's own menus
 have no `wide`, and stay in the middle 640.
+
+The menu engine (`display.menu_engine = "new"`) draws Settings' tabs and
+pages in a tall layout of their own, full screen and edge to edge past 16:9,
+which these files do not have: `tools/port_settings.py` writes their widgets
+a second time in it (`tall_widgets`), and `tools/menu_look.py` writes the
+looks in `model/look` from those. Its looks may have a `past` ("dx dw" at
+21:9 past 16:9's) and a text `scale`; `docs/menu_engine.md` ("The tall
+layout") says how another screen opts in.
 
 On a touchscreen a tap on an item of a list with an extended description
 (the Multiplayer menu, the settings) chooses it, showing what the
@@ -274,7 +322,6 @@ number).
 `tools/ce_menus.py` draws each frame from its redraw in `svg/` (copied from
 ui-svg-handmade) at up to 4x its size. A picture with no redraw is the
 Xbox's map's, where it has the same one (a whole bitmap, or a `<frame
-map=...>`), else a placeholder, placed where the PC version's picture is in
-its frame (`--pictures`: only where, not the picture, is read);
-`NON_HANDDRAWN.md` lists both. It needs `rsvg-convert`, Pillow, NumPy and
+map=...>`), else nothing: the frame is drawn empty, so that a screen shows no
+picture there rather than a stand-in's words; `NON_HANDDRAWN.md` lists both. It needs `rsvg-convert`, Pillow, NumPy and
 SciPy.

@@ -38,10 +38,16 @@ machines of a network game agree on.
 #include "game/game_globals.h"
 #include "game/players.h"
 #include "input/input_abstraction.h"
+#include "interface/hud.h"
+#include "interface/hud_definitions.h"
+#include "interface/hud_draw.h"
+#include "interface/interface.h"
 #include "rasterizer/rasterizer.h"
 #include "scenario/scenario.h"
 #include "text/draw_string.h"
 #include "halo_keyboard.h"
+#include "player_settings.h"
+#include "controller_buttons.h"
 
 #include <math.h>
 
@@ -59,12 +65,18 @@ char const *config_string(char const *name);
 
 /* ---------- constants */
 
-/* the HUD's icons of the sticks (hud_messaging.c's _icon_left_stick and
-_icon_right_stick, and the controller buttons' indices before them) */
+/* the HUD's icons of the Back button and the sticks (hud_messaging.c's
+_icon_back_button, _icon_left_stick and _icon_right_stick, and the
+controller buttons' indices before them) */
 enum
 {
+	HUD_KEY_PROMPT_BACK_BUTTON = 13,
 	HUD_KEY_PROMPT_LEFT_STICK = 16,
-	HUD_KEY_PROMPT_RIGHT_STICK = 17
+	HUD_KEY_PROMPT_RIGHT_STICK = 17,
+	/* a message icon's sprite smaller than this many texels each way is
+	no picture: the Xbox's sheet marks the buttons it has none of (Start,
+	Back, the D-pad) with empty cells of 4 by 4 */
+	HUD_KEY_PROMPT_MINIMUM_SPRITE = 8
 };
 
 /* ---------- prototypes */
@@ -75,10 +87,13 @@ void hud_key_prompt_action_name(short action, char *name, long size);
 boolean hud_key_prompt_draw(short local_player_index, short game_control, short gamepad_button,
 	rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
 boolean hud_key_prompt_draw_key(char const *name, rectangle2d *bounds, rectangle2d *cursor, pixel32 color);
+boolean hud_key_prompt_draw_symbol(wchar_t const *legend, rectangle2d *bounds, rectangle2d *cursor, pixel32 color,
+	unsigned long fill, unsigned long legend_color, boolean round);
 short hud_key_prompt_cap_advance(short name_left, short name_right);
 short hud_key_prompt_legend_advance(short name_left, short name_right, wchar_t const *words);
 long hud_key_prompt_draw_equals(rectangle2d *bounds, rectangle2d *cursor, wchar_t const *text);
 void hud_key_prompt_button_word(wchar_t *text, long length, wchar_t const *word, wchar_t const *icon);
+void hud_key_prompt_score_hint(short local_player_index, wchar_t *text, long length);
 
 /* ---------- private code */
 
@@ -149,7 +164,7 @@ static boolean vr_prompt_text(
 	struct game_input_preferences preferences;
 	char name[64];
 
-	if (!strcmp(config_string("input.button_prompts"), "controller"))
+	if (!strcmp(config_player_string(local_player_index, "input.button_prompts"), "controller"))
 		return FALSE;
 	if (game_control != NONE)
 	{
@@ -226,6 +241,14 @@ curves' edges blended over a pixel. The box is drawn whole pixels wide and
 high, its middle at the nearest half pixel to its own, so that what it is
 centred on (its name's letters, their capitals) is in its middle at any
 resolution */
+/* port: a controller layout's symbol being drawn (hud_key_prompt_draw_symbol):
+a key cap of its fill, its legend in its own colour, round or square; FALSE
+for a key's */
+static boolean key_cap_symbol;
+static boolean key_cap_symbol_round;
+static pixel32 key_cap_symbol_fill;
+static pixel32 key_cap_symbol_legend;
+
 static void key_cap_shape(real box_x0, real box_y0, real box_x1, real box_y1, pixel32 fill, pixel32 color)
 {
 	real text_scale, origin_x, origin_y, pixels, size;
@@ -242,7 +265,8 @@ static void key_cap_shape(real box_x0, real box_y0, real box_x1, real box_y1, pi
 	x0 = floorf(middle_x - width * 0.5f + 0.5f);
 	y0 = floorf(middle_y - height * 0.5f + 0.5f);
 	size = (local_player_count() > 1 ? 0.75f : 1.0f) * text_scale * pixels;
-	menu_shape_rounded_box_pixels(x0, y0, x0 + width, y0 + height, floorf(KEY_CAP_RADIUS * size + 0.5f),
+	menu_shape_rounded_box_pixels(x0, y0, x0 + width, y0 + height,
+		key_cap_symbol && key_cap_symbol_round ? floorf(height * 0.5f) : floorf(KEY_CAP_RADIUS * size + 0.5f),
 		MAX(floorf(KEY_CAP_EDGE * size + 0.5f), 1.0f), fill, color);
 }
 
@@ -408,10 +432,25 @@ static boolean key_cap_draw(wchar_t const *text, rectangle2d *bounds, rectangle2
 	middle = draw_unicode_string_capital_middle(cursor, L"");
 	capitals_middle = (real)middle + (draw_string_capital_height() % 2 ? 0.5f : 0.0f);
 	fill = ((pixel32)((color >> 24) * 3 / 10) << 24) | (color & 0x00FFFFFFUL);
+	if (key_cap_symbol)
+		fill = (color & 0xFF000000UL) | (key_cap_symbol_fill & 0x00FFFFFFUL);
 	key_cap_shape(ink_middle - (real)(box_x1 - box_x0) * 0.5f, capitals_middle - ((real)half - 0.5f),
 		ink_middle + (real)(box_x1 - box_x0) * 0.5f, capitals_middle + ((real)half - 0.5f), fill, color);
 	text_bounds.x0 = bounds->x0;
-	rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
+	if (key_cap_symbol)
+	{
+		/* (a symbol's legend in its own colour, black or white on its fill:
+		controller_layout_legend_color) */
+		real_argb_color saved, legend;
+
+		draw_string_get_color(&saved);
+		pixel32_to_real_argb_color((color & 0xFF000000UL) | (key_cap_symbol_legend & 0x00FFFFFFUL), &legend);
+		draw_string_set_color(&legend);
+		rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
+		draw_string_set_color(&saved);
+	}
+	else
+		rasterizer_draw_unicode_string(&text_bounds, NULL, NULL, 0, text);
 	bounds->y0 = cursor->y0;
 	/* (the text that follows starts past the cap and its gap) */
 	cursor->x0 = (short)(start + after);
@@ -485,7 +524,8 @@ static long wide_length(wchar_t const *text)
 score", the map's string) as its icon's name ("%back-button"), which the
 HUD's custom messages draw as the prompts draw the button
 (draw_string_and_hack_in_icons): the key bound while the keyboard and mouse
-play, else the controller's button. The first time the word stands alone (no
+play, else the controller's button (hud_key_prompt_score_hint: where there
+is a picture of it). The first time the word stands alone (no
 letter or digit either side), if the result fits in length characters with
 its terminator; else the text is left as it is */
 void hud_key_prompt_button_word(
@@ -554,6 +594,83 @@ boolean hud_key_prompt_text(
 	return TRUE;
 }
 
+/* the key a prompt draws in place of its controller button for the first
+player: while the keyboard and mouse play, the key (hud_key_prompt_text); in
+the headset, what presses the button (vr_prompt_text); FALSE when the prompt
+keeps the controller's button */
+static boolean prompt_key_text(
+	short local_player_index,
+	short game_control,
+	short gamepad_button,
+	wchar_t *text,
+	long length)
+{
+	if (local_player_index != 0)
+		return FALSE;
+#ifdef HALO_VR
+	if (halo_vr_running())
+		return vr_prompt_text(local_player_index, game_control, gamepad_button, text, length);
+#endif
+	return halo_keyboard_prompts() &&
+		hud_key_prompt_text(local_player_index, game_control, gamepad_button, text, length);
+}
+
+/* whether text draws a picture of a controller button: the message icons
+draw_string_and_hack_in_icons (ui_widget.c) takes its buttons from, the
+globals' third interface bitmap (the Xbox maps' and Halo PC's
+hud_msg_icons_sm), have a sprite of it no smaller than
+HUD_KEY_PROMPT_MINIMUM_SPRITE each way. Theirs of Start and Back are empty
+cells of 4 by 4 texels: the Xbox's messages wrote those buttons' names */
+static boolean button_sprite_drawn(
+	short gamepad_button)
+{
+	struct game_globals *game_globals = scenario_get_game_globals();
+	struct game_globals_interface_tag_references *references;
+	struct icon_hud_element_definition const *icon;
+	struct bitmap_data const *bitmap = NULL;
+	real_rectangle2d const *clip = NULL;
+	long bitmap_group_index;
+
+	if (!hud_globals || !game_globals || !game_globals->interface_tag_references.count ||
+		gamepad_button < 0 || gamepad_button >= hud_globals->messaging.button_icons.count)
+	{
+		return FALSE;
+	}
+	references = TAG_BLOCK_GET_ELEMENT(&game_globals->interface_tag_references, 0,
+		struct game_globals_interface_tag_references);
+	bitmap_group_index = references->interface_tag_references[_interface_bitmap_iface_map2].index;
+	if (bitmap_group_index == NONE)
+		return FALSE;
+	icon = TAG_BLOCK_GET_ELEMENT(&hud_globals->messaging.button_icons, gamepad_button,
+		struct icon_hud_element_definition);
+	hud_retrieve_bitmap_and_bounding_rect(bitmap_group_index, icon->sequence_index, 0, &bitmap, &clip);
+	return bitmap && clip &&
+		(clip->x1 - clip->x0) * bitmap->width >= HUD_KEY_PROMPT_MINIMUM_SPRITE &&
+		(clip->y1 - clip->y0) * bitmap->height >= HUD_KEY_PROMPT_MINIMUM_SPRITE;
+}
+
+/* the multiplayer start's score hint ("Hold BACK for score", the map's
+string, which game_engine_get_state_message gives) for a local player: its
+BACK the Back button's icon (hud_key_prompt_button_word) only where the HUD
+draws something for the icon, the scoreboard's key while the keyboard and
+mouse play (in the headset, what presses Back), or the map's picture of the
+button. The Xbox's and Halo PC's message icons have none of Back (and no
+button style draws one), so with a controller (or the touch controls) the
+word stays, as the Xbox's message wrote it, rather than leaving a gap */
+void hud_key_prompt_score_hint(
+	short local_player_index,
+	wchar_t *text,
+	long length)
+{
+	wchar_t key[64];
+
+	if (prompt_key_text(local_player_index, NONE, HUD_KEY_PROMPT_BACK_BUTTON, key, NUMBEROF(key)) ||
+		button_sprite_drawn(HUD_KEY_PROMPT_BACK_BUTTON))
+	{
+		hud_key_prompt_button_word(text, length, L"BACK", L"%back-button");
+	}
+}
+
 /* draws the prompt's key at the cursor, as the HUD draws a button there,
 and moves the cursor past it; FALSE (nothing drawn) when the prompt keeps
 the controller's button */
@@ -567,22 +684,73 @@ boolean hud_key_prompt_draw(
 {
 	wchar_t text[64];
 
-	if (local_player_index != 0)
+	if (!prompt_key_text(local_player_index, game_control, gamepad_button, text, NUMBEROF(text)))
 		return FALSE;
+	return key_cap_draw(text, bounds, cursor, color);
+}
+
+/* the name of a pad's Back button, its family's (an Xbox pad's View, a
+PlayStation's Share, a Switch's minus), for its cap in the menus
+(hud_key_prompt_draw_back_cap); NULL for no family's */
+char const *hud_key_prompt_back_name(int family)
+{
+	switch (family)
+	{
+	case CONTROLLER_PLAYSTATION:
+		return "Share";
+	case CONTROLLER_SWITCH:
+		return "-";
+	default:
+		return "View";
+	}
+}
+
+/* the menus' Back (View) button while a controller plays (the server
+browser's HOST & MORE): no button style has a picture of it (the Xbox's and
+Halo PC's message icons have none: hud_key_prompt_score_hint), so a cap of
+its name, the menus' player's pad's (player 1's), as the keyboard's keys are
+drawn; FALSE while the keyboard and mouse play (their key's cap then) */
+boolean hud_key_prompt_draw_back_cap(
+	rectangle2d *bounds,
+	rectangle2d *cursor,
+	pixel32 color)
+{
+	wchar_t text[16];
+
 #ifdef HALO_VR
 	if (halo_vr_running())
-	{
-		if (!vr_prompt_text(local_player_index, game_control, gamepad_button, text, NUMBEROF(text)))
-			return FALSE;
-	}
-	else
-#endif
-	if (!halo_keyboard_prompts() ||
-		!hud_key_prompt_text(local_player_index, game_control, gamepad_button, text, NUMBEROF(text)))
-	{
 		return FALSE;
-	}
+#endif
+	if (halo_keyboard_prompts())
+		return FALSE;
+	latin1_to_wide(hud_key_prompt_back_name(controller_button_style_family(controller_button_style_for_port(0))),
+		text, NUMBEROF(text));
 	return key_cap_draw(text, bounds, cursor, color);
+}
+
+/* port: a controller layout's symbol (#1143: an extra button a player
+described, port/linux/include/controller_layouts.h) at the cursor, as a key's
+cap is drawn: its legend in a cap of its fill (the prompt's opacity), round or
+square, edged in the prompt's colour, its legend black or white on it; the
+cursor moved past it */
+boolean hud_key_prompt_draw_symbol(
+	wchar_t const *legend,
+	rectangle2d *bounds,
+	rectangle2d *cursor,
+	pixel32 color,
+	unsigned long fill,
+	unsigned long legend_color,
+	boolean round)
+{
+	boolean drawn;
+
+	key_cap_symbol = TRUE;
+	key_cap_symbol_round = round;
+	key_cap_symbol_fill = (pixel32)fill;
+	key_cap_symbol_legend = (pixel32)legend_color;
+	drawn = key_cap_draw(legend, bounds, cursor, color);
+	key_cap_symbol = FALSE;
+	return drawn;
 }
 
 /* the menus' key of their own (Settings' tabs' Q and E for LB and RB:

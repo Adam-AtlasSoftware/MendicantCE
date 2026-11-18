@@ -32,8 +32,10 @@ that every field is baked again (2: sparse bricks, within the placements'
 reach; 3: the static scenery in the field, and its occlusion of the level
 in lightmap pages; 4: the vehicles' occlusion fields; 5: the scenery's
 occlusion fields, of its drawn triangles, its leaves by their coverage,
-which its static placements' pages are baked with too) */
-#define WORLD_SDF_VERSION 5
+which its static placements' pages are baked with too; 6: a box without
+collision geometry of what it draws, nothing for one that draws nothing
+opaque, in the pages, #773) */
+#define WORLD_SDF_VERSION 6
 /* the file's magic, "WSDF" */
 #define WORLD_SDF_MAGIC 0x46445357UL
 

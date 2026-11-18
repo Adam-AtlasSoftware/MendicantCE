@@ -192,6 +192,23 @@ void profile_dump(
 void profile_dump_to_file(
 	const char *name);
 
+/* port: debug.timings (port/linux/game/perf_overlay.c): whether the
+sections are timed, read at each frame's start */
+boolean profile_port_timings(
+	void);
+/* port: (debug.timings turned on again) the sections left open as it was
+turned off mid-frame (the console's, console.c) taken for closed */
+void profile_port_sections_closed(
+	void);
+/* port: (debug.timings) the sections that took the most time over the
+last MAXIMUM_PROFILE_HISTORY frames, the most first: their names,
+milliseconds and calls a frame; how many, at most most */
+short profile_port_busiest(
+	char const **names,
+	real *milliseconds,
+	real *calls,
+	short most);
+
 /* ---------- globals */
 
 extern boolean profile_timebase_ticks;

@@ -63,7 +63,8 @@ ZLIB_SOURCES = zlib_sources()
 
 def generated(fault=None):
     code = read(SOURCE).replace('#include "platform.h"\n', "").replace(
-        '#include "../../third_party/zlib/zlib_prefixed.h"\n', "").replace('#include "posix.h"\n', "")
+        '#include "../../third_party/zlib/zlib_prefixed.h"\n', "").replace('#include "posix.h"\n', "").replace(
+        '#include "loading_screen.h"\n', "")
     code = mutated(mutated(code, "MAP_UNPACK_READ_SIZE = 0x40000,", "MAP_UNPACK_READ_SIZE = 0x4000,"),
                    "MAP_UNPACK_WRITE_SIZE = 0x400000,", "MAP_UNPACK_WRITE_SIZE = 0x10000,")
     if fault:

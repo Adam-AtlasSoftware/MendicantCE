@@ -1007,7 +1007,11 @@ static void definition_shapes(struct world_proxies_source const *source, struct 
 		break;
 	case _world_proxies_source_box:
 	{
-		/* every node's collision geometry in node 0's space, one box */
+		/* every node's collision geometry in node 0's space, one box; with
+		none, the box of what it draws opaque, and nothing when it draws
+		nothing opaque (not its bounding sphere: a bound for culling, about
+		its origin on the floor, which held the floor inside it wholly
+		occluded about a grenade or a floor marker, #773) */
 		float bounds[2][3], box[2][3];
 		short node_index;
 		int any = 0;
@@ -1021,11 +1025,16 @@ static void definition_shapes(struct world_proxies_source const *source, struct 
 			bounds_add_box(source, 0, (float const (*)[3])box, 0, bounds);
 			any = 1;
 		}
+		if (!any && source->drawn)
+		{
+			memcpy(bounds, source->drawn_bounds, sizeof(bounds));
+			any = 1;
+		}
 		if (any)
+		{
 			box_shape(0, (float const (*)[3])bounds, &shape);
-		else
-			sphere_shape(source, &shape);
-		set_add(set, &shape);
+			set_add(set, &shape);
+		}
 		break;
 	}
 	case _world_proxies_source_sphere:

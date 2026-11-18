@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The built-in benchmark's results (docs/menu_screens.md, "The benchmark's results"), opened over the main menu
+as the benchmark's match ends (port/linux/game/benchmark.c; its stand-in screens/benchmark). The tall layout: the
+scenario at the band's right, the measures in the table at the left (the row source benchmark.results: the
+average, the lows, the frame time's percentiles, the GPU's and the CPU's time a frame), or why the run stopped in
+their place, and in the panel what held the frames back, the pacing, the settings, the computer and the file the
+results were saved in (benchmarks/, beside reports/). CLOSE (and B) goes back to the main menu. -->
+<screen name="benchmark">
+	<header title="BENCHMARK RESULTS" detail="{benchmark.scenario}"/>
+	<table source="benchmark.results" empty="{benchmark.failure}">
+		<column id="measure" label="MEASURE" kind="strong" width="232" grow="80" touch="12 7 220 0 80"/>
+		<column id="value" label="RESULT" width="156" grow="64" align="right" touch="232 7 120 80 64"/>
+	</table>
+	<panel>
+		<heading text="{benchmark.verdict}" lines="2"/>
+		<text text="{benchmark.held}" lines="2" if="benchmark.held"/>
+		<text text="Pacing: {benchmark.pacing}" lines="2"/>
+		<text text="Drawn at {benchmark.settings}" lines="2" if="benchmark.settings"/>
+		<text text="GPU: {benchmark.gpu}" lines="2" if="benchmark.gpu"/>
+		<text text="CPU: {benchmark.cpu}" lines="2" if="benchmark.cpu"/>
+		<text text="Saved in {benchmark.file}" lines="3" if="benchmark.file"/>
+	</panel>
+	<buttons>
+		<button key="back" label="CLOSE"/>
+	</buttons>
+</screen>

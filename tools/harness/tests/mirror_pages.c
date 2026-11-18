@@ -110,6 +110,16 @@ static void xgpu_backend_mirror_write(unsigned long segment, unsigned long offse
 	uploaded_bytes += size;
 }
 
+/* (the window's pages all there: a record's pages played back where they are
+readable, xbox_memory.c's, which tools/harness/tests/test_journal_streams.py
+checks) */
+static BOOL platform_contiguous_readable(const void *address, unsigned long size)
+{
+	(void)address;
+	(void)size;
+	return 1;
+}
+
 #include "mirror.inc"
 
 /* what a draw read from the mirror is the memory's as it is now */

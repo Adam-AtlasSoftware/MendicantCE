@@ -94,7 +94,7 @@ static void voice_audio_mix(float *output, unsigned long frames)
 #define FRAMES 512
 #define BINS (FRAMES / 2 + 1)
 #define AZIMUTHS 24
-#define ELEVATIONS 11
+#define ELEVATIONS 19
 #define DIRECTIONS (AZIMUTHS * ELEVATIONS)
 #define OCTAVES 8
 
@@ -103,10 +103,14 @@ static const double octaves[OCTAVES] = { 125, 250, 500, 1000, 2000, 4000, 8000, 
 /* direction index's azimuth (degrees round to the right from ahead) and
 elevation */
 static int azimuth_of(int direction) { return direction % AZIMUTHS * 15; }
-static int elevation_of(int direction) { return direction / AZIMUTHS * 10 - 40; }
+static int elevation_of(int direction) { return direction / AZIMUTHS * 10 - 90; }
+/* the directions of the Xbox's figures (xbox_figures): 40 below to 60 above; the grid's others (to the poles)
+are judged by recorded_figures only */
+#define FIGURE_DIRECTIONS (AZIMUTHS * 11)
+static int in_figures(int direction) { return elevation_of(direction) >= -40 && elevation_of(direction) <= 60; }
 static int direction_at(int azimuth, int elevation)
 {
-	return (elevation + 40) / 10 * AZIMUTHS + ((azimuth % 360 + 360) % 360) / 15;
+	return (elevation + 90) / 10 * AZIMUTHS + ((azimuth % 360 + 360) % 360) / 15;
 }
 
 /* whether our_response places its sound as 5.1's back pair plays one
@@ -135,7 +139,7 @@ static void our_response(int direction, float *left, float *right, struct hrtf_p
 	memset(impulse, 0, sizeof(impulse));
 	memset(output, 0, sizeof(output));
 	impulse[0] = 1.0f;
-	hrtf_process(stream, impulse, output, FRAMES, FRAMES, &parameters, 1.0f, 0.0f);
+	hrtf_process(stream, impulse, output, FRAMES, FRAMES, &parameters, 1.0f, 0.0f, 1.0f);
 	for (n = 0; n < FRAMES; n++)
 	{
 		left[n] = output[n * 2];
@@ -261,19 +265,23 @@ static struct figures measure(const float *responses)
 	memset(common, 0, sizeof(common));
 	for (d = 0; d < DIRECTIONS; d++)
 	{
+		if (!in_figures(d))
+			continue;
 		spectrum(responses + d * FRAMES * 2, s[d].left, re[0], im[0]);
 		spectrum(responses + d * FRAMES * 2 + FRAMES, s[d].right, re[1], im[1]);
 		delay[d] = ears_delay_ms(re[0], im[0], re[1], im[1]);
 		for (b = 0; b < OCTAVES; b++)
 			ild[d][b] = band_db(s[d].left, octaves[b]) - band_db(s[d].right, octaves[b]);
 		for (k = 0; k < BINS; k++)
-			common[k] += (pow(10.0, s[d].left[k] / 10.0) + pow(10.0, s[d].right[k] / 10.0)) / (2.0 * DIRECTIONS);
+			common[k] += (pow(10.0, s[d].left[k] / 10.0) + pow(10.0, s[d].right[k] / 10.0)) / (2.0 * FIGURE_DIRECTIONS);
 	}
 	for (d = 0; d < DIRECTIONS; d++)
 	{
 		double low_sum = 0.0, high_sum = 0.0;
 		int lows = 0, highs = 0;
 
+		if (!in_figures(d))
+			continue;
 		for (k = 0; k < BINS; k++)
 		{
 			double c = 10.0 * log10(common[k]);
@@ -302,7 +310,7 @@ static struct figures measure(const float *responses)
 	for (b = 0; b < OCTAVES; b++)
 	{
 		for (d = 0; d < DIRECTIONS; d++)
-			f.level_mean[b] += fabs(ild[d][b]) / DIRECTIONS;
+			f.level_mean[b] += in_figures(d) ? fabs(ild[d][b]) / FIGURE_DIRECTIONS : 0.0;
 	}
 	for (i = 0; i < 3; i++)
 	{
@@ -370,6 +378,23 @@ static const struct
 	double left[OCTAVES], right[OCTAVES];
 } recorded_figures[] =
 {
+	/* (the poles and 60 degrees below and above: the test bed's tenth run) */
+	{   0, -90, 0.000, { -0.3, -0.2, 0.1, 0.5, -1.7, -12.1, -23.9, -34.6 }, { -0.3, -0.2, 0.1, 0.5, -1.7, -12.1, -23.9, -34.6 } },
+	{   0, -60, 0.000, { -0.9, -1.1, -2.0, -2.1, -0.5, -5.9, -5.7, -12.6 }, { -0.9, -1.1, -2.0, -2.1, -0.5, -5.9, -5.7, -12.6 } },
+	{  30, -60, 0.066, { -1.2, -1.7, -3.6, -4.7, -1.6, -7.1, -8.8, -18.3 }, { -0.1, -0.2, -0.5, -0.6, -0.7, -4.9, -5.3, -11.2 } },
+	{  60, -60, 0.345, { -1.1, -1.4, -2.6, -7.4, -14.4, -13.8, -17.8, -27.6 }, { 0.4, 0.7, 1.4, 2.2, 0.2, -5.4, -5.0, -13.4 } },
+	{  90, -60, 0.389, { -1.4, -1.6, -2.1, -3.8, -9.0, -22.4, -20.7, -25.9 }, { 0.7, 1.0, 1.7, 2.8, 1.6, -5.8, -5.3, -10.9 } },
+	{ 120, -60, 0.328, { -1.3, -1.6, -2.8, -7.1, -14.3, -16.4, -20.2, -25.0 }, { 0.5, 0.8, 1.3, 2.1, 0.2, -7.9, -7.8, -11.7 } },
+	{ 150, -60, 0.087, { -2.1, -2.3, -3.0, -3.3, -4.1, -10.6, -13.3, -18.0 }, { -0.3, -0.3, -0.2, 0.1, -2.1, -7.9, -8.6, -11.7 } },
+	{ 180, -60, 0.000, { -1.5, -1.4, -1.4, -1.0, -3.2, -8.9, -9.2, -15.3 }, { -1.5, -1.4, -1.4, -1.0, -3.2, -8.9, -9.2, -15.3 } },
+	{   0, +60, 0.000, { -0.1, -0.3, -0.9, -1.2, -1.2, -3.7, -3.6, -6.7 }, { -0.1, -0.3, -0.9, -1.2, -1.2, -3.7, -3.6, -6.7 } },
+	{  30, +60, 0.116, { -0.2, -0.5, -1.4, -2.8, -3.0, -4.6, -6.3, -10.6 }, { 0.4, 0.3, -0.1, 0.1, -0.3, -1.8, -1.0, -2.3 } },
+	{  60, +60, 0.264, { -0.5, -0.7, -1.8, -4.4, -6.2, -9.6, -9.2, -13.4 }, { 0.7, 0.7, 0.8, 1.2, 0.2, -0.7, 1.5, -0.4 } },
+	{  90, +60, 0.307, { -0.7, -1.0, -1.9, -4.4, -7.0, -11.9, -11.4, -18.1 }, { 1.0, 1.0, 1.0, 1.3, 0.3, -1.2, 1.8, -2.1 } },
+	{ 120, +60, 0.251, { -0.5, -0.7, -1.7, -4.0, -6.4, -10.2, -7.1, -12.3 }, { 0.7, 0.7, 0.8, 1.1, -0.2, -2.2, 1.0, -4.2 } },
+	{ 150, +60, 0.104, { -0.3, -0.5, -1.3, -2.6, -3.6, -6.4, -4.8, -11.2 }, { 0.1, 0.1, -0.1, -0.2, -1.3, -4.2, -1.0, -6.6 } },
+	{ 180, +60, 0.000, { -0.1, -0.3, -0.7, -1.2, -2.1, -5.7, -2.6, -8.8 }, { -0.1, -0.3, -0.7, -1.2, -2.1, -5.7, -2.6, -8.8 } },
+	{   0, +90, 0.000, { 0.0, -0.2, -0.7, -1.3, -2.2, -5.0, -2.4, -6.5 }, { 0.0, -0.2, -0.7, -1.3, -2.2, -5.0, -2.4, -6.5 } },
 	{   0, -40, 0.000, { -0.3, -0.1, 0.8, 2.6, 1.4, -4.1, 0.0, -1.2 }, { -0.3, -0.1, 0.8, 2.6, 1.4, -4.1, 0.0, -1.2 } },
 	{  30, -40, 0.186, { -1.2, -1.2, -1.2, -0.7, -2.4, -7.9, -4.0, -9.7 }, { 1.3, 1.5, 2.3, 4.0, 2.9, -1.4, 2.3, 0.1 } },
 	{  60, -40, 0.555, { -1.3, -1.5, -2.1, -4.4, -8.0, -17.1, -15.3, -24.4 }, { 2.7, 3.0, 3.6, 4.4, 2.9, 0.2, 2.8, -3.1 } },

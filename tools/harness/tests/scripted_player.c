@@ -56,17 +56,26 @@ static unsigned long test_input_pressed;
 static int test_input_holding_action;
 static double test_input_holding_action_since;
 static int test_script_on;
-static char test_input_menu[512];
+static char test_input_menu[2048];
 static unsigned long long test_input_menu_since;
+/* ("menu:ready ...": its clock waiting for the menus; the computer's clock,
+debug.frame_time not set) */
+static int test_input_menu_waiting;
+/* (the built-in benchmark's count of debug.test_input reread, never bumped here) */
+static int test_input_generation;
+static unsigned long long test_input_menu_now(void) { return SDL_GetTicks(); }
 
 static void test_script_parse(char const *script) { (void)script; test_script_on = 1; }
-static void test_script_gamepad(XINPUT_GAMEPAD *pad) { (void)pad; }
+static void test_script_port_gamepad(int port, XINPUT_GAMEPAD *pad) { (void)port; (void)pad; }
 static void test_pad_gamepad(XINPUT_GAMEPAD *pad) { (void)pad; }
 static int test_latency_on(void) { return !strncmp(test_input_setting, "latency:", 8); }
 static void test_latency_gamepad(XINPUT_GAMEPAD *pad) { (void)pad; }
 
-static void test_input_menu_gamepad(XINPUT_GAMEPAD *pad)
+static void test_input_menu_ports_read(void) { }
+
+static void test_input_menu_gamepad(XINPUT_GAMEPAD *pad, int port)
 {
+	(void)port;
 	if (menu_script_plays++ == 0)
 		menu_script_first_read = (long long)(SDL_GetTicks() - test_input_menu_since);
 	pad->bAnalogButtons[XINPUT_GAMEPAD_A] = 255;
@@ -111,6 +120,7 @@ int main(int argc, char **argv)
 	char const *case_name = argc > 1 ? argv[1] : "";
 	int touched, pressed_a;
 
+	(void)test_input_menu_waiting; /* (set by the code, read by the menus' script here stubbed out) */
 	CASE("bot_menus")
 	{
 		test_input_setting = "bot:1";

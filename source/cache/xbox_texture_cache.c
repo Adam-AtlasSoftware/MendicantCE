@@ -126,6 +126,9 @@ symbols in this file:
 #include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
 #include "prism_popin.h" /* port: port/linux/game/prism_popin.c */
 #include "camera_pose.h" /* port: port/linux/game/camera_pose.c */
+#include "mcc_cache.h" /* port: port/linux/game/mcc_cache.h */
+#include "mcc_texture_cache.h" /* port: port/linux/game/mcc_texture_cache.h */
+
 
 /* ---------- constants */
 
@@ -999,6 +1002,11 @@ static boolean texture_cache_bitmap_valid(
 		bitmap->mipmap_count<=floor_log2(MAX(bitmap->width, MAX(bitmap->height, bitmap->depth))) &&
 		bitmap->pixels_size>=0;
 
+	/* port: Only MCC-owned normalized resources take this admission path. Their
+	linear rows have already been padded by the MCC bitmap adapter. */
+	if (mcc_cache_tags_loaded() && mcc_cache_bitmap_valid(bitmap))
+		return TRUE;
+
 	if (valid)
 	{
 		boolean compressed_format =
@@ -1040,6 +1048,7 @@ static boolean texture_cache_bitmap_valid(
 
 	return valid;
 }
+
 
 static boolean texture_cache_start_loading_bitmap(
 	struct bitmap_data *bitmap,
@@ -1096,11 +1105,13 @@ static boolean texture_cache_start_loading_bitmap(
 		}
 		texture_cache_initialize_hardware_format(bitmap, &texture->hardware_format);
 		/* port: or, the bitmap of a mod played over the map's, from its
-		file, at once (port/linux/game/mod_bitmaps.c) */
+		file, at once (port/linux/game/mod_bitmaps.c); or one of the
+		menus' models', from theirs (port/linux/game/menu_models.c) */
 		{
 			extern boolean mod_bitmaps_read(struct bitmap_data *bitmap, void *buffer);
+			extern int menu_models_bitmap_read(void *bitmap, void *buffer);
 
-			if (mod_bitmaps_read(bitmap, base_address))
+			if (mod_bitmaps_read(bitmap, base_address) || menu_models_bitmap_read(bitmap, base_address))
 			{
 				texture->loaded = TRUE;
 				texture->read_request_handle = NONE;
@@ -1274,6 +1285,15 @@ void *_texture_cache_bitmap_get_hardware_format(
 	if ((render_enumerating || menu_pictures_textures_wait() || camera_path_settling()) && load)
 	{
 		block = TRUE;
+	}
+
+	/* port: an MCC map's textures have hardware headers of their own
+	(port/linux/game/mcc_texture_cache.c) */
+	if (mcc_cache_tags_loaded())
+	{
+		hardware_format = mcc_texture_cache_get(bitmap, load);
+		if (hardware_format || mcc_cache_bitmap_valid(bitmap))
+			return hardware_format;
 	}
 
 	match_assert(

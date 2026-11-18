@@ -101,7 +101,7 @@ fi
 # its first start
 case $package_kind in
 frame)
-	app="OpenH1 VR"
+	app="GOAT H1 VR"
 	dir=$HOME/apps/halo-vr
 	entry=$HOME/.local/share/applications/openh1-vr.desktop
 	program=halo-vr.sh
@@ -116,11 +116,11 @@ frame)
 	;;
 vr|desktop)
 	if [ "$package_kind" = vr ]; then
-		app="OpenH1 VR"
+		app="GOAT H1 VR"
 		dir=$HOME/Applications/OpenH1-VR
 		entry=$HOME/.local/share/applications/openh1-vr.desktop
 	else
-		app=OpenH1
+		app="GOAT H1"
 		dir=$HOME/Applications/OpenH1
 		entry=$HOME/.local/share/applications/openh1.desktop
 	fi
@@ -310,7 +310,7 @@ fi
 # copied as the game copies an image's (to maps.partial, then renamed
 # maps); a disc image is linked into the game's folder, where that first
 # start finds it.
-title="OpenH1: your game's maps"
+title="GOAT H1: your game's maps"
 image_link=
 if [ -n "$image" ]; then
 	for link in "$dir"/*.iso "$dir"/*.xiso "$dir"/*.ISO "$dir"/*.XISO; do
@@ -343,7 +343,7 @@ if [ -z "$batch" ] && ! has_maps "$dir" && ! data_set "$dir" && [ -z "$image_lin
 	else
 		answer=0
 		kdialog --title "$title" --yes-label "A disc image" --no-label "A maps folder" --yesnocancel \
-			"OpenH1 plays the maps of your own Halo: Combat Evolved for the Xbox.
+			"GOAT H1 plays the maps of your own Halo: Combat Evolved for the Xbox.
 
 Where are they: in a disc image of the game (.iso or .xiso), or in a maps folder copied from its disc?" || answer=$?
 		if [ "$answer" = 0 ] &&

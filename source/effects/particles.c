@@ -94,6 +94,7 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "sound/game_sound.h"
 #include "sound/sound_definitions.h"
+#include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
 
 /* ---------- constants */
 
@@ -815,6 +816,7 @@ void particle_new(
 	struct location location;
 	real_point3d position;
 	long particle_index;
+	boolean cosmetic, ticking = FALSE; /* port: (below) */
 
 	match_assert_valid_real_vector3d(
 		"c:\\halo\\SOURCE\\effects\\particles.c",
@@ -870,6 +872,15 @@ void particle_new(
 		return;
 
 	particle = particle_get(particle_index);
+	/* port: at game.sim_rate 60 and 120 the frames' seed in a tick too
+	(random_math_port_begin_cosmetic, as the decals' and the contrails'): a
+	particle is only seen, and whether a tick makes it (seen, room among the
+	particles, held for a later frame: render_interpolation_particle_later)
+	is the frames', so the game's local seed would move with them. At 30 the
+	tick's, as the original's */
+	cosmetic = sim_rate_get() > TICKS_PER_SECOND;
+	if (cosmetic)
+		ticking = random_math_port_begin_cosmetic();
 
 	particle->flags = 0;
 	if (TEST_FLAG(definition->flags, _particle_definition_can_animate_backwards_bit))
@@ -997,6 +1008,8 @@ void particle_new(
 			particle->frame_index = NONE;
 		}
 	}
+	if (cosmetic) /* port: (above) */
+		random_math_port_end_cosmetic(ticking);
 
 	return;
 }

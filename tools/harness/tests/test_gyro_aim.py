@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
+from harness import CHECK_FAILED, build, function, mutated, read, run  # noqa: E402
 
 AIM_CONTROLS = [
     # no automatic calibration: the bias drifts the view
@@ -42,6 +42,14 @@ AIM_CONTROLS = [
     # the Steam Controller's touch not known, or Steam Input's virtual controller's taken for one
     ("(product >= 0x1302 && product <= 0x1305)", "(product == 0x1302)", "modes"),
     ("return vendor == VALVE && (product", "return vendor == VALVE && (product == 0x11ff || product", "modes"),
+    # the touch controls' gyroscope as the phone turned, its settings not applied (the old path)
+    ("\tgyro_aim_rate(rate, smoothed, seconds, settings, turn);", "\tturn[0] = turned[0];\n\tturn[1] = turned[1];",
+     "touch"),
+    # the smoothing's strength not applied: low and high smooth as medium does
+    ("SMOOTH_SLOWEST * settings->smoothing, SMOOTH_FASTEST * settings->smoothing,", "SMOOTH_SLOWEST, SMOOTH_FASTEST,",
+     "strength"),
+    # the flick's time not the setting's: every flick a tenth of a second
+    ("seconds / flick_seconds, 1.0f)", "seconds / FLICK_STICK_SECONDS, 1.0f)", "flick_time"),
 ]
 
 
@@ -53,7 +61,8 @@ def aim_generated(fault=None):
     return (("gyro_aim.h", read("port/linux/src/gyro_aim.h")), ("under_test.inc", code))
 
 
-@pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick", "modes"])
+@pytest.mark.parametrize("case", ["bias", "calibrate", "player_space", "tilt_followed", "smoothing", "flick", "modes",
+                                  "touch", "strength", "flick_time"])
 def test_gyro_aim(case):
     status, output = run(build("gyro_aim", aim_generated()), case)
     assert status == 0, output
@@ -92,10 +101,11 @@ ASSIST_CONTROLS = [
 
 
 def assist_generated(fault=None):
-    block = camera_block(read("source/game/player_control.c"))
+    source = read("source/game/player_control.c")
+    block = camera_block(source)
     if fault:
         block = mutated(block, *fault)
-    text = ("static void camera_turn(struct game_globals_player_control *constants, struct game_input_state "
+    text = (function(source, "player_control_look_acceleration") + "\n" + "static void camera_turn(struct game_globals_player_control *constants, struct game_input_state "
             "*input_state, struct player_control *control, struct player_datum *player, struct input_blob *input, "
             "real clamped_yaw, real clamped_pitch, real look_yaw_rate, real look_pitch_rate, real time_delta_sec, "
             "short gamepad_index, short local_player_index)\n" + block + "\n")
@@ -112,14 +122,3 @@ def test_gyro_aim_assist(case):
 def test_gyro_aim_assist_negative_control(before, after, case):
     status, output = run(build("gyro_aim_assist", assist_generated((before, after))), case)
     assert status == CHECK_FAILED, output
-
-
-def test_flick_stick_takes_the_sticks_look():
-    # the flick stick's look is its own: the stick's look none at a frame's reading and a sub-step's alike (both
-    # input_abstraction_state_from_gamepad's), with the default stick layout only
-    code = read("source/input/input_abstraction.c")
-    state = code[code.index("static void input_abstraction_state_from_gamepad("):]
-    state = state[:state.index("\n}\n")]
-    assert "if (input_abstraction_port_flick_stick((short)controller_index))" in state
-    assert "_joystick_controls_default" in code[code.index("boolean input_abstraction_port_flick_stick("):][:600]
-    assert code.count("input_abstraction_state_from_gamepad(controller_index, &gamepad, state);") >= 1

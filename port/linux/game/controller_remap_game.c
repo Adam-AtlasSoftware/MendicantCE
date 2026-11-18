@@ -4,6 +4,7 @@
 #include "memory/data.h"
 #include "controller_remap.h"
 #include "controller_buttons.h"
+#include "controller_layouts.h"
 #include "input/input_abstraction.h"
 #include "game/game.h"
 #include "game/players.h"
@@ -135,20 +136,42 @@ void controller_remap_prompt(short port, struct game_input_preferences *preferen
                 (unsigned char)(CONTROLLER_REMAP_PROMPT_PADDLE + buttons[i] - CONTROLLER_REMAP_PADDLE) : buttons[i];
 }
 
+/* (a viewport's local player's controller's, as controller_remap_prompt
+ * reads its layout) */
+static void prompt_device(short port, struct controller_device *device)
+{
+    long player;
+    if (port >= 0 && port < 4 && (player = local_player_get_player_index(port)) != NONE)
+        port = player_get(player)->local_player_index;
+    controller_device_get(port, device);
+}
+
+int controller_remap_prompt_symbol(short port, int button, struct controller_layout_control *symbol)
+{
+    struct controller_device device;
+    struct controller_layout const *layout;
+    struct controller_layout_control const *control;
+    if (!CONTROLLER_REMAP_PROMPT_EXTRA(button)) return 0;
+    prompt_device(port, &device);
+    layout = controller_layout_for(device.guid);
+    if (!layout) return 0;
+    control = &layout->controls[button - CONTROLLER_REMAP_PROMPT_PADDLE];
+    if (!control->name[0]) return 0;
+    if (symbol) *symbol = *control;
+    return 1;
+}
+
 wchar_t const *controller_remap_prompt_text(short port, int button)
 {
     static wchar_t text[32];
     struct controller_device device;
     char const *name;
-    long player;
     int i;
     if (button == CONTROLLER_REMAP_UNBOUND) return L"UNBOUND";
-    if (button < CONTROLLER_REMAP_PROMPT_PADDLE || button > CONTROLLER_REMAP_PROMPT_PADDLE + 3) return NULL;
-    if (port >= 0 && port < 4 && (player = local_player_get_player_index(port)) != NONE)
-        port = player_get(player)->local_player_index;
-    controller_device_get(port, &device);
-    name = controller_remap_button_name(CONTROLLER_REMAP_PADDLE + button - CONTROLLER_REMAP_PROMPT_PADDLE,
-        device.family);
+    if (!CONTROLLER_REMAP_PROMPT_EXTRA(button)) return NULL;
+    prompt_device(port, &device);
+    /* (its name in the controller's layout, where it has one) */
+    name = controller_layout_button_name(CONTROLLER_REMAP_PADDLE + button - CONTROLLER_REMAP_PROMPT_PADDLE, &device);
     for (i = 0; name[i] && i < (int)(sizeof(text) / sizeof(text[0])) - 1; i++) text[i] = (wchar_t)(unsigned char)name[i];
     text[i] = 0;
     return text;

@@ -2,9 +2,10 @@
 HOST_SCREENSHOT_TEST.C
 
 The screenshot key's files (host_screenshot.c), with SDL: the names, the
-folder made, the PNG's pixels (the frame's alpha made opaque), a second
-picture in the same second kept beside the first, and a folder that cannot
-be made. argv[1]: an empty folder to write in.
+folder made, the PNG's pixels (the frame's alpha made opaque, the caller's
+pixels free to be reused once it answers: the file is written on a thread
+of its own, and no .part is left), a second picture in the same second
+kept beside the first, and a folder that cannot be made. argv[1]: an empty folder to write in.
 */
 
 #include "host_render_stream.h"
@@ -67,6 +68,11 @@ int main(int argc, char **argv)
 	pattern(bgra);
 	CHECK(host_screenshot_write(bgra, WIDTH, HEIGHT, directory, name, sizeof(name)));
 	CHECK(name_valid(name));
+	/* (the caller's pixels its own again: the thread writes its copy) */
+	memset(bgra, 0, sizeof(bgra));
+	host_screenshot_finish();
+	snprintf(path, sizeof(path), "%s/%s.part", directory, name);
+	CHECK(!SDL_GetPathInfo(path, NULL));
 	snprintf(path, sizeof(path), "%s/%s", directory, name);
 	read = SDL_LoadPNG(path);
 	CHECK(read != NULL);
@@ -103,6 +109,7 @@ int main(int argc, char **argv)
 		CHECK(host_screenshot_write(bgra, WIDTH, HEIGHT, directory, first, sizeof(first)));
 		pattern(bgra);
 		CHECK(host_screenshot_write(bgra, WIDTH, HEIGHT, directory, name, sizeof(name)));
+		host_screenshot_finish();
 		CHECK(name_valid(first) && name_valid(name) && strcmp(first, name));
 		if (!strncmp(first, name, 19))
 		{

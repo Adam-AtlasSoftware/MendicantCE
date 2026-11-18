@@ -96,7 +96,7 @@ port_config.c), and a player's own application's id turns Discord on. */
 #ifdef HALO_FORK_MENDICANT
 #define DISCORD_GAME_NAME "MendicantCE"
 #else
-#define DISCORD_GAME_NAME "OpenH1"
+#define DISCORD_GAME_NAME "GOAT H1"
 #endif
 
 /* an activity, as sent */
@@ -498,8 +498,13 @@ static int compose(struct activity *activity)
 		snprintf(activity->details, sizeof(activity->details), "In the menus");
 	else
 	{
-		snprintf(activity->details, sizeof(activity->details), "%s%s", discord.game.hosting ? "Hosting " : "",
-			discord.game.description);
+		/* (the description's "OpenH1 <rate> Tick", which friends' machines
+		read as sent, doubles_friend_in_kind, said by the name players know) */
+		const char *description = discord.game.description;
+		int renamed = !strncmp(description, "OpenH1 ", 7);
+
+		snprintf(activity->details, sizeof(activity->details), "%s%s%s", discord.game.hosting ? "Hosting " : "",
+			renamed ? "GOAT H1 " : "", description + (renamed ? 7 : 0));
 	}
 	if (discord.own_art && (party.active || discord.game.hosting))
 	{

@@ -158,10 +158,11 @@ symbols in this file:
 #include "saved games/playlist_profile.h"
 #include "saved games/saved_game_files.h"
 #include "interface/ui_widget.h"
-#include "interface/virtual_keyboard.h"
+#include "keyboard.h" /* port: port/linux/game/keyboard.c */
 #include "main/main.h"
 #include "tag_files/tag_groups.h"
 #include "player_ui.h"
+#include "mcc_ui.h" /* port: port/linux/game/mcc_ui.c */
 
 /* ---------- constants */
 
@@ -691,6 +692,12 @@ long player_ui_get_player1_last_used_profile_index(
 	sets the path itself */
 	static boolean player1_profile_path_looked_for = FALSE;
 
+	/* port: and not until the profiles are enumerated: the game's thread asks
+	from the start (friends_menu.inc, game_state_persistent_storage_ahead),
+	while the enumeration writes the mapfile on its own thread, whose list
+	the index found then was not of (#888) */
+	if (!player1_profile_path[0] && !player1_profile_path_looked_for && !saved_game_files_enumerated())
+		return NONE;
 	if (!player1_profile_path[0] && !player1_profile_path_looked_for)
 	{
 		player1_profile_path_looked_for = TRUE;
@@ -796,6 +803,8 @@ void player_ui_begin_editing_profile(
 	long type;
 
 	player_ui_globals.edit_profile_index = NONE;
+	/* port: a profile editor opened here is no longer MCC's pause menu's */
+	mcc_ui_settings_profile_released();
 	type = saved_game_file_get_type(profile_index);
 
 	switch (type)
@@ -1048,14 +1057,14 @@ boolean player_ui_prompt_user_to_rename_edit_profile(
 		switch (type)
 		{
 			case _saved_game_file_type_player_profile:
-				result = virtual_keyboard_launch(
+				result = keyboard_name_launch(
 					player_ui_globals.edit_profile.current.player.player_name,
 					sizeof(player_ui_globals.edit_profile.current.player.player_name),
 					10);
 				break;
 
 			case _saved_game_file_type_game_variant:
-				result = virtual_keyboard_launch(
+				result = keyboard_name_launch(
 					player_ui_globals.edit_profile.current.variant.human_readable_game_description,
 					sizeof(player_ui_globals.edit_profile.current.variant.human_readable_game_description),
 					10);
@@ -1387,5 +1396,7 @@ static void clear_profile_edit_data(
 	void)
 {
 	player_ui_globals.edit_profile_index = NONE;
+	/* port: saving or cancelling also ends the editor MCC's pause menu opened */
+	mcc_ui_settings_profile_released();
 	return;
 }

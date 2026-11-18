@@ -88,6 +88,12 @@ static void *guest_allocate(size_t size)
 /* ---------- what the encoder calls besides the host (the front end's
 own code in the game) */
 
+/* (port/linux/game/render_marks.c's, which the encoder calls for a pipeline
+made in play: nothing to name here) */
+void render_marks_pipeline_unprepared(void)
+{
+}
+
 void platform_log(const char *format, ...)
 {
 	(void)format;
@@ -118,6 +124,24 @@ void host_logf(int priority, const char *format, ...)
 	vfprintf(stderr, format, arguments);
 	va_end(arguments);
 	fputc('\n', stderr);
+}
+
+/* (no stalls detected here: host_stall.c) */
+void host_stall_frame(void)
+{
+}
+
+void host_stall_render_thread(void)
+{
+}
+
+void host_stall_loading(int active)
+{
+	(void)active;
+}
+
+void host_stall_summary(void)
+{
 }
 
 void xgpu_texture_describe(DWORD format_word, DWORD size_word, struct xgpu_texture_description *description)
@@ -913,6 +937,14 @@ static void test_dynamic_lights_upload(void *context, const struct xgpu_stream_d
 		checksum(host_pointer(record->cells), record->size));
 }
 
+static void test_dynamic_lights_change(void *context, const struct xgpu_stream_dynamic_lights_change *record)
+{
+	(void)context;
+	text_printf(&actual, "lights %u %u %08x %08x\n", record->offset, record->size,
+		checksum(&record->block, sizeof(record->block)),
+		record->size ? checksum(host_pointer(record->cells), record->size) : 0u);
+}
+
 static void test_dynamic_lights_halos(void *context, const struct xgpu_stream_dynamic_lights_halos *record)
 {
 	(void)context;
@@ -982,6 +1014,7 @@ static const struct host_render_backend test_backend =
 	.loading = test_loading,
 	.loading_art = test_loading_art,
 	.dynamic_lights_upload = test_dynamic_lights_upload,
+	.dynamic_lights_change = test_dynamic_lights_change,
 	.dynamic_lights_halos = test_dynamic_lights_halos,
 	.vr_supported = test_vr_supported,
 	.vr_initialize = test_vr_initialize,
@@ -1671,9 +1704,18 @@ static void test_round_trip(void)
 			random_bytes(block->position, 5 * 16);
 			random_bytes(cells, 32 * 32 * 17 * 16);
 			CHECK(xgpu_backend_dynamic_lights_prepare());
+			/* (the first: all of the cells; then those that changed, from the
+			first texel that did to the last; none) */
 			xgpu_backend_dynamic_lights_upload(block, cells);
-			text_printf(&expected, "lights %08x %08x\n", checksum(block, sizeof(*block)),
+			text_printf(&expected, "lights 0 %u %08x %08x\n", 32 * 32 * 17 * 16, checksum(block, sizeof(*block)),
 				checksum(cells, 32 * 32 * 17 * 16));
+			cells[5000] ^= 1;
+			cells[70000] ^= 1;
+			xgpu_backend_dynamic_lights_upload(block, cells);
+			text_printf(&expected, "lights 4992 %u %08x %08x\n", 70016 - 4992, checksum(block, sizeof(*block)),
+				checksum(cells + 4992, 70016 - 4992));
+			xgpu_backend_dynamic_lights_upload(block, cells);
+			text_printf(&expected, "lights 0 0 %08x 00000000\n", checksum(block, sizeof(*block)));
 			memset(cells, 0, 32 * 32 * 17 * 16);
 			halos->count = 3;
 			random_bytes(halos->halos, 6 * 16);
@@ -1951,7 +1993,10 @@ static void test_vertices_kept(void)
 	}
 	ring = xgpu_stream_encode_ring();
 	printf("vertices kept: %u vertices sent again, %u waits\n", ring->vertices_again, ring->waits);
-	CHECK(ring->vertices_again >= 6);
+	/* (sent again where a wait for room came between them, which the
+	records' sizes decide: 6 rounds gave 6 with 580 bytes of uniforms, 5 with
+	584; what the host drew is checked against what was sent, above) */
+	CHECK(ring->vertices_again >= 5);
 	stream_end("vertices kept");
 }
 
@@ -2026,6 +2071,53 @@ static void test_malformed(void)
 		CHECK(host_render_decode(decoder, 0, 12) == 0);
 		CHECK(ring->error == XGPU_STREAM_ERROR_RECORD);
 		CHECK(loading_art_calls == calls);
+	}
+
+	/* display.ambient_occlusion "ray_traced"'s: a mesh's size not its
+	triangles', an id past the last, triangles for id 0 (every mesh let go
+	of), instances past the most or of another size */
+	{
+		struct xgpu_stream_world_ao_mesh *mesh = (void *)buffer;
+		struct xgpu_stream_world_ao_instances *instances = (void *)buffer;
+
+		memset(buffer, 0, 64);
+		mesh->header = XGPU_STREAM_HEADER(XGPU_STREAM_WORLD_AO_MESH, sizeof(*mesh));
+		mesh->id = 1;
+		mesh->count = 2;
+		mesh->size = 36;
+		ring->error = 0;
+		CHECK(host_render_decode(decoder, 0, sizeof(*mesh)) == 0);
+		CHECK(ring->error == XGPU_STREAM_ERROR_BOUNDS);
+		mesh->count = 0;
+		mesh->size = 0;
+		mesh->id = XGPU_STREAM_WORLD_AO_MESHES;
+		ring->error = 0;
+		CHECK(host_render_decode(decoder, 0, sizeof(*mesh)) == 0);
+		CHECK(ring->error == XGPU_STREAM_ERROR_BOUNDS);
+		mesh->id = 0;
+		mesh->count = 1;
+		mesh->size = 36;
+		ring->error = 0;
+		CHECK(host_render_decode(decoder, 0, sizeof(*mesh)) == 0);
+		CHECK(ring->error == XGPU_STREAM_ERROR_BOUNDS);
+		/* (and as it should be: every mesh let go of) */
+		mesh->count = 0;
+		mesh->size = 0;
+		ring->error = 0;
+		CHECK(host_render_decode(decoder, 0, sizeof(*mesh)) == sizeof(*mesh));
+		CHECK(ring->error == 0);
+		memset(buffer, 0, 64);
+		instances->header = XGPU_STREAM_HEADER(XGPU_STREAM_WORLD_AO_INSTANCES, sizeof(*instances));
+		instances->count = XGPU_STREAM_WORLD_AO_INSTANCES_MAXIMUM + 1;
+		instances->size = instances->count * (uint32_t)sizeof(struct xgpu_world_ao_instance);
+		ring->error = 0;
+		CHECK(host_render_decode(decoder, 0, sizeof(*instances)) == 0);
+		CHECK(ring->error == XGPU_STREAM_ERROR_BOUNDS);
+		instances->count = 1;
+		instances->size = 60;
+		ring->error = 0;
+		CHECK(host_render_decode(decoder, 0, sizeof(*instances)) == 0);
+		CHECK(ring->error == XGPU_STREAM_ERROR_BOUNDS);
 	}
 
 	/* a skip to the ring's end, and on from its start */

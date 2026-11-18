@@ -35,6 +35,12 @@ CASES = ["delays", "levels", "rear", "recorded", "recorded-behind"]
 
 # a fault in the HRTF, and the case that must catch it
 NEGATIVE_CONTROLS = {
+    # the pole below the mean of the 40-degree rows, as it was before the tenth run recorded it (a sound straight
+    # below 20 to 30 dB too bright above 4.5 kHz)
+    "pole-below-guessed": (("{ { -0.3f, -0.3f, 2.0f, -32.3f, -40.1f, -22.4f, -19.1f, -43.1f, -31.9f },\n"
+                            "\t  { -0.3f, -0.3f, 2.0f, -32.3f, -40.1f, -22.4f, -19.1f, -43.1f, -31.9f }, 0.0f },",
+                            "{ { 0.5f, 0.1f, 3.4f, -0.7f, -1.7f, -8.1f, -1.4f, 1.1f, -5.8f },\n"
+                            "\t  { 0.5f, 0.1f, 3.4f, -0.7f, -1.7f, -8.1f, -1.4f, 1.1f, -5.8f }, 0.0f },"), "recorded"),
     # the time between the ears 15% short (a sphere's, at 40 degrees up or down)
     "delays-short": (("floorf(strength * direction.delay + 0.5f)", "floorf(0.85f * strength * direction.delay + 0.5f)"),
                      "delays"),

@@ -85,6 +85,7 @@ symbols in this file:
 #include "game/players.h"
 #include "interface/first_person_weapons.h"
 #include "interface/hud.h"
+#include "mcc_hud_draw.h" /* port: port/linux/game/mcc_hud_draw.c */
 #include "interface/hud_definitions.h"
 #include "interface/interface.h"
 #include "interface/hud_messaging.h"
@@ -110,6 +111,8 @@ symbols in this file:
 void prism_bake_indicator_draw(void); /* port: port/linux/game/prism_bake_indicator.c */
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
+#include "stats_log.h" /* port: port/linux/game/stats_log.c */
+#include "touch_cinematic.h" /* port: port/linux/game/touch_cinematic.c */
 
 /* ---------- constants */
 
@@ -285,6 +288,9 @@ void interface_initialize_for_new_map(
 	return;
 }
 
+/* port: (ui_widget.c) */
+void ui_widget_port_popups_close(void);
+
 void interface_dispose_from_old_map(
 	void)
 {
@@ -295,6 +301,9 @@ void interface_dispose_from_old_map(
 	(ui.map's: main_screen_shell_load sets it up again); a game map has none,
 	so it cannot open there (the PC menus' Settings, from the pause menu) */
 	virtual_keyboard_dispose();
+	/* port: and the menus' pop-ups (ui_widget.c), whose screens were the old
+	map's */
+	ui_widget_port_popups_close();
 
 	return;
 }
@@ -389,6 +398,9 @@ void interface_draw_fullscreen_overlays(
 	void)
 {
 	cinematic_render();
+	/* port: the touchscreen's skip button, in the letterbox's bar
+	(port/linux/game/touch_cinematic.c) */
+	touch_cinematic_draw();
 	interface_splitscreen_render();
 	hud_render_timer();
 	/* port: a map's download (port/linux/game/map_share.c) */
@@ -399,6 +411,8 @@ void interface_draw_fullscreen_overlays(
 	prism_bake_indicator_draw();
 	/* port: a replay's playback: who is watched */
 	network_replay_playback_draw();
+	/* port: display.stats_log, a line a second in the log (stats_log.c) */
+	stats_log_tick();
 	terminal_draw();
 	/* port: dev tools, in games of the Forge game type (port/linux/game/forge.c) */
 	forge_render();
@@ -722,7 +736,9 @@ static void interface_draw_weapon_screen_effect(
 				}
 			}
 
+			mcc_hud_mask_begin(parameters.convolution_mask); /* port: MCC screen-effect bitmap units */
 			rasterizer_screen_effect(&parameters);
+			mcc_hud_mask_end(); /* port: release the current view's borrowed mask */
 		}
 		else
 		{

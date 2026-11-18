@@ -58,6 +58,9 @@ The conventions (SPIR-V 1.3, Vulkan 1.1):
 XGPU_HDR_SHADER_BLENDS, xgpu_hdr.h), the colour attachment read as input
 attachment 0 at binding 0 (VK_KHR_dynamic_rendering_local_read) */
 #define XGPU_SPIRV_SET_INPUT 2
+/* (its binding of the colour target as a storage image, for the draws the
+interlock orders: xgpu_spirv_options interlock) */
+#define XGPU_SPIRV_BINDING_STORE 1
 /* display.ambient_occlusion "world" (xgpu_stream.h): in a set of its own
 (binding 0 unused), the structure's distance field, its atlas of bricks (a
 combined image sampler, 3D, linear, clamped to its edge) and its table of
@@ -92,6 +95,10 @@ linear, clamped: the dynamic objects' rays step through them) */
 /* (the distance-field scene's cascades: a 3D RG8 snorm image, linear,
 clamped: xgpu.h's XGPU_WORLD_CASCADE*) */
 #define XGPU_SPIRV_BINDING_WORLD_CASCADES 7
+/* (display.ambient_occlusion "ray_traced": the ray-traced scene's top-level
+acceleration structure, which the occlusion's pass made with ray queries
+reads: xgpu_stream.h's WORLD_AO_MESH, _INSTANCES) */
+#define XGPU_SPIRV_BINDING_WORLD_AO_SCENE 8
 
 /* display.prism_shadows "cascaded" (xgpu.h's "PRISM's sun shadows"): in a
 set of its own, the moving casters' atlas compared (a depth compare
@@ -204,9 +211,14 @@ struct xgpu_spirv_uniforms
 	float effect_eye[4][4];
 	/* display.ambient_occlusion "world" (xgpu.h): the draw's object, its
 	owner slot among the window's proxies (-1 none) and its reference, then
-	two spare; declared in the pixel shaders that read it alone, the last
-	member, so that the others' words are as they were */
+	two spare; declared in the pixel shaders that read it alone, past the
+	others, so that their words are as they were */
 	float world_ao[4];
+	/* display.dynamic_lights "enhanced": the lights' tint in the
+	structure's lightmap pass, ps_final_c0's color in linear light (to the
+	2.2), which the backend works out; declared (past world_ao) in those
+	pixel shaders alone */
+	float dynamic_light_tint[4];
 	/* display.prism_material_overlay's uniform (xgpu.h's "The material
 	overlay": XGPU_OVERLAY_UNIFORM_COUNT vec4s), declared in the pixel
 	shaders that read it alone, after world_ao */
@@ -251,6 +263,8 @@ struct xgpu_spirv_uniforms
   correction's rows) and add the uniforms' depth_bias, a z-sprite writes
   its depth reversed, the glows and the VR mode's effects read the scene's
   depth and their own reversed (their unprojections stay the game's). */
+enum { XGPU_SPIRV_INTERLOCK_NONE, XGPU_SPIRV_INTERLOCK_PIXEL, XGPU_SPIRV_INTERLOCK_SAMPLE };
+
 struct xgpu_spirv_options
 {
 	BOOL count_samples;
@@ -260,6 +274,18 @@ struct xgpu_spirv_options
 	BOOL foveated;
 	int effect, effect_fade;
 	int input_samples;
+	/* how a display.hdr draw that blends in its shader is ordered with the
+	draw's own triangles over the same pixel (XGPU_SPIRV_INTERLOCK_*): by
+	the device's fragment shader interlock (SPV_EXT_fragment_shader_
+	interlock), the pixel's (PIXEL) or, with sample shading, each sample's
+	(SAMPLE): the target read and written as a storage image
+	(XGPU_SPIRV_BINDING_STORE) in the triangles' order, the channels of
+	interlock_mask (the pipeline's colour mask, bit n channel n) written,
+	the depth and stencil tests early (the draw must write neither, nor
+	replace its depth), and the pipeline writing no colour itself; NONE as
+	an input attachment, where the device orders the reads itself
+	(rasterization order) or cannot */
+	int interlock, interlock_mask;
 	BOOL reversed_depth;
 	/* the device's subgroups have their bitwise operations in pixel shaders
 	(Vulkan 1.1's subgroup arithmetic in the fragment stage):
@@ -267,6 +293,11 @@ struct xgpu_spirv_options
 	(world_proxies_occlusion), each shape's place and kind then the same for
 	all of its pixels */
 	BOOL subgroups;
+	/* display.ambient_occlusion "ray_traced": the occlusion's pass traces
+	the dynamic objects' rays by the device's ray queries (SPV_KHR_ray_query:
+	xgpu_spirv_world_ao_pass) through the scene at
+	XGPU_SPIRV_BINDING_WORLD_AO_SCENE */
+	BOOL ray_queries;
 	/* display.prism_shadows "cascaded": a caster's shadow twin
 	(xgpu_stream_prism_shadow_twin): its vertex shader's position the
 	program's clip position times the uniforms' eye_correction[0] (the
@@ -317,7 +348,9 @@ halo_vr_effect_depth):
 
 The pixel program must sample texture 0 in 2D (the effect's bitmap) and
 not textures 2 and 3, whose bindings the depth and thickness take
-(xgpu_spirv_effect_possible), drawn into both eyes. The fade is drawn as
+(xgpu_spirv_effect_possible), drawn into both eyes, or on a flat screen
+into no views (display.soft_particles: soft alone; the depth then one
+layer, a 2D image, and the uniforms' first view). The fade is drawn as
 the blend's own nothing (XGPU_SPIRV_FADE_*): alpha to 0 over an alpha
 blend, colour to 0 when added, to white when multiplied, to grey when
 multiplied twice. */
@@ -352,11 +385,14 @@ struct xgpu_pixel_program;
 /* the program can be drawn as an effect (above) */
 BOOL xgpu_spirv_effect_possible(const struct xgpu_pixel_program *program);
 
-/* a module's words (SPIR-V's own: 32 bits each), malloc'd, count of them */
+/* a module's words (SPIR-V's own: 32 bits each), malloc'd, count of them;
+the vertex constants it reads (bit n of word n / 64: c[n], counted from
+c[-96]), every one where it indexes them with a0 */
 struct xgpu_spirv_module
 {
 	unsigned int *words;
 	unsigned long count;
+	unsigned long long constants_read[3];
 };
 
 /* the vertex program (xgpu_shader.h) as a vertex shader, entry point
@@ -383,8 +419,9 @@ WORLD_AO_PREPASS): the passes after the pre-pass, entry point "main": the
 vertex shader covering the viewport with one triangle (pass 0) and the
 occlusion (1: a vec4 a texel, each 2x2 block's nearest pixel's at a quarter
 of the pixels: the occlusion, the distance, the normal octahedral). Their bindings:
-XGPU_SPIRV_WORLD_AO_PASS_*. options: subgroups alone. FALSE if out of
-memory. */
+XGPU_SPIRV_WORLD_AO_PASS_*. options: subgroups and ray_queries alone (the
+occlusion's rays through the ray-traced scene: the pass's history[3] 2).
+FALSE if out of memory. */
 enum
 {
 	XGPU_SPIRV_WORLD_AO_VERTEX,

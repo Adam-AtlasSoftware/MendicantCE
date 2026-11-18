@@ -27,6 +27,18 @@ double config_real(const char *name)
 		!strcmp(name, "display.panini_vertical") ? setting_vertical : 0.0;
 }
 
+/* a local player's own (their profile's): player 2's strength set apart
+(players_apart), config.toml's for the others */
+static int players_apart;
+static double player2_strength;
+
+double config_player_real(int local_player, const char *name)
+{
+	if (players_apart && local_player == 1 && !strcmp(name, "display.panini"))
+		return player2_strength;
+	return config_real(name);
+}
+
 unsigned long config_changes(void)
 {
 	return setting_changes;
@@ -450,6 +462,35 @@ static void off(void)
 	panini_window_end();
 }
 
+/* split screen's players each their own: player 2's off while player 1's
+is on draws only player 1's window through it, and player 2's strength
+(not player 1's) widens player 2's fields of view */
+static void players(void)
+{
+	float tx, ty;
+
+	view_tangents(120.0, 16.0 / 9.0, &tx, &ty);
+	window_set(tx, ty, 0.0f, 0.0f, 0, 0, 852, 480);
+	settings(TRUE, 1.0, 0.0);
+	players_apart = 1;
+	player2_strength = 0.0;
+	setting_changes++;
+	passes = 0;
+	panini_window_begin(0, 0, &camera, &frustum);
+	panini_window_draw();
+	CHECK(passes == 1 && panini_center_scale() > 1.0f, "player 1's on: %d", passes);
+	panini_window_begin(1, 0, &camera, &frustum);
+	panini_window_draw();
+	CHECK(passes == 1 && panini_center_scale() == 1.0f, "player 2's off, drawn: %d", passes);
+	CHECK(panini_strength(0) == 1.0f && panini_strength(1) == 0.0f, "the strengths: %g, %g", panini_strength(0),
+		panini_strength(1));
+	player2_strength = 0.5;
+	setting_changes++;
+	CHECK(panini_strength(1) == 0.5f, "player 2's changed: %g", panini_strength(1));
+	panini_window_end();
+	players_apart = 0;
+}
+
 /* a waypoint's arrow off the screen points where the projection draws it:
 at s 0 the rectilinear direction (the projection moves points along their
 lines from the middle), at s 1 not */
@@ -502,6 +543,8 @@ int main(int argc, char **argv)
 		off();
 	else if (!strcmp(name, "direction"))
 		direction();
+	else if (!strcmp(name, "players"))
+		players();
 	else
 	{
 		fprintf(stderr, "unknown case %s\n", name);

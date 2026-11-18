@@ -126,6 +126,7 @@ symbols in this file:
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
 #include "mods.h" /* port: port/linux/game/mod_materials.c */
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
+#include "world_ao.h" /* port: port/linux/game/world_ao.c */
 
 /* ---------- constants */
 
@@ -621,6 +622,7 @@ void _rasterizer_model_end(
 			viewmodel_projection_end();	/* port: (view_fov.c) */
 			rasterizer_set_frustum_z(0.0f, 0.0f);
 		}
+		halo_model_bounds(NULL, NULL, 0.0f, 0.0f, FALSE); /* port: (the model is drawn) */
 		local_parameters = NULL;
 	}
 #ifdef HALO_VR
@@ -690,7 +692,36 @@ void _rasterizer_model_begin(
 			skinning_work =
 				rasterizer_frame_statistics.vertex_shader_skinning_constant_bytes - skinning_work;
 			lighting_work = rasterizer_frame_statistics.vertex_shader_lighting_constant_bytes;
-			rasterizer_set_model_lighting(&parameters->lighting);
+			/* port: the model's bounds, for its draws (port/linux/src/d3d8_device.c):
+			its sphere, and its middle where the frame draws its object
+			(port/linux/game/render_interpolation.c). With the enhanced dynamic
+			lights, a model none of them reaches is drawn as with no light */
+			{
+				real_point3d drawn = parameters->centroid;
+
+				/* (a caller that gives no sphere gives no object either:
+				rasterizer_xbox_active_camouflage.c) */
+				if (parameters->radius > 0.0f)
+				{
+					render_interpolation_model_centre(parameters->unique_identifier, &parameters->centroid, &drawn);
+				}
+				if (halo_model_bounds(
+						(const float *)&parameters->centroid,
+						(const float *)&drawn,
+						parameters->radius,
+						distance3d(&global_window_parameters.camera.position, &parameters->centroid),
+						TEST_FLAG(parameters->geometry_flags, _rasterizer_geometry_first_person_bit)))
+				{
+					struct render_lighting unreached = parameters->lighting;
+
+					unreached.point_light_count = 0;
+					rasterizer_set_model_lighting(&unreached);
+				}
+				else
+				{
+					rasterizer_set_model_lighting(&parameters->lighting);
+				}
+			}
 			rasterizer_frame_statistics.model_skinning_constant_bytes +=
 				skinning_work;
 			rasterizer_frame_statistics.model_lighting_constant_bytes +=
@@ -2378,6 +2409,14 @@ void _rasterizer_model_draw(
 					global_d3d_device,
 					D3DRS_CULLMODE,
 					D3DCULL_CCW);
+				/* port: display.ambient_occlusion "world": a two-sided
+				shader's cards (a plant's leaves) take their occlusion about
+				their most open direction, not each card's normal
+				(world_ao.c) */
+				world_ao_cards(
+					TEST_FLAG(
+						shader_model->model.flags,
+						_shader_model_two_sided_bit));
 
 				rasterizer_draw(
 					triangle_buffer,
@@ -2464,6 +2503,7 @@ void _rasterizer_model_draw(
 				}
 				halo_hdr_draw_kind(HALO_HDR_KIND_NONE); /* port: (drawn) */
 				mod_materials_draw_end(); /* port: (mod_materials.c) */
+				world_ao_cards(FALSE); /* port: (drawn) */
 			}
 
 			if (local_environment_fog_screen_flag)

@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, mutated, read, run, structure  # noqa: E402
+from harness import skip_without_32_bit_abi  # noqa: E402
 
 CASES = ["empty", "triangles", "ids", "follows", "lights"]
 GAME = "port/linux/game/world_scene.c"
@@ -29,6 +30,8 @@ CONTROLS = [
     ("else if (history->frame + 1 == world_scene.frame)", "else if (1)", "follows"),
     # another object's history taken over by the one made in its slot
     ("if (history->id != id)\n", "if (0)\n", "ids"),
+    # the menus' Spartan, drawn in a view of its own, and the rifle it holds, listed as the scene's
+    ("menu_spartan_object(object_get_ultimate_parent(object_index))", "0", "ids"),
     # an instance found by its slot alone
     ("&& world_scene.instances[slot].id == id ?", "?", "ids"),
     # the bounding sphere left where the tick has it
@@ -65,13 +68,22 @@ def generated(fault=None):
             ("under_test.inc", code))
 
 
+# what only the game's 32-bit ABI shows (harness.NATIVE_64_BIT)
+ABI_DEPENDENT = {
+    case: "an object's id is its datum handle, negative (its salt's high bit) only in the game's 32-bit long"
+    for case in ("ids", "follows")
+}
+
+
 @pytest.mark.parametrize("case", CASES)
 def test_case(case):
+    skip_without_32_bit_abi(ABI_DEPENDENT, case)
     status, output = run(build("world_scene", generated()), case)
     assert status == 0, output
 
 
 @pytest.mark.parametrize("before,after,case", CONTROLS)
 def test_negative_control(before, after, case):
+    skip_without_32_bit_abi(ABI_DEPENDENT, case)
     status, output = run(build("world_scene", generated((before, after))), case)
     assert status == CHECK_FAILED, output

@@ -205,6 +205,13 @@ enum
 };
 #endif
 
+/* port: sprites that are light, which display.hdr_highlight_boost gains
+(render_sprite.c: a self-illuminated particle, a glow; #1123) */
+enum
+{
+	_rasterizer_geometry_emitter_bit = NUMBER_OF_RASTERIZER_GEOMETRY_FLAGS + 1,
+};
+
 enum
 {
 	_shader_type_screen = 0,
@@ -876,6 +883,8 @@ void rasterizer_transparent_geometry_dispose_aux_buffer(
 
 /* ---------- private code */
 
+#include "mcc_chicago.inl" /* port: MCC-only authored blending compatibility. */
+
 /* port: mesh and material checks run only when model tags load. */
 #include "rasterizer/rasterizer_transparent_enclosure.h"
 
@@ -1153,6 +1162,11 @@ static int transparent_hdr_kind(
 	{
 		kind |= HALO_HDR_KIND_LIGHT;
 	}
+	/* (sprites that are light: display.hdr_highlight_boost's emitters, the
+	first-person weapon's toward its own ceiling) */
+	if (TEST_FLAG(group->geometry_flags, _rasterizer_geometry_emitter_bit))
+		kind |= TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit) ?
+			HALO_HDR_KIND_EMITTER_FIRST_PERSON : HALO_HDR_KIND_EMITTER;
 	return kind;
 }
 
@@ -1176,6 +1190,14 @@ static boolean active_camouflage_same_view(
 		group->source_object_index == source_object_index &&
 		TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit) ==
 			TEST_FLAG(geometry_flags, _rasterizer_geometry_first_person_bit);
+}
+
+/* port: whether the group is drawn as active camouflage
+(rasterizer_transparent_geometry.c's rasterizer_first_person_camouflaged, #875) */
+boolean rasterizer_transparent_geometry_group_camouflaged(
+	struct transparent_geometry_group const *group)
+{
+	return group->effect_type == _render_model_effect_type_active_camouflage;
 }
 
 /* port: whether the group is the last of its object's camouflaged model parts
@@ -1555,6 +1577,11 @@ void rasterizer_transparent_geometry_group_draw(
 
 			if (!group->shader)
 			{
+				/* port: debug.render_marks: an object's widget (its antenna,
+				flag, glow, light volume, lightning: port/linux/game/
+				render_marks.c) */
+				render_marks_transparent(group, group->geometry_flags, group->first_triangle_index, NULL,
+					FALSE, FALSE, FALSE);
 				group->render_proc(
 					group->first_triangle_index,
 					group->triangle_count);
@@ -1649,6 +1676,12 @@ void rasterizer_transparent_geometry_group_draw(
 
 					/* port: (display.hdr's, until the group is drawn) */
 					halo_hdr_draw_kind(transparent_hdr_kind(group));
+					/* port: debug.render_marks: the group's object, shader or
+					maker (port/linux/game/render_marks.c) */
+					render_marks_transparent(group, group->geometry_flags, group->object_index, group->shader,
+						TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit),
+						TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit),
+						group->shader->base.type == _shader_type_transparent_water);
 					switch (group->shader->base.type)
 					{
 						case _shader_type_model:
@@ -2045,6 +2078,18 @@ void rasterizer_transparent_geometry_group_draw(
 									combiner_index++;
 								}
 								pixel_shader.combiner_count = combiner_index;
+								/* port: on a flat screen, with display.soft_particles,
+								soft against the scene's depth as the VR mode's eyes
+								draw it (d3d8_device.c, halo_effect_soft): the same
+								groups, not the first-person weapon's nor one drawn
+								without depth; soft alone, never thick */
+								{
+									extern void halo_effect_soft(int soft);
+
+									halo_effect_soft(
+										!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit) &&
+										!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_zbuffer_bit));
+								}
 #ifdef HALO_VR
 								{
 									/* port: in the VR mode's eyes, soft against the
@@ -3040,6 +3085,9 @@ void rasterizer_transparent_geometry_group_draw(
 									}
 								}
 							}
+							/* port: keep MCC blend semantics out of the legacy shader path. */
+							mcc_chicago_blend(&shader_transparent_chicago->chicago,
+								&pixel_shader, rasterizer_debug_options.draw_environment_fog);
 							break;
 						}
 
@@ -3750,6 +3798,12 @@ void rasterizer_transparent_geometry_group_draw(
 
 					rasterizer_set_pixel_shader(&pixel_shader);
 					rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
+					{
+						/* port: (the effect's alone: halo_effect_soft) */
+						extern void halo_effect_soft(int soft);
+
+						halo_effect_soft(0);
+					}
 #ifdef HALO_VR
 					{
 						/* port: (the effect's alone: halo_vr_effect_depth) */

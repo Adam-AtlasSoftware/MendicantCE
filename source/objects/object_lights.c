@@ -824,6 +824,68 @@ void lights_dispose_from_old_map(
 	return;
 }
 
+/* port: a view drawn that is not a player's (a feed of the HUD's Spartan
+link, port/linux/game/spartan_link.c): the lights' colors and radii, which
+lights_preprocess_scene sets for those the view sees and the game reads
+(a unit's self illumination, its ambient light), put back as they were once
+it is drawn, so that the view changes nothing the game reads */
+static struct
+{
+	boolean kept;
+	long identifiers[MAXIMUM_LIGHTS_PER_MAP];
+	real_rgb_color colors[MAXIMUM_LIGHTS_PER_MAP];
+	real radii[MAXIMUM_LIGHTS_PER_MAP];
+} lights_port_kept;
+
+void lights_port_keep(
+	boolean keep)
+{
+	long light_index;
+
+	if (!light_data || !light_data->valid)
+	{
+		lights_port_kept.kept = FALSE;
+		return;
+	}
+	if (keep)
+	{
+		for (light_index = 0; light_index < MAXIMUM_LIGHTS_PER_MAP; light_index++)
+			lights_port_kept.identifiers[light_index] = NONE;
+		for (light_index = data_next_index(light_data, NONE);
+			light_index != NONE;
+			light_index = data_next_index(light_data, light_index))
+		{
+			struct light_datum *light = light_get(light_index);
+			long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(light_index);
+
+			if (absolute_index < 0 || absolute_index >= MAXIMUM_LIGHTS_PER_MAP)
+				continue;
+			lights_port_kept.identifiers[absolute_index] = light_index;
+			lights_port_kept.colors[absolute_index] = light->color;
+			lights_port_kept.radii[absolute_index] = light->radius;
+		}
+		lights_port_kept.kept = TRUE;
+		return;
+	}
+	if (!lights_port_kept.kept)
+		return;
+	lights_port_kept.kept = FALSE;
+	for (light_index = data_next_index(light_data, NONE);
+		light_index != NONE;
+		light_index = data_next_index(light_data, light_index))
+	{
+		struct light_datum *light = light_get(light_index);
+		long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(light_index);
+
+		if (absolute_index >= 0 && absolute_index < MAXIMUM_LIGHTS_PER_MAP &&
+			lights_port_kept.identifiers[absolute_index] == light_index)
+		{
+			light->color = lights_port_kept.colors[absolute_index];
+			light->radius = lights_port_kept.radii[absolute_index];
+		}
+	}
+}
+
 /* port: the lights array out of order in a map (game_state.c's
 game_state_check_data_arrays reports how): Sentry's NATIVE-7 found it made
 for no map, every light lost, and the next light made or looked up crashed.

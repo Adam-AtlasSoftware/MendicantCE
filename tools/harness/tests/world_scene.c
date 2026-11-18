@@ -221,6 +221,32 @@ static void object_get_render_bounding_sphere(long object_index, real_point3d *c
 	*radius = object->object.bounding_sphere_radius * 2.0f;
 }
 
+/* (a parent the case deleted from under its child, as the game never does:
+the child's own index) */
+static long object_get_ultimate_parent(long object_index)
+{
+	for (;;)
+	{
+		long parent = object_get(object_index)->object.parent_object_index;
+		long absolute_index = DATUM_INDEX_TO_ABSOLUTE_INDEX(parent);
+
+		if (parent == NONE || absolute_index >= FAKE_OBJECTS || !fake_objects[absolute_index].alive ||
+			fake_objects[absolute_index].handle != parent)
+		{
+			return object_index;
+		}
+		object_index = parent;
+	}
+}
+
+/* (the menus' Spartan, drawn in a view of its own: menu_spartan.c) */
+static long fake_menu_spartan = NONE;
+
+boolean menu_spartan_object(long object_index)
+{
+	return object_index != NONE && object_index == fake_menu_spartan;
+}
+
 /* (moved with the root node from where the tick left it to where it's drawn) */
 static void render_interpolation_object_point(long object_index, real_point3d *point)
 {
@@ -451,7 +477,7 @@ static int same_transform(float const a[3][4], float const b[3][4])
 
 static void ids_case(void)
 {
-	long first, second, third, hidden, held, outside;
+	long first, second, third, hidden, held, outside, rifle;
 	struct world_scene_instance const *instance;
 	float second_transform[3][4];
 
@@ -466,6 +492,11 @@ static void ids_case(void)
 	fake_objects[3].datum.object.parent_object_index = first;
 	outside = fake_object_new(4, 6, 0.0f, 0.0f, -50.0f);
 	fake_objects[4].datum.object.flags = 0;
+	/* (the menus' Spartan and the rifle it holds: not the scene's) */
+	fake_menu_spartan = fake_object_new(5, 0, 0.0f, 3.0f, 1.0f);
+	rifle = fake_object_new(6, 2, 0.0f, 3.0f, 1.5f);
+	fake_objects[6].datum.object.flags = 0;
+	fake_objects[6].datum.object.parent_object_index = fake_menu_spartan;
 	world_scene_frame_begin();
 	/* the BSP first, then the objects that may be drawn */
 	CHECK(world_scene_instance_count() == 4, "%ld instances", world_scene_instance_count());
@@ -482,6 +513,7 @@ static void ids_case(void)
 	found(second);
 	found(held);
 	CHECK(!world_scene_instance_find(hidden) && !world_scene_instance_find(outside), "not drawn");
+	CHECK(!world_scene_instance_find(fake_menu_spartan) && !world_scene_instance_find(rifle), "the menus' Spartan");
 	memcpy(second_transform, found(second)->transform, sizeof(second_transform));
 
 	/* the first deleted, another made in its slot: a new id; the second's
@@ -499,6 +531,7 @@ static void ids_case(void)
 	/* none past the map */
 	world_scene_map_unloaded();
 	CHECK(!world_scene_instance_count() && !world_scene_instance_find(second), "unloaded");
+	fake_menu_spartan = NONE;
 }
 
 /* the tick's pose and the next, drawn a fraction of the way */

@@ -348,6 +348,13 @@ static rectangle2d keyboard_rect[NUMBER_OF_VIRTUAL_KEYS] =
 
 static struct virtual_keyboard_globals virtual_keyboard_globals= {0};
 
+/* port: a title and a caption of the caller's in place of ENTER NAME and
+the keyboard's own strings' (virtual_keyboard_port_launch: Settings'
+search's, port/linux/game/settings_search_menu.inc), until the keyboard is
+launched again */
+static wchar_t const *virtual_keyboard_port_title;
+static wchar_t const *virtual_keyboard_port_caption;
+
 /* port: the computer's keyboard types into the keyboard while it is up
 (port/linux/src/xinput_sdl.c), set as it opens and closes: it is processed
 only while it is up, so its processing cannot end the typing */
@@ -374,6 +381,8 @@ legends; where they are not, the Xbox's picture */
 
 /* port/linux/game/menu_shapes.c */
 void menu_shape_rounded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
+	pixel32 color);
+void menu_shape_shaded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 top, pixel32 bottom,
 	pixel32 color);
 void menu_shape_band(real x0, real y0, real x1, real y1, pixel32 top, pixel32 bottom);
 /* port/linux/src/xinput_sdl.c (halo_keyboard.h) */
@@ -529,17 +538,21 @@ static void virtual_keyboard_port_render_backdrop(
 		bounds.y1 = (short)(bounds.y0 + 64);
 		draw_string_set_draw_mode(heading_font, NONE, 0, 0, &title_color);
 		rasterizer_text_set_scale(scale, (real)bounds.x0, (real)bounds.y0);
-		rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0, L"ENTER NAME");
+		rasterizer_draw_unicode_string(&bounds, NULL, NULL, 0,
+			virtual_keyboard_port_title ? virtual_keyboard_port_title : L"ENTER NAME");
 		rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
 	}
 
-	/* the panels: the text's and the keys' */
-	menu_shape_rounded_box(VIRTUAL_KEYBOARD_PORT_PANEL_LEFT, VIRTUAL_KEYBOARD_PORT_TEXT_PANEL_TOP,
+	/* the panels: the text's and the keys', filled as the Xbox's picture
+	(ui\bkd_virtual_keyboard) fills them: 0xEE of one shade down both,
+	from 02142A at the text's top to 02070D at the keys' bottom, edged in
+	its 31AAFF (issue 896: a flat navy hid the shade) */
+	menu_shape_shaded_box(VIRTUAL_KEYBOARD_PORT_PANEL_LEFT, VIRTUAL_KEYBOARD_PORT_TEXT_PANEL_TOP,
 		VIRTUAL_KEYBOARD_PORT_PANEL_RIGHT, VIRTUAL_KEYBOARD_PORT_TEXT_PANEL_BOTTOM, 9.5f, 2.0f,
-		0xE0000E23UL, 0xFF2995FFUL);
-	menu_shape_rounded_box(VIRTUAL_KEYBOARD_PORT_PANEL_LEFT, VIRTUAL_KEYBOARD_PORT_KEYS_PANEL_TOP,
+		0xEE02142AUL, 0xEE021225UL, 0xFF31AAFFUL);
+	menu_shape_shaded_box(VIRTUAL_KEYBOARD_PORT_PANEL_LEFT, VIRTUAL_KEYBOARD_PORT_KEYS_PANEL_TOP,
 		VIRTUAL_KEYBOARD_PORT_PANEL_RIGHT, VIRTUAL_KEYBOARD_PORT_KEYS_PANEL_BOTTOM, 9.5f, 2.0f,
-		0xE0000E23UL, 0xFF2995FFUL);
+		0xEE021225UL, 0xEE02070DUL, 0xFF31AAFFUL);
 }
 
 /* how a key looks: chosen (pressed, if A was the last thing done to it), or
@@ -716,6 +729,10 @@ boolean virtual_keyboard_launch(
 		419,
 		(caption_index>=FIRST_VIRTUAL_KEYBOARD_CAPTION_STRING_INDEX) && (caption_index<NUMBER_OF_VIRTUAL_KEYBOARD_STRINGS));
 
+	/* port: (the keyboard's own title and caption, unless the port's launch
+	gives them) */
+	virtual_keyboard_port_title = NULL;
+	virtual_keyboard_port_caption = NULL;
 	if (!virtual_keyboard_globals.active && virtual_keyboard_globals.keyboard)
 	{
 		event_manager_flush();
@@ -745,6 +762,26 @@ boolean virtual_keyboard_launch(
 	}
 
 	return result;
+}
+
+/* port: the keyboard launched with a title and a caption of the caller's
+(its words, kept while the keyboard is up), not ENTER NAME and one of its
+strings' */
+boolean virtual_keyboard_port_launch(
+	wchar_t *text_buffer,
+	word buffer_size,
+	wchar_t const *title,
+	wchar_t const *caption)
+{
+	boolean launched = virtual_keyboard_launch(text_buffer, buffer_size, FIRST_VIRTUAL_KEYBOARD_CAPTION_STRING_INDEX);
+
+	if (launched)
+	{
+		virtual_keyboard_port_title = title;
+		virtual_keyboard_port_caption = caption;
+	}
+
+	return launched;
 }
 
 boolean virtual_keyboard_active(
@@ -966,6 +1003,10 @@ static void virtual_keyboard_render_internal(
 		wchar_t *caption = unicode_string_list_get_string(
 			virtual_keyboard_globals.keyboard->special_key_labels_string_list_tag.index,
 			virtual_keyboard_globals.caption_index);
+
+		/* port: (the port's caller's caption: virtual_keyboard_port_launch) */
+		if (virtual_keyboard_port_caption)
+			caption = (wchar_t *)virtual_keyboard_port_caption;
 
 		bounds.y0 = 78;
 		bounds.x0 = 114;
@@ -1457,8 +1498,22 @@ static boolean virtual_keyboard_select(
 	return TRUE;
 }
 
+/* port: whether a character typed is put in: ASCII's visible ones and its
+space, and the letters with a mark a player's name keeps and the host folds
+to their plain letters (players.c's player_name_character_ascii): Latin-1's
+and Latin Extended-A's, U+00C0 to U+017F, but for the signs x and / (#1134) */
+static boolean virtual_keyboard_port_character_kept(
+	wchar_t character)
+{
+	unsigned long code = (unsigned long)character;
+
+	return (code >= ' ' && code <= '~') || (code >= 0xC0 && code <= 0x17F && code != 0xD7 && code != 0xF7);
+}
+
 /* port: the characters and backspaces typed on the computer's keyboard,
-as its keys would put them (the first replacing the text it began with) */
+as its keys would put them (the first replacing the text it began with):
+its layout's letters with a mark too, and the system's on-screen
+keyboard's (input_key_character) */
 static void virtual_keyboard_port_type(
 	void)
 {
@@ -1467,8 +1522,9 @@ static void virtual_keyboard_port_type(
 	while (input_get_key(&key))
 	{
 		boolean backspace = key.key_code == _key_backspace;
+		wchar_t character = input_key_character();
 
-		if (!backspace && ((unsigned char)key.ascii_code < ' ' || (unsigned char)key.ascii_code > '~'))
+		if (!backspace && !virtual_keyboard_port_character_kept(character))
 			continue;
 		if (virtual_keyboard_globals.first_key_replaces_buffer == TRUE)
 		{
@@ -1490,7 +1546,7 @@ static void virtual_keyboard_port_type(
 				virtual_keyboard_globals.buffer_size -
 					((byte *)virtual_keyboard_globals.cursor - (byte *)virtual_keyboard_globals.text_buffer) -
 					sizeof(wchar_t));
-			*virtual_keyboard_globals.cursor++ = (wchar_t)(unsigned char)key.ascii_code;
+			*virtual_keyboard_globals.cursor++ = character;
 			ui_play_audio_feedback_sound(_ui_audio_feedback_forward);
 		}
 		else

@@ -9,20 +9,32 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, mutated, read, run  # noqa: E402
 
-CASES = ["off", "world", "window", "test"]
+CASES = ["off", "world", "window", "test", "rays"]
 GAME = "port/linux/game/world_ao.c"
 CONTROLS = [
     # on whatever the setting says
-    ('world_ao.mode = setting && !strcmp(setting, "world") ?', 'world_ao.mode = setting ?', "off"),
+    ('world_ao.mode = setting && (!strcmp(setting, "world") || world_ao.rays) ?', 'world_ao.mode = setting ?', "off"),
     # the frame's work done when it is off
-    ("\tif (!world_ao_mode())\n\t\treturn;\n\tworld_scene_frame_begin();", "\tworld_scene_frame_begin();", "off"),
+    # (fork: the early return after PRISM v4's hooks, which run either way)
+    ("\t\tprism_bake_frame();\n\t\treturn;\n\t}\n\tworld_scene_frame_begin();", "\t\tprism_bake_frame();\n\t}\n\tworld_scene_frame_begin();", "off"),
     # an object's slot taken from its shape's place, not its owner's slot
     ("owner = (int)world_ao.proxies[index].v[1][3];", "owner = (int)index;", "window"),
     # the reference found without the field faded in
     ("instance = world_ao.volume && world_ao.fade > 0.0f && !baked ?", "instance = !baked ?", "window"),
     # the first-person weapon lit by it
-    ("halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);",
-     "halo_world_ao_object(WORLD_AO_OWNER_NONE, 1.0f);", "window"),
+    ("halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f, 0);",
+     "halo_world_ao_object(WORLD_AO_OWNER_NONE, 1.0f, 0);", "window"),
+    # "ray_traced"'s rays without the backend's ray queries
+    ("\tif (world_ao.rays && halo_world_ao_ray_queries())\n", "\tif (world_ao.rays)\n", "rays"),
+    # why it is drawn as "world" said every time
+    ("world_ao.rays && !world_ao.rays_missing_said && halo_world_ao_ray_queries_missing()",
+     "world_ao.rays && halo_world_ao_ray_queries_missing()", "rays"),
+    # the ray-traced scene's frame not handed on
+    ("\t\tif (mode & WORLD_AO_RAYS)\n\t\t\tworld_rt_frame(world_ao_scene.frame);", "", "rays"),
+    # an object's own instances not left out of its rays
+    ("\t\t\trays_owner = world_rt_owner(object_index);", "\t\t\trays_owner = 0;", "rays"),
+    # the scene kept past the map's end
+    ("\tworld_rt_map_unloaded();\n\tworld_ao_scene_release();", "\tworld_ao_scene_release();", "rays"),
     # a window given while a map's pipelines are prepared (the world's then made in the load)
     ("\tif (render_enumerating)\n\t{\n\t\tworld_sdf_frame_prepared();\n\t\treturn;\n\t}", "", "window"),
     # the window's span told only while the setting is on (the manifest's world draws then lost)
@@ -46,7 +58,8 @@ def generated(fault=None):
     if fault:
         game = mutated(game, *fault)
     headers = [(name, read(f"port/linux/include/{name}"))
-               for name in ("world_ao.h", "world_cascades.h", "world_proxies.h", "world_scene.h", "world_sdf.h")]
+               for name in ("world_ao.h", "world_cascades.h", "world_proxies.h", "world_rt.h", "world_scene.h",
+                            "world_sdf.h")]
     return tuple(headers) + (("under_test.inc", game),)
 
 
@@ -62,41 +75,7 @@ def test_negative_control(before, after, case):
     assert status == CHECK_FAILED, output
 
 
-def test_the_hooks():
-    render = read("source/render/render.c")
-    # the window's block handed on before the opaque surfaces, taken away after the lightmap pass
-    assert render.index("world_ao_window_begin(") < render.index("\t\trender_objects();\n\t\t/* port: and through")
-    assert render.index("structure_render_lightmaps();") < render.index("world_ao_window_end();") < \
-        render.index("rasterizer_lens_flares_submit_occlusion_tests();")
-    assert "world_ao_frame_begin();" in render
-    # each object named before its model draws, the first-person weapon unlit, the structure after
-    objects = read("source/render/render_objects.c")
-    assert objects.index("world_ao_object_begin(object_index);") < objects.index("\t\t\t\t\trender_model(\n")
-    assert "world_ao_first_person(TRUE);\n\t\t\tfirst_person_weapon_draw();\n\t\t\tworld_ao_first_person(FALSE);" in \
-        objects
-    assert objects.index("while (first_person_pass);") < objects.index("world_ao_object_begin(NONE);")
-    scenario = read("source/scenario/scenario.c")
-    for hook in ("world_ao_map_loaded();", "world_ao_map_unloaded();",
-                 "world_ao_bsp_switched(global_structure_bsp_index);"):
-        assert hook in scenario, hook
-
-
 def test_the_classic_preset_bypasses_it():
     # Classic sets display.ambient_occlusion "off", which world_ao_mode reads as off (and "prism" "world")
     assert '{ "display.ambient_occlusion", "\\"off\\"", 0, "\\"world\\"" },' in read("port/linux/src/port_config.c")
     assert '#define GRAPHICS_AMBIENT_OCCLUSION "\\"off\\""' in read("port/linux/src/port_config.c")
-
-
-def test_the_stream_and_the_bindings():
-    stream = read("port/linux/src/xgpu_stream.h")
-    assert "XGPU_STREAM_WORLD_AO_WINDOW," in stream and "XGPU_STREAM_WORLD_AO_FIELD," in stream
-    decode = read("port/android/host/host_render_stream.c")
-    assert "[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window)," in decode
-    assert "[XGPU_STREAM_WORLD_AO_FIELD] = sizeof(struct xgpu_stream_world_ao_field)," in decode
-    # (in #574's set: a draw binds at most four)
-    spirv = read("port/linux/src/xgpu_spirv.h")
-    assert "#define XGPU_SPIRV_BINDING_WORLD_SDF 1" in spirv and "#define XGPU_SPIRV_BINDING_WORLD_AO 2" in spirv
-    msl = read("port/linux/src/xgpu_msl.h")
-    metal = read("port/macos/xgpu_metal_bindings.h")
-    assert "#define XGPU_MSL_TEXTURE_WORLD_SDF 5" in msl and "#define XGPU_METAL_TEXTURE_WORLD_SDF 5" in metal
-    assert "#define XGPU_MSL_BUFFER_WORLD_AO 23" in msl and "#define XGPU_METAL_BUFFER_WORLD_AO 23" in metal

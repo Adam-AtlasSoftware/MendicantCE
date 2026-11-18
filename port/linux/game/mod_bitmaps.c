@@ -20,6 +20,21 @@ tags ask of the bitmap it replaces is not there: as many bitmaps of the same
 types, as many sequences, and each with as many sprites (a mod's bitmap is
 the map's redrawn, larger or not).
 
+A lightmap (its usage the light map's, which the lightmaps tool gives the
+BSP's bitmap and no other) is tied page for page to the BSP's lightmaps,
+each of which names its page by index and lays its surfaces' corners out in
+it: one baked for another layout (another build of the level, Halo PC's)
+lights the level wrongly. So a mod's lightmap waits, the map's drawn, until
+the BSP it lights is read (as the map loads, scenario_structure_bsps_read_ahead,
+or as it is switched to: mod_bitmaps_structure_bsp_read), and is then taken
+or left out, once, by one of two checks (mod_lightmaps.c):
+- with a layout file beside it (<name>.lightmap_layout, of the same mod),
+  the fingerprint it holds must be the BSP's layout's;
+- with none, it must have the map's pages, each the map's at one scale, and
+  each page's picture the map's (its luminance correlated with the map's).
+The game's log has a line for each, saying which check took it or left it
+out, and why, with the BSP's fingerprint.
+
 The HUD draws a bitmap at its own size (hud_draw.c), so a bitmap a redraw
 made larger, every one of its sprites (or, with none, its bitmaps) by the
 same ratio, has each HUD placement that draws it
@@ -37,9 +52,10 @@ A bitmap's pixels are read from the file as the texture cache loads them
 as the hardware wants them as a Custom Edition map's are
 (rasterizer_xbox_bitmap_rebuild_hardware_format); the renderer is told
 which keep their channels where Halo PC does (multipurpose maps and HUD
-meters: custom_edition_bitmaps.c). A bitmap whose pixels are more than a
-quarter of the texture cache is left out: it could not be drawn with what
-the map draws around it. A bitmap is drawn, not simulated: nothing a network
+meters: custom_edition_bitmaps.c), unless the mod's mod.toml says its keep
+them where the Xbox does (channel_order = "xbox": bitmaps taken from an Xbox
+map). A bitmap whose pixels are more than a quarter of the texture cache is
+left out: it could not be drawn with what the map draws around it. A bitmap is drawn, not simulated: nothing a network
 game's machines agree on reads one.
 
 The map's bitmap tag takes the file's values in place, so everything that
@@ -60,25 +76,37 @@ a bitmap made is kept until the map goes, as anything may still hold it.
 #include "interface/unit_hud_interface_definition.h"
 #include "main/console.h"
 #include "rasterizer/rasterizer_swizzle.h"
+#include "scenario/scenario.h"
+#include "structures/structure_bsp_definitions.h"
 #include "tag_files/tag_groups.h"
+#include "../src/port_mods.h" /* port: port/linux/src/port_mods.c */
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
 #include "mods.h"
 
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <xtl.h>
 
 /* the platform layer's (port/linux/src) */
 void halo_custom_edition_texels_channels(void const *texels, unsigned char channel_order);
 
 /* the game's (port) */
 char *tag_get_name(long tag_index);
+/* the host consumes queued draws before their textures change (mods.c) */
+void xgpu_backend_consume(void);
 
 /* ---------- constants */
 
-/* a bitmap tag's file: tags\<its name>.bitmap */
+/* a bitmap tag's file: tags\<its name>.bitmap; a lightmap's layout file,
+beside it: tags\<its name>.lightmap_layout (mod_lightmaps.c) */
 #define TAG_FILE_EXTENSION ".bitmap"
+#define LAYOUT_FILE_EXTENSION ".lightmap_layout"
+/* (the most a layout file is read of: a fingerprint, and a line or two of
+what it is) */
+#define MAXIMUM_LAYOUT_FILE_SIZE 4096
 /* (bitmap_group.c's bitmap_group) */
 #define BITMAP_TAG_VERSION 7
 
@@ -137,6 +165,13 @@ enum
 	_bitmap_group_half_hud_scale_bit = 4,
 };
 
+/* bitmap_group.c's usages: a lightmap's (the lightmaps tool's bitmap of the
+BSP, and none other's) */
+enum
+{
+	_bitmap_usage_light_map = 4,
+};
+
 /* the HUD's digits' tag (hud_draw.c): their bitmap first */
 #define HUD_NUMBER_GROUP_TAG 'hud#'
 
@@ -174,6 +209,15 @@ struct mod_bitmap
 	real hud_scale;
 	/* the HUD's digits, drawn as the digits tag says (not scaled) */
 	boolean digits;
+	/* a lightmap: waiting for the BSP it lights to be read (the map's is
+	drawn meanwhile), or taken; whether an update found it again (one not
+	found goes); and its layout file (NONE: none) as it was when read */
+	boolean lightmap;
+	boolean waiting;
+	boolean seen;
+	long layout_file;
+	unsigned long layout_size;
+	unsigned long layout_stamp[2];
 };
 
 /* a HUD placement's scale before it was scaled for a mod's bitmap */
@@ -207,6 +251,14 @@ static struct
 	failed was said */
 	boolean orders_found;
 	boolean read_failure_reported;
+	/* the map's structure bsps read, each one's lightmap bitmap and the
+	fingerprint of its lightmaps' layout */
+	struct
+	{
+		boolean read;
+		long lightmap_tag_index;
+		unsigned long long fingerprint;
+	} bsps[MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO];
 } mod_bitmaps_globals;
 
 /* ---------- private code */
@@ -356,6 +408,39 @@ static real difference(
 	return first > second ? first - second : second - first;
 }
 
+/* the ratio of the size of the map's bitmaps, `map_group`'s, to the bitmap
+read's, `bitmap`'s, the same for each of the map's (1 with none); or 0 if it
+is not the same, with *differing_page (if not NULL) the first that is not at
+the first's */
+static real bitmaps_scale_find(
+	struct bitmap_group const *map_group,
+	struct mod_bitmap const *bitmap,
+	long *differing_page)
+{
+	real scale = 0.f;
+	long index;
+
+	for (index = 0; index < map_group->bitmaps.count; index++)
+	{
+		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, index, struct bitmap_data);
+		struct bitmap_data const *mod_bitmap = &bitmap->bitmaps[index];
+
+		if (!scale)
+		{
+			scale = (real)map_bitmap->width / (real)mod_bitmap->width;
+		}
+		if ((real)map_bitmap->width != (real)mod_bitmap->width * scale ||
+			(real)map_bitmap->height != (real)mod_bitmap->height * scale)
+		{
+			if (differing_page)
+				*differing_page = index;
+			return 0.f;
+		}
+	}
+
+	return scale ? scale : 1.f;
+}
+
 /* the ratio of the size the map's bitmap `map_group` draws a sprite at to
 the size the bitmap read, `bitmap`, draws it (both of the same sequences and
 sprites: a sheet the tool made again lays them out anew), or of their
@@ -410,23 +495,94 @@ static real hud_scale_find(
 	{
 		return scale;
 	}
-	for (index = 0; index < map_group->bitmaps.count; index++)
+
+	return bitmaps_scale_find(map_group, bitmap, NULL);
+}
+
+/* NULL if the bitmap read, `bitmap` (`bitmap_count` bitmaps), is laid out as
+the map's lightmap `map_group` is: its pages, each the map's at one scale;
+or why not, naming the page */
+static char const *lightmap_layout_differs(
+	struct bitmap_group const *map_group,
+	struct mod_bitmap const *bitmap,
+	unsigned long bitmap_count)
+{
+	static char reason[160];
+	long page = NONE;
+
+	if ((long)bitmap_count != map_group->bitmaps.count)
+	{
+		snprintf(reason, sizeof(reason), "its lightmap has %lu pages, not the map's %ld (another build of the level's)",
+			bitmap_count, map_group->bitmaps.count);
+		return reason;
+	}
+	if (!bitmaps_scale_find(map_group, bitmap, &page))
+	{
+		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, page, struct bitmap_data);
+
+		snprintf(reason, sizeof(reason),
+			"its lightmap page %ld is %dx%d, not the map's %dx%d at the scale of its others (another build of the level's)",
+			page, bitmap->bitmaps[page].width, bitmap->bitmaps[page].height, map_bitmap->width, map_bitmap->height);
+		return reason;
+	}
+
+	return NULL;
+}
+
+/* NULL if the bitmap read, `bitmap` (`bitmap_count` bitmaps and
+`sequence_count` sequences), has what the map's other tags ask of the map's
+bitmap `map_group`, or why not (as many sequences: what draws it keeps a
+sequence's index, which must still be one when the map's bitmap comes back,
+weather_particle_systems.c) */
+static char const *map_requirements_differ(
+	struct bitmap_group const *map_group,
+	struct mod_bitmap const *bitmap,
+	unsigned long bitmap_count,
+	unsigned long sequence_count)
+{
+	char const *fewer = "it has fewer bitmaps or sprites than the map's, other sequences, or bitmaps of other types";
+	unsigned long index;
+
+	if ((long)bitmap_count < map_group->bitmaps.count || (long)sequence_count != map_group->sequences.count)
+	{
+		return fewer;
+	}
+	for (index = 0; index < (unsigned long)map_group->bitmaps.count; index++)
 	{
 		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, index, struct bitmap_data);
-		struct bitmap_data const *mod_bitmap = &bitmap->bitmaps[index];
 
-		if (!scale)
+		if (map_bitmap->type != bitmap->bitmaps[index].type)
 		{
-			scale = (real)map_bitmap->width / (real)mod_bitmap->width;
+			return fewer;
 		}
-		if ((real)map_bitmap->width != (real)mod_bitmap->width * scale ||
-			(real)map_bitmap->height != (real)mod_bitmap->height * scale)
+	}
+	for (index = 0; index < (unsigned long)map_group->sequences.count; index++)
+	{
+		struct bitmap_group_sequence const *map_sequence =
+			TAG_BLOCK_GET_ELEMENT(&map_group->sequences, index, struct bitmap_group_sequence);
+		struct bitmap_group_sequence const *sequence = &bitmap->sequences[index];
+
+		if (sequence->sprites.count < map_sequence->sprites.count ||
+			(map_sequence->bitmap_count > 0 && sequence->bitmap_count <= 0))
 		{
-			return 0.f;
+			return fewer;
 		}
 	}
 
-	return scale ? scale : 1.f;
+	/* (a lightmap's layout is checked as its BSP is read) */
+	return NULL;
+}
+
+/* the layout file of the lightmap tag `tag_index` beside the mod's file
+`file`, of the same mod, or NONE */
+static long layout_file_find(
+	long tag_index,
+	long file)
+{
+	long layout_file = mods_tag_file_find(tag_index, LAYOUT_FILE_EXTENSION);
+
+	return layout_file != NONE && !strcmp(port_mods_file_mod(layout_file), port_mods_file_mod(file)) ?
+		layout_file : NONE;
 }
 
 /* The bitmap the tag file `file` makes for the map's bitmap tag
@@ -462,6 +618,7 @@ static struct mod_bitmap *mod_bitmap_new(
 	memset(bitmap, 0, sizeof(*bitmap));
 	bitmap->tag_index = tag_index;
 	bitmap->file = file;
+	bitmap->layout_file = NONE;
 	group = &bitmap->group;
 	bitmap->path = malloc(strlen(port_mods_file_path(file)) + 1);
 	if (!bitmap->path)
@@ -645,39 +802,28 @@ static struct mod_bitmap *mod_bitmap_new(
 	free(tail);
 	tail = NULL;
 
-	/* what the map's other tags ask of the bitmap (as many sequences: what
-	draws it keeps a sequence's index, which must still be one when the map's
-	bitmap comes back, weather_particle_systems.c) */
-	*reason = "it has fewer bitmaps or sprites than the map's, other sequences, or bitmaps of other types";
-	if ((long)bitmap_count < map_group->bitmaps.count || (long)sequence_count != map_group->sequences.count)
+	/* what the map's other tags ask of the bitmap, and a lightmap's layout */
+	*reason = map_requirements_differ(map_group, bitmap, bitmap_count, sequence_count);
+	if (*reason)
 	{
 		goto refused;
-	}
-	for (index = 0; index < (unsigned long)map_group->bitmaps.count; index++)
-	{
-		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, index, struct bitmap_data);
-
-		if (map_bitmap->type != bitmap->bitmaps[index].type)
-		{
-			goto refused;
-		}
-	}
-	for (index = 0; index < (unsigned long)map_group->sequences.count; index++)
-	{
-		struct bitmap_group_sequence const *map_sequence =
-			TAG_BLOCK_GET_ELEMENT(&map_group->sequences, index, struct bitmap_group_sequence);
-		struct bitmap_group_sequence const *sequence = &bitmap->sequences[index];
-
-		if (sequence->sprites.count < map_sequence->sprites.count ||
-			(map_sequence->bitmap_count > 0 && sequence->bitmap_count <= 0))
-		{
-			goto refused;
-		}
 	}
 
 	/* (the HUD draws it at the map's size if what it draws, its sprites or
 	its bitmaps, is all larger by one ratio) */
 	bitmap->hud_scale = hud_scale_find(map_group, bitmap);
+	/* a lightmap waits for its BSP, with its layout file as it is now */
+	if (map_group->usage == _bitmap_usage_light_map)
+	{
+		bitmap->lightmap = TRUE;
+		bitmap->waiting = TRUE;
+		bitmap->layout_file = layout_file_find(tag_index, file);
+		if (bitmap->layout_file != NONE &&
+			!port_mods_file_stamp(bitmap->layout_file, &bitmap->layout_size, bitmap->layout_stamp))
+		{
+			bitmap->layout_file = NONE;
+		}
+	}
 
 	group->import_bitmap.size = 0;
 	group->import_bitmap.address = NULL;
@@ -831,6 +977,30 @@ static struct mod_bitmap *bitmap_kept(
 	}
 
 	return NULL;
+}
+
+/* whether the lightmap made `made`'s layout file, from the mod of its file
+`file`, is as it was when it was made (or there is still none) */
+static boolean layout_unchanged(
+	struct mod_bitmap *made,
+	long file)
+{
+	long layout_file = layout_file_find(made->tag_index, file);
+	unsigned long size;
+	unsigned long stamp[2];
+
+	if (layout_file == NONE || made->layout_file == NONE)
+	{
+		return layout_file == made->layout_file;
+	}
+	if (!port_mods_file_stamp(layout_file, &size, stamp) || size != made->layout_size ||
+		stamp[0] != made->layout_stamp[0] || stamp[1] != made->layout_stamp[1])
+	{
+		return FALSE;
+	}
+	made->layout_file = layout_file;
+
+	return TRUE;
 }
 
 /* the scale of the HUD placements that draw the bitmap tag `handle` names */
@@ -1049,6 +1219,253 @@ static long hud_placements_rescale(
 	return mod_bitmaps_globals.scale_count;
 }
 
+/* the first level of the map's page `bitmap` read from the map into
+`buffer` (`size` bytes, room for whole sectors): FALSE if it cannot be */
+static boolean map_page_read(
+	struct bitmap_data const *bitmap,
+	void *buffer,
+	unsigned long size)
+{
+	boolean read_complete = FALSE;
+
+	if (bitmap->pixels_offset < 0)
+	{
+		return FALSE;
+	}
+	cache_file_read(bitmap->tag_index, bitmap->pixels_offset, (long)size, buffer, &read_complete, TRUE);
+	while (!read_complete)
+	{
+		SwitchToThread();
+	}
+
+	return read_complete == TRUE;
+}
+
+/* NULL if each page of the mod's lightmap `made` has the picture of the
+map's of the same index (`map_group`'s: of the same size, or at one scale
+of it), with *lowest the lowest correlation and *lowest_page its page; or
+why not, naming the page */
+static char const *lightmap_pictures_differ(
+	struct bitmap_group const *map_group,
+	struct mod_bitmap const *made,
+	real *lowest,
+	long *lowest_page)
+{
+	static char reason[160];
+	char const *result = NULL;
+	long page;
+
+	*lowest = 1.f;
+	*lowest_page = NONE;
+	for (page = 0; page < map_group->bitmaps.count && !result; page++)
+	{
+		struct bitmap_data const *map_bitmap = TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, page, struct bitmap_data);
+		struct bitmap_data const *mod_bitmap = &made->bitmaps[page];
+		unsigned long map_size = mod_lightmap_page_size(map_bitmap);
+		unsigned long mod_size = mod_lightmap_page_size(mod_bitmap);
+		/* (the map's read in whole sectors) */
+		unsigned long map_room = (map_size + 0x1FF) & ~0x1FFUL;
+		long map_pixels = (long)map_bitmap->width * map_bitmap->height;
+		long mod_pixels = (long)mod_bitmap->width * mod_bitmap->height;
+		byte *bytes;
+		real *luminance;
+		real correlation;
+
+		if (!map_size || !mod_size)
+		{
+			snprintf(reason, sizeof(reason), "its page %ld is of a format the picture check cannot read", page);
+			return reason;
+		}
+		bytes = malloc(MAX(map_room, mod_size));
+		luminance = malloc((size_t)(map_pixels + mod_pixels) * sizeof(real));
+		if (!bytes || !luminance)
+		{
+			snprintf(reason, sizeof(reason), "out of memory for its page %ld's picture", page);
+			result = reason;
+		}
+		else if (!map_page_read(map_bitmap, bytes, map_room) ||
+			!mod_lightmap_page_luminance(map_bitmap, bytes, luminance))
+		{
+			snprintf(reason, sizeof(reason), "the map's page %ld cannot be read", page);
+			result = reason;
+		}
+		else if (mod_bitmap->pixels_offset < 0 ||
+			!port_mods_file_read(made->file, made->pixel_data_offset + (unsigned long)mod_bitmap->pixels_offset, bytes,
+				mod_size) ||
+			!mod_lightmap_page_luminance(mod_bitmap, bytes, luminance + map_pixels))
+		{
+			snprintf(reason, sizeof(reason), "its page %ld cannot be read", page);
+			result = reason;
+		}
+		else
+		{
+			correlation = mod_lightmap_page_correlation(luminance, map_bitmap->width, map_bitmap->height,
+				luminance + map_pixels, mod_bitmap->width, mod_bitmap->height);
+			if (correlation < *lowest || *lowest_page == NONE)
+			{
+				*lowest = correlation;
+				*lowest_page = page;
+			}
+			if (correlation < MOD_LIGHTMAP_MINIMUM_CORRELATION)
+			{
+				snprintf(reason, sizeof(reason),
+					"its page %ld's picture is not the map's (another build of the level's): correlation %.3f, below %.2f",
+					page, correlation, MOD_LIGHTMAP_MINIMUM_CORRELATION);
+				result = reason;
+			}
+		}
+		if (bytes)
+			free(bytes);
+		if (luminance)
+			free(luminance);
+	}
+
+	return result;
+}
+
+/* the fingerprint the mod's lightmap `made`'s layout file holds, into
+`text`: FALSE with *reason if it holds none or cannot be read */
+static boolean layout_file_read(
+	struct mod_bitmap const *made,
+	char text[MOD_LIGHTMAP_FINGERPRINT_TEXT_SIZE],
+	char const **reason)
+{
+	char bytes[MAXIMUM_LAYOUT_FILE_SIZE];
+
+	*reason = "its layout file cannot be read";
+	if (made->layout_size > sizeof(bytes) ||
+		!port_mods_file_read(made->layout_file, 0, bytes, made->layout_size))
+	{
+		if (made->layout_size > sizeof(bytes))
+			*reason = "its layout file is longer than a fingerprint";
+		return FALSE;
+	}
+	*reason = "its layout file holds no lightmap fingerprint (lm1- and 16 hexadecimal digits)";
+	if (!mod_lightmap_sidecar_parse(bytes, made->layout_size, text))
+	{
+		return FALSE;
+	}
+	*reason = NULL;
+
+	return TRUE;
+}
+
+/* Takes the mod's lightmap `made` (waiting) for the BSP `structure_bsp_index`,
+whose lightmaps are laid out as `fingerprint` says, or leaves it out (it
+goes), by its layout file's fingerprint or, with none, by the map's pages'
+sizes and pictures: one line in the log, saying which. TRUE if taken. */
+static boolean lightmap_decide(
+	struct mod_bitmap *made,
+	short structure_bsp_index,
+	unsigned long long fingerprint)
+{
+	struct mod_bitmap_override *override = override_get(made->tag_index);
+	struct bitmap_group const *map_group = bitmap_group_get(made->tag_index);
+	char map_text[MOD_LIGHTMAP_FINGERPRINT_TEXT_SIZE];
+	char mod_text[MOD_LIGHTMAP_FINGERPRINT_TEXT_SIZE];
+	char detail[200] = "";
+	char const *check = made->layout_file != NONE ? "fingerprint" : "size and picture";
+	char const *reason = NULL;
+	long page = NONE;
+
+	mod_lightmap_fingerprint_text(fingerprint, map_text);
+	if (!override || override->bitmap || !map_group)
+	{
+		reason = "the map's lightmap is not there to replace";
+	}
+	else if (made->group.bitmaps.count != map_group->bitmaps.count)
+	{
+		snprintf(detail, sizeof(detail), "its lightmap has %ld pages, not the map's %ld (another build of the level's)",
+			made->group.bitmaps.count, map_group->bitmaps.count);
+		reason = detail;
+	}
+	else if (made->layout_file != NONE)
+	{
+		if (layout_file_read(made, mod_text, &reason) && strcmp(mod_text, map_text))
+		{
+			snprintf(detail, sizeof(detail), "it is made for the layout %s, not this BSP's", mod_text);
+			reason = detail;
+		}
+	}
+	else if (!(reason = lightmap_layout_differs(map_group, made, (unsigned long)made->group.bitmaps.count)))
+	{
+		real lowest = 1.f;
+
+		reason = lightmap_pictures_differ(map_group, made, &lowest, &page);
+		if (!reason && page != NONE)
+		{
+			snprintf(detail, sizeof(detail), " (lowest picture correlation %.3f, page %ld)", lowest, page);
+		}
+	}
+
+	error(_error_silent, "mods: lightmap %s.bitmap of %s, BSP %d (layout %s): %s by the %s check%s%s",
+		tag_get_name(made->tag_index), port_mods_file_mod(made->file), structure_bsp_index, map_text,
+		reason ? "refused" : "accepted", check, reason ? ": " : detail, reason ? reason : "");
+	if (reason)
+	{
+		console_warning("mods: %s.bitmap of %s left out: %s", tag_get_name(made->tag_index),
+			port_mods_file_mod(made->file), reason);
+		bitmap_forget(made);
+		return FALSE;
+	}
+
+	/* (the map's pages held by the texture cache let go of: they come back
+	if the mod's go) */
+	for (page = 0; page < map_group->bitmaps.count; page++)
+	{
+		if (TAG_BLOCK_GET_ELEMENT(&map_group->bitmaps, page, struct bitmap_data)->cache_block_index != NONE)
+		{
+			xgpu_backend_consume();
+			texture_cache_flush();
+			break;
+		}
+	}
+	made->waiting = FALSE;
+	bitmap_plug(made->tag_index, override, made);
+
+	return TRUE;
+}
+
+/* Takes or leaves out each lightmap waiting whose BSP has been read (of
+the BSP `structure_bsp_index`, or of any with NONE), counting them: TRUE if
+any was taken. */
+static boolean lightmaps_decide(
+	short structure_bsp_index,
+	long *taken,
+	long *left_out)
+{
+	struct mod_bitmap *made = mod_bitmaps_globals.bitmaps;
+	boolean any = FALSE;
+
+	while (made)
+	{
+		struct mod_bitmap *next = made->next;
+		short index;
+
+		for (index = 0; made->waiting && index < MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO; index++)
+		{
+			if (mod_bitmaps_globals.bsps[index].read &&
+				(structure_bsp_index == NONE || structure_bsp_index == index) &&
+				mod_bitmaps_globals.bsps[index].lightmap_tag_index == made->tag_index)
+			{
+				if (lightmap_decide(made, index, mod_bitmaps_globals.bsps[index].fingerprint))
+				{
+					(*taken)++;
+					any = TRUE;
+				}
+				else
+				{
+					(*left_out)++;
+				}
+				break;
+			}
+		}
+		made = next;
+	}
+
+	return any;
+}
+
 /* ---------- public code */
 
 long mod_bitmaps_update(
@@ -1065,12 +1482,16 @@ long mod_bitmaps_update(
 	/* (whether a bitmap played changed: the HUD's placements and the
 	channels' orders are found again) */
 	boolean changed = FALSE;
+	struct mod_bitmap *made_before;
 
 	if (!mods_map_loaded() || !overrides_new())
 	{
 		return 0;
 	}
 
+	/* (the lightmaps waiting that this update does not find again go) */
+	for (made_before = mod_bitmaps_globals.bitmaps; made_before; made_before = made_before->next)
+		made_before->seen = FALSE;
 	tag_iterator_new(&iterator, BITMAP_GROUP_TAG);
 	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
@@ -1094,8 +1515,14 @@ long mod_bitmaps_update(
 			mods' files changes) */
 			if (port_mods_file_stamp(file, &size, stamp))
 				made = bitmap_kept(tag_index, port_mods_file_path(file), size, stamp);
+			/* (a lightmap whose layout file changed is made again) */
+			if (made && made->lightmap && !layout_unchanged(made, file))
+				made = NULL;
 			if (made)
+			{
 				made->file = file;
+				made->seen = TRUE;
+			}
 			if (made && made == override->bitmap)
 				continue;
 		}
@@ -1115,6 +1542,10 @@ long mod_bitmaps_update(
 					reason);
 				refused_count++;
 			}
+			else
+			{
+				made->seen = TRUE;
+			}
 			made_now = made != NULL;
 		}
 		/* (a bitmap whose file is gone or changed, read again or not, is the
@@ -1122,6 +1553,18 @@ long mod_bitmaps_update(
 		if (!made && !override->bitmap)
 		{
 			continue;
+		}
+		/* (a lightmap waits for its BSP, the map's drawn meanwhile: one of
+		the mod's played before is given back) */
+		if (made && made->waiting)
+		{
+			if (made_now)
+			{
+				made->next = mod_bitmaps_globals.bitmaps;
+				mod_bitmaps_globals.bitmaps = made;
+			}
+			if (!override->bitmap)
+				continue;
 		}
 
 		/* a change: no texture holds a bitmap while it is made */
@@ -1134,8 +1577,12 @@ long mod_bitmaps_update(
 		{
 			bitmap_unplug(tag_index, override);
 			changed = TRUE;
-			if (!made)
+			if (!made || made->waiting)
 				removed_count++;
+		}
+		if (made && made->waiting)
+		{
+			continue;
 		}
 		if (made)
 		{
@@ -1158,6 +1605,27 @@ long mod_bitmaps_update(
 
 		loaded_count -= given_back;
 		refused_count += given_back;
+	}
+	/* the lightmaps waiting that were not found again go (their file gone,
+	changed, or the mods given back); those whose BSP was read are taken or
+	left out now */
+	made_before = mod_bitmaps_globals.bitmaps;
+	while (made_before)
+	{
+		struct mod_bitmap *next = made_before->next;
+
+		if (made_before->waiting && !made_before->seen)
+			bitmap_forget(made_before);
+		made_before = next;
+	}
+	{
+		long taken = 0;
+		long left_out = 0;
+
+		if (lightmaps_decide(NONE, &taken, &left_out))
+			changed = TRUE;
+		loaded_count += taken;
+		refused_count += left_out;
 	}
 	for (tag_index = 0; tag_index < mod_bitmaps_globals.override_count; tag_index++)
 	{
@@ -1190,6 +1658,55 @@ long mod_bitmaps_update(
 	}
 
 	return played_count;
+}
+
+long mod_bitmaps_structure_bsp_read(
+	short structure_bsp_index,
+	struct structure_bsp const *structure_bsp)
+{
+	long taken = 0;
+	long left_out = 0;
+	long played_count = 0;
+	long index;
+
+	if (structure_bsp_index < 0 || structure_bsp_index >= MAXIMUM_STRUCTURE_BSPS_PER_SCENARIO)
+	{
+		return 0;
+	}
+	/* (its layout is the same each time it is read: found once) */
+	if (!mod_bitmaps_globals.bsps[structure_bsp_index].read)
+	{
+		mod_bitmaps_globals.bsps[structure_bsp_index].lightmap_tag_index = structure_bsp->lightmap_group.index;
+		mod_bitmaps_globals.bsps[structure_bsp_index].fingerprint = mod_lightmap_fingerprint(structure_bsp);
+		mod_bitmaps_globals.bsps[structure_bsp_index].read = TRUE;
+	}
+	/* (each taken or left out says so in the log: lightmap_decide) */
+	if (lightmaps_decide(structure_bsp_index, &taken, &left_out))
+	{
+		mod_bitmaps_globals.orders_found = custom_edition_loaded_reordered_bitmaps_find();
+	}
+	for (index = 0; index < mod_bitmaps_globals.override_count; index++)
+	{
+		if (mod_bitmaps_globals.overrides[index].bitmap)
+			played_count++;
+	}
+
+	return played_count;
+}
+
+long mod_bitmaps_waiting_count(
+	void)
+{
+	struct mod_bitmap *made;
+	long count = 0;
+
+	for (made = mod_bitmaps_globals.bitmaps; made; made = made->next)
+	{
+		if (made->waiting)
+			count++;
+	}
+
+	return count;
 }
 
 /* (once the texture cache is closed: no block holds a bitmap) */
@@ -1256,7 +1773,8 @@ boolean mod_bitmaps_read(
 	}
 	halo_custom_edition_texels_channels(
 		buffer,
-		mod_bitmaps_globals.orders_found || custom_edition_cache_tags_loaded() ?
+		!port_mods_file_xbox_channels(made->file) &&
+		(mod_bitmaps_globals.orders_found || custom_edition_cache_tags_loaded()) ?
 			(unsigned char)custom_edition_bitmap_channel_order(made->tag_index, (long)(bitmap - made->bitmaps)) :
 			_custom_edition_channels_xbox);
 	/* (on failure it logs, and the texture shows the pixels as read) */

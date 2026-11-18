@@ -35,7 +35,7 @@ skipped or made without its sampler.
 What a structure the map switches to later draws besides its materials is
 drawn in the map's first frame too, whatever structure it starts in: the
 mirrors' window (render_window's through a mirror: the world again, its
-models, effects and lens flares, unlit by the ambient occlusion, which the
+models, decals, effects and lens flares, unlit by the ambient occlusion, which the
 3D view's window alone has) where any structure of the map has a mirror
 (structure_bsp_cache_has_mirrors: the kept copies of its bsps), and the
 other structures' materials (the stand-ins) drawn through it too; and the
@@ -62,6 +62,7 @@ each structure's first sight, every model and effect).
 #include "objects/light_definitions.h"
 #include "objects/object_definitions.h"
 #include "objects/object_types.h"
+#include "objects/widgets/glow.h"
 #include "objects/widgets/light_volumes.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_cinematics.h"
@@ -108,6 +109,7 @@ each structure's first sight, every model and effect).
 #include "halo_dynamic_lights.h"
 #include "render_enumerate.h"
 #include "render_prepared.h"
+#include "world_ao.h"
 #ifdef HALO_VR
 #include "../src/vr.h"
 boolean vr_render_eye_pass(void);
@@ -891,6 +893,7 @@ boolean render_enumerate_begin(boolean mirrors, boolean scope)
 		enumerate.pass++;
 	fog_set(pass_fog());
 	render_enumerating = TRUE;
+	prepared_coverage_label(scope ? "scope" : "walk");
 	halo_gpu_prepare(enumerate.everything);
 	texture_cache_preparation_begin();
 	if (enumerate.everything && !scope)
@@ -1321,6 +1324,33 @@ static boolean object_effect_drawn(long model_index, short kind, long value)
 	return FALSE;
 }
 
+/* a model camouflaged, as rasterizer_xbox_active_camouflage.c draws it:
+fading (the model blended over its refraction) and fully cloaked (an
+intensity of 1: depth alone, alpha tested against its base map, then the
+refraction unblended), each with the ordinary and the hyper-stealth
+parameters. A player who picks up active camouflage is fully cloaked
+within a second; without the cloaked draws, their first-person weapon's
+and the other camouflaged units' pipelines were made in play, as they were
+first drawn so */
+static void camouflage_draw(long model_index, short state, struct render_model_effect *effect, unsigned long flags)
+{
+	static real const intensities[] = { 0.5f, 1.0f };
+	short intensity, parameter;
+
+	effect->type = _render_model_effect_type_active_camouflage;
+	for (intensity = 0; intensity < (short)NUMBEROF(intensities); intensity++)
+	{
+		for (parameter = 0; parameter < 2; parameter++)
+		{
+			effect->intensity = intensities[intensity];
+			effect->parameter = (real)parameter;
+			model_draw(model_index, state, effect, 0, flags);
+		}
+	}
+	effect->type = _render_model_effect_type_none;
+	effect->intensity = effect->parameter = 0.0f;
+}
+
 static void object_effects_draw(void)
 {
 	struct tag_iterator iterator;
@@ -1363,16 +1393,7 @@ static void object_effects_draw(void)
 				effect.modifier_shader = NULL;
 			}
 			if (camouflage && unlit_effects)
-			{
-				effect.type = _render_model_effect_type_active_camouflage;
-				effect.intensity = 0.5f;
-				effect.parameter = 0.0f;
-				model_draw(model_index, state, &effect, 0, 0);
-				effect.parameter = 1.0f;
-				model_draw(model_index, state, &effect, 0, 0);
-				effect.type = _render_model_effect_type_none;
-				effect.intensity = effect.parameter = 0.0f;
-			}
+				camouflage_draw(model_index, state, &effect, 0);
 			if (self_occludes && unlit_effects)
 			{
 				effect.type = _render_model_effect_type_modifier;
@@ -1422,13 +1443,9 @@ static void first_person_model_draw(long model_index)
 		memset(&effect, 0, sizeof(effect));
 		if (unlit_effects_drawn())
 		{
-			effect.type = _render_model_effect_type_active_camouflage;
 			effect.source_object_index = STAND_IN_OBJECT_INDEX;
 			effect.source_object_centroid = render.camera.position;
-			effect.intensity = 0.5f;
-			model_draw(model_index, state, &effect, 0, flags);
-			effect.parameter = 1.0f;
-			model_draw(model_index, state, &effect, 0, flags);
+			camouflage_draw(model_index, state, &effect, flags);
 		}
 		memset(&effect, 0, sizeof(effect));
 		effect.source_object_index = STAND_IN_OBJECT_INDEX;
@@ -1516,7 +1533,12 @@ void render_enumerate_models(void)
 		object_effects_draw();
 		break;
 	case _part_first_person:
+		/* (as render_objects draws the first-person weapon: its window's
+		span the first person's, display.ambient_occlusion "world" leaving
+		it as it is, world_ao.c) */
+		world_ao_first_person(TRUE);
 		first_person_models_draw();
+		world_ao_first_person(FALSE);
 		break;
 	}
 	rasterizer_debug_options.debug_model_lod = saved_lod;
@@ -1560,6 +1582,35 @@ void render_enumerate_shadows(void)
 		if (!enumerate.everything)
 			break;
 	}
+	/* the shadow atlas's (rasterizer_xbox_shadows.c): a caster into a region
+	of it, the chain over the atlas, and the receivers sampling the region */
+	if (rasterizer_shadow_atlas_begin())
+	{
+		short region = NONE;
+		real radius = 1.0f;
+
+		tag_iterator_new(&iterator, MODELS_GROUP_TAG);
+		model_index = tag_iterator_next(&iterator);
+		if (model_index != NONE &&
+			rasterizer_environment_shadow_begin(STAND_IN_OBJECT_INDEX, &shadow_matrix, &shadow_color, 1.0f, &radius))
+		{
+			model_draw(model_index, 0, NULL, 0, FLAG(_render_model_shadow_bit));
+			region = rasterizer_shadow_atlas_caster_end();
+			if (region == NONE)
+			{
+				structure_render_shadow(&render.camera.position, radius, &bounds, 0, planes);
+				rasterizer_environment_shadow_end();
+			}
+		}
+		rasterizer_shadow_atlas_convolve();
+		if (region != NONE)
+		{
+			rasterizer_shadow_atlas_receive(region);
+			structure_render_shadow(&render.camera.position, radius, &bounds, 0, planes);
+			rasterizer_environment_shadow_end();
+		}
+		rasterizer_shadow_atlas_end();
+	}
 	rasterizer_environment_shadows_end();
 	/* Shadows leave stencil rejection enabled. The world can also follow
 	a frame with no shadow or first-person weapon, so retain the selected
@@ -1583,7 +1634,10 @@ fog */
 
 void render_enumerate_decals(void)
 {
-	if (!render_enumerating || !enumerate.everything || pass_part() != _part_world)
+	/* (the world's, and a mirror's window, which draws its clusters' decals
+	and detail objects as the world's does: into the secondary target, whose
+	colour is not the screen's) */
+	if (!render_enumerating || !enumerate.everything || !pass_world())
 		return;
 	rasterizer_decals_port_enumerate(pass_stencil_reject() ? 2 : 0);
 	/* (and every detail object collection's: rasterizer_xbox_detail_objects.c) */
@@ -1594,11 +1648,17 @@ void render_enumerate_decals(void)
 system state's sprite, a sprite before the camera, which the transparent geometry's pass
 then draws as it would theirs */
 
+/* the sprites drawn as light (display.hdr_highlight_boost's emitters, whose
+HDR tag makes a pipeline of their own): a self-illuminated particle's, a
+glow's (render_particles.c, glow.c) */
+static boolean effect_sprite_emitter = FALSE;
+
 static void effect_sprite(long bitmap_group_index, struct shader_effect_definition const *shader)
 {
 	/* (not on the screen: its sprites' vertices are the dynamic screen
 	type's, which has no buffer in a map: render_sprite.c) */
-	unsigned long flags = pass_part() == _part_first_person ? FLAG(_build_sprites_first_person_bit) : 0;
+	unsigned long flags = (pass_part() == _part_first_person ? FLAG(_build_sprites_first_person_bit) : 0) |
+		(effect_sprite_emitter ? FLAG(_build_sprites_emitter_bit) : 0);
 	real_argb_color color = { 1.0f, 1.0f, 1.0f, 1.0f };
 	struct build_sprite_data data;
 	real_point3d origin;
@@ -1670,7 +1730,10 @@ static void effect_sprite(long bitmap_group_index, struct shader_effect_definiti
 }
 
 /* Light volumes use the widget sprite shader with depth testing, unlike
-lens flares. Their animated objects need not be visible in the first frame. */
+lens flares. Their animated objects need not be visible in the first frame.
+They are drawn as light_volume_render draws them in play: among the queued
+transparent geometry, each a light (display.hdr: a light's glow, whose HDR
+tag makes a pipeline of its own) */
 static void light_volumes_draw(void)
 {
 	struct tag_iterator iterator;
@@ -1679,6 +1742,8 @@ static void light_volumes_draw(void)
 
 	point_from_line3d(&render.camera.position, &render.camera.forward, 2.0f, &origin);
 	rasterizer_set_stencil_mode(pass_stencil_reject() ? 2 : 0);
+	halo_hdr_category(_rasterizer_profile_queued_transparents);
+	halo_hdr_draw_kind(HALO_HDR_KIND_LIGHT);
 	tag_iterator_new(&iterator, 'mgs2');
 	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
 	{
@@ -1694,6 +1759,8 @@ static void light_volumes_draw(void)
 		}
 		rasterizer_widget_end();
 	}
+	halo_hdr_draw_kind(HALO_HDR_KIND_NONE);
+	halo_hdr_category(NONE);
 }
 
 void render_enumerate_effects(void)
@@ -1709,8 +1776,13 @@ void render_enumerate_effects(void)
 	{
 		struct particle_definition *definition = particle_definition_get(tag_index);
 
+		/* (particles.c's _particle_definition_self_illuminated_bit, 9) */
+		effect_sprite_emitter = TEST_FLAG(definition->flags, 9);
 		effect_sprite(definition->bitmap.index, &definition->shader);
 	}
+	effect_sprite_emitter = TRUE;
+	glow_port_enumerate(effect_sprite);
+	effect_sprite_emitter = FALSE;
 	weather_particle_systems_port_enumerate(effect_sprite);
 	/* (a contrail's shader is drawn as an effect's: rasterizer_xbox_transparent_geometry.c) */
 	tag_iterator_new(&iterator, CONTRAIL_DEFINITION_TAG);

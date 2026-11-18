@@ -1,14 +1,19 @@
 /*
 FIRST_PERSON_LEGS_VIEW.C
 
-The first-person legs moved from the view between the ticks, which goes with
-the body, to the view drawn (render_interpolation.c's
-render_interpolation_view_body, #697): turned about the vertical from the
-one's heading to the other's and moved from the one's place to the other's,
-so that the legs are where the body has them from its own eye. Drawn where
-the body is, they trailed the view drawn from the newest step by a tick's
-motion, more or less as each step and each frame's aim came, and stepped
-against it.
+The first-person legs moved to the view drawn (render_interpolation.c's
+render_interpolation_view_body): turned about the vertical from the body's
+heading as it is drawn (the blend of its facing at the ticks drawn between)
+to the view drawn's, and moved from the view between the ticks' place, which
+goes with the body, to the view drawn's.
+
+- strafing (#697): drawn where the body is, the legs trailed the view drawn
+  from the newest step by a tick's motion, more or less as each step and
+  each frame's aim came, and stepped against it.
+- turning (#826): the body faces the aim only once the aim is far enough
+  from it, then turns after it a tick at a time; the view drawn turns every
+  frame. Turned by the view's own turn alone, the legs swung away from the
+  view and came back with a jerk each tick.
 */
 
 #include "harness.h"
@@ -43,7 +48,19 @@ struct object_datum
 	struct
 	{
 		long parent_object_index;
+		real_vector3d forward;
 	} object;
+};
+
+#define MAXIMUM_INTERPOLATED_OBJECTS 8
+
+struct interpolated_object
+{
+	long object_index;
+	long tick;
+	boolean has_previous;
+	unsigned char latest;
+	real_vector3d facing[2];
 };
 
 static struct
@@ -53,7 +70,12 @@ static struct
 static long fake_unit = 7;
 static director_perspective fake_perspective;
 static boolean fake_inhibited, fake_cinematic;
-static struct object_datum fake_object = { { NONE } };
+static struct object_datum fake_object = { { NONE, { 1.0f, 0.0f, 0.0f } } };
+static struct interpolated_object fake_records[MAXIMUM_INTERPOLATED_OBJECTS];
+static struct interpolated_object *interpolated_objects = fake_records;
+static boolean interpolation_rendering;
+static long interpolation_tick;
+static real interpolation_fraction;
 
 static long player_control_get_unit_index(short local_player_index) { (void)local_player_index; return fake_unit; }
 static director_perspective director_get_perspective(short local_player_index)
@@ -64,6 +86,8 @@ static director_perspective director_get_perspective(short local_player_index)
 static boolean director_inhibited_facing(short local_player_index) { (void)local_player_index; return fake_inhibited; }
 static boolean cinematic_in_progress(void) { return fake_cinematic; }
 static struct object_datum *object_get(long object_index) { (void)object_index; return &fake_object; }
+static struct object_datum *object_try_and_get(long object_index) { (void)object_index; return &fake_object; }
+static real lerp(real a, real b, real t) { return a + (b - a) * t; }
 
 static struct observer_result blended_views[MAXIMUM_LOCAL_PLAYERS];
 static struct observer_result drawn_views[MAXIMUM_LOCAL_PLAYERS];
@@ -121,6 +145,7 @@ int main(int argc, char **argv)
 {
 	char const *case_name = argc == 2 ? argv[1] : "";
 	real_matrix4x3 move;
+	real_vector3d heading;
 	boolean carried;
 
 	CASE("strafing")
@@ -162,13 +187,93 @@ int main(int argc, char **argv)
 			drawn_views_valid[0] = TRUE;
 			blended_views[0] = view(10.0f, 4.0f + body_y, 0.6f, 0.0f, -0.8f);
 			drawn_views[0] = view(10.0f, 4.0f + view_y, 0.6f, aim, -0.8f);
-			carried = render_interpolation_view_body(7, &move);
+			carried = render_interpolation_view_body(7, &move, &heading);
 			CHECK(carried, "not moved");
 			at = seen(&drawn_views[0], moved(&move, body_foot));
 			if (frame_index > 0)
 			{
 				CHECK(NEAR(at.x, previous[0]) && NEAR(at.y, previous[1]) && NEAR(at.z, previous[2]),
 					"frame %ld: the foot stepped by %f %f %f against the view", frame_index, at.x - previous[0],
+					at.y - previous[1], at.z - previous[2]);
+			}
+			previous[0] = at.x;
+			previous[1] = at.y;
+			previous[2] = at.z;
+		}
+	}
+	else CASE("turning")
+	{
+		/* frames at 144 a second over ticks at 30, the player standing,
+		looking down and turning at 3 radians a second. The body faces the
+		aim only once it is 0.5 radians from it, then turns 0.2244 radians a
+		tick after it (the cyborg's, as logged from the game); it is drawn
+		between the last two ticks, its feet turned with it about its place
+		under the eye, and so is the view between the ticks. The view drawn
+		turns every frame. Seen from the view drawn, the feet stay put */
+		real facings[64], aims[64];
+		long tick, frame_index;
+		real previous[3] = { 0.0f, 0.0f, 0.0f };
+
+		facings[0] = aims[0] = 0.0f;
+		for (tick = 1; tick < 64; tick++)
+		{
+			aims[tick] = aims[tick - 1] + 0.1f;
+			facings[tick] = facings[tick - 1];
+			if (aims[tick] - facings[tick] > 0.5f || (aims[tick - 1] - facings[tick - 1] > 0.2244f &&
+				facings[tick - 1] != (tick > 1 ? facings[tick - 2] : 0.0f)))
+			{
+				facings[tick] += 0.2244f;
+			}
+		}
+		for (frame_index = 0; frame_index < 60 * 144 / 30 - 10; frame_index++)
+		{
+			real t = 2.0f + frame_index / (144.0f / 30.0f);
+			long newest = (long)t;
+			real fraction = t - (real)newest;
+			real facing = facings[newest - 1] + (facings[newest] - facings[newest - 1]) * fraction;
+			real blended_aim = aims[newest - 1] + (aims[newest] - aims[newest - 1]) * fraction;
+			real drawn_aim = aims[newest] + 0.1f * fraction + 0.01f * sinf((real)frame_index * 1.7f);
+			/* (the foot ahead and to the left of the body's place, turned
+			with the body) */
+			real_point3d body_foot;
+			real_point3d at;
+
+			body_foot.x = 10.0f + cosf(facing) * 0.3f - sinf(facing) * 0.1f;
+			body_foot.y = 4.0f + sinf(facing) * 0.3f + cosf(facing) * 0.1f;
+			body_foot.z = -0.05f;
+			render.local_player_index = 0;
+			fake_perspective = _director_perspective_first_person;
+			fake_object.object.parent_object_index = NONE;
+			/* (the game's facing is the newest tick's; the record has the
+			two drawn between) */
+			fake_object.object.forward.i = cosf(facings[newest]);
+			fake_object.object.forward.j = sinf(facings[newest]);
+			fake_object.object.forward.k = 0.0f;
+			interpolation_rendering = TRUE;
+			interpolation_tick = newest;
+			interpolation_fraction = fraction;
+			fake_records[7].object_index = 7;
+			fake_records[7].tick = newest;
+			fake_records[7].has_previous = TRUE;
+			fake_records[7].latest = (unsigned char)(newest & 1);
+			fake_records[7].facing[newest & 1].i = cosf(facings[newest]);
+			fake_records[7].facing[newest & 1].j = sinf(facings[newest]);
+			fake_records[7].facing[newest & 1].k = 0.0f;
+			fake_records[7].facing[(newest & 1) ^ 1].i = cosf(facings[newest - 1]);
+			fake_records[7].facing[(newest & 1) ^ 1].j = sinf(facings[newest - 1]);
+			fake_records[7].facing[(newest & 1) ^ 1].k = 0.0f;
+			drawn_views_valid[0] = TRUE;
+			blended_views[0] = view(10.0f, 4.0f, 0.6f, blended_aim, -1.3f);
+			drawn_views[0] = view(10.0f, 4.0f, 0.6f, drawn_aim, -1.3f);
+			carried = render_interpolation_view_body(7, &move, &heading);
+			CHECK(carried, "not moved");
+			CHECK(NEAR(heading.i, cosf(drawn_aim)) && NEAR(heading.j, sinf(drawn_aim)) && heading.k == 0.0f,
+				"frame %ld: the heading %f %f %f, not the view's", frame_index, heading.i, heading.j, heading.k);
+			at = seen(&drawn_views[0], moved(&move, body_foot));
+			if (frame_index > 0)
+			{
+				CHECK(NEAR(at.x, previous[0]) && NEAR(at.y, previous[1]) && NEAR(at.z, previous[2]),
+					"frame %ld: the foot moved by %f %f %f against the view", frame_index, at.x - previous[0],
 					at.y - previous[1], at.z - previous[2]);
 			}
 			previous[0] = at.x;

@@ -5,13 +5,18 @@ display.hdr's draws as both backends' emitters write them
 (tools/test_hdr_backends.py): one pixel program, its colour the diffuse
 colour (v0) as the game's shaders hand it to the blend, tagged with each
 blend the game's draws have and each tag (xgpu_hdr.h), a screen effect's
-pass unclamped (XGPU_HDR_UNCLAMPED), and a self-illuminated surface's pass
-(XGPU_HDR_SELF_ILLUMINATION) and the same untagged, written as the
+pass unclamped (XGPU_HDR_UNCLAMPED), a self-illuminated surface's pass
+(XGPU_HDR_SELF_ILLUMINATION) and the same untagged and boosted, and an
+emitter's colour boosted (XGPU_HDR_EMITTER, #1123), written as the
 Vulkan backend's SPIR-V (xgpu_spirv.c, reading the pixel drawn over as an
 input attachment) and the Metal backend's MSL (xgpu_msl.c, reading it as
 [[color(0)]]). The test makes the SPIR-V Metal's with SPIRV-Cross and runs
 both on the Mac's GPU over the same pixels (harness.m): the two backends'
-blends must agree.
+blends must agree. Each tagged draw is also written interlocked
+(xgpu_spirv_options interlock: the target read and written as a storage
+image in the triangles' order; <name>-interlock, and, with the colour mask
+of red, green and blue alone, <name>-interlock-rgb for the alpha blend),
+which the harness draws over each pixel twice in one draw.
 
   shaders <out dir>
 
@@ -87,7 +92,7 @@ int main(int argc, char **argv)
 	struct xgpu_msl_options msl;
 	struct xgpu_spirv_module module;
 	char name[64], file[80], path[1024];
-	unsigned int blend, tag;
+	unsigned int blend, tag, mask;
 	FILE *index;
 	char *source;
 
@@ -141,6 +146,30 @@ int main(int argc, char **argv)
 				return 1;
 			free(source);
 			fprintf(index, "%s %u\n", name, (unsigned)program.hdr);
+			/* (interlocked, and its colour mask too: the MSL's the same) */
+			for (mask = 0; mask < (blend == 3 ? 2 : 1); mask++)
+			{
+				char interlocked[80];
+
+				snprintf(interlocked, sizeof(interlocked), "%s-interlock%s", name, mask ? "-rgb" : "");
+				spirv.interlock = XGPU_SPIRV_INTERLOCK_PIXEL;
+				spirv.interlock_mask = mask ? 7 : 15;
+				if (!xgpu_spirv_pixel_shader(&program, &spirv, &module))
+					return 1;
+				spirv.interlock = XGPU_SPIRV_INTERLOCK_NONE;
+				snprintf(file, sizeof(file), "%s.spv", interlocked);
+				if (!write_file(argv[1], file, module.words, module.count * 4))
+					return 1;
+				free(module.words);
+				source = xgpu_msl_pixel_shader(&program, &msl);
+				if (!source)
+					return 1;
+				snprintf(file, sizeof(file), "%s.metal", interlocked);
+				if (!write_file(argv[1], file, source, strlen(source)))
+					return 1;
+				free(source);
+				fprintf(index, "%s %u\n", interlocked, (unsigned)program.hdr);
+			}
 		}
 	}
 	/* a screen effect's pass (XGPU_HDR_UNCLAMPED): a combiner doubling the
@@ -172,11 +201,40 @@ int main(int argc, char **argv)
 		return 1;
 	free(source);
 	fprintf(index, "%s %u\n", name, (unsigned)program.hdr);
+	/* display.hdr_highlight_boost (#1123): an emitter's colour gained (the
+	diffuse colour, the final combiner's D, by the lights' bound at the
+	most level, by the weapon's at level 2), drawn as the fixed function
+	would hand it to its blend */
+	for (tag = 0; tag < 2; tag++)
+	{
+		memset(&program, 0, sizeof(program));
+		program.final.present = 1;
+		program.final.inputs[3].reg = XGPU_REGISTER_V0;
+		program.final.inputs[6].reg = XGPU_REGISTER_V0;
+		program.final.inputs[6].alpha = 1;
+		program.hdr = tag ? XGPU_HDR_EMITTER(2, XGPU_HDR_CEILING_WEAPON) :
+			XGPU_HDR_EMITTER(XGPU_HDR_BOOST_MOST, XGPU_HDR_CEILING_LIGHT);
+		snprintf(name, sizeof(name), "draw-emitter%s", tag ? "-weapon" : "");
+		if (!xgpu_spirv_pixel_shader(&program, &spirv, &module))
+			return 1;
+		snprintf(file, sizeof(file), "%s.spv", name);
+		if (!write_file(argv[1], file, module.words, module.count * 4))
+			return 1;
+		free(module.words);
+		source = xgpu_msl_pixel_shader(&program, &msl);
+		if (!source)
+			return 1;
+		snprintf(file, sizeof(file), "%s.metal", name);
+		if (!write_file(argv[1], file, source, strlen(source)))
+			return 1;
+		free(source);
+		fprintf(index, "%s %u\n", name, (unsigned)program.hdr);
+	}
 	/* a self-illuminated surface's pass, tagged and not: a combiner adding
 	its self-illumination, stage 0's constant (the harness's colour) times
 	the diffuse alpha (its mask), to the diffuse colour (its light) into r0,
 	the final combiner's D r0 */
-	for (tag = 0; tag < 2; tag++)
+	for (tag = 0; tag < 3; tag++)
 	{
 		memset(&program, 0, sizeof(program));
 		program.combiner_count = 1;
@@ -191,7 +249,10 @@ int main(int argc, char **argv)
 		program.final.inputs[6].reg = XGPU_REGISTER_V0;
 		program.final.inputs[6].alpha = 1;
 		program.hdr = tag ? XGPU_HDR_SELF_ILLUMINATION(1) : 0;
-		snprintf(name, sizeof(name), "draw-self-illumination%s", tag ? "" : "-sdr");
+		/* (and boosted at the most level: display.hdr_highlight_boost) */
+		if (tag == 2)
+			program.hdr |= XGPU_HDR_BOOST(XGPU_HDR_BOOST_MOST);
+		snprintf(name, sizeof(name), "draw-self-illumination%s", tag == 2 ? "-boost" : tag ? "" : "-sdr");
 		if (!xgpu_spirv_pixel_shader(&program, &spirv, &module))
 			return 1;
 		snprintf(file, sizeof(file), "%s.spv", name);

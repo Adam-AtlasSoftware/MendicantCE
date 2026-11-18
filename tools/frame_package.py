@@ -64,6 +64,8 @@ LICENSES = {
     "Overpass-OFL.txt": "port/assets/fonts/Overpass-OFL.txt",
     "Hack-LICENSE.txt": "port/assets/fonts/Hack-LICENSE.txt",
     "OpenCE-OFL.txt": "port/assets/fonts/OpenCE-OFL.txt",
+    "Newtown-LICENSE.txt": "port/assets/fonts/Newtown-LICENSE.txt",
+    "msdfgen-LICENSE.txt": "port/third_party/msdfgen/LICENSE.txt",
     "expat-COPYING.txt": "port/third_party/expat/COPYING",
     "opus-COPYING.txt": "port/third_party/opus/COPYING",
     "ffmpeg-COPYING.LGPLv2.1.txt": "port/third_party/ffmpeg/COPYING.LGPLv2.1",

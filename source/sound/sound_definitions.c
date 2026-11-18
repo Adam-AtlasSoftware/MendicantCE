@@ -36,11 +36,40 @@ symbols in this file:
 #include "sound_classes.h"
 #include "sound_definitions.h"
 
+#include <stdlib.h>
+
 /* ---------- constants */
+
+enum
+{
+	/* port: a pitch range's played permutations past the 32 bits of its
+	played_permutation_mask, up to every permutation a range can have
+	(OpenH1 issue 1170) */
+	SOUND_PLAYED_BEYOND_LONGS = (MAXIMUM_PERMUTATIONS_PER_PITCH_RANGE - 32 + 31) / 32,
+	/* (the ranges' played_beyond_index is a short: the most ranges of more
+	than 32 a map may have, the rest picking from their first 32) */
+	MAXIMUM_SOUND_PLAYED_BEYOND = 0x7FFF,
+};
 
 /* ---------- macros */
 
 /* ---------- structures */
+
+/* port: the played bits of a pitch range's permutations 32 on, bit n of
+bits[n / 32] for permutation 32 + n (sound_pitch_range_played_beyond) */
+struct sound_played_beyond
+{
+	struct sound_pitch_range const *range;
+	unsigned long bits[SOUND_PLAYED_BEYOND_LONGS];
+};
+
+/* port: the current map's (sound_definitions_played_beyond_clear) */
+struct sound_played_beyond_table
+{
+	struct sound_played_beyond *entries;
+	long count;
+	long capacity;
+};
 
 /* ---------- prototypes */
 
@@ -48,6 +77,8 @@ symbols in this file:
 unsigned long *sound_random_seed_address(void);
 
 /* ---------- globals */
+
+static struct sound_played_beyond_table sound_played_beyond_table;
 
 unsigned long const sound_sample_rate_samples_per_second[2] =
 {
@@ -183,6 +214,109 @@ void try_to_reset_permutations(
 	return;
 }
 
+/* port: a new map's ranges have none of their played bits past 32 yet
+(sound_initialize_for_new_map): the entries are only ever the ranges of the
+map loaded, so they never run out as map follows map, and an index is never
+another range's */
+void sound_definitions_played_beyond_clear(
+	void)
+{
+	sound_played_beyond_table.count = 0;
+
+	return;
+}
+
+/* port: the played bits of `range`'s permutations 32 on, for a range that
+chooses from more than 32 (a Custom Edition sound's, or a mod's: OpenH1
+issue 1170), or NULL if there is no room for them (past
+MAXIMUM_SOUND_PLAYED_BEYOND ranges in a map, or no memory). The range is
+the map's structure, its layout the tags', so they are kept here: the
+range's played_beyond_index is its entry, one on, 0 for none. The validator
+(tag_schema_effects.c) and the mods' loader (mod_sounds.c) set it to 0 as
+they set the range's played_permutation_mask, so a range loaded starts with
+none played, as its first 32 do; the entries are the current map's
+(sound_definitions_played_beyond_clear). */
+static unsigned long *sound_pitch_range_played_beyond(
+	struct sound_pitch_range *range)
+{
+	struct sound_played_beyond_table *table = &sound_played_beyond_table;
+	long index = (long)range->played_beyond_index - 1;
+	long word;
+
+	if (index >= 0 && index < table->count && table->entries[index].range == range)
+		return table->entries[index].bits;
+
+	if (table->count == MAXIMUM_SOUND_PLAYED_BEYOND)
+		return NULL;
+	if (table->count == table->capacity)
+	{
+		long capacity = table->capacity ? MIN(table->capacity * 2, (long)MAXIMUM_SOUND_PLAYED_BEYOND) : 16;
+		struct sound_played_beyond *grown = realloc(table->entries, (size_t)capacity * sizeof(*grown));
+
+		if (!grown)
+			return NULL;
+		table->entries = grown;
+		table->capacity = capacity;
+	}
+	index = table->count++;
+	table->entries[index].range = range;
+	for (word = 0; word < SOUND_PLAYED_BEYOND_LONGS; word++)
+		table->entries[index].bits[word] = 0;
+	range->played_beyond_index = (short)(index + 1);
+
+	return table->entries[index].bits;
+}
+
+/* port: whether permutation `index` of `range` has played: one of the first
+32 in its played_permutation_mask, as the game kept them, one past them in
+`beyond` (sound_pitch_range_played_beyond: NULL for a range of 32 or fewer,
+which never asks past 32) */
+static boolean sound_pitch_range_permutation_played(
+	struct sound_pitch_range const *range,
+	unsigned long const *beyond,
+	short index)
+{
+	return index < 32 ?
+		TEST_FLAG(range->played_permutation_mask, index) :
+		((beyond[(index - 32) >> 5] >> ((index - 32) & 31)) & 1) != 0;
+}
+
+static void sound_pitch_range_permutation_set_played(
+	struct sound_pitch_range *range,
+	unsigned long *beyond,
+	short index)
+{
+	if (index < 32)
+		SET_FLAG(range->played_permutation_mask, index, TRUE);
+	else
+		beyond[(index - 32) >> 5] |= 1UL << ((index - 32) & 31);
+
+	return;
+}
+
+/* port: try_to_reset_permutations for a range of more than 32 permutations:
+once every one of them has played, none has but the one played last */
+static void try_to_reset_permutations_beyond(
+	struct sound_pitch_range *range,
+	unsigned long *beyond)
+{
+	short permutation_count = range->actual_permutation_count;
+	short index;
+
+	for (index = 0; index < permutation_count; index++)
+	{
+		if (!sound_pitch_range_permutation_played(range, beyond, index))
+			return;
+	}
+	range->played_permutation_mask = 0;
+	for (index = 0; index < SOUND_PLAYED_BEYOND_LONGS; index++)
+		beyond[index] = 0;
+	if (range->previous_permutation_index >= 0 && range->previous_permutation_index < permutation_count)
+		sound_pitch_range_permutation_set_played(range, beyond, range->previous_permutation_index);
+
+	return;
+}
+
 real sound_permutation_get_real_mouth_aperture(
 	struct sound_permutation *permutation,
 	long tick_index)
@@ -265,6 +399,7 @@ static short sound_definition_next_permutation_from_seed(
 	struct sound_pitch_range *range;
 	short selected_permutation_index;
 	short attempt_count = 0;
+	unsigned long *beyond = NULL;
 
 	/* port: no range (NONE, from a sound none of whose ranges has
 	permutations), no permutation */
@@ -345,6 +480,39 @@ static short sound_definition_next_permutation_from_seed(
 
 		return permutation->next_permutation_index;
 	}
+	/* port: or the next piece of a long permutation split at load, in a
+	sound whose permutations are not linked; after the last, a pick as
+	before (sound_permutation_next_piece) */
+	if (VALID_INDEX(permutation_index, range->permutations.count))
+	{
+		short piece = sound_permutation_next_piece(range, TAG_BLOCK_GET_ELEMENT(
+			&range->permutations,
+			permutation_index,
+			struct sound_permutation));
+
+		if (piece != NONE)
+		{
+			return piece;
+		}
+	}
+
+	/* port: a range of more than 32 permutations keeps the played bits of
+	those past 32 apart (sound_pitch_range_played_beyond); one of 32 or
+	fewer picks as the game did, draw for draw. Without room for them, it
+	picks from its first 32. */
+	if (range->actual_permutation_count > 32)
+	{
+		beyond = sound_pitch_range_played_beyond(range);
+		if (!beyond)
+		{
+			error(
+				_error_silent,
+				"pitch range %s picks from 32 of its %d permutations: no room for the rest",
+				range->name,
+				range->actual_permutation_count);
+			range->actual_permutation_count = 32;
+		}
+	}
 
 	/* port: the seed given (the sounds', or the game's speakers'), here and
 	below */
@@ -355,13 +523,16 @@ static short sound_definition_next_permutation_from_seed(
 
 	for (;;)
 	{
-		try_to_reset_permutations(range);
+		if (beyond)
+			try_to_reset_permutations_beyond(range, beyond);
+		else
+			try_to_reset_permutations(range);
 
-		if (!TEST_FLAG(range->played_permutation_mask, selected_permutation_index))
+		if (!sound_pitch_range_permutation_played(range, beyond, selected_permutation_index))
 		{
 			struct sound_permutation *permutation;
 
-			SET_FLAG(range->played_permutation_mask, selected_permutation_index, TRUE);
+			sound_pitch_range_permutation_set_played(range, beyond, selected_permutation_index);
 			if (attempt_count++ == 16)
 				break;
 

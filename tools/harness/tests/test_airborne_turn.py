@@ -22,7 +22,6 @@ TURNS_CONTROLS = [
      'network'),
     # (the host's word ignored: a Classic host's clients would turn its players)
     ('network_standard_turns_with_aim(unit_get(unit_index)->unit.player_index)', 'TRUE', 'network_classic'),
-    ('game_connection() == _game_connection_network_client ||', '', 'network'),
 ]
 
 

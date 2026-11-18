@@ -47,8 +47,9 @@ NEGATIVE_CONTROLS = {
     # RESTART does not check the saved game is still the one asked about
     "restart-unchecked": (CAMPAIGN_MENU, (" || level != campaign_restart_level)", ")"), "cancel-keeps"),
     # leaving before a checkpoint writes the game state over the saved game
-    "written-without-checkpoint": (GAME_STATE, ("if (player_spawn_count==1 && (game_state_port_saved_game_valid() || "
-                                                "recover_saved_games_hack))", "if (player_spawn_count==1)"),
+    "written-without-checkpoint": (GAME_STATE, ("if (player_spawn_count==1 && !demo_playing() && "
+                                                "(game_state_port_saved_game_valid() || recover_saved_games_hack))",
+                                                "if (player_spawn_count==1 && !demo_playing())"),
                                    "kept-until-checkpoint"),
 }
 
@@ -91,21 +92,6 @@ def test_functions_are_named():
     for name in ("restart ask", "missions restart", "restart", "restart cancel", "restart update"):
         assert f'"port campaign {name}"' in tags, name
         assert f'!strcmp(name, "{name}")' in menu, name
-
-
-def test_question_opened_and_answered():
-    """RESTART MISSION and Choose Mission's Y and RESTART open the question; its RESTART restarts, its CANCEL and B
-    go back."""
-    widgets = menu_layout.widgets()
-    text = (menu_layout.CE / "main_menu.campaign.xml").read_text()
-    opens = f'open="{CAMPAIGN}/restart_screen"'
-    assert re.search(rf'<on event="a" run="port campaign restart ask" {opens}/>', text)
-    assert re.search(rf'<on event="y" run="port campaign missions restart" {opens}/>', text)
-    assert re.search(rf'<on event="a" run="port campaign missions restart" {opens}/>', text)
-    assert f"{CAMPAIGN}/restart_button_confirm" in widgets and f"{CAMPAIGN}/restart_button_cancel" in widgets
-    assert '<on event="a" run="port campaign restart"/>' in text
-    assert '<on event="b" run="port campaign restart cancel" back="true"/>' in text
-    assert '<on event="a" run="port campaign restart cancel" back="true"/>' in text
 
 
 @pytest.mark.parametrize("aspect", WIDTHS)

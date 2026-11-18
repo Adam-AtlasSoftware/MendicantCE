@@ -446,9 +446,13 @@ void render_objects(
 	return;
 }
 
+/* port: port/linux/game/menu_spartan.c */
+boolean menu_spartan_object(long object_index);
+real_matrix4x3 const *menu_spartan_node_matrices(long object_index, real_matrix4x3 const *nodes);
 /* port: port/linux/game/first_person_legs.c */
 boolean first_person_legs_wanted(long object_index);
 real_matrix4x3 const *first_person_legs_node_matrices(long object_index, real_matrix4x3 const *nodes);
+real_matrix4x3 const *first_person_legs_shadow_node_matrices(long object_index, real_matrix4x3 const *nodes);
 #ifdef HALO_VR
 /* port: port/linux/game/vr_death.c */
 real_matrix4x3 const *vr_death_body_nodes(long object_index, real_matrix4x3 const *nodes);
@@ -460,6 +464,28 @@ boolean vr_grab_highlight(long object_index, struct render_lighting const *given
 real_rgb_color const *shield_color_colors(long unit_index, real_rgb_color const *colors);
 /* port: port/linux/game/overshield_effect.c */
 real const *overshield_effect_values(long unit_index, real const *values, boolean arms);
+
+/* port: an object and what it carries drawn alone, lit as given, in the view
+the rasterizer has now (the menus' Spartan, in its own: port/linux/game/
+menu_spartan.c), between rasterizer_models_begin and _end */
+void render_object_alone(
+	long object_index,
+	struct render_lighting *lighting)
+{
+	struct object_render_data data;
+	struct render_model_effect model_effect;
+
+	csmemset(&data, 0, sizeof(data));
+	data.object_index = object_index;
+	data.lighting = lighting;
+	data.shadow = FALSE;
+	data.no_planar_fog = TRUE;
+	model_effect.type = _render_model_effect_type_none;
+	model_effect.modifier_shader = NULL;
+	model_effect.modifier_animation.values = NULL;
+	model_effect.modifier_animation.colors = NULL;
+	render_object_list(&data, &model_effect, object_index);
+}
 
 void render_object_shadows(
 	void)
@@ -533,6 +559,22 @@ their unit is the camera's, as a local player's own is
 		if (player && player->unit_index != NONE && player->unit_index == object_index)
 			return TRUE;
 	}
+	{
+		/* port: a dead player's view through a teammate's eyes, that
+		teammate's body hidden (port/linux/game/dead_spectate.c) */
+		extern long dead_spectate_eyes_unit(short local_player_index);
+
+		if (object_index != NONE && object_index == dead_spectate_eyes_unit(render.local_player_index))
+			return TRUE;
+	}
+	{
+		/* port: a teammate's feed in the HUD's Spartan link, drawn from
+		their eyes, their body hidden (port/linux/game/spartan_link.c) */
+		extern long spartan_link_hidden_unit(void);
+
+		if (object_index != NONE && object_index == spartan_link_hidden_unit())
+			return TRUE;
+	}
 	return (unit_index == object_index &&
 		director_get_perspective(render.local_player_index) ==
 			_director_perspective_first_person) ||
@@ -564,6 +606,21 @@ static void find_rendered_objects(
 		object_mark_function);
 
 	object_marker_end();
+
+	/* port: not the menus' Spartans, which are drawn in a view of their own
+	among the menus' widgets (port/linux/game/menu_spartan.c) */
+	{
+		short index, kept = 0;
+
+		for (index = 0; index < render_object_globals.rendered_object_count; index++)
+		{
+			long object_index = render_object_globals.rendered_object_indices[index];
+
+			if (!menu_spartan_object(object_index))
+				render_object_globals.rendered_object_indices[kept++] = object_index;
+		}
+		render_object_globals.rendered_object_count = kept;
+	}
 
 	if (render_object_globals.rendered_object_count == MAXIMUM_RENDERED_OBJECTS &&
 		!reported_rendered_object_overflow)
@@ -674,13 +731,14 @@ static void render_object_list(
 	{
 		struct object_datum *object = object_get(object_index);
 		/* port: the player's own legs, seen looking down in first person
-		(port/linux/game/first_person_legs.c): its body drawn from the waist
-		down, nothing it carries */
-		boolean legs = !data->shadow && !render.camera.mirrored &&
+		(port/linux/game/first_person_legs.c): its body drawn from its belly
+		down, nothing it carries; its shadow the whole body's, placed as the
+		legs are */
+		boolean legs = !render.camera.mirrored &&
 			object_is_first_person_camera(object_index) && first_person_legs_wanted(object_index);
-		real_matrix4x3 const *node_matrices = legs ?
-			first_person_legs_node_matrices(object_index, object_get_node_matrices(object_index)) :
-			object_get_node_matrices(object_index);
+		real_matrix4x3 const *node_matrices = !legs ? object_get_node_matrices(object_index) :
+			data->shadow ? first_person_legs_shadow_node_matrices(object_index, object_get_node_matrices(object_index)) :
+			first_person_legs_node_matrices(object_index, object_get_node_matrices(object_index));
 
 #ifdef HALO_VR
 		/* port: the VR mode's dead player's body, seen from where its head
@@ -689,6 +747,10 @@ static void render_object_list(
 		if (!legs && !data->shadow && !render.camera.mirrored)
 			node_matrices = vr_death_body_nodes(object_index, node_matrices);
 #endif
+		/* port: the menus' Spartan and its rifle, posed on the menus' frame
+		clock while its view draws it (port/linux/game/menu_spartan.c) */
+		if (!legs && !data->shadow)
+			node_matrices = menu_spartan_node_matrices(object_index, node_matrices);
 		if (!object_is_first_person_camera(object_index) || render.camera.mirrored || (legs && node_matrices))
 		{
 			struct render_model_effect model_effect;
@@ -1395,7 +1457,11 @@ static void render_object(
 	{
 		struct object_datum *object = object_get(data->object_index);
 
-		if (!object_is_first_person_camera(data->object_index) &&
+		/* port: the player's own body casts its shadow in first person
+		with its legs drawn (port/linux/game/first_person_legs.c) */
+		if ((!object_is_first_person_camera(data->object_index) ||
+				(first_person_legs_wanted(data->object_index) && first_person_legs_shadow_node_matrices(
+					data->object_index, object_get_node_matrices(data->object_index)))) &&
 			!TEST_FLAG(object->object.flags, _object_shadowless_bit) &&
 			(!TEST_FLAG(object->object.flags, _object_invisible_bit) ||
 				object->object.first_child_object_index != NONE))

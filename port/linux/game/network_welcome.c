@@ -62,26 +62,28 @@ static char const *const welcome_lines[] =
 {
 #ifdef HALO_FORK_MENDICANT
 	/* fork: a host of this fork's build (tools/build_common.py's FORK_DEFINE)
-	runs a modified OpenH1, and says so, and where its source is, to every
+	runs a modified GOAT H1 (OpenH1), and says so, and where its source is, to every
 	player who joins it over the network (the licence's section 13): not that
-	it runs OpenH1, nor to get OpenH1 at openh1.com, where this host's source
+	it runs GOAT H1, nor to get it at goath1.com, where this host's source
 	is not */
 	"This server runs MendicantCE, a modified OpenH1.",
 	"Source: github.com/Adam-AtlasSoftware/MendicantCE",
 #else
-	"This server runs OpenH1.",
-	"Get it free at openh1.com for smoother 60 and 120 tick games.",
+	"This server runs GOAT H1.",
+	"Get it free at goath1.com for smoother 60 and 120 tick games.",
 #endif
 };
 
 #ifdef HALO_FORK_MENDICANT
-/* fork: OpenH1's own lines, which a client of this fork leaves out as an
-OpenH1 client does when an OpenH1 host sends them (network_welcome_line):
+/* fork: GOAT H1's own lines (and OpenH1's, before its rename), which a client of this fork leaves out as
+a GOAT H1 client does when a GOAT H1 host sends them (network_welcome_line):
 recognised, never sent */
 static char const *const welcome_upstream_lines[] =
 {
 	"This server runs OpenH1.",
 	"Get it free at openh1.com for smoother 60 and 120 tick games.",
+	"This server runs GOAT H1.",
+	"Get it free at goath1.com for smoother 60 and 120 tick games.",
 };
 #endif
 

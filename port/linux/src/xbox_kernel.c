@@ -7,6 +7,7 @@ threads, asynchronous procedure calls, time, memory and debug output.
 
 #include "platform.h"
 #include "port_config.h"
+#include "report.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -50,33 +51,39 @@ static int platform_log_file(void)
 
 void platform_log(const char *format, ...)
 {
-	va_list arguments;
+	va_list arguments, copy;
+	char line[2048];
+	int length;
 	int file = platform_log_file();
 
-	fputs("halo-linux: ", stderr);
 	va_start(arguments, format);
-	vfprintf(stderr, format, arguments);
-	va_end(arguments);
+	va_copy(copy, arguments);
+	length = vsnprintf(line, sizeof(line), format, arguments);
+	fputs("halo-linux: ", stderr);
+	/* (a line longer than the copy's room written whole) */
+	if (length >= (int)sizeof(line))
+		vfprintf(stderr, format, copy);
+	else
+		fputs(line, stderr);
 	fputc('\n', stderr);
-	if (file >= 0)
+	va_end(copy);
+	va_end(arguments);
+	/* (the last lines kept for a report: report.c) */
+	report_log_line(line);
+	if (file >= 0 && length >= 0)
 	{
 		/* (one write for each line, at the file's end: the host writes
-		its lines there too) */
+		its lines there too; a line longer than this is cut) */
 		char text[2048];
-		int length;
+		int size = length < (int)sizeof(line) ? length : (int)sizeof(line) - 1;
 
+		if (size > (int)sizeof(text) - 14)
+			size = (int)sizeof(text) - 14;
 		memcpy(text, "halo-linux: ", 12);
-		va_start(arguments, format);
-		length = vsnprintf(text + 12, sizeof(text) - 13, format, arguments);
-		va_end(arguments);
-		if (length < 0)
-			return;
-		/* (a line longer than this is cut) */
-		if (length > (int)sizeof(text) - 14)
-			length = (int)sizeof(text) - 14;
-		length += 12;
-		text[length++] = '\n';
-		if (write(file, text, (size_t)length) < 0)
+		memcpy(text + 12, line, (size_t)size);
+		size += 12;
+		text[size++] = '\n';
+		if (write(file, text, (size_t)size) < 0)
 			return;
 	}
 }

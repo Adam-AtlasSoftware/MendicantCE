@@ -513,7 +513,7 @@ static int route_pulse(int *found, int *card)
 		if (SDL_GetTicks() < pulse.retry_at)
 			return 0;
 		pulse.mainloop = pulse.mainloop_new();
-		pulse.context = pulse.mainloop ? pulse.context_new(pulse.mainloop_get_api(pulse.mainloop), "OpenH1") : NULL;
+		pulse.context = pulse.mainloop ? pulse.context_new(pulse.mainloop_get_api(pulse.mainloop), "GOAT H1") : NULL;
 		if (!pulse.context || pulse.context_connect(pulse.context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL) < 0 ||
 			!route_pulse_wait(NULL))
 		{

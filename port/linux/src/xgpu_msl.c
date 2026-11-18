@@ -1034,10 +1034,23 @@ static void sample(struct xgpu_text *text, const struct xgpu_pixel_program *prog
 	unsigned int border = options->border[stage] & (sampler == _xgpu_sampler_3d ? 7 : 3);
 	char uv[160];
 
+	if ((options->border[stage] & XGPU_BORDER_REGION) && sampler == _xgpu_sampler_2d)
+	{
+		xgpu_text_append(text, "region_sample(tex%d, tex%d_sampler, (%s).xy, u.texture_scale[%d], u.texture_lod_bias[%d], "
+			"u.texture_border[%d], u.texture_border_linear[%d])", stage, stage, coordinates, stage, stage, stage, stage);
+		return;
+	}
 	if (sampler == _xgpu_sampler_3d || sampler == _xgpu_sampler_cube)
 		snprintf(uv, sizeof(uv), "(%s).xyz", coordinates);
 	else
 		snprintf(uv, sizeof(uv), "(%s).xy * u.texture_scale[%d].xy", coordinates, stage);
+	/* (the high-res text's distance fields: msdf_coverage) */
+	if ((options->border[stage] & XGPU_BORDER_MSDF) && sampler == _xgpu_sampler_2d)
+	{
+		xgpu_text_append(text, "msdf_coverage(tex%d.sample(tex%d_sampler, %s, bias(u.texture_lod_bias[%d])), %s, "
+			"float2(float(tex%d.get_width()), float(tex%d.get_height())))", stage, stage, uv, stage, uv, stage, stage);
+		return;
+	}
 	if (border && sampler != _xgpu_sampler_cube && sampler != _xgpu_sampler_2d_layered)
 		xgpu_text_append(text, "border_mix(");
 	else
@@ -1381,35 +1394,26 @@ static void dynamic_lights_functions(struct xgpu_text *text, struct xgpu_text *f
 		"\tfloat4 cone[%d];\n"
 		"};\n", XGPU_DYNAMIC_LIGHTS_MAXIMUM, XGPU_DYNAMIC_LIGHTS_MAXIMUM, XGPU_DYNAMIC_LIGHTS_MAXIMUM);
 	/* (the lights that reach a point's cluster: its cluster's mask, found down
-	the world's BSP; every light where the world has none, or puts the point
-	in no cluster: xgpu.h) */
+	the world's tree; every light where the world has none, or puts the point
+	in no cluster: xgpu.h, xgpu_dynamic_lights_world.h) */
 	xgpu_text_append(functions,
 		"static inline uint4 dynamic_light_cluster_mask(const device uint4 *cells, const device uint4 *world, float3 q)\n"
 		"{\n"
-		"\tuint4 header = world[0];\n"
-		"\tuint node = 0u;\n"
+		"\tuint node = world[0].y;\n"
 		"\tfor (int depth = 0; depth < %d; depth++)\n"
 		"\t{\n"
-		"\t\tif (node >= header.x)\n"
-		"\t\t\tbreak;\n"
-		"\t\tuint4 entry = world[1u + node];\n"
-		"\t\tif (entry.x >= header.z - header.y)\n"
-		"\t\t\tbreak;\n"
-		"\t\tfloat4 plane = as_type<float4>(world[header.y + entry.x]);\n"
-		"\t\tuint child = dot(plane.xyz, q) - plane.w >= 0.0 ? entry.z : entry.y;\n"
+		"\t\tuint at = 1u + 2u * min(node, %du);\n"
+		"\t\tfloat4 plane = as_type<float4>(world[at]);\n"
+		"\t\tuint4 children = world[at + 1u];\n"
+		"\t\tuint child = dot(plane.xyz, q) - plane.w >= 0.0 ? children.y : children.x;\n"
 		"\t\tif ((child & 0x80000000u) != 0u)\n"
-		"\t\t{\n"
-		"\t\t\tuint leaf = child & 0x7fffffffu;\n"
-		"\t\t\tif (child == 0xffffffffu || leaf >= header.w)\n"
-		"\t\t\t\tbreak;\n"
-		"\t\t\tuint cluster = world[header.z + leaf / 4u][leaf %% 4u];\n"
-		"\t\t\treturn cluster < %du ? cells[%du + cluster] : uint4(0xffffffffu);\n"
-		"\t\t}\n"
+		"\t\t\treturn child == 0xffffffffu ? uint4(0xffffffffu) : cells[%du + (child & %du)];\n"
 		"\t\tnode = child;\n"
 		"\t}\n"
 		"\treturn uint4(0xffffffffu);\n"
-		"}\n", XGPU_DYNAMIC_LIGHTS_WORLD_DEPTH, XGPU_DYNAMIC_LIGHTS_CLUSTERS,
-		XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * XGPU_DYNAMIC_LIGHTS_GRID_Z);
+		"}\n", XGPU_DYNAMIC_LIGHTS_WORLD_DEPTH, (XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS - 3) / 2,
+		XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * XGPU_DYNAMIC_LIGHTS_GRID_Z,
+		XGPU_DYNAMIC_LIGHTS_CLUSTERS - 1);
 	xgpu_text_append(functions,
 		"static inline float3 dynamic_light_sum(constant xgpu_dynamic_lights &lights, const device uint4 *cells,\n"
 		"\tconst device uint4 *world, float3 p, float3 n, float3 surface_normal, bool environment, float4 own)\n"
@@ -1419,7 +1423,7 @@ static void dynamic_lights_functions(struct xgpu_text *text, struct xgpu_text *f
 		"\t\tfloat3(%d.0, %d.0, %d.0);\n"
 		"\tint3 at = clamp(int3(floor(cell)), int3(0), int3(%d, %d, %d));\n"
 		"\tuint4 mask = cells[(at.z * %d + at.y) * %d + at.x];\n"
-		"\tif (any(mask != 0u) && world[0].x != 0u)\n"
+		"\tif (any((mask & cells[environment ? %d : %d]) != 0u) && world[0].x != 0u)\n"
 		"\t\tmask &= dynamic_light_cluster_mask(cells, world, p + surface_normal * %.4f);\n"
 		"\tfloat3 sum = float3(0.0);\n"
 		"\tfor (int word = 0; word < 4; word++)\n"
@@ -1454,6 +1458,8 @@ static void dynamic_lights_functions(struct xgpu_text *text, struct xgpu_text *f
 		"}\n"
 		"static inline float3 dynamic_light_add(constant xgpu_dynamic_lights &lights, float3 base, float3 light)\n"
 		"{\n"
+		"\tif (all(light == 0.0))\n"
+		"\t\treturn saturate(base);\n"
 		"\tlight += float3(max(max(light.r, max(light.g, light.b)) - 1.0, 0.0) * lights.grid[2].z);\n"
 		"\tfloat3 had = pow(saturate(base), float3(2.2));\n"
 		"\tfloat3 room = max(1.0 - had, float3(1.0e-3));\n"
@@ -1464,6 +1470,8 @@ static void dynamic_lights_functions(struct xgpu_text *text, struct xgpu_text *f
 		xgpu_hdr_lights) */
 		"static inline float3 dynamic_light_add_hdr(constant xgpu_dynamic_lights &lights, float3 base, float3 light)\n"
 		"{\n"
+		"\tif (all(light == 0.0))\n"
+		"\t\treturn saturate(base);\n"
 		"\tlight += float3(max(max(light.r, max(light.g, light.b)) - 1.0, 0.0) * lights.grid[2].z);\n"
 		"\tfloat3 had = pow(saturate(base), float3(2.2));\n"
 		"\tfloat3 room = max(1.0 - had, float3(1.0e-3));\n"
@@ -1473,7 +1481,10 @@ static void dynamic_lights_functions(struct xgpu_text *text, struct xgpu_text *f
 		"}\n",
 		XGPU_DYNAMIC_LIGHTS_GRID_X / 2, XGPU_DYNAMIC_LIGHTS_GRID_Y / 2, XGPU_DYNAMIC_LIGHTS_GRID_Z / 2,
 		XGPU_DYNAMIC_LIGHTS_GRID_X - 1, XGPU_DYNAMIC_LIGHTS_GRID_Y - 1, XGPU_DYNAMIC_LIGHTS_GRID_Z - 1,
-		XGPU_DYNAMIC_LIGHTS_GRID_Y, XGPU_DYNAMIC_LIGHTS_GRID_X, (double)XGPU_DYNAMIC_LIGHTS_CLUSTER_OFFSET,
+		XGPU_DYNAMIC_LIGHTS_GRID_Y, XGPU_DYNAMIC_LIGHTS_GRID_X,
+		XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * XGPU_DYNAMIC_LIGHTS_GRID_Z + XGPU_DYNAMIC_LIGHTS_WALK + 1,
+		XGPU_DYNAMIC_LIGHTS_GRID_X * XGPU_DYNAMIC_LIGHTS_GRID_Y * XGPU_DYNAMIC_LIGHTS_GRID_Z + XGPU_DYNAMIC_LIGHTS_WALK,
+		(double)XGPU_DYNAMIC_LIGHTS_CLUSTER_OFFSET,
 		1.0 / (XGPU_DYNAMIC_LIGHTS_CORE * XGPU_DYNAMIC_LIGHTS_CORE));
 }
 
@@ -1512,6 +1523,29 @@ static const char border_function[] =
 	"\t\tinside *= linear != 0.0 ? filtered : nearest;\n"
 	"\t}\n"
 	"\treturn mix(color, texel, float4(inside));\n"
+	"}\n"
+	/* a region of the texture (XGPU_BORDER_REGION: region its size, then
+	its origin) sampled as a texture of the region's own whose border is
+	beyond it: clamped to the region's edge texels, and the border mixed in
+	by how much of the lookup is inside the region */
+	"static inline float4 region_sample(texture2d<float> t, sampler s, float2 r, float4 region, float lod_bias, float4 color,\n"
+	"\tfloat linear)\n"
+	"{\n"
+	"\tfloat2 size = float2(float(t.get_width()), float(t.get_height())) * region.xy;\n"
+	"\tfloat2 half_texel = 0.5 / size;\n"
+	"\tfloat4 texel = t.sample(s, region.zw + clamp(r, half_texel, 1.0 - half_texel) * region.xy, bias(lod_bias));\n"
+	"\treturn border_mix(texel, float3(r, 0.5), float3(size, 1.0), 3u, color, linear);\n"
+	"}\n"
+	/* the high-res text's distance fields (XGPU_BORDER_MSDF): white, its
+	alpha the coverage of the edge where the median of the channels is 0.5,
+	over as many of the screen's pixels as XGPU_MSDF_RANGE texels are (at
+	least one) */
+	"static inline float4 msdf_coverage(float4 texel, float2 uv, float2 size)\n"
+	"{\n"
+	"\tfloat distance = max(min(texel.r, texel.g), min(max(texel.r, texel.g), texel.b));\n"
+	"\tfloat2 texels = fwidth(uv * size);\n"
+	"\tfloat pixels = max(" XGPU_MSDF_RANGE_TEXT " * 0.5 * (1.0 / max(texels.x, 1e-6) + 1.0 / max(texels.y, 1e-6)), 1.0);\n"
+	"\treturn float4(1.0, 1.0, 1.0, saturate((distance - 0.5) * pixels + 0.5));\n"
 	"}\n";
 
 /* ---------- display.hdr's tags (xgpu_hdr.h) */
@@ -1564,6 +1598,17 @@ static void hdr_output(struct xgpu_text *text, unsigned short hdr)
 
 	if (!XGPU_HDR_SHADER_BLENDS(hdr))
 	{
+		/* (an emitter's light gained by display.hdr_highlight_boost's
+		level, before the fixed function adds it: xgpu_hdr_boost_emitter) */
+		if (XGPU_HDR_IS_EMITTER(hdr))
+			xgpu_text_append(text,
+				"\t{\n"
+				"\t\tfloat3 boost_extra = source.rgb * %.6f;\n"
+				"\t\tsource.rgb += boost_extra * clamp((%.6f - max(source.r, max(source.g, source.b))) / "
+				"max(max(boost_extra.r, max(boost_extra.g, boost_extra.b)), 1.0e-6), 0.0, 1.0);\n"
+				"\t}\n", XGPU_HDR_BOOST_STEP * (float)XGPU_HDR_BOOST_OF(hdr),
+				XGPU_HDR_EMITTER_BOUND(hdr) == XGPU_HDR_CEILING_WEAPON ? XGPU_HDR_CEILING_WEAPON_VALUE :
+				XGPU_HDR_CEILING_LIGHT_VALUE);
 		xgpu_text_append(text, "\toutput.color = source;\n");
 		return;
 	}
@@ -1979,6 +2024,33 @@ static void world_ao_functions(struct xgpu_text *text, int light)
 		"\t\tocclusion += (1.0 / float(2 << tap)) * saturate((h - d) / h);\n"
 		"\t}\n"
 		"\treturn 1.0 - saturate(%.6f * occlusion);\n"
+		"}\n"
+		/* ... and where cards (a two-sided model shader's: xgpu.h's
+		XGPU_WORLD_AO_INPUT_CARDS) that of the most open of the sky's
+		direction (up) and the card's two faces, the first of them where
+		alike; n the direction found (world_ao_shading.c's
+		world_ao_cards_occlusion) */
+		"static inline float world_sdf_cards_occlusion(constant xgpu_world_ao &w, texture3d<float> world_sdf,\n"
+		"\ttexture3d<float> world_sdf_table, float3 p, thread float3 &n, float own, bool cards)\n"
+		"{\n"
+		"\tfloat field = world_sdf_occlusion(w, world_sdf, world_sdf_table, p, n, own);\n"
+		"\tif (!cards)\n"
+		"\t\treturn field;\n"
+		"\tfloat3 up = float3(0.0, 0.0, 1.0), direction = n;\n"
+		"\tfloat sky = world_sdf_occlusion(w, world_sdf, world_sdf_table, p, up, own);\n"
+		"\tfloat back = world_sdf_occlusion(w, world_sdf, world_sdf_table, p, -n, own);\n"
+		"\tif (!(field > sky))\n"
+		"\t{\n"
+		"\t\tfield = sky;\n"
+		"\t\tdirection = up;\n"
+		"\t}\n"
+		"\tif (back > field)\n"
+		"\t{\n"
+		"\t\tfield = back;\n"
+		"\t\tdirection = -n;\n"
+		"\t}\n"
+		"\tn = direction;\n"
+		"\treturn field;\n"
 		"}\n", XGPU_WORLD_SDF_RANGE_VOXELS, XGPU_WORLD_SDF_BRICK, 1.0 / XGPU_WORLD_SDF_BRICK, XGPU_WORLD_SDF_CELL_BRICK,
 		XGPU_WORLD_SDF_CELL_INSIDE, XGPU_WORLD_SDF_BRICK_SPAN, XGPU_WORLD_SDF_BRICK,
 		XGPU_WORLD_SDF_ATLAS * XGPU_WORLD_SDF_BRICK_SPAN, XGPU_WORLD_SDF_ATLAS * XGPU_WORLD_SDF_BRICK_SPAN,
@@ -2299,6 +2371,16 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 		"\t{\n"
 		"\t\tfloat3 world_n = in.xWorldNormal.xyz * rsqrt(max(dot(in.xWorldNormal.xyz, in.xWorldNormal.xyz), 1.0e-24));\n"
 		"\t\tint limit = int(world_ao.parameters[1].y);\n");
+	/* (a model's field: where its reference is negative, a static scenery
+	placement's own draw, its taps from the pixel's own depth in the field,
+	relative to none; a two-sided shader's cards, its world_ao.w not 0, about
+	their most open direction, the shapes too) */
+	if (light != XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
+		xgpu_text_append(text,
+			"\t\tbool baked = u.world_ao.y < 0.0;\n"
+			"\t\tfloat inside = min(world_sdf_distance(world_ao, world_sdf, world_sdf_table, in.xWorldPosition), 0.0);\n"
+			"\t\tfloat field = world_sdf_cards_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n,\n"
+			"\t\t\tbaked ? inside : 0.0, u.world_ao.w != 0.0);\n");
 	if (world_ao_paged(program, light))
 		xgpu_text_append(text,
 			"\t\tfloat scenery = 1.0;\n"
@@ -2322,12 +2404,6 @@ static void world_ao_read(struct xgpu_text *text, const struct xgpu_pixel_progra
 			XGPU_WORLD_AO_FLOOR);
 	else
 		xgpu_text_append(text,
-			/* (a negative reference, a static scenery placement's own draw: its
-			taps from the pixel's own depth in the field, relative to none) */
-			"\t\tbool baked = u.world_ao.y < 0.0;\n"
-			"\t\tfloat inside = min(world_sdf_distance(world_ao, world_sdf, world_sdf_table, in.xWorldPosition), 0.0);\n"
-			"\t\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, in.xWorldPosition, world_n,\n"
-			"\t\t\tbaked ? inside : 0.0);\n"
 			"\t\tfield = mix(field, saturate(field / max(baked ? 1.0 : u.world_ao.y, %.6f)), world_ao.parameters[1].x);\n"
 			"\t\tocclusion = mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, baked ? %.6f : %.6f),\n"
 			"\t\t\tworld_ao.parameters[0].x);\n",
@@ -2348,7 +2424,11 @@ static void world_ao_inputs(struct xgpu_text *text, const struct xgpu_pixel_prog
 		"\t{\n"
 		"\t\tfloat3 world_n = in.xWorldNormal.xyz * rsqrt(max(dot(in.xWorldNormal.xyz, in.xWorldNormal.xyz), 1.0e-24));\n"
 		"\t\tfloat value = u.world_ao.y;\n"
-		"\t\tuint flags = (uint(int(u.world_ao.x) + 2) & 0xFFu) | %uu;\n", XGPU_WORLD_AO_INPUT_PRESENT);
+		"\t\tuint flags = (uint(int(u.world_ao.x) + 2) & 0xFFu) | %uu;\n"
+		/* (a two-sided model shader's cards: found about their most open
+		direction) */
+		"\t\tif (u.world_ao.w != 0.0)\n"
+		"\t\t\tflags |= %uu;\n", XGPU_WORLD_AO_INPUT_PRESENT, XGPU_WORLD_AO_INPUT_CARDS);
 	if (world_ao_paged(program, light))
 		xgpu_text_append(text,
 			"\t\tflags |= %uu;\n"
@@ -2609,7 +2689,9 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 	if (comparison && *comparison && program->alpha_test_samples && comparison[0] != '=' && comparison[0] != '!')
 		sample_mask = TRUE;
 	xgpu_text_append(&text, uniforms_declaration, XGPU_MODEL_LIGHT_COUNT, overlay ?
-		"\tfloat4 world_ao;\n\tfloat4 material_overlay[20];\n" : world ? "\tfloat4 world_ao;\n" : "");
+		"\tfloat4 world_ao;\n\tfloat4 dynamic_light_tint;\n\tfloat4 material_overlay[20];\n" : environment ?
+		(world ? "\tfloat4 world_ao;\n\tfloat4 dynamic_light_tint;\n" : "\tfloat4 dynamic_light_spare;\n\tfloat4 dynamic_light_tint;\n") :
+		world ? "\tfloat4 world_ao;\n" : "");
 	if (lightmap_smoothed(program, options))
 		lightmap_smooth_function(&text);
 	if (world_inline)
@@ -2844,6 +2926,17 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 			"\t\tif (added_most > 0.0)\n"
 			"\t\t\tself_illumination = added * min(%.6f * smoothstep(%.6f, 1.0, most) * most / added_most, %.6f);\n"
 			"\t}\n", XGPU_HDR_SELF_ILLUMINATION_VALUE - 1.0f, XGPU_HDR_SELF_ILLUMINATION_KNEE, XGPU_HDR_EXPAND_MOST);
+	/* (... gained by display.hdr_highlight_boost's level, toward the same
+	ceiling: xgpu_hdr_self_illuminate_boost) */
+	if (self_illuminated && XGPU_HDR_BOOST_OF(program->hdr))
+		xgpu_text_append(&text,
+			"\t{\n"
+			"\t\tfloat3 boost_rgb = saturate(result.rgb) + self_illumination;\n"
+			"\t\tfloat3 boost_extra = (max(saturate(result.rgb) - self_illumination_base, float3(0.0)) + "
+			"self_illumination) * %.6f;\n"
+			"\t\tself_illumination += boost_extra * clamp((%.6f - max(boost_rgb.r, max(boost_rgb.g, boost_rgb.b))) / "
+			"max(max(boost_extra.r, max(boost_extra.g, boost_extra.b)), 1.0e-6), 0.0, 1.0);\n"
+			"\t}\n", XGPU_HDR_BOOST_STEP * (float)XGPU_HDR_BOOST_OF(program->hdr), XGPU_HDR_SELF_ILLUMINATION_VALUE);
 	/* (display.ambient_occlusion: a lightmap pass's light, by the
 	occlusion, before the enhanced dynamic lights add theirs) */
 	if (occlusion_light == XGPU_AMBIENT_OCCLUSION_LIGHT_LIGHTMAP)
@@ -2861,7 +2954,7 @@ char *xgpu_msl_pixel_shader(const struct xgpu_pixel_program *program, const stru
 			"\t\tresult.rgb = dynamic_light_add%s(dynamic_lights, result.rgb,\n"
 			"\t\t\tdynamic_light_sum(dynamic_lights, dynamic_light_cells, dynamic_light_world, in.xWorldPosition, n, surface_normal, true,\n"
 			"\t\t\t\tfloat4(-1.0)) *\n"
-			"\t\t\tpow(u.ps_final_c0.rgb, float3(2.2)));\n"
+			"\t\t\tu.dynamic_light_tint.rgb);\n"
 			"\t}\n",
 			program->stages[0].sampler == _xgpu_sampler_2d ? "dynamic_light_bump * 2.0 - 1.0" : "float3(0.0, 0.0, 1.0)",
 			(program->hdr & XGPU_HDR_LIGHTS) ? "_hdr" : "");
@@ -3142,6 +3235,18 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\tfloat owner = float(int(words.y & 0xFFu)) - 2.0;\n"
 		"\tfloat value = float(as_type<half>(ushort(words.y >> 16)));\n"
 		"\tint limit = (words.y & %uu) != 0u ? %d : int(world_ao.parameters[1].y);\n"
+		"\tbool lightmap = (words.y & %uu) != 0u, baked = value < 0.0;\n"
+		/* (a model's field: from the pixel's own depth in it where its
+		reference is negative, a static scenery placement's own draw; a
+		two-sided shader's cards about their most open direction, the shapes
+		and rays too) */
+		"\tfloat field = 1.0;\n"
+		"\tif (!lightmap)\n"
+		"\t{\n"
+		"\t\tfloat inside = min(world_sdf_distance(world_ao, world_sdf, world_sdf_table, p), 0.0);\n"
+		"\t\tfield = world_sdf_cards_occlusion(world_ao, world_sdf, world_sdf_table, p, n, baked ? inside : 0.0,\n"
+		"\t\t\t(words.y & %uu) != 0u);\n"
+		"\t}\n"
 		/* (the dynamic objects' shapes by the rays, their occlusion fields
 		and the static scenery's shapes walked) */
 		"\tbool traced = pass.history.w != 0.0;\n"
@@ -3149,11 +3254,8 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		"\t\ttraced ? int(world_ao.parameters[1].y) : 0);\n"
 		"\tif (traced)\n"
 		"\t\tproxies *= 1.0 - world_ao_traced(world_cascades, pass.cascades, p, n, pixel, pass.history.y);\n"
-		"\tif ((words.y & %uu) != 0u)\n"
+		"\tif (lightmap)\n"
 		"\t\treturn mix(1.0, max(proxies * value, %.6f), world_ao.parameters[0].y);\n"
-		"\tbool baked = value < 0.0;\n"
-		"\tfloat inside = min(world_sdf_distance(world_ao, world_sdf, world_sdf_table, p), 0.0);\n"
-		"\tfloat field = world_sdf_occlusion(world_ao, world_sdf, world_sdf_table, p, n, baked ? inside : 0.0);\n"
 		"\tfield = mix(field, saturate(field / max(baked ? 1.0 : value, %.6f)), world_ao.parameters[1].x);\n"
 		"\treturn mix(1.0, max(mix(1.0, field, world_ao.parameters[0].z) * proxies, baked ? %.6f : %.6f),\n"
 		"\t\tworld_ao.parameters[0].x);\n"
@@ -3161,8 +3263,8 @@ char *xgpu_msl_world_ao_pass(BOOL pixel)
 		XGPU_WORLD_AO_RAY_CASCADE, XGPU_WORLD_AO_RAY_REACH,
 		XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAYS, XGPU_WORLD_AO_RAY_BIAS, XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_TRACE_OBJECTS,
 		XGPU_WORLD_AO_RAY_REACH, XGPU_WORLD_AO_RAYS,
-		XGPU_WORLD_AO_INPUT_ALL_SHAPES, XGPU_WORLD_AO_SHAPES, XGPU_WORLD_AO_INPUT_LIGHTMAP, XGPU_WORLD_AO_FLOOR,
-		XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_SCENERY_FLOOR, XGPU_WORLD_AO_FLOOR);
+		XGPU_WORLD_AO_INPUT_ALL_SHAPES, XGPU_WORLD_AO_SHAPES, XGPU_WORLD_AO_INPUT_LIGHTMAP, XGPU_WORLD_AO_INPUT_CARDS,
+		XGPU_WORLD_AO_FLOOR, XGPU_WORLD_AO_REFERENCE_LEAST, XGPU_WORLD_AO_SCENERY_FLOOR, XGPU_WORLD_AO_FLOOR);
 	xgpu_text_append(&text,
 		"fragment float4 xgpu_world_ao_pass(float4 position [[position]], constant xgpu_world_ao_pass &pass [[buffer(%d)]],\n"
 		"\tconstant xgpu_world_ao &world_ao [[buffer(%d)]], texture2d<uint> inputs [[texture(0)]],\n"

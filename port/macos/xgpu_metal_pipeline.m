@@ -50,6 +50,7 @@ static const struct xgpu_metal_format_information formats[XGPU_METAL_FORMAT_COUN
 	[XGPU_METAL_FORMAT_RGBA32UI] = { MTLPixelFormatRGBA32Uint, 16, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 	[XGPU_METAL_FORMAT_RGBA32F] = { MTLPixelFormatRGBA32Float, 16, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 	[XGPU_METAL_FORMAT_RG8_SNORM] = { MTLPixelFormatRG8Snorm, 2, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
+	[XGPU_METAL_FORMAT_RGBA16] = { MTLPixelFormatRGBA16Unorm, 8, 0, 0, 0, SWIZZLE(Red, Green, Blue, Alpha), 0 },
 };
 
 const struct xgpu_metal_format_information *xgpu_metal_format_information(uint32_t format)
@@ -287,11 +288,12 @@ NSString *const xgpu_metal_fixed_source =
 
 /* ---------- the command stream's pipelines */
 
-/* the stream's target formats (XGPU_FORMAT_*: BGRA8 1, D24S8 2, RGBA16F 3) */
+/* the stream's target formats (XGPU_FORMAT_*: BGRA8 1, D24S8 2, RGBA16F 3,
+RGBA16 5) */
 static uint8_t target_format(uint8_t format)
 {
 	return format == 1 ? XGPU_METAL_FORMAT_BGRA8 : format == 2 ? XGPU_METAL_FORMAT_D24S8 :
-		format == 3 ? XGPU_METAL_FORMAT_RGBA16F :
+		format == 3 ? XGPU_METAL_FORMAT_RGBA16F : format == 5 ? XGPU_METAL_FORMAT_RGBA16 :
 		format == XGPU_STREAM_FORMAT_WORLD_AO_INPUTS ? XGPU_METAL_FORMAT_RGBA32UI : XGPU_METAL_FORMAT_NONE;
 }
 
@@ -389,13 +391,16 @@ uint32_t xgpu_metal_layout_immediate(uint32_t written, struct xgpu_metal_vertex_
 	return count;
 }
 
-/* XGPU_SOURCE_NONE; _xgpu_sampler_cube, _2d_layered (xgpu.h) */
+/* XGPU_SOURCE_NONE; _xgpu_sampler_3d, _cube, _2d_layered (xgpu.h) */
 enum
 {
 	_source_none = 0,
+	_sampler_3d = 2,
 	_sampler_cube = 3,
 	_sampler_2d_layered = 4,
 };
+
+_Static_assert(XGPU_METAL_ADDRESS_REGION == 5, "XGPU_ADDRESS_REGION's number");
 
 uint8_t xgpu_metal_border_axes(uint8_t source, uint8_t sampler_type, const struct xgpu_stream_sampler *sampler)
 {
@@ -417,5 +422,11 @@ uint8_t xgpu_metal_border_axes(uint8_t source, uint8_t sampler_type, const struc
 		if (sampler->address[axis] == XGPU_METAL_ADDRESS_BORDER)
 			axes |= (uint8_t)(1u << axis);
 	}
+	/* (a region of a 2D texture: its border on u and v, the shader's) */
+	if (sampler->address[0] == XGPU_METAL_ADDRESS_REGION && sampler_type != _sampler_3d)
+		axes = 3 | XGPU_METAL_BORDER_REGION;
+	/* (the high-res text's distance fields, a 2D texture's: the shader's) */
+	if (sampler->address[2] == XGPU_METAL_ADDRESS_MSDF && sampler_type != _sampler_3d)
+		axes |= XGPU_METAL_BORDER_MSDF;
 	return axes;
 }

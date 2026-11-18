@@ -39,9 +39,13 @@ static short connection = _game_connection_local;
 static boolean unit_animation_enhanced(long index) { return enhanced; }
 static boolean unit_animation_enhanced_unit(long index) { return TRUE; }
 static short game_connection(void) { return connection; }
-/* (the host's word in a network game: network_standard_turns_with_aim) */
+/* (the host's word in a network game, the game's own rule in a game of
+one machine, its setting: network_standard_turns_with_aim) */
 static boolean host_turns = TRUE;
-static boolean network_standard_turns_with_aim(long player_index) { return host_turns; }
+static boolean network_standard_turns_with_aim(long player_index)
+{
+	return connection == _game_connection_local ? enhanced : host_turns;
+}
 static struct biped_datum *unit_get(long index) { return biped_get(index); }
 #include "turns_with_aim.inc"
 static void biped_verify_object_vectors(long index, const char *where) { }

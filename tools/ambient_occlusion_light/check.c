@@ -233,7 +233,8 @@ int main(int argc, char **argv)
 		return trace(argc > 2 ? argv[2] : NULL);
 	/* (the occlusion's pass, as the Metal emitter writes it; or the SPIR-V
 	emitter's, written to a file, with the subgroups' operations) */
-	if (argc == 3 && !strcmp(argv[1], "pass"))
+	/* (or with "ray_traced"'s ray queries: pass_rays) */
+	if (argc == 3 && (!strcmp(argv[1], "pass") || !strcmp(argv[1], "pass_rays")))
 	{
 		struct xgpu_spirv_options options;
 		struct xgpu_spirv_module module;
@@ -241,6 +242,7 @@ int main(int argc, char **argv)
 
 		memset(&options, 0, sizeof(options));
 		options.subgroups = TRUE;
+		options.ray_queries = !strcmp(argv[1], "pass_rays");
 		if (!xgpu_spirv_world_ao_pass(XGPU_SPIRV_WORLD_AO_OCCLUSION, &options, &module) || !(file = fopen(argv[2], "wb")))
 			return 1;
 		fwrite(module.words, sizeof(*module.words), module.count, file);
@@ -264,6 +266,6 @@ int main(int argc, char **argv)
 		(!strcmp(argv[1], "spirv") || !strcmp(argv[1], "spirv_subgroups")))
 		return spirv(argv[2], !strcmp(argv[1], "spirv_subgroups"));
 	fprintf(stderr, "check msl [world|view|bare] | check spirv|spirv_subgroups <directory> [world|view|bare] | "
-		"check trace [<module>]\n");
+		"check trace [<module>] | check pass|pass_rays <module>\n");
 	return 2;
 }

@@ -16,6 +16,7 @@ part of the file. */
 
 #include <limits.h>
 #include <math.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "under_test.inc"
@@ -56,6 +57,13 @@ static int z_uncompress(unsigned char *destination, unsigned long *destination_s
 	memcpy(destination, source + 4, size);
 	*destination_size = size;
 	return 0;
+}
+
+/* (world_sdf.c's sdf_folder: the objects' kept fields' paths are relative,
+world_sdf/objects/..., here the case's own folder's) */
+static char const *sdf_folder(void)
+{
+	return "world_sdf";
 }
 
 #include "file_under_test.inc"
@@ -1005,7 +1013,7 @@ static void round_trip_case(void)
 	CHECK(bytes && size == 80 + payload + 4 + 4, "%lu", size);
 	/* (the header field by field, little-endian, at fixed places) */
 	CHECK(bytes[0] == 'W' && bytes[1] == 'S' && bytes[2] == 'D' && bytes[3] == 'F', "magic");
-	CHECK(sdf_get32(bytes + 4) == 5, "version");
+	CHECK(sdf_get32(bytes + 4) == 6, "version");
 	CHECK(sdf_get32(bytes + 8) == 0xC0FFEE12UL && sdf_get32(bytes + 12) == 2, "checksum, bsp");
 	CHECK(sdf_get32(bytes + 16) == volume.header.width && sdf_get32(bytes + 20) == volume.header.height &&
 		sdf_get32(bytes + 24) == volume.header.depth, "size");
@@ -1530,6 +1538,68 @@ static void object_determinism_case(void)
 	free(b.texels);
 }
 
+static void object_cache_case(void)
+{
+	/* (a field kept by its geometry: found again by another copy of it,
+	whatever its definition; not by another geometry, nor damaged) */
+	char folder[] = "/tmp/world_sdf_objects_XXXXXX", path[128];
+	struct sdf_object_copy copy, other;
+	struct world_sdf_object baked;
+	unsigned long long hash;
+	float opacities[64];
+	long index;
+	FILE *file;
+
+	CHECK(mkdtemp(folder) && chdir(folder) == 0, "a folder");
+	object_bake(&baked, 0);
+	memset(&copy, 0, sizeof(copy));
+	copy.positions = positions;
+	copy.triangle_count = triangle_count;
+	memcpy(copy.bounds, object_low, sizeof(object_low));
+	memcpy(copy.bounds + 3, object_high, sizeof(object_high));
+	world_sdf_object_layout(copy.bounds, WORLD_SDF_OBJECT_MOST_VOXELS, &copy.field);
+	other = copy;
+	hash = sdf_object_hash(&copy);
+	CHECK(!sdf_object_cache_load(&copy, hash), "found before any was kept");
+	copy.field = baked;
+	sdf_object_cache_write(&copy, hash);
+	other.field.definition = 77;
+	CHECK(sdf_object_cache_load(&other, hash), "not found");
+	CHECK(other.field.texels && !memcmp(other.field.texels, baked.texels, baked.width * baked.height * baked.depth * 8) &&
+		other.field.reach == baked.reach && other.field.voxel == baked.voxel && other.field.definition == 77,
+		"not the same field");
+	free(other.field.texels);
+	other.field.texels = NULL;
+	/* (another geometry, its opacities, its grid: another name) */
+	positions[4] += 1.0e-3f;
+	CHECK(sdf_object_hash(&copy) != hash, "a triangle moved, the same name");
+	positions[4] -= 1.0e-3f;
+	CHECK(sdf_object_hash(&copy) == hash, "the same geometry, another name");
+	for (index = 0; index < 64; index++)
+		opacities[index] = 0.5f;
+	copy.opacities = opacities;
+	{
+		unsigned long long half = sdf_object_hash(&copy);
+
+		opacities[3] = 0.25f;
+		CHECK(sdf_object_hash(&copy) != half, "another opacity, the same name");
+	}
+	copy.opacities = NULL;
+	copy.scenery = 1;
+	CHECK(sdf_object_hash(&copy) != hash, "scenery, the same name");
+	copy.scenery = 0;
+	/* (a byte of its texels changed: not taken) */
+	sdf_object_cache_path(hash, path, sizeof(path));
+	file = fopen(path, "r+b");
+	CHECK(file && fseek(file, 200, SEEK_SET) == 0 && fputc(0x01 ^ 0x5A, file) != EOF && fclose(file) == 0, "damaged");
+	CHECK(!sdf_object_cache_load(&other, hash) && !other.field.texels, "a damaged field taken");
+	remove(path);
+	rmdir("world_sdf/objects");
+	rmdir("world_sdf");
+	CHECK(chdir("/") == 0 && rmdir(folder) == 0, "the folder left");
+	free(baked.texels);
+}
+
 static void object_half_case(void)
 {
 	static const float exact[] = { 0.0f, 1.0f, -1.0f, 0.5f, 0.25f, 0.125f, 2.0f, -0.75f, 65504.0f, 6.103515625e-05f };
@@ -1791,6 +1861,8 @@ int main(int argc, char **argv)
 		object_opacity_case();
 	else if (!strcmp(name, "object_determinism"))
 		object_determinism_case();
+	else if (!strcmp(name, "object_cache"))
+		object_cache_case();
 	else if (!strcmp(name, "object_half"))
 		object_half_case();
 	else if (!strcmp(name, "object_atlas"))

@@ -289,8 +289,10 @@ DERIVER = r"""
 /* each draw of a manifest as the settings the stock maps' records are made
 with derive it (tools/prepared_records.py: every setting's default, the
 game's own first start: no multisampling, no HDR, the enhanced dynamic
-lights, which light each pixel, no ambient occlusion), its hash as a
-record's (render_prepared.c's prepared_draws) */
+lights, which light each pixel, no ambient occlusion, display.output_depth
+"auto"'s 16-bit frame on a computer, soft effects, Vulkan's alpha tests that
+cannot fail dropped), its hash as a record's
+(render_prepared.c's prepared_draws) */
 int main(int argc, char **argv)
 {
 	struct xgpu_manifest manifest;
@@ -308,6 +310,11 @@ int main(int argc, char **argv)
 	settings.samples = 1;
 	settings.per_pixel_lighting = 1;
 	settings.enhanced_lights = 1;
+	settings.deep = 1;
+	/* (display.soft_particles on, and Vulkan's dropped alpha tests that
+	cannot fail) */
+	settings.soft = 1;
+	settings.alpha_drop = 1;
 	for (index = 0; index < manifest.draw_count; index++)
 	{
 		struct xgpu_manifest_draw draw;
@@ -376,13 +383,27 @@ def test_negative_a_draw_without_its_context(deriver, tmp_path):
     assert records_missing(derived_hashes(deriver, stripped))
 
 
+def test_negative_derived_as_an_8_bit_frame(tmp_path):
+    """the records' draws (made with display.output_depth "auto", a 16-bit
+    frame on a computer) derived as if the frame were BGRA8: their colour
+    targets' format is not the records', and they are seen missing, as the
+    Mac's library would be missing the 16-bit frame's pipelines without the
+    setting (xgpu_manifest_settings' deep)"""
+    folder = tmp_path / "shallow"
+    folder.mkdir()
+    (folder / "deriver.c").write_text(DERIVER.replace("\tsettings.deep = 1;\n", ""))
+    assert "settings.deep" not in (folder / "deriver.c").read_text()
+    shallow = compile_reader(folder, folder / "deriver.c", folder / "deriver")
+    assert records_missing(derived_hashes(shallow, COMMITTED))
+
+
 def test_settings_have_every_multisampling():
     """xgpu_manifest_settings' samples are display.anti_aliasing's
     (d3d8_device.c's anti_aliasing_values), so that a draw is derived for each"""
     device = (SOURCE / "d3d8_device.c").read_text(encoding="latin-1")
     table = device[device.index("anti_aliasing_values[] ="):]
     table = table[:table.index("};")]
-    samples = {int(value) for value in re.findall(r"_anti_aliasing_\w+, (\d+) \}", table)} - {0}
+    samples = {int(value) for value in re.findall(r"_anti_aliasing_\w+, (\d+), [0-9.]+f \}", table)} - {0}
     manifest = (SOURCE / "xgpu_manifest.c").read_text()
     listed = manifest[manifest.index("static const int settings_samples[] = {"):]
     listed = {int(value) for value in re.findall(r"\d+", listed[:listed.index("}")])}

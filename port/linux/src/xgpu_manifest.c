@@ -100,7 +100,8 @@ lighting (lights, world's transform found), ct the targets (multisampled,
 screen colour), cd the dynamic lights
 (present, the lightmap pass), ch the HDR tag's (category, 3D view, kind),
 cw the world's occlusion's light (a recording without it: none), cf its
-window found once a pixel by the pre-pass (none) */
+window found once a pixel by the pre-pass (none), cs the effect's group soft
+with display.soft_particles, cp its alpha test one no pixel fails */
 static const struct field context_fields[] = {
 	CONTEXT_FIELD("cl", lights, 1, 2),
 	CONTEXT_FIELD("ct", multisampled, 1, 2),
@@ -109,6 +110,8 @@ static const struct field context_fields[] = {
 	CONTEXT_FIELD("ck", hdr_kind, 2, 1),
 	CONTEXT_FIELD("cw", world, 1, 1),
 	CONTEXT_FIELD("cf", found, 1, 1),
+	CONTEXT_FIELD("cs", soft, 1, 1),
+	CONTEXT_FIELD("cp", alpha_passes, 1, 1),
 };
 
 #define FIELD_COUNT(fields) (sizeof(fields) / sizeof((fields)[0]))
@@ -791,7 +794,7 @@ int xgpu_draw_derive(const struct xgpu_draw_facts *facts, int unlit, struct xgpu
 	memset(derived, 0, sizeof(*derived));
 	derived->samples = (uint8_t)(facts->samples > 1 ? facts->samples : 1);
 	derived->color_format = (uint8_t)(!facts->color ? XGPU_FORMAT_NONE : facts->hdr_target ? XGPU_FORMAT_RGBA16F :
-		XGPU_FORMAT_BGRA8);
+		facts->deep_target ? XGPU_FORMAT_RGBA16 : XGPU_FORMAT_BGRA8);
 	/* (an alpha test by sample, where the backend has a sample mask, of an
 	opaque draw into multisampled targets) */
 	if (facts->sample_mask && facts->samples > 1 && facts->alpha_test && !facts->blend)
@@ -891,7 +894,7 @@ static const int settings_samples[] = { 1, 2, 4, 8 };
 
 int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 {
-	if (index < 0 || index >= SETTINGS_SAMPLES * 8 * XGPU_MANIFEST_OCCLUSIONS)
+	if (index < 0 || index >= SETTINGS_SAMPLES * 64 * (XGPU_HDR_BOOST_MOST + 1) * XGPU_MANIFEST_OCCLUSIONS)
 		return 0;
 	memset(settings, 0, sizeof(*settings));
 	settings->samples = settings_samples[index % SETTINGS_SAMPLES];
@@ -899,7 +902,12 @@ int xgpu_manifest_settings(int index, struct xgpu_manifest_settings *settings)
 	settings->hdr = index & 1;
 	settings->per_pixel_lighting = (index >> 1) & 1;
 	settings->enhanced_lights = (index >> 2) & 1;
-	settings->ambient_occlusion = index >> 3;
+	settings->deep = (index >> 3) & 1;
+	settings->soft = (index >> 4) & 1;
+	settings->alpha_drop = (index >> 5) & 1;
+	index >>= 6;
+	settings->boost = index % (XGPU_HDR_BOOST_MOST + 1);
+	settings->ambient_occlusion = index / (XGPU_HDR_BOOST_MOST + 1);
 	return 1;
 }
 
@@ -911,18 +919,27 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	struct xgpu_draw_derived parts;
 	int lit;
 
+	uint32_t alpha_test = key->pixel.alpha_test_function;
+
+	/* (d3d8_device.c's prepare_draw: a test no pixel fails dropped where the
+	backend drops it) */
+	if (settings->alpha_drop && context->alpha_passes && !key->pixel.coverage_alpha)
+		alpha_test = 0;
 	memset(&facts, 0, sizeof(facts));
 	facts.blend = key->blend;
 	facts.color = key->color_format != XGPU_FORMAT_NONE;
 	facts.immediate = key->immediate;
 	facts.packed_attributes = key->packed_attributes;
-	facts.alpha_test = key->pixel.alpha_test_function;
+	facts.alpha_test = alpha_test;
 	facts.lights = context->lights;
 	facts.world_found = context->world_found;
 	/* (d3d8_device.c's bind_targets: multisampled where a screen buffer
 	is; a screen buffer's colour in half floats with display.hdr) */
 	facts.samples = context->multisampled ? settings->samples : 1;
 	facts.hdr_target = settings->hdr && context->screen_colour && facts.color;
+	/* (d3d8_device.c's hdr_back_buffer_format: display.output_depth's 16-bit
+	SDR frame, a screen buffer's colour in RGBA16 where it is not HDR's) */
+	facts.deep_target = settings->deep && !facts.hdr_target && context->screen_colour && facts.color;
 	if (facts.hdr_target)
 	{
 		/* (d3d8_device.c's hdr_tag) */
@@ -937,6 +954,7 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 		tagged.category = (signed char)context->hdr_category;
 		tagged.interface = !context->hdr_view;
 		tagged.kind = context->hdr_kind;
+		tagged.boost = settings->boost;
 		facts.hdr = xgpu_hdr_classify(&tagged);
 	}
 	/* ("world"'s light where its window is given: d3d8_device.c's
@@ -970,6 +988,11 @@ int xgpu_manifest_derive(const struct xgpu_manifest_draw *draw, const struct xgp
 	derived->key.pixel.material_overlay = parts.material_overlay;
 	derived->key.pixel.prism = XGPU_STREAM_PRISM(parts.prism_lighting, parts.lightmap_filter);
 	derived->key.pixel.material_pbr = parts.material_pbr;
+	derived->key.pixel.alpha_test_function = alpha_test;
+	/* (display.soft_particles: the effect soft, on a flat screen: d3d8_device.c's
+	soft_effect_key) */
+	if (settings->soft && context->soft && !derived->key.pixel.vr_effect)
+		derived->key.pixel.vr_effect = 1;
 	return lit;
 }
 
@@ -1092,6 +1115,93 @@ static struct
 	int enumerated_once;
 } recorder = { -1 };
 
+/* HALO_RENDER_COVERAGE's (xgpu_manifest_coverage_label) */
+static struct
+{
+	/* -1 not read yet */
+	int state;
+	FILE *file;
+	char label[160];
+	struct text text;
+	struct hash_set draws, pixels;
+	/* the draws of play after a map's preparation (its walk's or its
+	record's), as no setting changes them: "<map> play <width> <models>",
+	each written once as it is first drawn (the main menu's scene and its
+	screens' text, a map's play), which tools/test_preparation_coverage.py
+	checks the map's record's playback makes too */
+	char play_label[160];
+	int play_written;
+	struct text play;
+	struct hash_set play_draws, play_pixels;
+} coverage = { -1 };
+
+static int coverage_on(void)
+{
+	if (coverage.state < 0)
+	{
+		const char *path = getenv("HALO_RENDER_COVERAGE");
+
+		coverage.state = 0;
+		if (path && *path && (coverage.file = fopen(path, "a")) != NULL)
+			coverage.state = 1;
+	}
+	return coverage.state > 0;
+}
+
+static void coverage_reset(void)
+{
+	free(coverage.draws.slots);
+	memset(&coverage.draws, 0, sizeof(coverage.draws));
+	free(coverage.pixels.slots);
+	memset(&coverage.pixels, 0, sizeof(coverage.pixels));
+	coverage.text.length = 0;
+}
+
+void xgpu_manifest_coverage_label(const char *label)
+{
+	snprintf(coverage.label, sizeof(coverage.label), "%s", label ? label : "");
+}
+
+/* the play after the enumeration that ends now, labelled as it was ("<map>
+<walk|replay|scope> <width> <models>", its second word "play") */
+static void coverage_play_begin(void)
+{
+	char map[160];
+	const char *rest = strchr(coverage.label, ' ');
+
+	if (!rest || !(rest = strchr(rest + 1, ' ')))
+	{
+		coverage.play_label[0] = 0;
+		return;
+	}
+	snprintf(map, sizeof(map), "%.*s", (int)(strchr(coverage.label, ' ') - coverage.label), coverage.label);
+	snprintf(coverage.play_label, sizeof(coverage.play_label), "%s play%s", map, rest);
+	coverage.play_written = 0;
+	free(coverage.play_draws.slots);
+	memset(&coverage.play_draws, 0, sizeof(coverage.play_draws));
+	free(coverage.play_pixels.slots);
+	memset(&coverage.play_pixels, 0, sizeof(coverage.play_pixels));
+}
+
+/* a draw of play (its basis, with its context), written once */
+static void coverage_play_draw(const struct xgpu_manifest_draw *draw, const struct xgpu_manifest_context *context,
+	uint64_t recorded)
+{
+	if (!coverage.play_label[0] || !hash_set_add(&coverage.play_draws, recorded))
+		return;
+	coverage.play.length = 0;
+	if (!coverage.play_written)
+	{
+		text_add(&coverage.play, "# coverage %s\n", coverage.play_label);
+		coverage.play_written = 1;
+	}
+	if (hash_set_add(&coverage.play_pixels, pixel_hash(&draw->key.pixel)))
+		pixel_write(&coverage.play, &draw->key.pixel);
+	draw_write(&coverage.play, draw, context);
+	fwrite(coverage.play.buffer, 1, coverage.play.length, coverage.file);
+	fflush(coverage.file);
+}
+
 /* the next draw is noted: recorded, or a map's enumeration's */
 static int noting(void)
 {
@@ -1171,10 +1281,12 @@ void xgpu_manifest_note_textures(const struct xgpu_texture_source *stages)
 		memcpy(to->address, from->sampler.address, sizeof(to->address));
 		/* (w addresses a 3D texture alone: in another, what earlier draws
 		left) */
-		if (to->sampler_type != _xgpu_sampler_3d)
+		/* (but the high-res text's distance fields') */
+		if (to->sampler_type != _xgpu_sampler_3d && to->address[2] != XGPU_ADDRESS_MSDF)
 			to->address[2] = 0;
 		if (from->source != XGPU_SOURCE_NONE && (to->address[0] == XGPU_ADDRESS_BORDER ||
-			to->address[1] == XGPU_ADDRESS_BORDER || to->address[2] == XGPU_ADDRESS_BORDER))
+			to->address[1] == XGPU_ADDRESS_BORDER || to->address[2] == XGPU_ADDRESS_BORDER ||
+			to->address[0] == XGPU_ADDRESS_REGION))
 		{
 			to->border_color = (uint32_t)from->sampler.border_color;
 		}
@@ -1301,6 +1413,21 @@ void xgpu_manifest_enumerating(int enumerating, int new_map)
 		free(recorder.missed.slots);
 		memset(&recorder.missed, 0, sizeof(recorder.missed));
 	}
+	/* (an enumeration's draws written as it ends, each enumeration's whole:
+	HALO_RENDER_COVERAGE) */
+	if (coverage_on())
+	{
+		if (!enumerating && recorder.enumerating && coverage.text.length)
+		{
+			fprintf(coverage.file, "# coverage %s\n", coverage.label);
+			fwrite(coverage.text.buffer, 1, coverage.text.length, coverage.file);
+			fflush(coverage.file);
+		}
+		/* (and the play after it: a scope's enumeration is of the same map) */
+		if (!enumerating && recorder.enumerating)
+			coverage_play_begin();
+		coverage_reset();
+	}
 	recorder.enumerating = enumerating;
 	recorder.enumerated_once = 1;
 	xgpu_manifest_note(enumerating ? "enumerating: the draws until \"prepared\" are a map's enumeration's" :
@@ -1357,6 +1484,15 @@ void xgpu_manifest_record_draw(int immediate, unsigned long written)
 	{
 		recorded = hash;
 	}
+	/* (a map's enumeration's, each once: HALO_RENDER_COVERAGE) */
+	if (recorder.have_basis && recorder.enumerating && coverage_on() && hash_set_add(&coverage.draws, recorded))
+	{
+		if (hash_set_add(&coverage.pixels, pixel_hash(&draw.key.pixel)))
+			pixel_write(&coverage.text, &draw.key.pixel);
+		draw_write(&coverage.text, &draw, &recorder.context);
+	}
+	if (recorder.have_basis && !recorder.enumerating && coverage_on())
+		coverage_play_draw(&draw, &recorder.context, recorded);
 	if (!hash_set_add(&recorder.draws, recorded) && !missed)
 		return;
 	if (missed)

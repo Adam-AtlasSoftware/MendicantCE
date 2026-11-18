@@ -191,6 +191,8 @@ symbols in this file:
 #include "scenario/scenario_definitions.h"
 #include "rasterizer/rasterizer.h"
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#include "mcc_cache.h" /* port: port/linux/game/mcc_cache.c */
+#include "mcc_share.h" /* port: port/linux/game/mcc_share.c */
 
 #include <xtl.h>
 
@@ -347,6 +349,10 @@ static void cache_file_get_map_path(
 static boolean cache_file_read_header_from_dvd(
 	const char *map_name,
 	struct cache_file_header *header);
+static boolean cache_file_read_header_from_dvd_checked( /* port */
+	const char *map_name,
+	struct cache_file_header *header,
+	boolean fatal);
 static short cached_map_files_find_free_map(
 	long file_length,
 	short scenario_type);
@@ -618,6 +624,9 @@ boolean cache_files_precache_is_copying_map(
 boolean cache_files_precache_map_loaded(
 	const char *map_name)
 {
+	/* port: an MCC map (mcc_maps\<name>) is read in place (mcc_cache.c) */
+	if (mcc_level_name(map_name))
+		return mcc_cache_available(map_name);
 	/* port: a Halo Custom Edition map (custom_maps\<name>) is read in place
 	and never copied to the cache partition; it is never the game's own map
 	of that file name (port/linux/game/custom_edition_cache.c) */
@@ -673,11 +682,68 @@ unsigned long cache_files_map_copyable_checksum(
 	return (unsigned long)header.checksum;
 }
 
+/* port: whether a map can be loaded: in the cache already, a Custom Edition
+map this machine plays, or one the precache would copy
+(cache_files_map_copyable_checksum). A map named at the console (map_name)
+or in a file is asked of before the game it would end is left: the Xbox's
+precache took a map it could not find for a damaged disc and stopped the
+game for good (display_error_damaged_media). The reason a map is refused is
+logged. */
+boolean cache_files_map_loadable(
+	const char *map_name)
+{
+	const char *cache_map_name;
+	struct cache_file_header header;
+
+	if (!map_name || !map_name[0])
+	{
+		error(_error_silent, "no map named");
+		return FALSE;
+	}
+	if (custom_edition_level_name(map_name))
+	{
+		if (custom_edition_cache_playable(map_name))
+			return TRUE;
+		error(_error_silent, "couldn't find the Custom Edition map '%s' in custom_maps", map_name);
+		return FALSE;
+	}
+	if (cache_files_precache_map_loaded(map_name))
+		return TRUE;
+	cache_map_name = tag_name_strip_path(map_name);
+	if (!cache_map_name[0] || !cache_file_read_header_from_dvd_checked(cache_map_name, &header, FALSE))
+	{
+		error(_error_silent, "couldn't find map '%s' (%s), or it is no map this build runs", cache_map_name, map_name);
+		return FALSE;
+	}
+	if (_stricmp(header.name, cache_map_name) != 0)
+	{
+		error(_error_silent, "map '%s' names itself '%s' in its header: refused", cache_map_name, header.name);
+		return FALSE;
+	}
+	if (cached_map_files_find_free_map(header.file_length, header.scenario_type) == NONE)
+	{
+		error(_error_silent, "no cache file can hold map '%s' (%08x bytes, type %d)",
+			cache_map_name, header.file_length, header.scenario_type);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
 boolean cache_files_precache_map_begin(
 	const char *map_name,
 	boolean copy_map)
 {
 	const char *cache_map_name = tag_name_strip_path(map_name);
+
+	if (mcc_level_name(map_name))
+	{
+		/* port: a package being fetched from the host (port/linux/game/mcc_share.c)
+		is validated once it is there */
+		if (mcc_share_game_downloading(map_name))
+			return TRUE;
+		return mcc_cache_require(map_name, 0);
+	}
 
 	/* port: a Halo Custom Edition map (custom_maps\<name>) this machine has
 	not is missing, as a map not on the DVD is: never the game's own map of
@@ -1010,6 +1076,14 @@ short cache_file_read(
 	short request_index = cache_request_next_free_index();
 	struct cache_file_request *request = cache_request_get(request_index);
 
+	/* port: the reads of an MCC map are served in place, at once
+	(port/linux/game/mcc_cache.c) */
+	if (mcc_cache_tags_loaded())
+	{
+		*completion_flag_reference = mcc_cache_read(tag_index, offset, size, buffer) ?
+			TRUE : _cache_file_read_failed;
+		return request_index;
+	}
 	/* port: the reads of a Halo Custom Edition map are served in place, at
 	once; the request stays free (port/linux/game/custom_edition_cache.c) */
 	if (custom_edition_cache_tags_loaded())
@@ -1409,9 +1483,12 @@ static void cache_file_get_map_path(
 	return;
 }
 
-static boolean cache_file_read_header_from_dvd(
+/* port: (with fatal FALSE, a file that is no cache file is refused without
+its assertion: cache_files_map_loadable) */
+static boolean cache_file_read_header_from_dvd_checked(
 	const char *map_name,
-	struct cache_file_header *header)
+	struct cache_file_header *header,
+	boolean fatal)
 {
 	boolean result = FALSE;
 	char path[256];
@@ -1437,7 +1514,7 @@ static boolean cache_file_read_header_from_dvd(
 			&bytes_read,
 			NULL) &&
 			bytes_read == sizeof(struct cache_file_header) &&
-			cache_file_header_verify(header, path, TRUE))
+			cache_file_header_verify(header, path, fatal))
 		{
 			result = TRUE;
 		}
@@ -1445,6 +1522,13 @@ static boolean cache_file_read_header_from_dvd(
 	}
 
 	return result;
+}
+
+static boolean cache_file_read_header_from_dvd(
+	const char *map_name,
+	struct cache_file_header *header)
+{
+	return cache_file_read_header_from_dvd_checked(map_name, header, TRUE);
 }
 
 static short cached_map_files_find_free_map(

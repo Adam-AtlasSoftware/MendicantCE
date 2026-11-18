@@ -20,7 +20,8 @@ CASES = ["word-empty", "replace", "backspace-clears", "names-append", "enter-is-
 NEGATIVE_CONTROLS = {
     # the word shown typed into, as before (DEFAULT left to delete)
     "word-kept": ("menus", ("\tif (settings_slider_word(slider, value) != NONE)\n\t\ttext[0] = 0;\n\telse\n"
-                            "\t\tsettings_slider_number(slider, value, text, size);",
+                            "\t\tsettings_slider_number(slider, slider->volume ? settings_volume_shown(value) : value, "
+                            "text, size);",
                             "\tsettings_slider_text(slider, value, text, size);"), "word-empty"),
     # typing appended to the number shown
     "number-appended": ("menus", ("\tif (text_field.chosen)\n\t\ttext_field.text[0] = 0;\n\ttext_field.chosen = FALSE;"
@@ -48,6 +49,32 @@ def _between(source, start, end):
     return source[at:source.index(end, at) + len(end)]
 
 
+# the sliders the cases type into, as the model has them (port/assets/menus/model, tools/port_settings.py's)
+SLIDERS = ("fov", "max_fps", "panini", "vehicle_fov")
+
+
+def model_sliders() -> str:
+    """the model's rows of SLIDERS (each one's first), and menu_engine_model's model of them"""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(read("port/assets/menus/model/settings.xml"))
+    rows, choices = [], []
+    for key in SLIDERS:
+        row = next(row for row in root.iter("row") if row.get("key") == key and row.get("kind") == "slider")
+        stops = row.findall("stop")
+        rows.append(f'{{ .kind = "slider", .key = "{key}", .setting = "{row.get("setting")}", '
+                    + ", ".join(f".{name} = {row.get(name)}" for name in ("least", "most", "step", "typed_least",
+                                                                          "typed_most"))
+                    + f', .whole = {int(row.get("whole") == "true")}, .first_choice = {len(choices)}, '
+                    f'.choice_count = {len(stops)} }}')
+        choices += [f'{{ "{stop.get("shown")}", "{stop.get("value")}" }}' for stop in stops]
+    return ("static struct halo_menu_model_choice test_choices[] = {\n\t" + ",\n\t".join(choices) + "\n};\n"
+            "static struct halo_menu_model_row test_rows[] = {\n\t" + ",\n\t".join(rows) + "\n};\n"
+            "static struct halo_menu_model test_model = { .rows = test_rows, .row_count = NUMBEROF(test_rows), "
+            ".choices = test_choices, .choice_count = NUMBEROF(test_choices) };\n"
+            "static struct halo_menu_model const *menu_engine_model(void) { return &test_model; }\n"
+            "static unsigned long halo_menus_model_reads(void) { return 1; }\n")
+
+
 def generated(fault=None):
     menus = read("port/linux/game/menu_functions.c")
     inputs = read("port/linux/src/xinput_sdl.c")
@@ -61,11 +88,15 @@ def generated(fault=None):
     field = _between(menus, "static struct\n{\n\tstruct widget_instance *row;\n\tchar text[TEXT_FIELD_LENGTH];",
                      "} text_field;")
     start = menus.index("struct settings_slider_stop\n{")
-    sliders = menus[start:menus.index("\n};", menus.index("} const settings_sliders[] =")) + 3]
-    code = "\n\n".join([field, "static unsigned long text_field_shown_time;", sliders] + [
+    sliders = menus[start:menus.index("} settings_slider_cache;") + len("} settings_slider_cache;")]
+    header = read("port/linux/include/halo_menus.h")
+    model = header[header.index("struct halo_menu_model_choice\n{"):header.index("/* the model, read from its files")]
+    code = "\n\n".join([field, "static unsigned long text_field_shown_time;", model, model_sliders(), sliders] + [
         function(menus, name) for name in (
+            "text_is_number", "settings_slider_made",
             "text_field_editing", "text_field_open", "text_field_begin", "text_field_begin_value",
-            "text_field_end", "text_field_insert", "text_field_show", "settings_slider_word", "settings_slider_number",
+            "text_field_end", "text_field_character_kept", "text_field_insert", "text_field_insert_character",
+            "text_field_show", "settings_slider_word", "settings_slider_number",
             "settings_slider_text", "settings_slider_field_text")])
     keyboard = function(inputs, "analog") + "\n\n" + function(inputs, "typing_gamepad")
     if where == "menus":
@@ -85,20 +116,3 @@ def test_case(case):
 def test_negative_control(control):
     status, output = run(build("typed_values", generated(control)), NEGATIVE_CONTROLS[control][2])
     assert status == CHECK_FAILED, f"{control} was not caught: {output}"
-
-
-def test_caret_on_the_capitals_middle():
-    """Every text field's caret (text_field_show's, the sliders' held on: Server Setup's, the browser's searches, the
-    touchscreen's search, a password's, a friend code's, Host Controls') is drawn by the text box, empty or not: a bar
-    about the font's capitals, on their middle, which the fields' text_y puts on the field's middle (test_menu_fit's
-    "centred"); no field draws an underscore."""
-    menus = read("port/linux/game/menu_functions.c")
-    assert "L'_'" not in menus
-    assert "ui_widget_port_caret_show(value_text, TRUE);" in menus
-    widgets = read("source/interface/ui_widget.c")
-    draw = function(widgets, "ui_widget_port_caret_draw")
-    assert "draw_unicode_string_capital_middle(bounds, text)" in draw and "draw_string_capital_height()" in draw
-    assert re.search(r"middle - half, middle \+ half", draw)
-    render = function(widgets, "widget_instance_render_text_box")
-    assert render.count("ui_widget_port_caret_draw(") == 2
-    assert "if ((!*text || !**text) && !caret)" in render

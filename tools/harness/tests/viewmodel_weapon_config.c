@@ -85,7 +85,7 @@ static void load(void)
 	toml_result_t result = toml_parse(file_text, (int)strlen(file_text));
 
 	CHECK(result.ok, "the file does not read: %s\n%s", result.errmsg, file_text);
-	config_weapons_read(result.toptab);
+	config_weapons_read_global(result.toptab);
 	toml_free(result);
 }
 
@@ -209,6 +209,23 @@ int main(int argc, char **argv)
 				strstr(joined, "[display]\nfov = 90.0\n\nvsync = true\n"), "joined:\n%s", joined ? joined : "(none)");
 			free(joined);
 		}
+	}
+	CASE("profile_zero")
+	{
+		/* a player profile's weapons (config_profile's): its 0s kept, in
+		place of config.toml's; config.toml's own taken out at 0 */
+		static const double zero[CONFIG_WEAPON_VALUES] = { 0 };
+		static const double some[CONFIG_WEAPON_VALUES] = { 1.0 };
+		struct config_weapons profile = { NULL, 0 };
+
+		CHECK(config_weapon_store(&profile, "weapons\\pistol\\pistol", zero, 1) &&
+			config_weapon_find(&profile, "weapons/pistol/pistol") == 0, "a profile's 0 not kept");
+		CHECK(config_weapon_store(&profile, "weapons\\pistol\\pistol", some, 1) && profile.count == 1 &&
+			profile.list[0].values[0] == 1.0, "a profile's not set again in place");
+		CHECK(config_weapon_store(&config_weapons, "weapons\\pistol\\pistol", some, 0) &&
+			config_weapon_store(&config_weapons, "weapons\\pistol\\pistol", zero, 0) &&
+			config_weapon_find(&config_weapons, "weapons\\pistol\\pistol") < 0, "config.toml's 0 kept");
+		config_weapons_clear(&profile);
 	}
 	return 0;
 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The look of ce/main_menu.forge.xml's widgets, for the menu engine (docs/menu_engine.md; tools/menu_look.py) -->
+<model>
+	<look name="main_menu/main_menu_item_forge" type="text" box="0 0 256 33" picture="main_menu/menu_forge"/>
+</model>

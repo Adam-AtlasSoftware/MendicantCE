@@ -110,7 +110,16 @@ would not fit; `debug.txt` has the details.
 
 A Custom Edition campaign map has no next level: winning it ends the game
 as the campaign's last level does (alone) or plays it again (network
-co-op), and it is not the campaign's saved game.
+co-op), and it is not the campaign's saved game. A campaign whose scripts
+name the next level with `map_name` (`(map_name "c20")`) moves on to it:
+the level ends as a won one does, and the next is that Custom Edition
+campaign map (`custom_maps\c20`), alone or for every machine of a network
+co-op game (a dedicated server plays its rotation's next entry, as after
+any won level). A map's script may name no other map, and one that names no
+campaign map present does nothing (`debug.txt` says so); the console's
+`map_name` loads any map, as before (`main_script_map_name`, main.c).
+Global initializers may not change maps, including through a static script:
+the map is not ready yet. Such a call is logged and does nothing.
 
 ### From the console
 
@@ -581,9 +590,11 @@ checked against the sample maps.
   validator corrects (an index past its block, an enum past its values) is
   what the game then runs; Halo PC read past such data unchecked.
 - **Ogg Vorbis sounds** are decoded when the map loads (stb_vorbis, with
-  added bounds checks: `port/third_party/stb_vorbis`) and encoded again as
-  Xbox ADPCM in memory (`port/linux/game/custom_edition_sounds.c`); one that
-  cannot be decoded is silenced, and still logs when played.
+  added bounds checks: `port/third_party/stb_vorbis`) and kept in memory as
+  16-bit PCM at their own rate, as uncompressed and mono 44 kHz sounds are
+  (`port/linux/game/custom_edition_sounds.c`); one too long for that is
+  encoded again as Xbox ADPCM, resampled with a band-limited low pass. One
+  that cannot be decoded is silenced, and still logs when played.
 - **Models of 44 nodes or more** are drawn a part's nodes at a time, given
   local nodes when they have none; one whose part's vertices name more
   nodes than a part holds is refused.

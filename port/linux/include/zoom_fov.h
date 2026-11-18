@@ -19,7 +19,8 @@ the stock view, the Xbox's fixed one, whatever the player's is:
   A zoom keeps its magnification against the player's view, and the
   projection's scale against the game's (the reticle's scale, view_fov.c's
   reticle_scales, the stock tangent over the player's) is one through the
-  zoom, as the scope's own pieces drawn over its picture keep to it.
+  zoom. The scope's own pieces keep to its picture instead, which the HUD
+  draws at its own size (render_fov_scope_piece_scale, #731).
 
 With display.panini the tangents are the rectilinear view's the projection
 is fitted to, the player's as display.fov reads it (to 160 degrees).

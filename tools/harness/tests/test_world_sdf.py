@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
 CASES = ["layout", "encoding", "sample", "atlas", "bake", "plane", "room", "sphere", "bsp", "soup", "round_trip", "rejection",
-         "object_layout", "object_bake", "object_opacity", "object_determinism", "object_half", "object_atlas", "threads", "pace"]
+         "object_layout", "object_bake", "object_opacity", "object_determinism", "object_cache", "object_half", "object_atlas", "threads", "pace"]
 HEADER = "port/linux/include/world_sdf.h"
 BAKE = "port/linux/game/world_sdf_bake.c"
 SCHEDULE = "port/linux/game/world_sdf.c"
@@ -25,7 +25,8 @@ FILE_FUNCTIONS = ["sdf_put32", "sdf_get32", "sdf_put_float", "sdf_get_float", "s
                   "sdf_objects_size", "sdf_objects_free", "sdf_objects_write", "sdf_finite", "sdf_objects_read",
                   "sdf_header_good", "sdf_cells_size", "sdf_bricks_size", "sdf_cells_good",
                   "sdf_volume_free", "sdf_file_pack", "sdf_file_unpack", "sdf_file_write",
-                  "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside"]
+                  "sdf_file_read", "sdf_cache_load", "sdf_bsp_inside", "sdf_hash_bytes", "sdf_hash_long",
+                  "sdf_object_hash", "sdf_object_cache_path", "sdf_object_cache_load", "sdf_object_cache_write"]
 CONTROLS = [
     # the bake on every processor: the game's own threads left none (#651)
     (BAKE, "long threads = forced > 0 ? forced : processors - WORLD_SDF_RESERVED_PROCESSORS;",
@@ -102,9 +103,11 @@ CONTROLS = [
     # the fit unweighted (the normals that see most of it as the others: its contact darkening short)
     (BAKE, "weight = WORLD_SDF_OBJECT_FIT_WEIGHT + occlusions[k];", "weight = 1.0;", "object_bake"),
     # a card's opacity taken as solid (an alpha-tested leaf's card blocking all that crosses it: #666's squares)
-    (BAKE, "through[j] *= passed;", "through[j] = 0.0f;", "object_opacity"),
+    (BAKE, "through[ray] = within ? through[ray] * passed : through[ray];",
+     "through[ray] = within ? 0.0f : through[ray];", "object_opacity"),
     # each card crossed blocking its opacity of the whole, not of what the cards before it let through
-    (BAKE, "through[j] *= passed;", "through[j] -= 1.0f - passed;", "object_opacity"),
+    (BAKE, "through[ray] = within ? through[ray] * passed : through[ray];",
+     "through[ray] = within ? through[ray] - (1.0f - passed) : through[ray];", "object_opacity"),
     # the share a direction is blocked counted whole whatever its cards' opacity
     (BAKE, "occlusions[k] += row[k] * blocked;", "occlusions[k] += row[k];", "object_opacity"),
     # the half's rounding truncated
@@ -120,6 +123,12 @@ CONTROLS = [
     # a smaller object after one that does not fit taking its place (the vehicles' first)
     (BAKE, "\t\tif (object->depth > depth_cap || object->width > width_cap)\n\t\t\tbreak;",
      "\t\tif (object->depth > depth_cap || object->width > width_cap)\n\t\t\tcontinue;", "object_atlas"),
+    # a kept object's field taken without its CRC checked (a damaged one drawn)
+    (SCHEDULE, "sdf_get32(bytes + size - WORLD_SDF_FILE_CRC) == sdf_crc(0, bytes, size - WORLD_SDF_FILE_CRC) &&\n"
+     "\t\tsdf_objects_read(", "sdf_objects_read(", "object_cache"),
+    # its name made without its triangles' opacities (a leafy tree's taken for another's)
+    (SCHEDULE, "\tif (copy->opacities)\n\t\thash = sdf_hash_bytes(hash, copy->opacities, (unsigned long)copy->triangle_count * "
+     "sizeof(float));\n", "", "object_cache"),
     # an object's texels not checked for no number
     (SCHEDULE, "if ((object->texels[texel] & 0x7C00u) == 0x7C00u)", "if (0)", "rejection"),
     # an object's bounds read one word on
@@ -137,7 +146,9 @@ def generated(fault=None):
         bake = mutated(bake, *fault[1:])
     if fault and fault[0] == SCHEDULE:
         schedule = mutated(schedule, *fault[1:])
-    file_code = "\n".join([enum_with(schedule, "WORLD_SDF_FILE_HEADER"), structure(schedule, "sdf_bsp")] +
+    file_code = "\n".join([enum_with(schedule, "WORLD_SDF_FILE_HEADER"), enum_with(schedule, "WORLD_SDF_OBJECT_FILE_MAGIC"),
+                           structure(schedule, "sdf_bsp"), structure(schedule, "sdf_solid"),
+                           structure(schedule, "sdf_object_copy")] +
                           [function(schedule, name) for name in FILE_FUNCTIONS])
     return (("world_sdf.h", read(HEADER)), ("under_test.inc", bake), ("file_under_test.inc", file_code))
 

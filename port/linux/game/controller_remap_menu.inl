@@ -1,5 +1,7 @@
 /* Settings > Controls > Controller > Button Remapping (tools/port_settings.py's
- * BUTTON_REMAPPING page): each player's layout, input.controller_p1 to p4,
+ * BUTTON_REMAPPING page): each player's layout, their profile's own
+ * (input.controller: player_settings.c) or their port's (input.controller_p1
+ * to p4, a player's without a profile, and the older versions'),
  * a group of actions at a time. The page's rows are the player's
  * (op_remap_player), the group's (op_remap_group) and an action's each
  * (op_pad_1 to op_pad_<REMAP_ROWS>), whose names and buttons this file
@@ -15,11 +17,12 @@ static wchar_t const *const pad_action_labels[CONTROLLER_REMAP_ACTIONS] = {
     L"JUMP", L"SWITCH GRENADE", L"USE / RELOAD", L"SWITCH WEAPON", L"MELEE",
     L"FLASHLIGHT", L"THROW GRENADE", L"FIRE", L"CROUCH", L"ZOOM",
     L"SCOREBOARD", L"SCREENSHOT", L"MOVE FORWARD", L"MOVE BACKWARD", L"STRAFE LEFT", L"STRAFE RIGHT",
-    L"ALL CHAT", L"TEAM CHAT", L"VEHICLE CHAT", L"PUSH TO TALK",
-    L"CAMERA SPEED UP", L"CAMERA SPEED DOWN", L"CAMERA / PLAYER SWITCH", L"CAMERA RAISE", L"CAMERA LOWER", L"CYCLE CAMERA"
+    L"CHAT", L"TEAM CHAT", L"VEHICLE CHAT", L"PUSH TO TALK",
+    L"CAMERA SPEED UP", L"CAMERA SPEED DOWN", L"CAMERA / PLAYER SWITCH", L"CAMERA RAISE", L"CAMERA LOWER", L"CYCLE CAMERA",
+    L"PING"
 };
-static short const pad_action_groups[CONTROLLER_REMAP_ACTIONS] = {0,1,1,1,1,2,1,1,0,2,2,2,0,0,0,0,3,3,3,3,4,4,4,4,4,4};
-static char const *const pad_group_names[] = { "MOVEMENT", "COMBAT", "GENERAL", "CHAT AND VOICE", "DEBUG CAMERA" };
+static short const pad_action_groups[CONTROLLER_REMAP_ACTIONS] = {0,1,1,1,1,2,1,1,0,2,2,2,0,0,0,0,3,3,3,3,4,4,4,4,4,4,3};
+static char const *const pad_group_names[] = { "MOVEMENT", "COMBAT", "GENERAL", "COMMUNICATION", "DEBUG CAMERA" };
 #define PAD_GROUPS ((short)NUMBEROF(pad_group_names))
 static struct
 {
@@ -129,7 +132,7 @@ static boolean pad_editor_event(struct widget_instance *widget, char const *name
     }
     else
     {
-        /* (past the back paddles the player's controller has not) */
+        /* (past the extra buttons the player's controller has not) */
         struct controller_device device;
         int button = pad_editor.buttons[port][action];
         controller_device_get(port, &device);
@@ -141,7 +144,9 @@ static boolean pad_editor_event(struct widget_instance *widget, char const *name
     return TRUE;
 }
 
-/* the page's OK ("port settings keep"): every player's layout written */
+/* the page's OK ("port settings keep"): every player's layout written, a
+player's with a profile into their profile (input.controller), another's
+as the port's (input.controller_p<n>) */
 static boolean pad_editor_save(struct widget_instance *screen)
 {
     boolean result = TRUE;
@@ -152,9 +157,14 @@ static boolean pad_editor_save(struct widget_instance *screen)
     for (i = 0; i < 4; i++)
     {
         char text[CONTROLLER_REMAP_TEXT] = {0};
+        char folder[1024];
         if (pad_editor.custom[i]) controller_remap_format(pad_editor.buttons[i], text, sizeof(text));
-        if (strcmp(text, config_string(controller_remap_setting(i))) &&
-            !config_write(controller_remap_setting(i), text)) result = FALSE;
+        if (!strcmp(text, controller_remap_text(i))) continue;
+        if (player_settings_profile_folder(player_ui_get_active_player_profile_index(i), folder, sizeof(folder)))
+        {
+            if (!config_profile_write(folder, "input.controller", text)) result = FALSE;
+        }
+        else if (!config_write(controller_remap_setting(i), text)) result = FALSE;
     }
     return result;
 }
@@ -239,7 +249,7 @@ static void pad_editor_update(struct widget_instance *list)
         pad_editor_text_set(named(row, value_name, 0),
             pad_editor.capturing == action && pad_editor.port == port ? "PRESS A BUTTON" :
             pad_editor.buttons[port][action] == CONTROLLER_REMAP_UNBOUND ? "UNBOUND" :
-            controller_remap_button_name(pad_editor.buttons[port][action], device.family));
+            controller_layout_button_name(pad_editor.buttons[port][action], &device));
     }
 }
 
@@ -277,7 +287,7 @@ static boolean pad_editor_panel(struct widget_instance *row, wchar_t *name, wcha
         conflict[i] = 0;
         snprintf(text, sizeof(text), "%s already uses %s. Press A or Enter to put it here, leaving %s unbound; "
             "B or Escape keeps both as they were.", conflict,
-            controller_remap_button_name(pad_editor.button, device.family), conflict);
+            controller_layout_button_name(pad_editor.button, &device), conflict);
     }
     else if (pad_editor.capturing != NONE)
         snprintf(text, sizeof(text), "Let go, then press the button for it on player %d's controller.|Start or "

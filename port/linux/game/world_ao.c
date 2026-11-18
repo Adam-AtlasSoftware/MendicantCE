@@ -12,13 +12,19 @@ is named to the front end with its owner slot among the window's proxies'
 owners (its own do not shade it) and its reference (the field's occlusion
 where its ambient light was sampled, which that light already holds).
 
-Nothing here runs unless the setting is "world": every other value (and
-the Classic preset's "off") draws exactly as before.
+With "ray_traced", the same, and the dynamic objects' occlusion traced by
+the GPU's ray queries through the ray-traced scene (world_rt.c: its meshes
+and each frame's instances) where the backend has them; "world" where it has
+not (said once, with why).
+
+Nothing here runs unless the setting is "world" or "ray_traced": every
+other value (and the Classic preset's "off") draws exactly as before.
 */
 
 #include "world_ao.h"
 #include "world_cascades.h"
 #include "world_proxies.h"
+#include "world_rt.h"
 #include "world_scene.h"
 #include "world_sdf.h"
 
@@ -67,6 +73,7 @@ unsigned long long SDL_GetTicksNS(void);
 /* (PRISM v2's model light: prism_light.c) */
 void prism_light_window_begin(float const camera[3]);
 void prism_light_object_begin(long object_index);
+void platform_log(const char *format, ...);
 /* (render_enumerate.c's: the window drawn is a map's first frame's, unseen,
 which prepares its pipelines) */
 extern unsigned char render_enumerating;
@@ -76,6 +83,9 @@ static struct
 	int initialized;
 	unsigned long read_at;
 	int mode;
+	/* "ray_traced" asked for, and whether why it is drawn as "world" was
+	said */
+	int rays, rays_missing_said;
 	/* a window's occlusion handed to the front end (world_ao_window_end
 	takes it away): its proxies and their objects (datum handles), the
 	field's volume (for the objects' references; NULL none) and its fade */
@@ -118,11 +128,22 @@ int world_ao_mode(void)
 
 		world_ao.initialized = 1;
 		world_ao.read_at = changes;
-		world_ao.mode = setting && !strcmp(setting, "world") ? WORLD_AO_PROXIES | WORLD_AO_FIELD : 0;
+		world_ao.rays = setting && !strcmp(setting, "ray_traced");
+		world_ao.mode = setting && (!strcmp(setting, "world") || world_ao.rays) ? WORLD_AO_PROXIES | WORLD_AO_FIELD : 0;
 		/* (display.prism_rt: the pre-pass drawn, which its rays start from,
 		whatever this setting) */
 		if (prism_rt_mode())
 			world_ao.mode = WORLD_AO_PROXIES | WORLD_AO_FIELD;
+	}
+	/* (the backend's ray queries, once it has said: until then, and
+	without them, "world") */
+	if (world_ao.rays && halo_world_ao_ray_queries())
+		return world_ao.mode | WORLD_AO_RAYS;
+	if (world_ao.rays && !world_ao.rays_missing_said && halo_world_ao_ray_queries_missing())
+	{
+		platform_log("world ao: display.ambient_occlusion \"ray_traced\" is drawn as \"world\" here: %s",
+			halo_world_ao_ray_queries_missing());
+		world_ao.rays_missing_said = 1;
 	}
 	return world_ao.mode;
 }
@@ -153,6 +174,7 @@ void world_ao_map_unloaded(void)
 	prism_scene_static_map_unloaded();
 	prism_scene_lights_map_unloaded();
 	prism_lightmaps_map_unloaded();
+	world_rt_map_unloaded();
 	world_ao_scene_release();
 	world_sdf_map_unloaded();
 	world_proxies_map_unloaded();
@@ -559,7 +581,10 @@ static void world_ao_counts_window(void)
 			(double)world_ao_counts.kinds[_world_proxy_field] / 600.0,
 			(double)world_ao_counts.paged / 600.0, (double)world_ao_counts.unpaged / 600.0);
 		fflush(stdout);
-		memset(&world_ao_counts.windows, 0, sizeof(world_ao_counts) - sizeof(world_ao_counts.wanted));
+		/* (the counts zeroed, whatever the padding after wanted) */
+		memset(world_ao_counts.kinds, 0, sizeof(world_ao_counts.kinds));
+		world_ao_counts.windows = world_ao_counts.shapes = world_ao_counts.dynamic = 0;
+		world_ao_counts.paged = world_ao_counts.unpaged = 0;
 	}
 }
 
@@ -625,8 +650,11 @@ void world_ao_window_begin(short local_player_index, short rasterizer_target, fl
 		if (mode & WORLD_AO_FIELD)
 			world_ao.volume = (struct world_sdf_volume const *)world_sdf_current();
 		world_ao.fade = world_ao.volume ? world_sdf_fade() : 0.0f;
-		/* (the distance-field scene about the camera, once a frame) */
+		/* (the distance-field scene about the camera, once a frame; the
+		ray-traced scene's instances too, with "ray_traced") */
 		world_ao_scene_update(camera_position, world_ao.cascades);
+		if (mode & WORLD_AO_RAYS)
+			world_rt_frame(world_ao_scene.frame);
 		if (world_ao_scene.windows_frame != world_ao_scene.frame)
 		{
 			world_ao_scene.last_windows = world_ao_scene.windows;
@@ -706,6 +734,7 @@ void world_ao_object_begin(long object_index)
 	struct world_scene_instance const *instance;
 	int owner = WORLD_AO_OWNER_NONE, baked;
 	float reference = 1.0f;
+	unsigned long rays_owner = 0;
 	long index;
 
 	/* (PRISM v2's probes nearest the object drawn, whatever the setting:
@@ -729,15 +758,30 @@ void world_ao_object_begin(long object_index)
 		}
 		/* (a static scenery placement the field holds: its own geometry is in
 		the field, which a negative reference says: the shaders take its taps
-		from the pixel's own depth in it) */
-		baked = world_ao.volume && world_ao.fade > 0.0f && world_proxies_source_baked(object_index);
+		from the pixel's own depth in it. One without collision geometry (a
+		shrub, a fern) is not in the field: its reference is taken as a moving
+		object's, since the lightmap its ambient light is sampled from already
+		holds what the field finds about it (#781: a shrub by a cliff went
+		black)) */
+		baked = world_ao.volume && world_ao.fade > 0.0f && world_proxies_source_baked(object_index) &&
+			world_proxies_source_solid(object_index);
 		instance = world_ao.volume && world_ao.fade > 0.0f && !baked ? world_scene_instance_find(object_index) : NULL;
 		if (instance)
 			reference = world_ao_reference(world_ao.volume, instance->lighting_point);
 		if (baked)
 			reference = WORLD_AO_REFERENCE_NO_FIELD;
+		/* (its own instances, which its pixels' rays leave out) */
+		if (world_ao_mode() & WORLD_AO_RAYS)
+			rays_owner = world_rt_owner(object_index);
 	}
-	halo_world_ao_object(owner, reference);
+	halo_world_ao_object(owner, reference, rays_owner);
+}
+
+void world_ao_cards(int cards)
+{
+	if (!world_ao.window)
+		return;
+	halo_world_ao_cards(cards);
 }
 
 void world_ao_lightmap_begin(void const *lightmap_bitmap)
@@ -759,7 +803,7 @@ void world_ao_lightmap_begin(void const *lightmap_bitmap)
 		world_ao_counts.paged++;
 	else
 		world_ao_counts.unpaged++;
-	halo_world_ao_object(WORLD_AO_OWNER_NONE, (float)layer);
+	halo_world_ao_object(WORLD_AO_OWNER_NONE, (float)layer, 0);
 }
 
 /* the distance-field scene's cascades as the window has them (PRISM v2's
@@ -788,5 +832,5 @@ void world_ao_first_person(int drawing)
 		WORLD_AO_SPAN_FOUND_FIRST_PERSON : WORLD_AO_SPAN_FIRST_PERSON);
 	if (!world_ao.window)
 		return;
-	halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f);
+	halo_world_ao_object(drawing ? WORLD_AO_OWNER_UNLIT : WORLD_AO_OWNER_NONE, 1.0f, 0);
 }

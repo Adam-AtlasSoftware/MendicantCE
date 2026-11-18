@@ -38,6 +38,7 @@ Called from the main loop every frame (network_test_update, network_test.c).
 double config_real(char const *name);
 char const *config_string(char const *name);
 int config_write(char const *name, char const *value);
+unsigned long config_changes(void);
 void platform_log(char const *format, ...);
 unsigned long long SDL_GetTicksNS(void);
 
@@ -137,12 +138,23 @@ static void setting_test_update(
 void bsp_switch_test_update(
 	boolean main_menu_loaded)
 {
-	double seconds = config_real("debug.bsp_switch_test");
+	/* (the settings, read again as they change: config_changes) */
+	static boolean read;
+	static unsigned long read_at;
+	static double seconds;
+	static boolean setting_test;
 	unsigned long long now;
 	float frame_ms;
 	struct scenario *scenario;
 
-	if (!main_menu_loaded && game_in_progress())
+	if (!read || read_at != config_changes())
+	{
+		read_at = config_changes();
+		read = TRUE;
+		seconds = config_real("debug.bsp_switch_test");
+		setting_test = config_string("debug.setting_test")[0] != 0;
+	}
+	if (setting_test && !main_menu_loaded && game_in_progress())
 		setting_test_update();
 	if (seconds <= 0.0)
 		return;

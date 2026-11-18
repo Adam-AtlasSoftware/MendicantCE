@@ -385,6 +385,124 @@ short fix_dead_zone(
 	return 0;
 }
 
+/* port: a direction of a stick's dead zones (fix_dead_zone's), with an
+outer one (input.left_stick_outer_dead_zone, input.right_stick_outer_dead_zone):
+read as full from live_range on, its push from dead_range to there made the
+whole travel; with none (live_range the rim) the original's */
+static short fix_dead_zones(
+	short value,
+	short dead_range,
+	short live_range)
+{
+	if (live_range >= SHORT_MAX)
+	{
+		return fix_dead_zone(value, dead_range);
+	}
+	if (value > dead_range)
+	{
+		return (short)((MIN(value, live_range) - dead_range) * SHORT_MAX / (live_range - dead_range));
+	}
+	if (value < -dead_range)
+	{
+		return (short)((MAX(value, -live_range) + dead_range) * SHORT_MAX / (live_range - dead_range));
+	}
+
+	return 0;
+}
+
+/* port: a stick's dead zone made round (Modern aim's look stick:
+input.aim_style): read as none within dead_range of the middle, whichever
+way it points, then its push from there to live_range (the rim, or short of
+it by its outer dead zone) made the whole travel, its direction kept */
+static void fix_round_dead_zone(
+	short x,
+	short y,
+	short dead_range,
+	short live_range,
+	point2d *stick)
+{
+	real length = square_root((real)x * (real)x + (real)y * (real)y);
+
+	if (length <= (real)dead_range)
+	{
+		stick->x = 0;
+		stick->y = 0;
+	}
+	else
+	{
+		real push = (MIN(length, (real)live_range) - dead_range) / (real)(live_range - dead_range);
+		real scale = push * SHORT_MAX / length;
+
+		stick->x = (short)PIN(x * scale, -SHORT_MAX, SHORT_MAX);
+		stick->y = (short)PIN(y * scale, -SHORT_MAX, SHORT_MAX);
+	}
+	return;
+}
+
+/* port: one stick's reading after its dead zones (dead_range read as none,
+live_range as full): round (fix_round_dead_zone), or each direction's own
+(fix_dead_zones); input_port_fix_stick_dead_zones' for the game, and Stick
+Test's reading of the stick by Advanced Stick Settings' values
+(port/linux/game/stick_test_menu.inc's stick_test_read) */
+void input_port_fix_stick(
+	short x,
+	short y,
+	short dead_range,
+	short live_range,
+	boolean round,
+	point2d *stick)
+{
+	if (round)
+	{
+		fix_round_dead_zone(x, y, dead_range, live_range, stick);
+	}
+	else
+	{
+		stick->x = fix_dead_zones(x, dead_range, live_range);
+		stick->y = fix_dead_zones(y, dead_range, live_range);
+	}
+	return;
+}
+
+/* port: a gamepad's sticks' dead zones from its reading (input_update's, and
+a sub-step's: input_abstraction.c), each its player's own dead range
+(halo_stick_dead_range) and outer dead range (halo_stick_live_range),
+each direction's own, as the original's; the stick
+that alone looks round instead under that player's Modern aim
+(input.aim_style), which takes it as a push and a direction (player_control.c),
+or as the player's look dead zone shape sets (input.look_dead_zone_shape) */
+void input_port_fix_stick_dead_zones(
+	short gamepad_index,
+	short left_x,
+	short left_y,
+	short right_x,
+	short right_y,
+	point2d *sticks)
+{
+	short look_stick = NONE;
+	short left_range = halo_stick_dead_range(gamepad_index, _gamepad_stick_left);
+	short right_range = halo_stick_dead_range(gamepad_index, _gamepad_stick_right);
+	short left_live = halo_stick_live_range(gamepad_index, _gamepad_stick_left);
+	short right_live = halo_stick_live_range(gamepad_index, _gamepad_stick_right);
+	float acceleration_tangent;
+	float acceleration_threshold;
+	/* (the look stick's shape, input.look_dead_zone_shape: Auto the aim
+	style's, round under Modern, each direction's own under Classic) */
+	int shape = halo_look_dead_zone_shape(gamepad_index);
+
+	if (shape == HALO_LOOK_DEAD_ZONE_ROUND ||
+		(shape == HALO_LOOK_DEAD_ZONE_AUTO &&
+			player_control_aim_modern(gamepad_index, &acceleration_tangent, &acceleration_threshold)))
+	{
+		look_stick = input_abstraction_port_look_stick(gamepad_index);
+	}
+	input_port_fix_stick(left_x, left_y, left_range, left_live, look_stick == _gamepad_stick_left,
+		&sticks[_gamepad_stick_left]);
+	input_port_fix_stick(right_x, right_y, right_range, right_live, look_stick == _gamepad_stick_right,
+		&sticks[_gamepad_stick_right]);
+	return;
+}
+
 void update_ticks(
 	byte *ticks,
 	boolean down)
@@ -625,6 +743,23 @@ boolean input_key_is_down(
 	}
 
 	return result;
+}
+
+/* port: the character each buffered key types (Unicode to U+017F, 0 for
+none: port/linux/src/xinput_sdl.c's platform_keystroke_character), beside
+the key, whose ascii_code is ASCII's alone: a letter with a mark for a text
+field (#1134). A letter of the system's on-screen keyboard's, which no key
+types, is buffered with no key (key_code NONE) */
+unsigned short platform_keystroke_character(void);
+static wchar_t input_buffered_key_characters[MAXIMUM_BUFFERED_KEYSTROKES];
+
+wchar_t input_key_character(
+	void)
+{
+	short index = input_globals.buffered_key_read_index - 1;
+
+	return index >= 0 && index < input_globals.buffered_key_write_index ?
+		input_buffered_key_characters[index] : 0;
 }
 
 boolean input_get_key(
@@ -987,18 +1122,9 @@ static void input_get_device_states(
 
 				/* port: each stick's dead range is a setting (halo_stick_dead_range), the
 				game's GAMEPAD_STICK_DEAD_RANGE by default */
-				gamepad_state->sticks[_gamepad_stick_left].x = fix_dead_zone(
-					input_state.Gamepad.sThumbLX,
-					halo_stick_dead_range(_gamepad_stick_left));
-				gamepad_state->sticks[_gamepad_stick_left].y = fix_dead_zone(
-					input_state.Gamepad.sThumbLY,
-					halo_stick_dead_range(_gamepad_stick_left));
-				gamepad_state->sticks[_gamepad_stick_right].x = fix_dead_zone(
-					input_state.Gamepad.sThumbRX,
-					halo_stick_dead_range(_gamepad_stick_right));
-				gamepad_state->sticks[_gamepad_stick_right].y = fix_dead_zone(
-					input_state.Gamepad.sThumbRY,
-					halo_stick_dead_range(_gamepad_stick_right));
+				input_port_fix_stick_dead_zones(gamepad_index, input_state.Gamepad.sThumbLX,
+					input_state.Gamepad.sThumbLY, input_state.Gamepad.sThumbRX, input_state.Gamepad.sThumbRY,
+					gamepad_state->sticks);
 			}
 			else
 			{
@@ -1114,6 +1240,16 @@ static void input_update_keyboard_devices(
 				0x308,
 				keystroke.VirtualKey>=0 && keystroke.VirtualKey<NUMBER_OF_VIRTUAL_CODES);
 			key.key_code = virtual_key_to_key_code[keystroke.VirtualKey];
+			/* port: a letter with no key (the system's keyboard's), buffered
+			for the text fields (input_key_character) */
+			if (key.key_code == NONE && platform_keystroke_character() &&
+				!(keystroke.Flags & XINPUT_DEBUG_KEYSTROKE_FLAG_KEYUP) &&
+				input_globals.buffered_key_write_index < MAXIMUM_BUFFERED_KEYSTROKES)
+			{
+				input_buffered_key_characters[input_globals.buffered_key_write_index] =
+					(wchar_t)platform_keystroke_character();
+				input_globals.buffered_keys[input_globals.buffered_key_write_index++] = key;
+			}
 			if (key.key_code != NONE)
 			{
 				match_assert(
@@ -1133,6 +1269,9 @@ static void input_update_keyboard_devices(
 				{
 					if (input_globals.buffered_key_write_index < MAXIMUM_BUFFERED_KEYSTROKES)
 					{
+						/* port: and the character it types */
+						input_buffered_key_characters[input_globals.buffered_key_write_index] =
+							(wchar_t)platform_keystroke_character();
 						input_globals.buffered_keys[
 							input_globals.buffered_key_write_index++] = key;
 					}
@@ -1164,7 +1303,8 @@ static void input_flush_rumble(
 
 /* port: a gamepad's motors written (XInputSetState) when they change, and,
 to refresh them, once INPUT_PORT_RUMBLE_REFRESH_MILLISECONDS have passed
-while they run; nothing while paused, in the console or out of a game */
+while they run, at its player's rumble strength; nothing while paused, in
+the console or out of a game */
 static void input_port_write_rumble(
 	short gamepad_index,
 	boolean refresh)
@@ -1175,8 +1315,13 @@ static void input_port_write_rumble(
 		game_time_get_paused() ||
 		!game_in_progress();
 	XINPUT_FEEDBACK *feedback = &input_globals.gamepad_feedbacks[gamepad_index];
-	word left = suppress_rumble ? 0 : input_globals.gamepad_rumbler_states[gamepad_index].left_frequency;
-	word right = suppress_rumble ? 0 : input_globals.gamepad_rumbler_states[gamepad_index].right_frequency;
+	/* (each motor times its player's rumble strength, input.rumble_strength:
+	100%, the default, the game's own) */
+	unsigned long strength = halo_rumble_strength(gamepad_index);
+	word left = suppress_rumble ? 0 :
+		(word)(input_globals.gamepad_rumbler_states[gamepad_index].left_frequency * strength / 100);
+	word right = suppress_rumble ? 0 :
+		(word)(input_globals.gamepad_rumbler_states[gamepad_index].right_frequency * strength / 100);
 	unsigned long now;
 
 	if (input_globals.gamepad_handles[gamepad_index] == NULL)

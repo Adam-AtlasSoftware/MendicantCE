@@ -53,6 +53,22 @@ void host_logf(int priority, const char *format, ...)
 	host_log(priority, line);
 }
 
+/* (the crash record, host_common.c's: none written here) */
+int host_crash_record_begin(const char *reason)
+{
+	(void)reason;
+	return 0;
+}
+
+void host_crash_record_line(const char *line)
+{
+	(void)line;
+}
+
+void host_crash_record_end(void)
+{
+}
+
 /* ---------- helpers */
 
 #define READ_WRITE (PROT_READ | PROT_WRITE)

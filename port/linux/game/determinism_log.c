@@ -344,10 +344,12 @@ static unsigned long determinism_hash_objects(
 	return determinism_hash(start, (long)(last_end > start ? last_end - start : 0), hash);
 }
 
-/* with debug.fresh_memory_fill, a data array: its header and its datums in
-use, not its free slots, which hold the fill (or what a deleted datum
-left), so that a zero and a pattern run differ only where something read
-the fill */
+/* a data array: its header and its datums in use, not its free slots,
+which hold the fill (or what a deleted datum left), so that a zero and a
+pattern run differ only where something read the fill (debug.fresh_memory_
+fill), and a demo's playback does not differ from its recording where its
+frames, not the ticks, made a datum and deleted it again (each tick's u
+line) */
 static unsigned long determinism_hash_data_array(
 	struct data_array const *data,
 	long size,
@@ -438,6 +440,24 @@ void determinism_log_tick_end(
 
 		fprintf(file, " %08lx", allocation_hash);
 		hash = (hash ^ allocation_hash) * 16777619UL;
+	}
+	fputc('\n', file);
+	/* (each allocation's hash again, its data arrays' of their datums in use
+	only: what the ticks can read of them, determinism_compare.py's
+	--simulation) */
+	fputc('u', file);
+	for (index = 0; index < determinism_log.allocation_count; index++)
+	{
+		struct determinism_allocation const *allocation = &determinism_log.allocations[index];
+
+		if (allocation->size >= (long)sizeof(struct data_array) &&
+			((struct data_array const *)allocation->address)->signature == 'd@t@' &&
+			((struct data_array const *)allocation->address)->data == (struct data_array const *)allocation->address + 1)
+		{
+			fprintf(file, " %08lx", determinism_hash_data_array(allocation->address, allocation->size, 2166136261UL));
+		}
+		else
+			fputs(" =", file);
 	}
 	fputc('\n', file);
 	if (determinism_log.rate != sim_rate_get())

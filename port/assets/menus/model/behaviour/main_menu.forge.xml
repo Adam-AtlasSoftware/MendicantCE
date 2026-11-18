@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The behaviour of ce/main_menu.forge.xml's widgets, for the menu engine (docs/menu_engine.md; tools/menu_behaviour.py) -->
+<model>
+	<behaviour name="main_menu/main_menu_item_forge">
+		<on event="a" run="port forge begin" open="main_menu/multiplayer_type_select/connected/connected_map_select_wrapper"/>
+		<on event="start" run="port forge begin" open="main_menu/multiplayer_type_select/connected/connected_map_select_wrapper"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+</model>

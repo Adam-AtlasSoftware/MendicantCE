@@ -10,13 +10,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, constant, enum_with, function, mutated, read, run  # noqa: E402
+from harness import skip_without_32_bit_abi  # noqa: E402
 
 SOURCE = "source/saved games/game_state.c"
 CAPACITY = read("port/linux/include/halo_port_capacity.h")
 
 CASES = ["size", "taken", "taken-back", "whole", "checked", "other-size"]
-NAMES = ["game_state_image_pointer", "game_state_image_refuse", "game_state_image_size", "game_state_image_take",
-         "game_state_image_accept"]
+NAMES = ["game_state_image_pointer", "game_state_image_refuse", "game_state_image_valid", "game_state_image_size",
+         "game_state_image_take", "game_state_image_accept"]
 
 # a fault in the code, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -33,9 +34,9 @@ NEGATIVE_CONTROLS = {
     "unused-part-overwritten": (("\tcsmemcpy(game_state_globals.base_address, image, game_state_globals.cpu_allocation_size);",
                                  "\tcsmemcpy(game_state_globals.base_address, image, size);"),
                                 "game_state_image_accept", "taken-back"),
-    "unchecked": (("\t\tif (!valid)\n", "\t\tif (!valid && 0)\n"), "game_state_image_accept", "checked"),
-    "any-size": (("\telse\n\t\treturn game_state_image_refuse(", "\telse if (0)\n\t\treturn game_state_image_refuse("),
-                 "game_state_image_accept", "other-size"),
+    "unchecked": (("\t\tif (!valid)\n", "\t\tif (!valid && 0)\n"), "game_state_image_valid", "checked"),
+    "any-size": (("\telse if (size == game_state_image_size())", "\telse if (1)"), "game_state_image_accept",
+                 "other-size"),
 }
 
 
@@ -44,6 +45,7 @@ def generated(fault=None, faulty_function=None):
     size = constant(CAPACITY, "HALO_PORT_GAME_STATE_CPU_SIZE") + constant(CAPACITY, "HALO_PORT_GAME_STATE_GPU_SIZE")
     types = "\n\n".join([
         f"#define GAME_STATE_SIZE ({size}L)",
+        f"#define GAME_STATE_CPU_SIZE ({constant(CAPACITY, 'HALO_PORT_GAME_STATE_CPU_SIZE')}L)",
         enum_with(source, "_game_state_allocation_data,"),
     ]) + "\n"
     text = ""
@@ -55,8 +57,18 @@ def generated(fault=None, faulty_function=None):
     return (("types.inc", types), ("under_test.inc", text))
 
 
+# what only the game's 32-bit ABI shows (harness.NATIVE_64_BIT)
+ABI_DEPENDENT = {
+    "whole": "the game state and its image are laid out with the game's 32-bit pointers and longs",
+    "checked": "the game state and its image are laid out with the game's 32-bit pointers and longs",
+    "other-size": "the game state and its image are laid out with the game's 32-bit pointers and longs",
+    "taken-back": "the game state and its image are laid out with the game's 32-bit pointers and longs",
+}
+
+
 @pytest.mark.parametrize("case", CASES)
 def test_case(case):
+    skip_without_32_bit_abi(ABI_DEPENDENT, case)
     status, output = run(build("game_state_image", generated()), case)
     assert status == 0, output
 
@@ -64,5 +76,6 @@ def test_case(case):
 @pytest.mark.parametrize("control", NEGATIVE_CONTROLS)
 def test_negative_control(control):
     fault, faulty_function, case = NEGATIVE_CONTROLS[control]
+    skip_without_32_bit_abi(ABI_DEPENDENT, control, case)
     status, output = run(build("game_state_image", generated(fault, faulty_function)), case)
     assert status == CHECK_FAILED, f"the code with a fault ({control}) passed '{case}': the test cannot see it"

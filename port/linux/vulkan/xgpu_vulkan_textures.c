@@ -53,6 +53,7 @@ texture with a thickness is not let go while the guest keeps its texels.
 #include "xgpu_backend.h"
 #include "xgpu_stream.h"
 #include "host.h"
+#include "host_render_record.h"
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_effects.h"
 #include "xgpu_vulkan_textures.h"
@@ -703,6 +704,13 @@ static struct entry *xbox_entry_current(const struct xgpu_stream_texture_stage *
 		*palette_out = palette;
 	if (!readable(stage->resource, 5 * sizeof(uint32_t)))
 		return NULL;
+	/* (what is read of the guest's memory, for a recording) */
+	if (host_render_record_active)
+	{
+		host_render_record_note(stage->resource, 5 * sizeof(uint32_t));
+		if (palette && ((stage->resource_format & D3DFORMAT_FORMAT_MASK) >> D3DFORMAT_FORMAT_SHIFT) == FORMAT_PALETTIZED)
+			host_render_record_note(stage->palette, 256 * sizeof(D3DCOLOR));
+	}
 	entry = xbox_entry_find(stage, palette);
 	if (!entry || !entry->image)
 		return NULL;
@@ -720,6 +728,8 @@ static struct entry *xbox_entry_current(const struct xgpu_stream_texture_stage *
 		entry->generation = host_memory_watch_generation(entry->address, entry->size);
 		if (!entry->generation)
 			entry->generation = 1;
+		if (host_render_record_active)
+			host_render_record_note(entry->address, entry->size);
 		xbox_texture_upload(entry, palette);
 	}
 	entry->watched_serial = serial;
@@ -1031,6 +1041,9 @@ static struct xgpu_vulkan_image *image_get(const struct xgpu_stream_texture_stag
 			return NULL;
 	}
 	entry->format_word = stage->resource_size;
+	if (host_render_record_active)
+		host_render_record_note(stage->data, given ? levels_bytes(width, height, given_levels, bc5) :
+			(uint64_t)width * height * texel);
 	if (given)
 	{
 		/* (each level as it is given) */

@@ -38,6 +38,9 @@ struct halo_gpu_journal_bitmaps
 	projection (as halo_screen_panini's) given where the record's is none
 	(made with it off) */
 	int (*panini)(float projection[8]);
+	/* a bitmap's tag index as the record keeps it (identify's and the
+	cache's loads'), which load takes back; NULL: as it is */
+	unsigned long (*keep)(unsigned long tag_index);
 };
 /* recorded from now on (the preparation begun) */
 void halo_gpu_journal_record(struct halo_gpu_journal_bitmaps const *bitmaps);
@@ -54,6 +57,12 @@ unsigned int halo_gpu_journal_form(void);
 the objects not found */
 int halo_gpu_journal_replay(unsigned int const *words, unsigned int count,
 	struct halo_gpu_journal_bitmaps const *bitmaps, unsigned int *unknown);
+/* Discard measured listener motion at camera cuts and lifecycle boundaries
+(source/sound/sound_manager.c). NONE resets every local listener. */
+void sound_listener_motion_reset(short local_player_index);
+
+/* MCC weapon-deletion notification (port/linux/game/mcc_first_person.inl). */
+void mcc_first_person_weapon_deleted(long weapon_index);
 
 /* frames between the 30 Hz ticks (port/linux/game/render_interpolation.c);
 the platform layer reads the display.interpolation setting */
@@ -73,10 +82,18 @@ void render_interpolation_frame_end(void);
 float render_interpolation_fraction(void);
 struct real_matrix4x3 *render_interpolation_object_node_matrices(long object_index);
 void render_interpolation_object_point(long object_index, union real_point3d *point);
+/* a model's bounding sphere's centre where the frame draws the model, if it
+is an object's own (render_interpolation.c) */
+void render_interpolation_model_centre(long unique_identifier, union real_point3d const *centre,
+	union real_point3d *drawn);
 /* an object's origin and a unit's camera where a frame draws them, not
 mixed of the tick's state and the frame's (render_interpolation.c) */
 void render_interpolation_object_origin(long object_index, union real_point3d *origin);
 void render_interpolation_unit_camera_position(long unit_index, union real_point3d *position);
+/* where the last frame drew a local player's view from, if it drew one */
+unsigned char render_interpolation_drawn_view_position(short local_player_index, union real_point3d *position);
+/* debug.network_test_elevator's frames (port/linux/game/network_test.c) */
+void network_test_elevator_frame(void);
 /* a widget's shape (an antenna's chain, a cloth flag's grid), stepped in the
 tick, drawn between the ticks hung from its marker as drawn */
 void render_interpolation_shape_tick(unsigned long owner, long index, struct real_matrix4x3 const *anchor,
@@ -102,6 +119,14 @@ in the tick), and how far the frame is past that, in ticks: -1 for a view
 drawn between the ticks (render_interpolation.c) */
 void render_interpolation_first_person_updated(void);
 float render_interpolation_first_person_phase(short local_player_index);
+/* ... and how far the step running now ends past it, the same way (0 to 1),
+for a state changed in it (first_person_weapon_start_interpolation) */
+float render_interpolation_first_person_step_phase(void);
+/* ... and a Spartan link feed's weapon (first_person_weapons.c's feeds'
+slots), sampled at the frame's time as the player's own view drawn from
+the newest step is (render_interpolation_first_person_phase): -1 with the
+frames' interpolation off */
+float render_interpolation_first_person_feed_phase(void);
 void render_interpolation_first_person(short local_player_index, struct real_matrix4x3 *node_matrices,
 	short node_count, struct render_camera const *camera);
 float render_interpolation_game_time_sec(long ticks);
@@ -228,6 +253,11 @@ short ui_widget_port_anchor_extra(void);
 the Android and iOS apps, or debug.touch_menus): their buttons then name no
 controller's key (port/linux/game/menu_tags.c) */
 int ui_widget_port_touch_menus(void);
+/* the tall layout's footer on a touchscreen, raised above a phone's safe
+area at the screen's foot: how far (0 elsewhere), and a widget's move up by
+it (its port flag foot) as it is drawn (port/linux/game/menu_tags.c) */
+short ui_widget_port_foot_lift(void);
+short ui_widget_port_foot_offset(long flags);
 /* the wide layout of the port's own screens (their widgets' wide attribute:
 port/linux/game/menu_tags.c): the extra width past the menus' 640 a view
 this wide lays them out in (to 16:9's), and a value's part of it; the
@@ -239,6 +269,11 @@ void ui_widget_port_wide_layout(long width);
 short ui_widget_port_wide_extra(void);
 short ui_widget_port_wide_offset(long definition_index);
 short ui_widget_port_wide_stretch(long definition_index);
+/* the width past 16:9's the menu engine's widgets laid out past it (a look's
+past: port/linux/game/menu_tags.c) are laid out for now, half of it each
+side, and a past attribute's value's part of a width past 16:9 */
+short ui_widget_port_past_extra(void);
+short ui_widget_port_past_scale(short value, short past);
 /* whether a widget's picture keeps its ends at the widget's width (its port
 flag keep_ends) */
 unsigned char ui_widget_port_keep_ends(long flags);
@@ -256,6 +291,24 @@ it kept, and the range it had in previous (NULL: not wanted): a range in
 the last step before 1 draws behind everything drawn, still clipped at the
 far plane (port/linux/src/d3d8_device.c) */
 void d3d8_viewport_depth_range(float minimum, float maximum, float previous[2]);
+/* the rectangle of the viewport that the draws from now on can change
+pixels in (left, top, right, bottom, in the viewport's pixels from its left
+and top; none of it, if the right is not past the left or the bottom past
+the top), to which they are scissored where the backend gains by it; NULL:
+the whole viewport, as before (port/linux/src/d3d8_device.c, "the draws'
+bounds"; from port/linux/game/draw_bounds.c) */
+void halo_draw_bounds(const float *rectangle);
+/* the stage samples a region of its texture as a texture of the region's
+alone, addressed by its border beyond it (D3DTADDRESS_BORDER, whatever the
+stage's address modes): region its width and height, then its left and top,
+in the texture's coordinates (0 to 1); NULL: the whole texture, as the
+stage's address modes have it (port/linux/src/d3d8_device.c) */
+void d3d8_texture_region(unsigned long stage, const float *region);
+/* the viewport's rectangle of the colour target cleared, the rest of the
+target of no use from now on; and whether the renderer gains by it: a pass
+then costs by the part of the target it covers (port/linux/src/d3d8_device.c) */
+int d3d8_clears_alone(void);
+void d3d8_clear_viewport_alone(unsigned long color);
 /* takes up a new width between frames (F11); returns the width */
 long halo_screen_commit(void);
 /* the shadow maps' pixels for each of their 128 texels each way, a power of
@@ -274,6 +327,7 @@ gauge (port/linux/game/weapon_gauge.c) */
 float weapon_gauge_meter_value(long object_index, short value_source, float meter_value);
 /* while TRUE, drawing shifts right to center 640-column layouts */
 void halo_screen_ui_offset(unsigned char centered);
+long halo_screen_ui_offset_current(void);
 /* names a model lighting vertex program, whose draws can be lit for each
 pixel (port/linux/src/d3d8_device.c, display.per_pixel_lighting) */
 void halo_vertex_shader_lighting(unsigned long handle);
@@ -291,6 +345,14 @@ preparation's record) */
 void halo_screen_panini(short x0, short y0, short x1, short y1, const float projection[8]);
 /* the enhanced dynamic lights (display.dynamic_lights) */
 #include "halo_dynamic_lights.h"
+
+/* the model the game's draws are of from now on (port/linux/src/d3d8_device.c):
+its bounding sphere (the tick's), its middle as the frame draws it, the
+middle's distance from the camera, whether it is a first-person model; a
+NULL centre or no radius: not known (no model, or one without a sphere).
+Nonzero if no enhanced dynamic light reaches it: it is drawn as with no
+light, and the game gives it no point lights */
+int halo_model_bounds(const float centre[3], const float drawn[3], float radius, float distance, int first_person);
 /* display.hdr's tone map of a window's 3D view, before its anti-aliasing
 (source/render/render.c), and what the game's renderer tells it of its
 draws (port/linux/src/d3d8_device.c, xgpu_hdr.h): the category drawing now
@@ -299,10 +361,25 @@ _end), and what the code drawing knows of them (HALO_HDR_KIND_*, 0 none) */
 void halo_screen_tone_map(short x0, short y0, short x1, short y1);
 void halo_hdr_category(int category);
 void halo_hdr_draw_kind(int kind);
+/* ... and the draws from now on the HUD's and menus' again, after a view of
+the world's drawn among them (port/linux/game/menu_spartan.c) */
+void halo_hdr_interface(void);
+/* debug.render_marks: what the draws that follow belong to, for the
+inspector's replay (port/linux/game/render_marks.c) */
+#include "render_marks.h"
 /* the display's peak and SDR white, as the backend says them, as text
 (Video Setup's DISPLAY PEAK row: its value, "800 NITS"; words, its panel's
 words); 0 where no renderer draws HDR (port/linux/src/d3d8_device.c) */
 int halo_hdr_display_text(int words, char *text, unsigned int size);
+/* the frame is drawn in HDR now (display.hdr and the display: Settings'
+COLOR DEPTH dimmed; port/linux/src/d3d8_device.c) */
+int halo_hdr_drawn(void);
+/* display.soft_particles (port/linux/src/d3d8_device.c): the effect shader's
+group drawn from now on can be soft against the scene's depth on a flat
+screen (rasterizer_xbox_transparent_geometry.c; 0 after it), and whether the
+renderer draws it so (Settings' SOFT PARTICLES row shown) */
+void halo_effect_soft(int soft);
+int halo_soft_effects_drawn(void);
 #ifndef HALO_HDR_KIND_NONE
 #define HALO_HDR_KIND_NONE 0
 #define HALO_HDR_KIND_FIRST_PERSON 1
@@ -313,6 +390,8 @@ int halo_hdr_display_text(int words, char *text, unsigned int size);
 #define HALO_HDR_KIND_LIGHT 32
 #define HALO_HDR_KIND_SELF_ILLUMINATION 64
 #define HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(stages) ((stages) << 8)
+#define HALO_HDR_KIND_EMITTER 128
+#define HALO_HDR_KIND_EMITTER_FIRST_PERSON (1 << 16)
 #endif
 /* a run whose frames nobody sees (debug.null_renderer, a dedicated server,
 no display: port/linux/src/d3d8_device.c): main.c draws none, and paces its
@@ -321,6 +400,13 @@ int halo_frames_unseen(void);
 void unseen_frame_wait(void);
 /* network.client_timeout_seconds, in milliseconds (port/linux/src/port_config.c) */
 unsigned long network_client_timeout_milliseconds(void);
+/* a co-op level won: the level the host asked for after it (Host Controls),
+at its difficulty, else campaign_next, at the game's (difficulty NONE)
+(port/linux/game/network_host_game.c) */
+char const *network_host_game_cooperative_won(char const *campaign_next, short *difficulty);
+/* the game halted on a fatal error, its report offered at the next start
+as a crash's (port/linux/src/report.c: main.c) */
+void report_session_halted(char const *reason);
 /* a dedicated server (halo --server: port/linux/src/server_mode.c,
 port/linux/game/server_director.c; docs/dedicated_server.md): whether this
 run is one; its start, before the game's (shell_xbox.c); its frames' pace
@@ -337,6 +423,9 @@ void server_console_output(const char *text);
 int halo_server_debug_echo(void);
 /* ... the level its rotation plays next, NULL if none (game_engine.c) */
 char const *server_director_first_level(void);
+/* the caches cleared at the start, where Settings' CLEAR CACHES asked for
+it (port/linux/src/game_caches.c: shell_xbox.c) */
+void game_caches_start(void);
 /* the cache slots' sources (port/linux/src/xbox_files.c): the size and
 modification time of the map file a slot was copied from, and the name,
 checksum and length of the map its whole copy holds, kept beside it once
@@ -388,13 +477,46 @@ once a frame (main_loop) */
 void map_cache_prefill_update(void);
 /* (port/linux/game/menu_pictures_render.c) the menus' pictures' pass runs */
 int menu_pictures_preparing(void);
-/* the deflection of a stick (0 the left, 1 the right) read as none, of
-32767: input.left_stick_dead_zone and input.right_stick_dead_zone, else the
-game's own (port/linux/src/xinput_sdl.c) */
-short halo_stick_dead_range(short stick);
-/* whether a controller's look turns the other way side to side:
+/* the deflection of a gamepad's stick (0 the left, 1 the right) read as
+none, of 32767: its player's input.left_stick_dead_zone and
+input.right_stick_dead_zone, else the game's own (port/linux/src/xinput_sdl.c) */
+short halo_stick_dead_range(short gamepad, short stick);
+/* the deflection of a gamepad's stick read as full, of 32767: 32767 (the
+rim, the original's) less its player's input.left_stick_outer_dead_zone or
+input.right_stick_outer_dead_zone (port/linux/src/xinput_sdl.c) */
+short halo_stick_live_range(short gamepad, short stick);
+/* a stick's dead range and live range, of 32767, from its settings'
+percentages (input.left_stick_dead_zone and input.left_stick_outer_dead_zone,
+or the right's): halo_stick_dead_range's and halo_stick_live_range's
+(port/linux/src/xinput_sdl.c) */
+void halo_stick_ranges(long percent, long outer, short *dead_range, short *live_range);
+/* a port's controller's own stick (0 the left, 1 the right) as last read, as
+XInput has it (up positive): never the keyboard's, the touch controls' or the
+scripted player's, which its reading merges in; none without a controller
+(port/linux/src/xinput_sdl.c) */
+void halo_controller_stick(short port, short which, short *x, short *y);
+/* the shape of a gamepad's look stick's dead zone: its player's
+input.look_dead_zone_shape, Auto (the aim style's: round under Modern, each
+direction's own under Classic), Axial or Round (port/linux/src/xinput_sdl.c) */
+enum { HALO_LOOK_DEAD_ZONE_AUTO, HALO_LOOK_DEAD_ZONE_AXIAL, HALO_LOOK_DEAD_ZONE_ROUND };
+int halo_look_dead_zone_shape(short gamepad);
+/* whether a gamepad's look turns the other way side to side: its player's
 input.invert_look_horizontal (port/linux/src/xinput_sdl.c) */
-int halo_look_horizontal_inverted(void);
+int halo_look_horizontal_inverted(short gamepad);
+/* a gamepad's look stick's turn up and down times this: its player's
+input.look_vertical_sensitivity, 1 the original's (port/linux/src/xinput_sdl.c) */
+float halo_look_vertical_sensitivity(short gamepad);
+/* a gamepad's look stick's turn zoomed in times this, on top of the zoom's
+own slowing: its player's input.stick_zoom_sensitivity, 1 the original's
+(port/linux/src/xinput_sdl.c) */
+float halo_stick_zoom_sensitivity(short gamepad);
+/* a gamepad's motors' strength, in percent (0 to 100): its player's
+input.rumble_strength, 100 the game's own (port/linux/src/xinput_sdl.c) */
+unsigned long halo_rumble_strength(short gamepad);
+/* whether a local player's controller aims as Modern does (input.aim_style,
+the player's own), and Modern's acceleration angle, as its tangent, and the
+push that accelerates, or -1 for the game's own (source/game/player_control.c) */
+int player_control_aim_modern(short local_player_index, float *acceleration_tangent, float *acceleration_threshold);
 /* ... and whether a controller's right stick is the flick stick
 (input.flick_stick) */
 int halo_linux_flick_stick(void);
@@ -402,7 +524,21 @@ int halo_linux_flick_stick(void);
 asked, which skips a Bink movie as a controller's button does
 (port/linux/src/sdl_platform.c; source/bink/bink_playback.c) */
 int platform_movie_skip_pressed(void);
+/* the player's move and look as the game read them, for the input trace
+(port/linux/src/input_trace.c): a frame's, or a sub-step's */
+void input_trace_player(int controller, int substep, float forward, float strafe, float yaw, float pitch);
+/* ... and the look stick's acceleration a tick (source/game/player_control.c) */
+void input_trace_aim(int controller, int modern, int accelerating, float acceleration_seconds);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
+/* the debug camera's mouse and keys (source/camera/director.c): whether the
+middle button, R and F are held, and the wheel's notches since the last call
+(port/linux/src/xinput_sdl.c) */
+int halo_linux_debug_camera_input(int *middle, int *up, int *down, float *wheel);
+
+/* replaces the file at to with the one at from, at once (a rename: on POSIX
+rename(2), on Windows MoveFileEx's replace), both Xbox paths; FALSE if it
+could not (port/linux/src/xbox_files.c) */
+int platform_replace_file(const char *from, const char *to);
 
 #endif

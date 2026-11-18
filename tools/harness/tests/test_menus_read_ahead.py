@@ -34,3 +34,15 @@ def test_read_ahead(case):
 def test_negative(fault, case):
     status, output = run(built(fault), case)
     assert status == CHECK_FAILED, output
+
+
+def test_read_ahead_after_renderer():
+    """the files are read once the renderer's capabilities and the VR mode are set: their platform="hdr" and "vr"
+    rows are kept or left out as they are read (Brightness lost its HDR rows when the reading began at the
+    platform's start, before the renderer's)"""
+    ready = function(read('port/linux/src/d3d8_device.c'), 'device_backend_ready')
+    ahead = ready.index('halo_menus_read_ahead();')
+    assert ready.index('xgpu_backend_initialize();') < ahead
+    assert ready.index('vr_initialize();') < ahead
+    for path in ('port/linux/src/sdl_platform.c', 'port/linux/game/menu_tags.c'):
+        assert 'halo_menus_read_ahead()' not in read(path), path

@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure
+from harness import skip_without_32_bit_abi
 
 CASES = ['frames', 'past-the-count', 'effect', 'simulation', 'offsets']
 
@@ -52,8 +53,15 @@ def generated(fault=None):
     return (('config.inc', config), ('under_test.inc', code))
 
 
+# what only the game's 32-bit ABI shows (harness.NATIVE_64_BIT)
+ABI_DEPENDENT = {
+    'offsets': "the object's fields are at the game's offsets, with its 32-bit pointers and longs",
+}
+
+
 @pytest.mark.parametrize('case', CASES)
 def test_case(case):
+    skip_without_32_bit_abi(ABI_DEPENDENT, case)
     status, output = run(build('frames_attachments', generated()), case)
     assert status == 0, output
 
@@ -76,5 +84,6 @@ FAULTS = [
 
 @pytest.mark.parametrize('fault', FAULTS, ids=['frames-hashed', 'effect-left-out', 'too-much-left-out', 'past-the-count'])
 def test_negative_control(fault):
+    skip_without_32_bit_abi(ABI_DEPENDENT, fault[2])
     status, output = run(build('frames_attachments', generated(fault[:2])), fault[2])
     assert status == CHECK_FAILED, output

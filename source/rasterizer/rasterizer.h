@@ -419,6 +419,15 @@ void rasterizer_present(struct bitmap_data *screenshot_bitmap, const point2d *sc
 void rasterizer_dispose(void);
 void rasterizer_window_get_fog(
 	struct render_fog *fog);
+/* port: a view of its own in a rectangle of the window, among its draws:
+its camera (its viewport the rectangle) and frustum, its depth cleared
+there, no fog; ended, the window's own again (the menus' Spartan:
+port/linux/game/menu_spartan.c) */
+void rasterizer_view_begin(
+	struct render_camera const *camera,
+	struct render_frustum const *frustum);
+void rasterizer_view_end(
+	void);
 void rasterizer_window_set_fog(
 	struct render_fog const *fog);
 void rasterizer_set_vblank_callback(
@@ -601,7 +610,7 @@ drawn into it if begin returns TRUE; after each caster's models, its region
 (NONE: its shadow was drawn into the map as before, its receivers to be
 drawn now); after every caster, the chain over the atlas; then each
 region's receivers, after receive */
-#define RASTERIZER_SHADOW_ATLAS_REGIONS 9
+#define RASTERIZER_SHADOW_ATLAS_REGIONS 49
 boolean rasterizer_shadow_atlas_begin(
 	void);
 short rasterizer_shadow_atlas_caster_end(
@@ -956,6 +965,17 @@ void rasterizer_text_get_scale(
 	real *scale,
 	real *origin_x,
 	real *origin_y);
+/* port: a line moved left by a fraction of a unit past the whole units it
+is laid out at, and cut to left and right (in the units it is laid out in)
+at fractions of a unit too, faded out over fade_left and fade_right units
+inside them (0: not), until set back to 0 and no cut (left > right): the
+menus' line scrolled in its box (ui_widget.c) */
+void rasterizer_text_set_shift(
+	real shift,
+	real left,
+	real right,
+	real fade_left,
+	real fade_right);
 void rasterizer_text_cache_flush(
 	void);
 void rasterizer_text_cache_dispose(

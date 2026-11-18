@@ -53,6 +53,26 @@ struct xgpu_backend_capabilities
 	/* visibility tests counted by the pixel shaders (atomic counters)
 	rather than by queries */
 	BOOL sample_counting;
+	/* a pixel shader that may discard is not tested by its depth before it
+	runs (a tile-based GPU's early test): a draw is better made without its
+	alpha test where no texel fails it (d3d8_device.c, "an alpha test that
+	cannot fail") */
+	BOOL alpha_test_drop;
+	/* ... and an alpha-tested opaque draw as its depth, then its colour
+	where the depth is its own ("a cut-out's depth first": asked for by a
+	switch alone, as a few of its pixels can differ) */
+	BOOL cutout_prepass;
+	/* a pass costs by the part of its target it clears and draws, not by the
+	target (XGPU_CLEAR_ALONE is of use: d3d8_clear_viewport_alone) */
+	BOOL clear_alone;
+	/* the lights' and shadows' draws are kept to what they can change, where
+	the pixels shaded are the cost: draws the game bounds (halo_draw_bounds:
+	a dynamic light's, a shadow's over the level) are scissored to their
+	bounds (d3d8_device.c, "the draws' bounds"), and with the enhanced
+	dynamic lights the triangles and models no light reaches are drawn by
+	the shader without the lights' loop ("the lightmap pass's triangles the
+	dynamic lights reach", halo_model_bounds) */
+	BOOL draw_bounds;
 	/* vertex streams' D3DCOLOR elements read as the Xbox has them (BGRA);
 	else streamed with their bytes swapped, never from the
 	mirror */
@@ -97,9 +117,34 @@ struct xgpu_backend_capabilities
 	/* display.prism_rt: hardware ray queries (xgpu_backend_rt_static,
 	xgpu_backend_rt_frame; docs/prism_rt.md) */
 	BOOL ray_tracing;
+	/* display.output_depth: an RGBA16 (unsigned normalized) SDR back
+	buffer, and its last pass dithered to the swapchain's 8 or 10 bits */
+	BOOL deep_sdr;
+	/* display.ambient_occlusion "ray_traced": the occlusion's rays traced
+	by the GPU's ray queries (xgpu_backend_world_ao_mesh, _instances) */
+	BOOL ray_queries;
+	/* display.soft_particles: an effect drawn on a flat screen (no views)
+	soft against the scene's depth, as the VR mode's eyes draw it (the pixel
+	key's vr_effect at 1: d3d8_device.c's soft_effect_key) */
+	BOOL soft_effects;
 };
 
 extern struct xgpu_backend_capabilities xgpu_backend_capabilities;
+/* the GPU, its API and driver, as the backend's host names them ("" if
+unknown: a report's, port/linux/src/report.c) */
+const char *xgpu_backend_device(void);
+/* a report's times (report_frame_presented), running counts of
+microseconds modulo 2^32: the GPU's on the frames, as the backend's host
+measures it; the renderer's thread's, playing the frames' records; the
+game's waits for the renderer and the display; and of those waits, the
+display's pacing and display.max_fps's. The function's value: whether the
+GPU's is measured (0: the backend measures none, gpu not written) */
+struct xgpu_backend_frame_times
+{
+	unsigned long gpu, render, waited, paced;
+};
+
+int xgpu_backend_frame_times(struct xgpu_backend_frame_times *times);
 
 /* ---------- the backend's life
 
@@ -140,6 +185,23 @@ void xgpu_backend_hdr(BOOL active, int mode, int paper_white_nits, int paper_whi
 pixels from the top of a window taller than it (no lower than its bottom),
 or centered (-1), from the next present on */
 void xgpu_backend_picture_top(int top);
+/* display.render_scale: a frame smaller than the window scaled up sharply
+(1) or smoothly (0, "original" resolution scaling's), from the next present */
+void xgpu_backend_sharp_upscale(int sharp);
+/* display.hdr_sdr_curve: the curve the HDR encoding takes the frame's
+values to light by (xgpu_hdr.h's XGPU_HDR_SDR_CURVE_*; AUTO: the
+platform's), from the next present on */
+void xgpu_backend_hdr_sdr_curve(int curve);
+/* display.hdr_peak_nits (#1122): the display's peak in nits the encoding
+takes (0: the system's), from the next frame on */
+void xgpu_backend_hdr_peak_nits(int value);
+/* display.hdr_gamut (#1124): the encoding expands the highlights' colours
+past sRGB's (1) or not (0), from the next frame on */
+void xgpu_backend_hdr_gamut(int value);
+/* debug.timings: the backend times each pass on the GPU every so many
+frames from the next frame on (0: no more), where debug.pass_times does
+not already (the Vulkan backend's; the performance overlay shows them) */
+void xgpu_backend_pass_times(int frames);
 /* display.gamma: an SDR frame curved by one over this as it is presented
 (each channel raised to that power: past 1 brighter), from the next present
 on; 1 none, which costs nothing. An HDR swapchain's frame never is. */
@@ -214,6 +276,18 @@ xgpu_backend_tone_map in bloom's bits XGPU_PRISM_TONE_SHIFT and up; 0 none */
 #define XGPU_PRISM_TONE_VIVID 2
 #define XGPU_PRISM_TONE_SHIFT 8
 void xgpu_backend_tone_map(xgpu_target target, const long corners[4], int bloom);
+/* debug.render_marks (xgpu_stream.h's MARK records, from
+port/linux/game/render_marks.c): what the draws from now on belong to, for
+the inspector's replay; the backends draw nothing for them. A view: the
+map, the game's tick, the window (-1: the frame's start) and its camera
+(position, forward, up, the horizontal field of view in radians, the
+viewport in the back buffer's pixels); an owner: its kind
+(XGPU_STREAM_MARK_*), an id (-1 none), a label, tag paths (NULL none), a
+menu widget's tag and its generator source */
+void xgpu_backend_mark_view(const char *map, unsigned long tick, long window, const float position[3],
+	const float forward[3], const float up[3], float field_of_view, const long viewport[4]);
+void xgpu_backend_mark_owner(int kind, long id, const char *label, const char *object, const char *model,
+	const char *shader, const char *bitmap, const char *widget, const char *source);
 /* display.ambient_occlusion "world" (xgpu_stream.h, docs/world-ao.md):
 the block the opaque surfaces' ambient light reads from here on (the
 field's place, the window's proxies; NULL none), and slices of the field
@@ -236,6 +310,12 @@ the structure's casters from here on (_STRUCTURE), ended with the block the
 receivers read (_END), or no shadow (_NONE); the atlases' resolution and
 the cascades' count */
 void xgpu_backend_prism_shadows(int phase, int resolution, int cascades, const struct xgpu_prism_shadows_block *block);
+/* display.ambient_occlusion "ray_traced" (xgpu_stream.h's WORLD_AO_MESH,
+_INSTANCES): a mesh of the scene, count triangles of nine floats (id 0:
+every mesh let go of), and the frame's instances of them */
+struct xgpu_world_ao_instance;
+void xgpu_backend_world_ao_mesh(unsigned long id, unsigned long count, const float *triangles);
+void xgpu_backend_world_ao_instances(const struct xgpu_world_ao_instance *instances, unsigned long count);
 BOOL xgpu_backend_display_hdr(float *headroom);
 BOOL xgpu_backend_display_white(float *nits);
 
@@ -276,11 +356,14 @@ their multisampled attachments (0: their textures) */
 void xgpu_backend_set_targets(xgpu_target color, int hud_group, xgpu_target depth, int views, int base, int samples);
 
 /* clears the bound targets' rectangles (left, top from the first row,
-width, height, in their pixels; count of them): XGPU_CLEAR_* */
+width, height, in their pixels; count of them): XGPU_CLEAR_*.
+XGPU_CLEAR_ALONE: what the colour target holds outside the rectangles is of
+no use from now on, and the backend may leave anything there (or clear it
+too: a backend that knows nothing of the flag clears the rectangles) */
 enum
 {
 	XGPU_CLEAR_RED = 1, XGPU_CLEAR_GREEN = 2, XGPU_CLEAR_BLUE = 4, XGPU_CLEAR_ALPHA = 8,
-	XGPU_CLEAR_COLOR = 16, XGPU_CLEAR_DEPTH = 32, XGPU_CLEAR_STENCIL = 64,
+	XGPU_CLEAR_COLOR = 16, XGPU_CLEAR_DEPTH = 32, XGPU_CLEAR_STENCIL = 64, XGPU_CLEAR_ALONE = 128,
 };
 void xgpu_backend_clear(unsigned long flags, const float color[4], float depth, unsigned long stencil,
 	const long (*rectangles)[4], unsigned long count);
@@ -323,6 +406,17 @@ enum
 enum
 {
 	XGPU_ADDRESS_WRAP, XGPU_ADDRESS_MIRROR, XGPU_ADDRESS_CLAMP, XGPU_ADDRESS_BORDER,
+	/* (u and v) a region of the texture, sampled as a texture of its own
+	whose border is beyond it (d3d8_texture_region): the draw's
+	texture_scale for the stage its width and height, then its left and
+	top, in the texture's coordinates; the shader draws the border */
+	XGPU_ADDRESS_REGION = 5,
+	/* (w, of a 2D texture) its texels are the high-res text's distance
+	fields (text_hires.c, xgpu_shader.h's XGPU_MSDF_RANGE): the shader samples the median
+	of red, green and blue as white of the coverage of the field's edge,
+	smoothed over a pixel of the screen (xgpu_shader.h's
+	XGPU_BORDER_MSDF); repeated on w, which a 2D texture has not */
+	XGPU_ADDRESS_MSDF = 6,
 };
 
 /* a sampler (zeroed, then filled: compared whole) */
@@ -531,8 +625,13 @@ struct xgpu_draw_uniforms
 	float screen_offset;
 	float texture_lod_bias[4];
 	/* display.ambient_occlusion "world": the draw's object's owner slot
-	(-1 none) and reference (xgpu.h; d3d8_device.c's halo_world_ao_object) */
-	float world_ao[2];
+	(-1 none) and reference (xgpu.h; d3d8_device.c's halo_world_ao_object),
+	and with "ray_traced" its owner among the ray-traced scene's instances
+	(its datum index plus one, 0 none: xgpu_stream.h's
+	xgpu_world_ao_instance); 1 where the draw is a two-sided model shader's
+	cards (halo_world_ao_cards: their occlusion about their most open
+	direction) */
+	float world_ao[4];
 };
 
 /* ---------- the pipeline key's values */
@@ -584,6 +683,10 @@ enum
 	unsigned words, xgpu.h's XGPU_AMBIENT_OCCLUSION_WORLD_INPUTS; the
 	backends' own target, never the game's) */
 	XGPU_FORMAT_WORLD_AO_INPUTS,
+	/* 16-bit unsigned normalized: the SDR back buffer with
+	display.output_depth (#1152), clamped and blended as BGRA8 is, at 65535
+	levels for the last pass to dither */
+	XGPU_FORMAT_RGBA16,
 };
 
 /* the vertex shader's lighting variant: none, a model lighting program's
@@ -688,6 +791,9 @@ BOOL xgpu_backend_pipeline(const struct xgpu_pipeline_key *key);
 alone (with the times the numbers have begun again), so that the front
 end's map preparation tells draws apart by it, not by the key's bytes */
 unsigned long xgpu_backend_pipeline_number(void);
+/* the pipeline keys defined so far (the performance overlay's count,
+debug.timings): read, never counted for it */
+unsigned long xgpu_backend_pipelines_defined(void);
 /* display.ambient_occlusion "world": the pipeline bound, one with the
 world's light, has a stand-in (a number of xgpu_backend_pipeline_number's;
 0 none), the pipeline the draw would have without the world, which the
@@ -937,6 +1043,9 @@ still to come (the ring's streams_pending: 0 with no stream or no store),
 and the frames that may be in flight, so that what is read describes a
 frame drawn so many frames ago (debug.camera_path_settle) */
 unsigned long xgpu_backend_streams_pending(unsigned long *frames_in_flight);
+/* the frames still to be told of xgpu_backend_frame_extra's (0: no load
+zone's switch coming): read, for debug.demo_perf_log's loads */
+unsigned long xgpu_backend_frame_extra_pending(void);
 /* Acknowledged loading ownership change, before map storage is reused. */
 void xgpu_backend_loading(int active);
 int xgpu_backend_loading_owned(void);

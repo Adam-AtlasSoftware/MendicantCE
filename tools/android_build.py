@@ -104,6 +104,13 @@ GUEST_FLAGS = [
     # the different rounding of fused operations
     "-ffp-contract=off",
     "-O2",
+    # the source lines of the code, for a crash's frames
+    # (tools/symbolize_crash.py; tools/android_asm_convert.py keeps them
+    # through the Darwin assembly), relative to the checkout, so that every
+    # computer's build writes the same; the image the builds carry is
+    # stripped of them (generate_guest_image)
+    "-gline-tables-only",
+    "-fdebug-compilation-dir=.",
 ]
 # the Android app's code paths, with the anti-aliasing a phone's GPU can
 # spare (d3d8_device.c); the Linux guests have the desktop's code paths
@@ -680,14 +687,20 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
         name=f"{prefix}_guest_link",
         command=(f"{ld} -m {arch.ld_emulation} -static -nostdlib -T {linker_script} -L {linker_fragments} "
                  f"--defsym=__guest_image_base={arch.image_base:#x} {link_flags}{' ' if link_flags else ''}"
-                 f"-Map $out.map -o $out @$out.rsp {libguestc}"
+                 f"$strip -Map $out.map -o $out @$out.rsp {libguestc}"
                  + (f" {arch.builtins(builtins_cc)}" if builtins_cc and arch.builtins(builtins_cc) else "")),
         description=f"{label} LINK $out",
         rspfile="$out.rsp",
         rspfile_content="$in_newline",
     )
-    n.build(outputs=image, rule=f"{prefix}_guest_link", inputs=objects,
-            implicit=[libguestc, linker_script, linker_fragments / "guest_init_array.ld"])
+    # the image the builds carry, and the same image with its source lines
+    # (GUEST_FLAGS' line tables), which they need not carry: the crash
+    # reports' frames are found in it (tools/symbolize_crash.py)
+    debug_image = build / "halo_guest.debug.elf"
+    for output, strip in ((image, "--strip-debug"), (debug_image, "")):
+        n.build(outputs=output, rule=f"{prefix}_guest_link", inputs=objects,
+                implicit=[libguestc, linker_script, linker_fragments / "guest_init_array.ld"],
+                variables={"strip": strip})
     # what the host cannot give the image: thread-local storage, the thread
     # pointer, an address outside its range (tools/guest_image_check.py);
     # what uses the image waits for this
@@ -698,11 +711,12 @@ def generate_guest_image(n: Writer, sln: Any, config: Dict[str, Any], *, arch: G
                  f"{'--pgo-generate ' if profile_generate else ''}--map $in.map $in $out"),
         description=f"{label} CHECK $in",
     )
+    # (and the image with its lines made with it, wherever the image is)
     n.build(outputs=checked, rule=f"{prefix}_guest_check", inputs=image,
-            implicit=[Path("tools/guest_image_check.py"), GUEST_ARCH_SCRIPT])
+            implicit=[Path("tools/guest_image_check.py"), GUEST_ARCH_SCRIPT, debug_image])
 
     # (and the assets' file the game reads beside it: embedded_assets.h)
-    return {"image": image, "checked": checked, "host_table_c": host_table_c,
+    return {"image": image, "debug_image": debug_image, "checked": checked, "host_table_c": host_table_c,
             "assets": assets_file(gen_dir / "hud_hires_assets.c")}
 
 
@@ -823,6 +837,8 @@ def generate_android_build(n: Writer, sln: Any) -> None:
     ])
     host_sources = host_memory_sources(sorted((PORT_DIR / "host").glob("*.c")), base_register) + [
         LINUX_DIR / "src" / "posix_files.c", LINUX_DIR / "src" / "posix_net.c",
+        LINUX_DIR / "src" / "posix_mcc_preview.c",
+        LINUX_DIR / "src" / "posix_mcc_share.c",
         # the app reads debug.sample_seconds from config.toml (host_main.c)
         TOML_DIR / "tomlc17.c",
     ]

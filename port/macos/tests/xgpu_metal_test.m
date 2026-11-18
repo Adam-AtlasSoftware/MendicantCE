@@ -114,6 +114,12 @@ uint64_t host_memory_watch_faults(void)
 	return 0;
 }
 
+/* (no game's frames: no stalls detected, host_stall.c) */
+void host_stall_note(const char *what)
+{
+	(void)what;
+}
+
 #ifdef TEST_STREAM
 void host_render_stream_gpu_completed(void)
 {
@@ -144,6 +150,11 @@ int host_screenshot_write(unsigned char *bgra, uint32_t width, uint32_t height, 
 const struct xgpu_stream_ring *host_render_stream_ring(void)
 {
 	return NULL;
+}
+
+void host_render_stream_gpu_time(uint64_t nanoseconds)
+{
+	(void)nanoseconds;
 }
 
 int host_render_stream_playing(void)

@@ -15,7 +15,8 @@ its own folder, never in the current one or by where the app is. Without
 maps, the first start copies them into the game's folder
 (platform_offer_game_data); a paths.data whose folder has no maps (moved, or
 on a drive not connected) is passed over for the game's folder, and the
-first start says so.
+first start says so. Settings' ADD MAPS asks for the same screen at the next
+start, with the maps there (map_sources.c).
 h:\ is the Halo Custom Edition install paths.custom_edition names, if any
 (its maps folder holds the resource maps Custom Edition maps need, and more
 maps).
@@ -31,6 +32,9 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include "load_trace.h"
 #include "install_layout.h"
 #include "server_mode.h"
+#include "steam_workshop.h"
+#include "mcc_local_package.h"
+#include "map_sources.h"
 
 #ifdef HALO_MACOS
 #include <SDL3/SDL.h>
@@ -199,6 +203,20 @@ const char *platform_data_root(void)
 			if (!has_maps(root))
 				platform_log("no maps/ folder found; set paths.data in config.toml to the folder that holds maps/");
 		}
+#if !defined(HALO_ANDROID) && !defined(HALO_IOS)
+		/* Settings' ADD MAPS asked for the maps screen at this start, to add
+		the source the game lacks (map_sources.c): taken first, so that a
+		screen that fails is not asked for again */
+		if (has_maps(root) && !halo_server_mode() && map_sources_requested())
+		{
+			struct map_sources sources;
+
+			map_sources_request(FALSE);
+			map_sources_read(root, &sources);
+			if (map_sources_screen_at_start(&sources, TRUE))
+				platform_offer_game_data(root, NULL);
+		}
+#endif
 		trim_separators(root);
 		platform_log("data root: %s (the game's log: debug.txt there)", root);
 	}
@@ -299,6 +317,54 @@ static BOOL names_match(const char *a, const char *b, unsigned long length)
 	return TRUE;
 }
 
+/* mcc_maps\<Workshop item id>\... where the data root has no such package folder: the item's maps folder in the
+player's Steam library (steam_workshop.h). The rest of the path after the id in rest */
+static int translate_workshop(const char *cursor, char *resolved, unsigned long size, const char **rest)
+{
+	char id[STEAM_WORKSHOP_ID_SIZE], package[1024], data_folder[1100], local_name[256];
+	unsigned long length = 0;
+
+	while (*cursor == '\\' || *cursor == '/')
+		cursor++;
+	/* MCC-owned local layout resolution is independent of Steam discovery. */
+	if (mcc_local_package_path(cursor, platform_data_root(), resolved, size))
+	{
+		*rest = cursor + strlen(cursor);
+		return 1;
+	}
+	if (!names_match(cursor, "mcc_maps", 8) || (cursor[8] != '\\' && cursor[8] != '/'))
+		return 0;
+	cursor += 9;
+	/* MCC-owned resource discovery also serves the virtual fopen path. */
+	if (steam_workshop_resource_path(cursor, platform_data_root(), resolved, size))
+	{
+		*rest = cursor + strlen(cursor);
+		return 1;
+	}
+	while (cursor[length] >= '0' && cursor[length] <= '9' && length + 1 < sizeof(id))
+	{
+		id[length] = cursor[length];
+		length++;
+	}
+	id[length] = 0;
+	if (!length || (cursor[length] && cursor[length] != '\\' && cursor[length] != '/'))
+		return 0;
+	/* a package folder of that name in the data root wins */
+	if (posix_find_entry_case_insensitive(platform_data_root(), "mcc_maps", local_name, sizeof(local_name)))
+	{
+		snprintf(data_folder, sizeof(data_folder), "%s/%s", platform_data_root(), local_name);
+		if (posix_find_entry_case_insensitive(data_folder, id, local_name, sizeof(local_name)))
+			return 0;
+	}
+	if (!steam_workshop_package_folder(id, package, sizeof(package)) ||
+		strlen(package) >= size)
+		return 0;
+	snprintf(resolved, size, "%s", package);
+	trim_separators(resolved);
+	*rest = cursor + length;
+	return 1;
+}
+
 /* the data root's files and folders kept elsewhere when the settings say
 (paths.logs, paths.custom_maps): a read-only data root, a dedicated
 server's maps mounted so. The rest of the path after them in rest */
@@ -311,6 +377,8 @@ static int translate_elsewhere(const char *cursor, char *resolved, unsigned long
 
 	while (*cursor == '\\' || *cursor == '/')
 		cursor++;
+	if (translate_workshop(cursor, resolved, size, rest))
+		return 1;
 	for (index = 0; logs_folder[0] && index < sizeof(logs) / sizeof(logs[0]); index++)
 	{
 		if (names_match(cursor, logs[index], strlen(logs[index]) + 1))
@@ -362,6 +430,11 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 				posix_make_directory(resolved);
 		}
 		cursor += 2;
+	}
+	else
+	{
+		/* (a path without a drive, as the package resources are named) */
+		translate_workshop(cursor, resolved, sizeof(resolved), &cursor);
 	}
 
 	while (*cursor)
@@ -698,7 +771,7 @@ static BOOL read_at(struct platform_file *file, LPVOID buffer, DWORD count, LPDW
 	BOOL positioned, unsigned long long offset)
 {
 	DWORD total = 0;
-	BOOL tracing = config_boolean("debug.load_trace");
+	BOOL tracing = halo_load_trace_enabled();
 	double started = tracing ? load_io_now() : 0.0;
 	double syscall_seconds = 0.0;
 	/* The renderer write-protects guest memory it caches (memory_watch.c),
@@ -765,7 +838,7 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 	BOOL positioned, unsigned long long offset)
 {
 	DWORD total = 0;
-	BOOL tracing = config_boolean("debug.load_trace");
+	BOOL tracing = halo_load_trace_enabled();
 	double started = tracing ? load_io_now() : 0.0;
 
 	while (total < count)
@@ -779,6 +852,16 @@ static BOOL write_at(struct platform_file *file, LPCVOID buffer, DWORD count, LP
 			if (errno == EINTR)
 				continue;
 			platform_set_last_error_from_errno(errno);
+			if (bytes_written)
+				*bytes_written = total;
+			return FALSE;
+		}
+		/* (nothing written of what is left, and no error: tried again it
+		would loop for good, so it fails as a write error, with what was
+		written) */
+		if (result == 0)
+		{
+			platform_set_last_error_from_errno(EIO);
 			if (bytes_written)
 				*bytes_written = total;
 			return FALSE;
@@ -1122,6 +1205,23 @@ BOOL WINAPI MoveFileA(LPCSTR existing_file_name, LPCSTR new_file_name)
 		return FALSE;
 	}
 	if (rename(from, to) != 0)
+	{
+		platform_set_last_error_from_errno(errno);
+		return FALSE;
+	}
+	return TRUE;
+}
+
+/* halo_linux_source_fixups.h's: the file at from put in to's place at once,
+replacing it (rename(2) replaces; the Windows host's renameat is MoveFileEx's
+replace) */
+int platform_replace_file(const char *from, const char *to)
+{
+	char from_path[1024], to_path[1024];
+
+	platform_translate_path(from, from_path, sizeof(from_path));
+	platform_translate_path(to, to_path, sizeof(to_path));
+	if (rename(from_path, to_path) != 0)
 	{
 		platform_set_last_error_from_errno(errno);
 		return FALSE;

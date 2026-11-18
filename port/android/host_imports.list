@@ -6,6 +6,8 @@
 # declarations.
 host_syscall
 host_log
+host_log_recent
+host_crash_record
 host_abort
 host_exit
 host_get_tp
@@ -29,11 +31,13 @@ host_sdl_create_window
 host_sdl_window_size_in_pixels
 host_sdl_set_relative_mouse
 host_sdl_poll_event
+host_sdl_input_held
 host_sdl_set_clipboard_text
 host_sdl_get_clipboard_text
 host_sdl_show_toast
 host_sdl_power_info
 host_sdl_open_url
+host_sdl_preferred_locales
 host_sdl_show_simple_message_box
 host_sdl_ask
 host_sdl_get_gamepads
@@ -47,8 +51,10 @@ host_sdl_close_gamepad
 host_sdl_gamepad_has_sensor
 host_sdl_set_gamepad_sensor_enabled
 host_sdl_gamepad_steam
+host_sdl_gamepad_guid
 host_sdl_scancode_name
 host_sdl_scancode_from_name
+host_sdl_key_from_scancode
 host_sdl_open_audio_stream
 host_sdl_put_audio_stream_data
 host_sdl_resume_audio_stream_device
@@ -61,6 +67,7 @@ host_render_stream_submit
 host_render_stream_wait
 host_render_stream_close
 host_audio_headphones
+host_caches
 host_https_request
 
 host_errno

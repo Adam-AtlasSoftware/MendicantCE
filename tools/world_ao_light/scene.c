@@ -738,11 +738,16 @@ int main(int argc, char **argv)
 			first or the second) */
 			float given = lightmap ? (float)(index % 3 - 1) : reference;
 
+			/* (and a model's as a two-sided shader's cards: about their most
+			open direction) */
 			printf("%s{\"point\": [%.9g, %.9g, %.9g], \"normal\": [%.9g, %.9g, %.9g], \"owner\": %.9g, "
-				"\"reference\": %.9g, \"lightmap\": %d, \"occlusion\": %.9g}\n", index || lightmap ? "," : "",
-				point[0], point[1], point[2], normal[0], normal[1], normal[2], owner, given, lightmap,
+				"\"reference\": %.9g, \"lightmap\": %d, \"occlusion\": %.9g, \"cards\": %.9g}\n",
+				index || lightmap ? "," : "", point[0], point[1], point[2], normal[0], normal[1], normal[2], owner, given,
+				lightmap, world_ao_occlusion((float const (*)[4])scene_parameters, &scene_volume, scene_proxies,
+				scene_proxy_count, point, normal, owner, given, lightmap, given >= 0.0f ? scene_pages[(int)given] : 1.0f, 0),
 				world_ao_occlusion((float const (*)[4])scene_parameters, &scene_volume, scene_proxies,
-				scene_proxy_count, point, normal, owner, given, lightmap, given >= 0.0f ? scene_pages[(int)given] : 1.0f));
+				scene_proxy_count, point, normal, owner, given, lightmap, given >= 0.0f ? scene_pages[(int)given] : 1.0f,
+				!lightmap));
 		}
 	}
 	printf("], \"field_shaded\": %ld}\n", scene_field_shaded(count));

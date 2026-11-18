@@ -182,9 +182,18 @@ int xgpu_metal_post_prepare(int smaa)
 		if (!function_make(function))
 			return prepare_failed(smaa, "functions");
 		/* (made on the backend's queues: a draw waits for its own, a map's
-		preparation for all of them) */
+		preparation for all of them; the pass into the target in each of
+		its formats, display.hdr's half floats too: pipeline_describe) */
 		pipeline_describe(function, XGPU_METAL_FORMAT_BGRA8, 1, &pipeline);
 		xgpu_metal_prepare(&pipeline);
+		if (function == XGPU_METAL_POST_FXAA || function == XGPU_METAL_POST_SMAA_BLEND)
+		{
+			pipeline_describe(function, XGPU_METAL_FORMAT_RGBA16F, 1, &pipeline);
+			xgpu_metal_prepare(&pipeline);
+			/* (display.output_depth's 16 bits) */
+			pipeline_describe(function, XGPU_METAL_FORMAT_RGBA16, 1, &pipeline);
+			xgpu_metal_prepare(&pipeline);
+		}
 	}
 	if (smaa && !post.area)
 	{
@@ -343,6 +352,8 @@ int xgpu_metal_post_panini_prepare(uint32_t samples)
 	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_BGRA8, samples, &pipeline);
 	xgpu_metal_prepare(&pipeline);
 	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_RGBA16F, samples, &pipeline);
+	xgpu_metal_prepare(&pipeline);
+	pipeline_describe(XGPU_METAL_POST_PANINI, XGPU_METAL_FORMAT_RGBA16, samples, &pipeline);
 	xgpu_metal_prepare(&pipeline);
 	return 1;
 }

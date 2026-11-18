@@ -18,15 +18,22 @@ thread plays N + 1 and the game writes N + 2.
 A backend that shows the frames on a display paces the game by it
 (frame_pacing.h): the game starts a frame only while at most
 FRAME_PACING_QUEUED of its frames wait for the display, and not before the
-budget a frame takes ahead of the display's latch it is for. Each frame's
-FRAME_END says when its input was read, for the time from then to the
-frame on screen.
+budget a frame takes ahead of the display's latch it is for (or, bounded
+only, without that start time). A backend whose display queues its frames
+(vsync's FIFO) bounds the frames ahead of its GPU as well
+(host_render_stream_frames_ahead): the game starts a frame only while at
+most one of its frames' work is unfinished, whatever the display says, so
+that a driver whose presents queue ahead of the display without a word
+(NVIDIA's on Windows, issue #274) holds no more than a frame of the game's.
+Each frame's FRAME_END says when its input was read, for the time from
+then to the frame on screen.
 */
 
 #include "host.h"
 #include "host_load_trace.h"
 #include "host_render_record.h"
 #include "host_render_stream.h"
+#include "host_performance.h"
 #include "frame_pacing.h"
 #ifdef HALO_VR
 #include "host_vr_render.h"
@@ -153,6 +160,7 @@ static void loading_set(const struct host_render_backend *backend, int active)
 	if (active == (int)loading.frame.active)
 		return;
 	host_load_trace("loading.received", "active=%d", active);
+	host_stall_loading(active);
 	loading.backend = backend;
 	loading.frame.active = active;
 	loading.ready = 0;
@@ -243,6 +251,11 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_PRISM_BAKE] = sizeof(struct xgpu_stream_prism_bake),
 	[XGPU_STREAM_SCENE_MATERIAL_MAPS] = sizeof(struct xgpu_stream_scene_material_maps),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
+	[XGPU_STREAM_SHARP_UPSCALE] = sizeof(struct xgpu_stream_value),
+	[XGPU_STREAM_HDR_SDR_CURVE] = sizeof(struct xgpu_stream_value),
+	[XGPU_STREAM_HDR_PEAK_NITS] = sizeof(struct xgpu_stream_value),
+	[XGPU_STREAM_HDR_GAMUT] = sizeof(struct xgpu_stream_value),
+	[XGPU_STREAM_PASS_TIMES] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_PANINI] = sizeof(struct xgpu_stream_panini),
 	[XGPU_STREAM_WORLD_AO_WINDOW] = sizeof(struct xgpu_stream_world_ao_window),
 	[XGPU_STREAM_WORLD_AO_FIELD] = sizeof(struct xgpu_stream_world_ao_field),
@@ -258,6 +271,11 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_MATERIAL_BIND] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_RT_STATIC] = sizeof(struct xgpu_stream_rt_static),
 	[XGPU_STREAM_RT_FRAME] = sizeof(struct xgpu_stream_rt_frame),
+	[XGPU_STREAM_WORLD_AO_MESH] = sizeof(struct xgpu_stream_world_ao_mesh),
+	[XGPU_STREAM_MARK_STRING] = sizeof(struct xgpu_stream_mark_string) + XGPU_STREAM_RECORD_ALIGNMENT,
+	[XGPU_STREAM_MARK_VIEW] = sizeof(struct xgpu_stream_mark_view),
+	[XGPU_STREAM_MARK_OWNER] = sizeof(struct xgpu_stream_mark_owner),
+	[XGPU_STREAM_WORLD_AO_INSTANCES] = sizeof(struct xgpu_stream_world_ao_instances),
 	[XGPU_STREAM_PIPELINE_STAND_IN] = sizeof(struct xgpu_stream_pipeline_stand_in),
 	/* (and its folder's path, at least its NUL) */
 	[XGPU_STREAM_SCREENSHOT] = sizeof(struct xgpu_stream_screenshot) + XGPU_STREAM_RECORD_ALIGNMENT,
@@ -290,6 +308,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_FRAME_END] = sizeof(struct xgpu_stream_record),
 	[XGPU_STREAM_DYNAMIC_LIGHTS_PREPARE] = sizeof(struct xgpu_stream_record),
 	[XGPU_STREAM_DYNAMIC_LIGHTS_UPLOAD] = sizeof(struct xgpu_stream_dynamic_lights_upload),
+	[XGPU_STREAM_DYNAMIC_LIGHTS_CHANGE] = sizeof(struct xgpu_stream_dynamic_lights_change),
 	[XGPU_STREAM_DYNAMIC_LIGHTS_HALOS] = sizeof(struct xgpu_stream_dynamic_lights_halos),
 	[XGPU_STREAM_DYNAMIC_LIGHTS_WORLD] = sizeof(struct xgpu_stream_dynamic_lights_world),
 	[XGPU_STREAM_VR_SUPPORTED] = sizeof(struct xgpu_stream_reply_record),
@@ -609,6 +628,26 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:
 	case XGPU_STREAM_SCENE_DECAL:
 	case XGPU_STREAM_SCENE_FOG:
+	case XGPU_STREAM_SHARP_UPSCALE:
+		CALL(sharp_upscale, value->value);
+		break;
+	case XGPU_STREAM_HDR_SDR_CURVE:
+		CALL(hdr_sdr_curve, value->value);
+		break;
+	case XGPU_STREAM_HDR_PEAK_NITS:
+		CALL(hdr_peak_nits, value->value);
+		break;
+	case XGPU_STREAM_HDR_GAMUT:
+		CALL(hdr_gamut, value->value);
+		break;
+	case XGPU_STREAM_PASS_TIMES:
+		CALL(pass_times, value->value);
+		break;
+	/* (debug.render_marks: the replay's, which reads them from its
+	recording; nothing to play) */
+	case XGPU_STREAM_MARK_STRING:
+	case XGPU_STREAM_MARK_VIEW:
+	case XGPU_STREAM_MARK_OWNER:
 		break;
 	case XGPU_STREAM_CATEGORY:
 		CALL(category, value->value);
@@ -732,6 +771,30 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 			return XGPU_STREAM_ERROR_RECORD;
 		CALL(material_bind, value->value);
 		break;
+	case XGPU_STREAM_WORLD_AO_MESH:
+	{
+		const struct xgpu_stream_world_ao_mesh *mesh = (const void *)start;
+
+		if (mesh->id >= XGPU_STREAM_WORLD_AO_MESHES || mesh->count > XGPU_STREAM_WORLD_AO_MESH_TRIANGLES ||
+			(!mesh->id && mesh->count) || (uint64_t)mesh->count * 36u != mesh->size ||
+			(mesh->size && !data_inside(decoder, start, size, mesh->data, mesh->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		CALL(world_ao_mesh, mesh);
+		break;
+	}
+	case XGPU_STREAM_WORLD_AO_INSTANCES:
+	{
+		const struct xgpu_stream_world_ao_instances *instances = (const void *)start;
+
+		/* (each instance's mesh and owner checked by the backend, which
+		leaves out one it has not) */
+		if (instances->count > XGPU_STREAM_WORLD_AO_INSTANCES_MAXIMUM ||
+			(uint64_t)instances->count * sizeof(struct xgpu_world_ao_instance) != instances->size ||
+			(instances->size && !data_inside(decoder, start, size, instances->data, instances->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		CALL(world_ao_instances, instances);
+		break;
+	}
 	case XGPU_STREAM_TARGET_CREATE:
 		CALL(target_create, (const void *)start);
 		break;
@@ -1162,6 +1225,18 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		CALL(dynamic_lights_upload, upload);
 		break;
 	}
+	case XGPU_STREAM_DYNAMIC_LIGHTS_CHANGE:
+	{
+		const struct xgpu_stream_dynamic_lights_change *change = (const void *)start;
+
+		if (change->count > XGPU_STREAM_DYNAMIC_LIGHTS_MAXIMUM || (change->offset & 15) || (change->size & 15) ||
+			change->offset > XGPU_STREAM_DYNAMIC_LIGHTS_CELLS_BYTES ||
+			change->size > XGPU_STREAM_DYNAMIC_LIGHTS_CELLS_BYTES - change->offset ||
+			(change->size && !data_inside(decoder, start, size, change->cells, change->size)))
+			return XGPU_STREAM_ERROR_BOUNDS;
+		CALL(dynamic_lights_change, change);
+		break;
+	}
 	case XGPU_STREAM_DYNAMIC_LIGHTS_WORLD:
 	{
 		const struct xgpu_stream_dynamic_lights_world *world = (const void *)start;
@@ -1379,12 +1454,29 @@ static struct
 	uint32_t frames_unfenced;
 	uint32_t retired_frames;
 	uint64_t frame_started;
+	/* the render thread's time playing records, and the guest's waits for
+	the display's pacing (the ring's render_microseconds and
+	paced_microseconds: a report's) */
+	uint64_t render_nanoseconds, paced_nanoseconds;
+	/* the render thread's time held by the display so far, and since when
+	it is (0: it is not; host_render_stream_display_blocking), under their
+	own lock: the guest reads them as it waits; and the time so far as the
+	guest's wait began (guest_wait) */
+	pthread_mutex_t blocked_lock;
+	uint64_t blocked_nanoseconds, blocked_since, guest_blocked;
+	/* (the render thread's: the GPU's time so far, and at the last frame's
+	performance hint) */
+	uint64_t gpu_nanoseconds, gpu_reported;
 	/* (frame_pacing.h) the backend paces the game by its display; the
 	frames the display has taken (shown, or dropped); its last latch and its
 	refreshes' period (nanoseconds of the game's clock); the frames' costs,
 	their input read to ready for the display */
 	int display_paced;
 	uint32_t frames_taken;
+	/* the most frames whose work may be unfinished, besides the one it has
+	just given, when the game starts one, and one (0: the ring's
+	frames_in_flight; host_render_stream_frames_ahead) */
+	uint32_t frames_ahead;
 	uint64_t latch, period;
 	struct frame_pacing_costs costs;
 	/* the refresh each of the last frames was started for (by its number,
@@ -1417,6 +1509,7 @@ static struct
 } render =
 {
 	.lock = PTHREAD_MUTEX_INITIALIZER,
+	.blocked_lock = PTHREAD_MUTEX_INITIALIZER,
 	.work = PTHREAD_COND_INITIALIZER,
 	.done = PTHREAD_COND_INITIALIZER,
 };
@@ -1429,9 +1522,40 @@ static uint64_t monotonic_nanoseconds(void)
 	return (uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec;
 }
 
+void host_render_stream_display_blocking(int blocking)
+{
+	uint64_t now = monotonic_nanoseconds();
+
+	pthread_mutex_lock(&render.blocked_lock);
+	if (blocking && !render.blocked_since)
+		render.blocked_since = now;
+	else if (!blocking && render.blocked_since)
+	{
+		render.blocked_nanoseconds += now - render.blocked_since;
+		render.blocked_since = 0;
+	}
+	pthread_mutex_unlock(&render.blocked_lock);
+}
+
+/* the render thread's time held by the display so far, to now */
+static uint64_t display_blocked(void)
+{
+	uint64_t blocked;
+
+	pthread_mutex_lock(&render.blocked_lock);
+	blocked = render.blocked_nanoseconds + (render.blocked_since ? monotonic_nanoseconds() - render.blocked_since : 0);
+	pthread_mutex_unlock(&render.blocked_lock);
+	return blocked;
+}
+
 void host_render_stream_set_backend(const struct host_render_backend *backend)
 {
 	render_backend = backend;
+}
+
+const struct host_render_backend *host_render_stream_backend(void)
+{
+	return render_backend;
 }
 
 void host_render_stream_gpu_completed(void)
@@ -1546,6 +1670,8 @@ static void *render_thread(void *argument)
 	pthread_setname_np(pthread_self(), "openh1 render");
 #endif
 	(void)argument;
+	host_performance_thread();
+	host_stall_render_thread();
 	pthread_mutex_lock(&render.lock);
 	for (;;)
 	{
@@ -1590,10 +1716,13 @@ static void *render_thread(void *argument)
 		{
 			uint32_t from = render.decoded, to = render.committed, reached;
 			int frame_ended;
+			uint64_t played, blocked;
 
 			pthread_mutex_unlock(&render.lock);
+			played = monotonic_nanoseconds();
+			blocked = display_blocked();
 			if (!render.frame_started)
-				render.frame_started = monotonic_nanoseconds();
+				render.frame_started = played;
 			atomic_store(&render_playing, 1);
 			reached = host_render_decode(render.decoder, from, to);
 			atomic_store(&render_playing, 0);
@@ -1603,11 +1732,17 @@ static void *render_thread(void *argument)
 			autorelease_pop(pool);
 			pool = autorelease_push();
 #endif
+			/* (less the time the display held it: no work, its pacing) */
+			blocked = display_blocked() - blocked;
+			played = monotonic_nanoseconds() - played;
+			render.render_nanoseconds += played > blocked ? played - blocked : 0;
+			__atomic_store_n(&render.ring->render_microseconds, (uint32_t)(render.render_nanoseconds / 1000u),
+				__ATOMIC_RELEASE);
 			frame_ended = render.decoder->frame_ended;
 			if (frame_ended)
 			{
 				uint64_t ready = render.frame_ready ? render.frame_ready : monotonic_nanoseconds();
-				uint64_t submitted, input = render.decoder->frame_input;
+				uint64_t submitted, input = render.decoder->frame_input, period, gpu;
 
 				/* (a frame's cost is its own work: the game's, and the render
 				thread's once it is free; not its wait for the thread, playing
@@ -1618,7 +1753,14 @@ static void *render_thread(void *argument)
 				if (input && submitted > input && render.frame_started > submitted)
 					input += render.frame_started - submitted;
 				frame_pacing_cost_add(&render.costs, input, ready);
+				period = render.period;
 				pthread_mutex_unlock(&render.lock);
+				/* (the frame's work, from its input to the frame handed to the
+				GPU, and the GPU's time since the last, against the display's
+				refresh: the clocks that keep it in time, Android's) */
+				gpu = render.gpu_nanoseconds - render.gpu_reported;
+				render.gpu_reported = render.gpu_nanoseconds;
+				host_performance_frame(input, input && ready > input ? ready - input : 0, gpu, period);
 				render.frame_ready = 0;
 				render.ring->decode_nanoseconds = (uint32_t)(monotonic_nanoseconds() - render.frame_started);
 				render.frame_started = 0;
@@ -1800,6 +1942,13 @@ void host_render_stream_display_paced(int paced)
 uint64_t host_render_stream_frame_input(void)
 {
 	return render.decoder ? render.decoder->frame_input : 0;
+}
+
+void host_render_stream_frames_ahead(int frames)
+{
+	pthread_mutex_lock(&render.lock);
+	render.frames_ahead = frames >= 0 ? (uint32_t)frames + 1 : 0;
+	pthread_mutex_unlock(&render.lock);
 }
 
 void host_render_stream_frame_taken(void)
@@ -1998,6 +2147,15 @@ static void display_wait(uint64_t *start)
 	}
 	if (render.ring->error || !render.display_paced)
 		return;
+	/* (bounded only: no start time, and no refresh the frame is for) */
+	if (render.display_paced == HOST_RENDER_DISPLAY_BOUNDED)
+	{
+		uint32_t next = render.ring->frames_submitted + 1;
+
+		render.targets[next % 8].frame = next;
+		render.targets[next % 8].target = 0;
+		return;
+	}
 	/* (and the time the guest says the next frame takes more than its
 	frames do, a load zone's switch: its start so much earlier, within a
 	refresh) */
@@ -2050,6 +2208,7 @@ static void guest_wait(uint64_t *start)
 	if (!*start)
 	{
 		*start = monotonic_nanoseconds();
+		render.guest_blocked = display_blocked();
 		render.ring->waits++;
 	}
 	/* (read by the render thread's loading picture without the lock) */
@@ -2065,6 +2224,21 @@ static void guest_waited(uint64_t start)
 		render.ring->wait_nanoseconds += (uint32_t)(monotonic_nanoseconds() - start);
 }
 
+/* (render.lock held) the guest's wait from start (0: none) for the render
+thread or the GPU: the part of it the display held the render thread for,
+its pacing (a FIFO swapchain's image or present), counted as the pacing's */
+static void guest_paced(uint64_t start)
+{
+	uint64_t waited, blocked;
+
+	if (!start)
+		return;
+	waited = monotonic_nanoseconds() - start;
+	blocked = display_blocked() - render.guest_blocked;
+	render.paced_nanoseconds += blocked < waited ? blocked : waited;
+	__atomic_store_n(&render.ring->paced_microseconds, (uint32_t)(render.paced_nanoseconds / 1000u), __ATOMIC_RELEASE);
+}
+
 void host_render_stream_submit(uint32_t flags)
 {
 	struct xgpu_stream_ring *ring = render.ring;
@@ -2072,6 +2246,11 @@ void host_render_stream_submit(uint32_t flags)
 
 	if (!render.running)
 		return;
+	if (flags & XGPU_STREAM_SUBMIT_FRAME)
+	{
+		host_performance_thread();
+		host_stall_frame();
+	}
 	pthread_mutex_lock(&render.lock);
 	render.committed = __atomic_load_n(&ring->committed, __ATOMIC_ACQUIRE);
 	if (flags & XGPU_STREAM_SUBMIT_FRAME)
@@ -2079,15 +2258,28 @@ void host_render_stream_submit(uint32_t flags)
 	pthread_cond_signal(&render.work);
 	while (!ring->error)
 	{
-		if ((flags & XGPU_STREAM_SUBMIT_FRAME) && ring->frames_submitted - render.retired_frames > ring->frames_in_flight)
+		if ((flags & XGPU_STREAM_SUBMIT_FRAME) && ring->frames_submitted - render.retired_frames >
+			(render.frames_ahead && render.frames_ahead <= ring->frames_in_flight ? render.frames_ahead - 1 :
+			ring->frames_in_flight))
 			guest_wait(&start);
 		else if ((flags & XGPU_STREAM_SUBMIT_SYNC) && (int32_t)(ring->released - render.committed) < 0)
 			guest_wait(&start);
 		else
 			break;
 	}
+	guest_paced(start);
 	if (flags & XGPU_STREAM_SUBMIT_FRAME)
+	{
+		/* (the time paced counted apart as well: a report's) */
+		uint64_t paced = render.display_paced ? monotonic_nanoseconds() : 0;
+
 		display_wait(&start);
+		if (paced)
+		{
+			render.paced_nanoseconds += monotonic_nanoseconds() - paced;
+			__atomic_store_n(&ring->paced_microseconds, (uint32_t)(render.paced_nanoseconds / 1000u), __ATOMIC_RELEASE);
+		}
+	}
 	guest_waited(start);
 	pthread_mutex_unlock(&render.lock);
 }
@@ -2102,6 +2294,7 @@ void host_render_stream_wait(uint32_t position)
 	pthread_mutex_lock(&render.lock);
 	while (!ring->error && (int32_t)(ring->released - position) < 0)
 		guest_wait(&start);
+	guest_paced(start);
 	guest_waited(start);
 	pthread_mutex_unlock(&render.lock);
 }
@@ -2140,8 +2333,20 @@ const struct xgpu_stream_ring *host_render_stream_ring(void)
 	return render.running ? render.ring : NULL;
 }
 
+void host_render_stream_gpu_time(uint64_t nanoseconds)
+{
+	struct xgpu_stream_ring *ring = render.ring;
+
+	if (!ring)
+		return;
+	render.gpu_nanoseconds = nanoseconds;
+	__atomic_store_n(&ring->gpu_microseconds, (uint32_t)(nanoseconds / 1000u), __ATOMIC_RELEASE);
+	__atomic_store_n(&ring->gpu_measured, 1u, __ATOMIC_RELEASE);
+}
+
 void host_render_stream_exiting(void)
 {
+	host_stall_summary();
 	if (render_backend && render_backend->exiting)
 		render_backend->exiting(render_backend->context);
 }

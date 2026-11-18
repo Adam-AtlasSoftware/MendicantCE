@@ -190,6 +190,24 @@ program header, four each) */
 void nv2a_vertex_program_decode(const DWORD *instructions, unsigned long instruction_count,
 	struct xgpu_vertex_program *program);
 
+/* the bit of a stage's border axes (the emitters' options, border) that
+says it samples a region of its texture (XGPU_ADDRESS_REGION): its
+texture_scale the region's width and height, then its left and top, and
+the border drawn beyond the region, on u and v */
+#define XGPU_BORDER_REGION 8
+
+/* the bit of a stage's border axes (the emitters' options, border) that
+says its texels are the high-res text's distance fields (XGPU_ADDRESS_MSDF,
+of a 2D texture): the texel sampled is white, its alpha the coverage of the
+field's edge, the median of red, green and blue at 0.5, smoothed over a
+pixel of the screen (XGPU_MSDF_RANGE texels of the field from its 0 to its
+1, as many pixels as the lookup's derivatives make them, at least one) */
+#define XGPU_BORDER_MSDF 16
+/* the range of the high-res text's distance fields (text_hires.c), in
+texels from the field's 0 to its 1; and as the shaders' source has it */
+#define XGPU_MSDF_RANGE 6.0f
+#define XGPU_MSDF_RANGE_TEXT "6.0"
+
 /* ---------- pixel programs
 
 A pixel shader runs in three parts: texture stages 0-3 fetch t0-t3, some of

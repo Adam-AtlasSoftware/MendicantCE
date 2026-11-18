@@ -4,13 +4,17 @@ Settings > Controls > Controller > **Button Remapping** edits separate P1–P4 l
 to input slots on this installation, not device serial numbers or player profiles.
 Empty settings keep the profile preset and stock shortcuts.
 
-Choose Movement, Combat, General, Chat and Voice or Debug Camera on the SHOW row. Select an action, release
+Choose Movement, Combat, General, Communication or Debug Camera on the SHOW row. Select an action, release
 the opening press, then press the desired button on that player's controller.
-All four D-pad directions and Back/Select are available, and the back paddles of a
-controller that has them (an Elite's P1 to P4, a DualSense Edge's, the Steam Deck's
-L4, L5, R4, R5 with Steam Input off): left and right step only through the paddles
-the controller has. Start/Options and Escape cancel capture. Button names follow the
-detected controller family (Xbox, PlayStation, Switch, Steam Deck). Stick axes, sensitivity and menu navigation keep their settings.
+All four D-pad directions and Back/Select are available, and the extra buttons of a
+controller that has them: the back paddles (an Elite's P1 to P4, a DualSense Edge's,
+the Steam Deck's L4, L5, R4, R5 with Steam Input off), the touchpad's click, and SDL's
+misc1 to misc6 (a Series pad's Share, a DualSense's mic, a Switch pad's Capture, the
+Steam Deck's right trackpad click, other pads' extra buttons). Left and right step only
+through the extra buttons the controller has. A Valve pad's Quick Access button and its
+sticks' and grips' touches are never offered. Start/Options and Escape cancel capture.
+Button names follow the detected controller family (Xbox, PlayStation, Switch, Steam
+Deck); PlayStation's Back is SELECT on a PS3 pad, SHARE on a PS4's, CREATE on a PS5's. Stick axes, sensitivity and menu navigation keep their settings.
 
 Left/right also cycles assignments, including **UNBOUND**. The menu's X action
 (Square on PlayStation, Y on Switch) clears the selected action; keyboard Delete
@@ -25,7 +29,12 @@ General includes Flashlight, Zoom, Scoreboard (hold) and Screenshot (one press).
 Movement buttons use forward/backward/strafe directions independently of stick
 presets, with the keyboard controls' diagonal and crouch-walk speeds.
 
-Communication includes All Chat, Team Chat, Vehicle Chat and Push to Talk.
+Communication includes Chat, Team Chat, Vehicle Chat, Push to Talk and Ping
+(port/linux/README.md, "Pings"). Ping's default is D-pad Right, the stock layouts'
+ping, which a new custom layout takes from Strafe Right (left unbound); an older
+layout keeps its D-pad Right for its strafe, and Ping starts unbound there.
+Chat opens on the channel that player chose last (`network.chat_channels`, as the
+keyboard's T does); Team Chat and Vehicle Chat open on their own channel.
 Chat opens once per press and belongs to the local player who opened it: their
 viewport, name, team and vehicle. The same controller drives the on-screen keyboard.
 Only one line can be edited at a time. A departing or disconnected owner cancels it.
@@ -81,9 +90,65 @@ continue") stay the stock buttons, as the menus do.
 - **Sticks**: the profile's STICK LAYOUT swaps the sticks (Southpaw). INVERT LOOK
   (the profile's) inverts up and down; INVERT TURNING
   (`input.invert_look_horizontal`) inverts side to side for every controller.
-  STICK DEAD ZONES (`input.left_stick_dead_zone`, `input.right_stick_dead_zone`,
+  STICK SETTINGS (`input.left_stick_dead_zone`, `input.right_stick_dead_zone`,
   OpenCE#526) sets each stick's dead zone, at the frame's reading and at every
-  sub-step's.
+  sub-step's. Its STICK TEST › opens Stick Test, a hand-written screen
+  (`screens/stick_test.xml`, docs/menu_screens.md), which shows each stick as
+  its controller last read it (never the keyboard) and then after the dead
+  zones and shape set, unsaved changes among them, in percent of its travel; a
+  circle per stick draws the dead zones (round or square) and both readings as
+  dots; DRIFT AT REST is the largest push held still near the middle since the
+  screen opened (`stick_test_menu.inc`).
+
+## Controller layouts
+
+Button Remapping's CONTROLLER LAYOUTS › (#1143) describes the extra buttons of the controller of the player
+whose settings they are: its EDIT BUTTONS › opens Controller Layout ([menu_screens.md](menu_screens.md)), where
+each back paddle, the touchpad and misc1 to misc6 can be given a name and a symbol, a legend of 1 to 3
+characters in a round or square cap of one of 8 colors (the legend black or white, whichever reads better on it:
+WCAG's contrast ratio). A prompt for an action on a described button then draws its symbol in place of the
+family's words ("P3", "L4"), in the HUD's messages and the help screens (as a key's cap is drawn,
+`hud_key_prompt_draw_symbol`), and Button Remapping and the VR Tutorial name it by its name. A button not
+described, a controller without a layout and every face button, trigger and stick are as before.
+
+A layout is kept by the controller's SDL GUID (the host's `host_sdl_gamepad_guid` in a guest build) as
+`<guid>.toml` in the data folder's `controller_layouts`, a small TOML file:
+
+```toml
+format = 1
+guid = "030000005e040000e002000000007801"
+name = "Fight stick"
+
+[[control]]
+input = "left_paddle"      # an extra button's token, as Button Remapping's
+name = "Left back"         # up to 20 characters
+legend = "LB"              # 1 to 3, no space
+shape = "round"            # or "square"
+fill = "#D03030"
+```
+
+The folder is read when the game first needs a layout and each time Controller Layout opens. A file of another
+name copied into it is taken as its controller's layout (written as `<guid>.toml` in place of its own, the copy
+removed). A file is read whole and strictly: any line it should not have (a key or table it may not have, a
+value out of range, a quote, a backslash or a control character, more than 16 KB) refuses all of it, logged
+with its line (`controller layouts: name.toml refused (line 7: a legend of 1 to 3 letters, digits or signs)`),
+and nothing of it is used. Only pictures and names come of a layout; input never does.
+
+**Sharing (#1144).** The page's SHARE: EXPORT writes the layout into `controller_layouts/shared/<its name>.toml`
+(a folder the game does not read as layouts), to give to another player. INCLUDE MY BINDINGS
+(`input.controller_layout_bindings`, off) adds the player's Button Remapping buttons as a `[bindings]` table of
+action = token (`jump = "left_paddle"`). To import, the other player copies the file into their
+`controller_layouts`; FILES says ALL READ or ONE REFUSED, its panel the refused file's line and why. Bindings in a
+file are checked as Button Remapping's (known actions and tokens, each action once, no two of a group on one
+button) or the whole file is refused; they are never put on anyone's buttons as the file is read or the controller
+connects. Where the controller's layout came with them, ITS BINDINGS › says how many of the player's buttons they
+would change and asks: KEEP MINE (focused) or USE THIS LAYOUT'S, which puts each through Button Remapping's assign
+rule on that player's port alone and writes it as Button Remapping's OK does. The system's save and open dialogs
+are not used: the game's file dialog bridge (`host_sdl_open_file_dialog`) is the first start's (on macOS the game
+data's panel) and the guest has no save dialog, so the folder is the way in and out for now.
+[controller_layouts.c](../port/linux/src/controller_layouts.c) reads and writes the files,
+`controller_remap_prompt_symbol` (controller_remap_game.c) gives a prompt its symbol and
+`controller_layout_menu.inc` (menu_functions.c's) is the page and the screen.
 
 ## Reading route and integration
 
@@ -127,26 +192,35 @@ continue") stay the stock buttons, as the menus do.
 ## Persistence and lifecycle
 
 `input.controller_p1` through `input.controller_p4` default to empty strings.
-New custom layouts use `v3:` followed by 26 comma-separated entries in this order:
+New custom layouts use `v4:` followed by 27 comma-separated entries in this order:
 
 ```
 jump, grenade type, use/reload, weapon, melee, flashlight, grenade, fire, crouch,
-zoom, scoreboard, screenshot, forward, backward, left, right, all chat, team chat,
+zoom, scoreboard, screenshot, forward, backward, left, right, chat, team chat,
 vehicle chat, push to talk, camera faster, camera slower, camera/player switch,
-camera raise, camera lower, cycle camera
+camera raise, camera lower, cycle camera, ping
 ```
 
+Ping is last so that a `v3:` layout (26 entries) is a `v4:` one's start; it is a
+gameplay and communication action (its button is unique among them), not the
+debug camera's.
+
 Entries are physical tokens: `south,east,west,north,rb,lb,lt,rt,ls,rs,dpad_up,
-dpad_down,dpad_left,dpad_right,back,left_paddle,right_paddle,left_paddle2,right_paddle2`,
-or `unbound`. The paddles are SDL's left and right paddle 1 and 2 (an Elite's P3, P1,
-P4, P2; the Steam Deck's L4, R4, L5, R5): they are not the Xbox pad's, so only a custom
-layout's actions take them, and a prompt names an action on one in words ("L4") where
-the HUD has no icon for it (`controller_remap_prompt_text`). South means A on Xbox, Cross on
+dpad_down,dpad_left,dpad_right,back,left_paddle,right_paddle,left_paddle2,right_paddle2,
+touchpad,misc1,misc2,misc3,misc4,misc5,misc6`, or `unbound`. The paddles are SDL's left
+and right paddle 1 and 2 (an Elite's P3, P1, P4, P2; the Steam Deck's L4, R4, L5, R5);
+`touchpad` and `misc1` to `misc6` are SDL's buttons of those names. None is the Xbox
+pad's, so only a custom layout's actions take them, and a prompt names an action on one
+in words ("L4", "TOUCHPAD") where the HUD has no icon for it
+(`controller_remap_prompt_text`). The extra tokens do not change the 27 entries, so the
+format stays `v4:`; an older version refuses a layout that uses them and falls back to
+the profile. South means A on Xbox, Cross on
 PlayStation and B on Switch. Tokens must be unique within gameplay/communication
 and separately within Debug; `unbound` may repeat. Unbound saves remain distinct
 from an empty setting (profile defaults).
 
-Old ten-action and 25-action `v2:` strings remain readable. The appended Cycle
+Old ten-action, 25-action `v2:` and 26-action `v3:` strings remain readable; Ping
+takes D-pad Right only where no older action has it. The appended Cycle
 Camera defaults to RB unless an old debug action already owns RB, in which case
 Cycle Camera starts unbound and can be assigned in the Debug group. Existing
 assignments are preserved. Ten-action strings' original actions take priority over
@@ -167,6 +241,10 @@ parsing, migration, replacement, cleared saves, all stock presets, per-player in
 pressure, capture, disconnects, focus and context changes, semantic commands,
 prompt identity and pending menu state. Chat ownership and hold-over checks use
 the real production functions.
+[Controller layout tests](../tools/test_controller_layouts.py) run controller_layouts.c on files in a folder: a
+layout's round trip, a file copied in taken, each kind of bad file refused whole, the legend's color, and the
+prompts' symbol with the defaults unchanged; [the screen's](../tools/harness/tests/test_controller_layout_screen.py)
+fit at 4:3, 16:9 and 21:9.
 [Context integration tests](../tools/test_controller_remap_context.py)
 combine the real widget-ownership check, remapper and director input for main-menu
 navigation, pause, camera cycling, alternate bindings, timing and lifecycle guards.

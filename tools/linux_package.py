@@ -10,13 +10,14 @@ anywhere and starts with bin/openh1:
 
     install.sh                                 its installer (tools/linux_install.sh: the Steam Deck's)
     bin/openh1                                 the game
+    bin/goath1                                 its command line's name (port/assets/linux/goath1: runs bin/openh1)
     lib/openh1/libSDL3.so.0                    its SDL (the rpath is $ORIGIN:$ORIGIN/../lib/openh1)
     share/openh1/brokers.txt                   internet play's brokers (network.brokers_file)
     share/openh1/masters.txt                   the master servers (network.masters_file)
     share/openh1/prepared.records              the stock maps' preparations' records (prepared_shipped.h)
     share/openh1/mendicant_models.aibw         MENDICANT AI's trained models (mendicant_shipped.h)
     share/openh1/openh1.assets                 the textures', fonts' and menus' bytes (embedded_assets.h)
-    share/openh1/relays.txt                    the relays offered (network.relays_file: none in it)
+    share/openh1/relays.txt                    the relays offered (network.relays_file)
     share/openh1/vr                            only in the VR build's (--vr): install.sh's sign of it
     share/openh1/steam/<kind>.png              Steam's library artwork, which install.sh gives its shortcut
                                                (port/assets/steam, tools/steam_art.py; the VR build's OpenH1 VR's)
@@ -73,6 +74,9 @@ MASTERS = ROOT / "port/assets/network/masters.txt"
 RELAYS = ROOT / "port/assets/network/relays.txt"
 # the stock maps' preparations' records (port/linux/src/prepared_shipped.h)
 PREPARED_RECORDS = ROOT / "port/assets/prepared/prepared.records"
+# goath1, the command players type (goath1 bots status): a script that runs
+# the bin/openh1 beside it (port/linux/src/cli_install.c)
+COMMAND = ROOT / "port/assets/linux/goath1"
 ASSETS = "openh1.assets"
 INSTALLER = ROOT / "tools/linux_install.sh"  # the tree's install.sh (and the Steam Frame package's)
 STEAM_ART = ROOT / "port/assets/steam"  # <variant>/<kind>.png (tools/steam_art.py)
@@ -150,9 +154,19 @@ def notices(platform: str) -> List[Tuple[Path, str]]:
         # the menus' headings' font (port/assets/fonts), embedded in every
         # build, whose SIL Open Font License asks each copy to carry it
         (ROOT / "port/assets/fonts/OpenCE-OFL.txt", "OpenCE-OFL.txt"),
+        # the font OpenCE is made from, Newtown, in the public domain, whose
+        # statement OpenCE-OFL.txt names
+        (ROOT / "port/assets/fonts/Newtown-LICENSE.txt", "Newtown-LICENSE.txt"),
+        # the high-res text's distance fields (port/third_party/msdfgen/msdf_gen.h,
+        # msdfgen translated to C), in every build, whose MIT license asks
+        # copies to carry its notice
+        (ROOT / "port/third_party/msdfgen/LICENSE.txt", "msdfgen-LICENSE.txt"),
         # the menus' XML parser (port/third_party/expat), in every build,
         # whose MIT license asks copies to carry its notice
         (ROOT / "port/third_party/expat/COPYING", "expat-COPYING.txt"),
+        # the MCC maps' BC texture decoder (port/third_party/bcdec), in every
+        # build, whose MIT license asks copies to carry its notice
+        (ROOT / "port/third_party/bcdec/LICENSE", "bcdec-LICENSE.txt"),
         # voice chat's codec (port/third_party/opus), in every build, whose
         # BSD license asks binaries to carry its notice
         (ROOT / "port/third_party/opus/COPYING", "opus-COPYING.txt"),
@@ -295,6 +309,7 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
         for art in sorted((STEAM_ART / ("openh1-vr" if vr else "openh1")).glob("*.png")):
             _copy(art, dist / "share" / NAME / "steam" / art.name)
     _copy(executable, dist / "bin" / NAME)
+    _copy(COMMAND, dist / "bin" / COMMAND.name)
     if library:
         _copy(library, dist / "lib" / NAME / library.name)
     _copy(BROKERS, dist / "share" / NAME / BROKERS.name)
@@ -320,7 +335,7 @@ def stage_tree(dist: Path, executable: Path, library: Optional[Path], notices: I
         # fork: a tree without OpenH1's installer is this fork's release or a package of it: its menu entry
         # names the fork (the installer's own entry, where a tree has it, is written by install.sh)
         entry = dist / "share/applications" / f"{NAME}.desktop"
-        entry.write_text(entry.read_text().replace("\nName=OpenH1\n", f"\nName={FORK_NAME}\n", 1))
+        entry.write_text(entry.read_text().replace("\nName=GOAT H1\n", f"\nName={FORK_NAME}\n", 1))
     for icon in sorted(ICONS.glob(f"{NAME}-*.png")):
         size = icon.stem.rsplit("-", 1)[1]
         _copy(icon, dist / "share/icons/hicolor" / f"{size}x{size}" / "apps" / f"{NAME}.png")

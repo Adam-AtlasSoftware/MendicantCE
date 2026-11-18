@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The behaviour of ce/main_menu.theater.xml's widgets, for the menu engine (docs/menu_engine.md; tools/menu_behaviour.py) -->
+<model>
+	<behaviour name="main_menu/theater/theater_screen" flags="pass_unhandled_to_focused_child pause_game">
+		<on event="b" back="true"/>
+		<on event="back" back="true"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/theater_list" flags="pass_unhandled_to_focused_child up_down_tabs_children">
+		<on event="x" run="port theater delete"/>
+		<on event="y" run="port theater record"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_1" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_2" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_3" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_4" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_5" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_6" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_7" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_8" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_9" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/op_replay_10" flags="pass_unhandled_to_focused_child">
+		<on event="a" run="port theater watch"/>
+		<on event="start" run="port theater watch"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/button_bar" flags="pass_unhandled_to_focused_child left_right_tabs_items"/>
+	<behaviour name="main_menu/theater/button_record">
+		<on event="a" run="port theater record"/>
+		<on event="start" run="port theater record"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/button_delete">
+		<on event="a" run="port theater delete"/>
+		<on event="start" run="port theater delete"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/theater/button_back">
+		<on event="a" back="true"/>
+		<on event="start" back="true"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+</model>

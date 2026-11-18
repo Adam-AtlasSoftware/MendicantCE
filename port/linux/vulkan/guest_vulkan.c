@@ -10,3 +10,4 @@ int host_vulkan_window_open(unsigned int window, unsigned int debug, const char 
 	const char *texture_folder, int interval, int battery_saver);
 /* display.vulkan_device, before the window opens (host_vulkan.c) */
 int host_vulkan_device_choose(const char *device);
+int host_vulkan_vrr(void);

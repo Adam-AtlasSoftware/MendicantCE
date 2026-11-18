@@ -618,6 +618,53 @@ static void rasterizer_sort_external(
 	return;
 }
 
+/* port: the first-person weapon camouflaged (#875). Its model parts are
+drawn as active camouflage here, after the world, not first as an opaque
+weapon is (draw_first_person_weapon_first), so its depth was tested against
+the world's and a wall near the player hid parts of it: the weapon and arms
+clipped into the walls, as on the Xbox. A run of first-person groups with a
+camouflaged one is drawn in the front of the depth range alone: never behind
+the world, still in order among its own parts, and in front of what is drawn
+after it. A run without one keeps the whole range, as the opaque weapon's
+depth (drawn in it) is what its counters and glows are tested against. Not
+in the VR mode's eyes, whose weapon is in the world */
+#define FIRST_PERSON_CAMOUFLAGE_DEPTH (1.0f / 256.0f)
+
+#ifdef HALO_VR
+boolean vr_render_eye_pass(void);
+#endif
+/* port: (rasterizer_xbox_transparent_geometry.c) */
+boolean rasterizer_transparent_geometry_group_camouflaged(struct transparent_geometry_group const *group);
+
+static boolean rasterizer_first_person_camouflaged(
+	long first_group_index)
+{
+	long group_index;
+
+#ifdef HALO_VR
+	if (vr_render_eye_pass())
+	{
+		return FALSE;
+	}
+#endif
+	for (group_index = first_group_index; group_index < transparent_geometry_group_count; group_index++)
+	{
+		struct transparent_geometry_group const *group =
+			transparent_geometry_groups + transparent_geometry_group_sorted_indices[group_index];
+
+		if (!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_first_person_bit))
+		{
+			break;
+		}
+		if (rasterizer_transparent_geometry_group_camouflaged(group))
+		{
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
 void rasterizer_transparent_geometry_draw(
 	boolean water)
 {
@@ -629,6 +676,9 @@ void rasterizer_transparent_geometry_draw(
 	if (transparent_geometry_group_count > 0)
 	{
 		boolean first_person_flag = FALSE;
+		/* port: (rasterizer_first_person_camouflaged) */
+		boolean first_person_camouflage_depth = FALSE;
+		float first_person_depth_range[2] = { 0.0f, 1.0f };
 
 		if (water)
 		{
@@ -681,6 +731,12 @@ void rasterizer_transparent_geometry_draw(
 						viewmodel_near_clip_distance(),
 						rasterizer_globals.first_person_weapon_far_clip_distance);
 					first_person_flag = TRUE;
+					first_person_camouflage_depth =
+						rasterizer_first_person_camouflaged(transparent_geometry_group_index);
+					if (first_person_camouflage_depth)
+					{
+						d3d8_viewport_depth_range(0.0f, FIRST_PERSON_CAMOUFLAGE_DEPTH, first_person_depth_range);
+					}
 				}
 			}
 			else
@@ -705,6 +761,11 @@ void rasterizer_transparent_geometry_draw(
 		{
 			viewmodel_projection_end();	/* port: (view_fov.c) */
 			rasterizer_set_frustum_z(0.0f, 0.0f);
+			/* port: (rasterizer_first_person_camouflaged) */
+			if (first_person_camouflage_depth)
+			{
+				d3d8_viewport_depth_range(first_person_depth_range[0], first_person_depth_range[1], NULL);
+			}
 		}
 	}
 	rasterizer_profile_end((short)profile);

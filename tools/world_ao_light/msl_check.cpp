@@ -169,6 +169,18 @@ int main(int argc, char **argv)
 		difference = std::fabs(world_sdf_occlusion(block, field, table, p, n, own) -
 			world_ao_field_occlusion_from(&scene_volume, point, normal, own));
 		worst_field = difference > worst_field ? difference : worst_field;
+		/* (and as a two-sided shader's cards: their most open direction, and
+		which it is) */
+		{
+			float3 found = n;
+			float direction[3] = { normal[0], normal[1], normal[2] };
+
+			difference = std::fabs(world_sdf_cards_occlusion(block, field, table, p, found, own, true) -
+				world_ao_cards_occlusion(&scene_volume, point, direction, own));
+			difference = std::fmax(difference, std::fabs(found.x - direction[0]) + std::fabs(found.y - direction[1]) +
+				std::fabs(found.z - direction[2]));
+			worst_field = difference > worst_field ? difference : worst_field;
+		}
 	}
 	printf("shapes %.3g reach %.3g proxies %.3g field %.3g; a vehicle's field %.3g at %ld points it shades\n", worst_shape,
 		worst_reach, worst_product, worst_field, worst_field_shape, shaded);

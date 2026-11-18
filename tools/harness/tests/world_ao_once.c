@@ -141,7 +141,7 @@ static void upsample_case(void)
 	float wall_normal[3] = { 0.0f, 0.0f, 1.0f }, post_normal[3] = { 0.6f, 0.0f, 0.8f };
 	unsigned int words[4];
 	float decoded[3], owner, value, distance;
-	int lightmap, all, tx, ty, x, y, bled = 0, wrong = 0;
+	int lightmap, all, cards, tx, ty, x, y, bled = 0, wrong = 0;
 
 	for (ty = 0; ty < TEXELS_HIGH; ty++)
 	{
@@ -152,14 +152,14 @@ static void upsample_case(void)
 			float const *normal = post ? post_normal : wall_normal;
 			struct world_ao_pass_texel *texel = &texels[ty * TEXELS_WIDE + tx];
 
-			world_ao_inputs_pack(normal, 3.0f, 1.0f, 0, 0, post ? 5.0f : 50.0f, words);
-			CHECK(world_ao_inputs_unpack(words, decoded, &owner, &value, &lightmap, &all, &distance), "unpacked");
+			world_ao_inputs_pack(normal, 3.0f, 1.0f, 0, 0, post, post ? 5.0f : 50.0f, words);
+			CHECK(world_ao_inputs_unpack(words, decoded, &owner, &value, &lightmap, &all, &cards, &distance), "unpacked");
 			texel->occlusion = post ? 0.3f : 0.9f;
 			texel->distance = distance;
 			texel->normal[0] = (float)(short)(words[0] & 0xffffu) / 32767.0f;
 			texel->normal[1] = (float)(short)(words[0] >> 16) / 32767.0f;
-			CHECK(fabsf(dot3(decoded, normal) - 1.0f) < 1.0e-4f && owner == 3.0f && distance == (post ? 5.0f : 50.0f),
-				"the inputs found again");
+			CHECK(fabsf(dot3(decoded, normal) - 1.0f) < 1.0e-4f && owner == 3.0f && distance == (post ? 5.0f : 50.0f) &&
+				cards == post, "the inputs found again");
 		}
 	}
 	for (y = 2; y < 2 * TEXELS_HIGH - 2; y++)

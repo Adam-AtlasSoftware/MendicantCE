@@ -145,6 +145,9 @@ enum
 	/* two signed bytes (display.ambient_occlusion "world"'s distance-field
 	scene's cascades) */
 	XGPU_METAL_FORMAT_RG8_SNORM,
+	/* four 16-bit unsigned normalized channels (display.output_depth's SDR
+	back buffer: clamped and blended as BGRA8, 65535 levels) */
+	XGPU_METAL_FORMAT_RGBA16,
 	XGPU_METAL_FORMAT_COUNT
 };
 
@@ -196,7 +199,20 @@ enum
 {
 	XGPU_METAL_ADDRESS_WRAP, XGPU_METAL_ADDRESS_MIRROR, XGPU_METAL_ADDRESS_CLAMP, XGPU_METAL_ADDRESS_BORDER,
 	XGPU_METAL_ADDRESS_MIRROR_ONCE,
+	/* XGPU_ADDRESS_REGION: the shader's (xgpu_metal_border_axes), clamped
+	to the edge here */
+	XGPU_METAL_ADDRESS_REGION,
+	/* XGPU_ADDRESS_MSDF (on w): the shader's (xgpu_metal_border_axes),
+	repeated here */
+	XGPU_METAL_ADDRESS_MSDF = 6,
 };
+
+/* the bit of a stage's border axes for a region (xgpu_shader.h's
+XGPU_BORDER_REGION) */
+#define XGPU_METAL_BORDER_REGION 8
+/* the bit of a stage's border axes for the high-res text's distance fields
+(xgpu_shader.h's XGPU_BORDER_MSDF) */
+#define XGPU_METAL_BORDER_MSDF 16
 
 /* the border colours Metal has; another is the emitter's to blend in (the
 design notes, 7) */
@@ -383,6 +399,9 @@ struct xgpu_metal_capabilities
 	uint8_t base_vertex;
 	uint8_t fans, line_loops;
 	uint8_t fill_modes;
+	/* the GPU and the system, in a few words (a report's:
+	port/linux/src/report.c) */
+	char device[96];
 };
 
 /* 1 on success (a Metal device); host_metal.m calls it */
@@ -601,6 +620,31 @@ enum
 };
 /* sets what the passes from now on draw; returns what it was */
 uint32_t xgpu_metal_pass_kind(uint32_t kind);
+
+/* A frame's GPU time pass by pass, for a caller (the replay's cost:
+port/tools/replay): the GPU's timestamps at each encoder's stages, as
+HALO_METAL_PASSES's. xgpu_metal_timing_request: the next frame begun is
+timed (0 if the GPU has no timestamps at its stages: nothing is);
+xgpu_metal_timing_draw: (the render thread) the draws handed on from now
+are the frame's index'th (UINT32_MAX: none of the caller's);
+xgpu_metal_timing_wait: waits up to seconds for the timed frame's GPU work
+to be done, then gives the time the GPU was busy with it, its passes (in
+the order they were encoded; each one's time its fragment stage's, or its
+encoder's, from its start or the end of those before it to its end, so
+that they sum to the busy time) and each draw's pass (UINT32_MAX: none),
+until the next request; 0 if it was not timed in that time. */
+struct xgpu_metal_pass_time
+{
+	const char *kind, *what;
+	uint32_t draws, width, height;
+	/* its span, its time (the frame's part), its stages' own times (a
+	blit's its encoder's, as fragment) */
+	double start_ms, end_ms, ms, vertex_ms, fragment_ms;
+};
+void xgpu_metal_timing_request(void);
+void xgpu_metal_timing_draw(uint32_t index);
+int xgpu_metal_timing_wait(double seconds, double *busy_ms, const struct xgpu_metal_pass_time **passes,
+	uint32_t *pass_count, const uint32_t **draw_pass, uint32_t *draws);
 
 /* statistics since the last call */
 struct xgpu_metal_statistics

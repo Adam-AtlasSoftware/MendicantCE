@@ -38,7 +38,11 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 37
+/* 38: GOAT H1's 20 to 23 (the ray traced occlusion's WORLD_AO_MESH and _INSTANCES, the render marks,
+DYNAMIC_LIGHTS_CHANGE, SHARP_UPSCALE, the HDR curve, peak and gamut, PASS_TIMES, the ring's GPU and
+render times, the capabilities' ray_queries to device) merged with PRISM v4's 20 to 37: PRISM's records
+after GOAT H1's, the scene records still last (docs/prism_scene_records.md) */
+#define XGPU_STREAM_VERSION 38
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -116,6 +120,21 @@ struct xgpu_stream_ring
 	that the next frame will (a load zone's switch in it): the host starts
 	that frame so much earlier (display_wait) */
 	uint32_t frame_extra_microseconds;
+	/* the host's, running counts of microseconds modulo 2^32 (read by the
+	guest with acquire loads at each frame presented: a report's,
+	port/linux/src/report.c): the GPU's time on the frames, at each frame's
+	end (host_render_stream_gpu_time: Metal's, the time the GPU was busy;
+	Vulkan's, from each frame's first work to its last), and nonzero once
+	the backend measures it; the render thread's time playing records (the
+	backend's calls included, but its waits for the display:
+	host_render_stream_display_blocking); the guest's waits for the
+	display's pacing, a part of wait_nanoseconds (display_wait's, and its
+	waits for the render thread or the GPU while the display held the render
+	thread) */
+	uint32_t gpu_microseconds;
+	uint32_t gpu_measured;
+	uint32_t render_microseconds;
+	uint32_t paced_microseconds;
 	/* the host's, at each frame's end: the replacement textures and meshes
 	(display.prism_textures, display.prism_models) drawn in its last frames
 	that are still to come, read, copied in or sharpened, drawn stock or
@@ -278,6 +297,38 @@ enum
 	/* display.ambient_occlusion "world"'s distance-field scene: a box of
 	its cascades (xgpu_backend_world_ao_cascades) */
 	XGPU_STREAM_WORLD_AO_CASCADES,
+	/* display.ambient_occlusion "ray_traced": a mesh of the scene the GPU's
+	ray queries trace, and the frame's instances of the meshes
+	(xgpu_backend_world_ao_mesh, _instances) */
+	XGPU_STREAM_WORLD_AO_MESH,
+	XGPU_STREAM_WORLD_AO_INSTANCES,
+	/* debug.render_marks: what the draws from now on belong to, for the
+	inspector's replay (port/macos/tools/halo_replay.m); the backends play
+	nothing for them (xgpu_stream_mark_*) */
+	XGPU_STREAM_MARK_STRING,
+	XGPU_STREAM_MARK_VIEW,
+	XGPU_STREAM_MARK_OWNER,
+	/* the enhanced dynamic lights' cells that changed
+	(xgpu_backend_dynamic_lights_upload; DYNAMIC_LIGHTS_UPLOAD's records,
+	of the whole, are the stream's version 22's) */
+	XGPU_STREAM_DYNAMIC_LIGHTS_CHANGE,
+	/* display.render_scale: a frame smaller than the window scaled up
+	sharply (value 1: the render scale's) or smoothly (0: "original"
+	resolution scaling's 640x480, as it always was) */
+	XGPU_STREAM_SHARP_UPSCALE,
+	/* display.hdr_sdr_curve: the curve the HDR encoding takes the frame's
+	values to light by (value: xgpu_hdr.h's XGPU_HDR_SDR_CURVE_*, AUTO the
+	backend's platform's) */
+	XGPU_STREAM_HDR_SDR_CURVE,
+	/* display.hdr_peak_nits (#1122): the display's peak in nits, of the
+	player's (value; 0 the system's) */
+	XGPU_STREAM_HDR_PEAK_NITS,
+	/* display.hdr_gamut (#1124): the highlights' colours expanded past
+	sRGB's (value 1; 0 sRGB's) */
+	XGPU_STREAM_HDR_GAMUT,
+	/* debug.timings: each pass timed on the GPU (value: every so many
+	frames, 0 none), as the setting changes (xgpu_backend_pass_times) */
+	XGPU_STREAM_PASS_TIMES,
 	/* display.prism_material_overlay: the overlay of the draws that follow
 	(xgpu_stream_material_overlay) */
 	XGPU_STREAM_MATERIAL_OVERLAY,
@@ -531,7 +582,7 @@ struct xgpu_stream_frame_end
 };
 
 /* a record of one value: ANTI_ALIASING_PREPARE (smaa), TARGET_DELETE,
-TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, VR_PASS, VR_TIMING
+TARGET_RESOLVE, PRESENT (the back buffer's target), PICTURE_POSITION, GAMMA, SHARP_UPSCALE, HDR_SDR_CURVE, HDR_PEAK_NITS, HDR_GAMUT, PASS_TIMES, VR_PASS, VR_TIMING
 (mark), PIPELINE (the id, XGPU_STREAM_PIPELINE_DEFINE's), VR_SKY (sky) */
 struct xgpu_stream_value
 {
@@ -542,6 +593,81 @@ struct xgpu_stream_value
 /* CATEGORY's value: the category (rasterizer.h's _rasterizer_profile_*,
 XGPU_STREAM_CATEGORY_NONE outside them) */
 #define XGPU_STREAM_CATEGORY_NONE 255u
+
+/* ---------- debug.render_marks (port/linux/game/render_marks.c)
+
+Written only with the setting on. A string a mark names is a number: the
+first mark that names it is preceded by MARK_STRING, its number and its
+bytes (inline, NUL-terminated); 0 names none. Numbers count from 1 since
+the stream began and are never given again. A VIEW mark says where the
+camera of the window drawn from now on is; an OWNER mark says what the
+draws from now on, until the next OWNER mark, belong to. */
+
+/* an owner's kind (the replay's names: halo_replay.m's mark_kind_names) */
+enum
+{
+	XGPU_STREAM_MARK_OTHER,
+	XGPU_STREAM_MARK_WORLD_OBJECT,
+	XGPU_STREAM_MARK_FIRST_PERSON,
+	XGPU_STREAM_MARK_BSP,
+	XGPU_STREAM_MARK_SKY,
+	XGPU_STREAM_MARK_DECAL,
+	XGPU_STREAM_MARK_EFFECT,
+	XGPU_STREAM_MARK_PARTICLE,
+	XGPU_STREAM_MARK_CONTRAIL,
+	XGPU_STREAM_MARK_LIGHTNING,
+	XGPU_STREAM_MARK_WEATHER,
+	XGPU_STREAM_MARK_WATER,
+	XGPU_STREAM_MARK_HUD,
+	XGPU_STREAM_MARK_TEXT,
+	XGPU_STREAM_MARK_MENU_WIDGET,
+	XGPU_STREAM_MARK_CINEMATIC_LETTERBOX,
+	XGPU_STREAM_MARK_DEBUG,
+	XGPU_STREAM_MARK_DETAIL_OBJECT,
+	XGPU_STREAM_MARK_LENS_FLARE,
+	XGPU_STREAM_MARK_FOG,
+	XGPU_STREAM_MARK_SCREEN_EFFECT,
+	XGPU_STREAM_MARK_LIGHT_VOLUME,
+	XGPU_STREAM_MARK_SHADOW,
+	XGPU_STREAM_MARK_CLEAR,
+	XGPU_STREAM_MARK_KINDS,
+};
+
+#define XGPU_STREAM_MARK_NONE 0xffffffffu
+
+/* MARK_STRING: then length bytes and a NUL (inline: at data) */
+struct xgpu_stream_mark_string
+{
+	uint32_t header;
+	uint32_t number, length, data;
+};
+
+/* MARK_VIEW: the map, the game's tick, the window (XGPU_STREAM_MARK_NONE:
+the frame's start, no camera) and its camera: position, forward and up
+(the world's units), the horizontal field of view (radians) and the
+viewport in the back buffer's pixels (x, y, width, height) */
+struct xgpu_stream_mark_view
+{
+	uint32_t header;
+	uint32_t map, tick, window;
+	float position[3], forward[3], up[3];
+	float field_of_view;
+	int32_t viewport[4];
+};
+
+/* MARK_OWNER: the kind (XGPU_STREAM_MARK_*), an id (an object's or a
+widget's handle, a tag's index; XGPU_STREAM_MARK_NONE), and strings: a
+label, the tags that matter (the object's definition, its model, the
+shader, a bitmap), a menu widget's tag and the generator source that wrote
+it (tools/menu_sources.py's) */
+struct xgpu_stream_mark_owner
+{
+	uint32_t header;
+	uint32_t kind, id;
+	uint32_t label;
+	uint32_t object, model, shader, bitmap;
+	uint32_t widget, source;
+};
 
 /* ---------- the backend's life */
 
@@ -554,6 +680,21 @@ struct xgpu_stream_capabilities
 	int32_t most_anisotropy;
 	uint8_t sample_counting, bgra_vertex_colors, base_vertex, sample_mask;
 	uint8_t mixed_constant_blend, dynamic_lights, dynamic_lights_preparable, hdr;
+	/* display.ambient_occlusion "ray_traced": the backend traces the
+	occlusion's rays by the GPU's ray queries (xgpu_backend_world_ao_mesh,
+	_instances: Vulkan's VK_KHR_ray_query) */
+	/* (and xgpu_backend_capabilities' clear_alone and draw_bounds, and in
+	cutout_prepass its alpha_test_drop, 1, and cutout_prepass, 2) */
+	uint8_t ray_queries, cutout_prepass, clear_alone, draw_bounds;
+	/* display.output_depth: the SDR back buffer can be RGBA16
+	(xgpu_backend.h's XGPU_FORMAT_RGBA16) */
+	uint8_t deep_sdr;
+	/* display.soft_particles: an effect drawn with no views can be soft
+	(the pixel key's vr_effect: xgpu_backend_capabilities' soft_effects) */
+	uint8_t soft_effects, pad[2];
+	/* the GPU, its API and driver, in a few words (a report's:
+	port/linux/src/report.c), NUL terminated */
+	char device[96];
 	/* display.prism_material_overlay drawn (MATERIAL_OVERLAY); the
 	lightmaps smoothed (display.prism_lightmaps: the pixel key's
 	lightmap_filter); display.prism_bloom drawn (BLOOM); display.prism_shadows
@@ -736,7 +877,9 @@ frame, its corners alike: the backend's previous texture of it), else 0;
 [1] the frame's number (the rays' turn); [2] the share of the new frame's
 occlusion blended into what is reprojected (1: none of the history); [3] 1
 where the dynamic objects' occlusion is traced, 0 where their shapes are
-walked instead (HALO_WORLD_AO_NO_TRACE, for measuring against) */
+walked instead (HALO_WORLD_AO_NO_TRACE, for measuring against), 2 where
+it is traced by the GPU's ray queries ("ray_traced": WORLD_AO_MESH, below;
+a backend without them, or before its scene is built, traces it as 1) */
 struct xgpu_world_ao_pass
 {
 	float camera[4][4];
@@ -875,8 +1018,8 @@ struct xgpu_stream_target_create
 	uint32_t header;
 	uint32_t target;
 	uint32_t width, height;
-	/* (format: XGPU_FORMAT_* of a colour target: BGRA8, or RGBA16F the
-	back buffer with display.hdr) */
+	/* (format: XGPU_FORMAT_* of a colour target: BGRA8, RGBA16F the back
+	buffer with display.hdr, or RGBA16 with display.output_depth) */
 	uint8_t depth, layers, format, pad;
 };
 
@@ -977,8 +1120,8 @@ masks and meters: xbox_textures.c).
 
 A stage may instead draw an image (XGPU_STREAM_SOURCE_IMAGE: a high-res
 replacement for the Xbox texture, xgpu_images.h): resource is its number,
-resource_format its pixels' kind (XGPU_IMAGE_*: RGBA, 4 bytes each, or a
-byte of a white pixel's coverage each), resource_size a serial that
+resource_format its pixels' kind (XGPU_IMAGE_*: RGBA, 4 bytes each),
+resource_size a serial that
 changes with its pixels (no two images have the same), data its first
 level's pixels, width by height, rows from the first; the host makes its
 levels (levels of them) from the first. */
@@ -1589,7 +1732,7 @@ struct xgpu_stream_draw_uniforms
 	float texture_scale[4][4];
 	float screen_offset;
 	float texture_lod_bias[4];
-	float world_ao[2];
+	float world_ao[4];
 };
 
 /* xgpu_backend_draw_state: what changed since the last follows, the
@@ -1752,12 +1895,27 @@ struct xgpu_stream_dynamic_lights_upload
 	struct xgpu_stream_dynamic_lights_block block;
 };
 
+/* the frame's lights: the block (its lights past count zero), and the
+cells' bytes from offset that changed since the stream's last change (size
+bytes, inline at cells; none: 0), the others as they were. The offset and
+size are multiples of 16, inside XGPU_STREAM_DYNAMIC_LIGHTS_CELLS_BYTES;
+the stream's first change is of all of them. */
+struct xgpu_stream_dynamic_lights_change
+{
+	uint32_t header;
+	uint32_t count;
+	uint32_t cells, offset, size;
+	struct xgpu_stream_dynamic_lights_block block;
+};
+
 /* the world's count texels (inline) at texels, count * 16 bytes; count
 at most xgpu.h's XGPU_DYNAMIC_LIGHTS_WORLD_TEXELS */
 #define XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_TEXELS (240u * 1024u)
 /* the cells' texture's slices of 32 x 32 texels (xgpu.h): the cells and the
 clusters' masks, uploaded each frame, then the world's */
 #define XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES 17u
+/* their bytes (xgpu.h's XGPU_DYNAMIC_LIGHTS_CELLS_BYTES) */
+#define XGPU_STREAM_DYNAMIC_LIGHTS_CELLS_BYTES (32u * 32u * XGPU_STREAM_DYNAMIC_LIGHTS_CELL_SLICES * 16u)
 #define XGPU_STREAM_DYNAMIC_LIGHTS_WORLD_SLICES 240u
 struct xgpu_stream_dynamic_lights_world
 {
@@ -2203,7 +2361,7 @@ geometry once for every consumer, the lights, the decals and the fog. They
 are sent only in the v4 modes (display.lighting "ce_deferred", "raster" and
 "pathtraced"); with "ce" (the default, Classic and Enhanced)
 none is ever written, so those frames stay byte for byte as they were. Their
-types are in the list above (XGPU_STREAM_VERSION 37) and the host's decoder
+types are in the list above (XGPU_STREAM_VERSION 38: after GOAT H1's own) and the host's decoder
 takes every one; M1 sends SCENE_MATERIAL and GBUFFER_DRAW (the guest's
 xgpu_backend_scene_material and _gbuffer_draw) and SCENE_STATIC (also with
 display.prism_rt on: the traced level is its), the others are specified and
@@ -2817,13 +2975,62 @@ struct xgpu_stream_prism_bake
 	char map_name[XGPU_BAKE_NAME];
 };
 
+/* ---------- display.ambient_occlusion "ray_traced" (docs/world-ao.md,
+"Hardware ray queries")
+
+The scene the occlusion's pass traces its rays through with the GPU's ray
+queries, where the backend has them (xgpu_stream_capabilities' ray_queries):
+the dynamic objects' occlusion is then found by the hardware's rays against
+their collision meshes, the structure's collision mesh stopping them, in
+place of the distance-field scene's step (the pass's history[3] 2).
+
+WORLD_AO_MESH: a mesh (a bottom-level acceleration structure, built once):
+its id (1 to XGPU_STREAM_WORLD_AO_MESHES - 1) and count triangles, nine
+floats each (each corner's x, y, z in the mesh's own space, the front faces
+counterclockwise seen from outside), at data (size: count * 36); id 0 lets
+go of every mesh (a map's end). An id is given once a map */
+#define XGPU_STREAM_WORLD_AO_MESHES 4096u
+#define XGPU_STREAM_WORLD_AO_MESH_TRIANGLES (1u << 20)
+struct xgpu_stream_world_ao_mesh
+{
+	uint32_t header;
+	uint32_t id, count;
+	uint32_t data, size;
+	uint32_t pad[3];
+};
+
+/* WORLD_AO_INSTANCES: the frame's instances of the meshes (a top-level
+acceleration structure of them, built before the next pass), count of
+them at data (size: count * sizeof(struct xgpu_world_ao_instance)): each
+its transform (a row-major 3x4, its mesh's space into the world), its
+mesh's id, its owner (its object's datum index plus one, the instance's
+custom index: a pixel of that object's own leaves it out; 0 the structure,
+which stops a ray and occludes nothing: the lightmaps and the field hold
+its occlusion) and its kind (XGPU_WORLD_AO_INSTANCE_*, the instance's mask:
+the structure's facing either way, an object's front faces alone) */
+#define XGPU_STREAM_WORLD_AO_INSTANCES_MAXIMUM 4096u
+#define XGPU_WORLD_AO_INSTANCE_STRUCTURE 1u
+#define XGPU_WORLD_AO_INSTANCE_OBJECT 2u
+#define XGPU_WORLD_AO_INSTANCE_OWNERS (1u << 24)
+struct xgpu_world_ao_instance
+{
+	float transform[3][4];
+	uint32_t mesh, owner, kind, pad;
+};
+struct xgpu_stream_world_ao_instances
+{
+	uint32_t header;
+	uint32_t count;
+	uint32_t data, size;
+};
+
 /* ---------- the layouts' sizes, alike on both sides */
 
 #define XGPU_STREAM_ASSERT_SIZE(type, size) _Static_assert(sizeof(type) == (size), #type "'s size")
 
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 108);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_ring, 124);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_frame_end, 12);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 28);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_capabilities, 132);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_static, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_rt_frame, 4 + 32 * 4 + 16 * 4 + XGPU_STREAM_RT_RIG_FLOATS * 4 +
 	XGPU_STREAM_RT_LIGHTS * 48);
@@ -2845,10 +3052,16 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_window, 16 + 32 + 32 + XGPU_
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_field, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_prepass, 96 + 64 + 64 + 16 + 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_cascades, 40);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_mesh, 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_world_ao_instance, 64);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_world_ao_instances, 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_prism_shadows_block, 4 * 64 + 8 * 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_shadows, 16 + 4 * 64 + 8 * 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_stand_in, 12);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_set_targets, 16);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mark_string, 16);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mark_view, 72);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_mark_owner, 40);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_clear, 36);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_read_target, 28);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_screenshot, 32);
@@ -2859,7 +3072,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_key, 312);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pixel_program, 440);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_pipeline_define, 760);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_dynamic_state, 68);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 580);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_draw_uniforms, 588);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_element, 6);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_layout_define, 20);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_vertex_stream, 20);

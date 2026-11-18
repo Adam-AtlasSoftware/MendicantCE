@@ -1,13 +1,21 @@
-/* CE warning graphics use crosshair states but are not aiming reticles. */
+/* Warning graphics (RELOAD, LOW AMMO, NO GRENADES...) use crosshair states
+ * but are not aiming reticles, on any map. */
 #ifndef CUSTOM_EDITION_HUD_H
 #define CUSTOM_EDITION_HUD_H
 #include "cache_file_formats.h"
 #include "custom_edition_cache.h"
 
+/* the crosshair states that are warnings: flash_ammo through
+ * flash_secondary_ammo_none_for_reload, and flash_fired_battery_depleted */
+static boolean hud_crosshair_state_warning(short state)
+{
+	return (state >= 3 && state <= 15) || state == 18;
+}
+
+/* CE maps' warnings, whose placement is translated below */
 static boolean custom_edition_hud_warning(short state)
 {
-	return custom_edition_cache_tags_loaded() &&
-		((state >= 3 && state <= 15) || state == 18);
+	return custom_edition_cache_tags_loaded() && hud_crosshair_state_warning(state);
 }
 
 /* Legacy HUDs placed warnings beside corner panels using offsets from a

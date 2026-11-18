@@ -50,6 +50,8 @@ typedef unsigned long xgpu_target;
 /* (a map's preparation's journal: not recorded here) */
 enum { JOURNAL_ANTI_ALIAS = 5, JOURNAL_PANINI };
 static BOOL journal_recording;
+/* (no extra view drawn: d3d8_device.c's halo_view_begin) */
+static int screen_view;
 static void journal_operation(unsigned long op, const void *arguments, unsigned long bytes)
 { (void)op; (void)arguments; (void)bytes; }
 struct xgpu_render_target { xgpu_target number; int samples; float scale[2]; };
@@ -57,7 +59,7 @@ struct render_target_entry { struct xgpu_render_target target; };
 static struct { BOOL gl_ready; int back_buffer; void *depth_stencil; } device;
 /* (the targets bound: the back buffer, as it is) */
 static BOOL bind_targets(BOOL *has_depth) { *has_depth = TRUE; return TRUE; }
-enum { _anti_aliasing_off, _anti_aliasing_fxaa, _anti_aliasing_smaa, _anti_aliasing_ssaa, _anti_aliasing_msaa };
+enum { _anti_aliasing_off, _anti_aliasing_fxaa, _anti_aliasing_smaa, _anti_aliasing_msaa };
 static int mode = _anti_aliasing_msaa;
 static int anti_aliasing(void) { return mode; }
 static struct render_target_entry back_buffer;

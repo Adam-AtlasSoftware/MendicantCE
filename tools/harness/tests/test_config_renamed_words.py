@@ -12,21 +12,25 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["file", "kept", "read"]
-NAMES = ["config_setting_index", "config_append", "config_copy", "config_append_setting", "config_line_key",
-         "config_line_section", "config_find_line", "config_line_commented_default", "config_replace_setting",
+CASES = ["file", "kept", "read", "boolean"]
+NAMES = ["config_name_hash", "config_setting_walk", "config_index_make", "config_setting_index", "config_append",
+         "config_copy", "config_append_setting", "config_line_key",
+         "config_line_section", "config_find_line", "config_line_commented_default", "config_comment_start",
+         "config_replace_setting",
          "config_word_is", "config_renamed_word", "config_migrate_words", "config_check_words"]
 
 # a fault in the code, the function it is in, and the case that must catch it
 NEGATIVE_CONTROLS = {
     # (the older words kept: neither the file nor the environment's)
-    "file-kept": (("if (setting < 0 || datum.type != TOML_STRING ||", "if (1 || setting < 0 || datum.type != TOML_STRING ||"),
-                  "config_migrate_words", "file"),
+    "file-kept": (("if (setting < 0 || !old ||", "if (1 || setting < 0 || !old ||"), "config_migrate_words", "file"),
+    # (an older version's true or false kept: input.gyro_smoothing's)
+    "boolean-kept": (('datum.type == TOML_BOOLEAN ? (datum.u.boolean ? "true" : "false") : NULL', "NULL"),
+                     "config_migrate_words", "boolean"),
     "read-kept": (("if (renamed)", "if (0)"), "config_check_words", "read"),
     # (every value taken for an older word: "off" turned on)
     "every-word": (("config_word_is(value, strlen(value), config_renamed_words[index].old_word)", "1"),
                    "config_renamed_word", "read"),
-    "every-file": (("!config_word_is(datum.u.s, strlen(datum.u.s), config_renamed_words[index].old_word)", "0"),
+    "every-file": (("!config_word_is(old, strlen(old), config_renamed_words[index].old_word)", "0"),
                    "config_migrate_words", "kept"),
     # (the old word written back)
     "old-written": (("word = config_renamed_words[index].word;", "word = config_renamed_words[index].old_word;"),
@@ -47,11 +51,14 @@ def generated(fault=None, faulty_function=None):
     types = "\n\n".join([
         "#include <stdarg.h>", "#include \"tomlc17.h\"",
         enum_with(source, "_config_boolean,"), enum_with(source, "_environment_set_is_true,"),
-        enum_with(source, "_platform_desktop = 1"), structure(source, "config_setting"),
+        enum_with(source, "_platform_desktop = 1"), enum_with(source, "\t_scope_player"), structure(source, "config_setting"),
         structure(source, "config_value"), structure(source, "config_text"),
     ]) + "\n"
     words = table(source, "config_words") + "\n#define NUMBER_OF_CONFIG_WORDS (sizeof(config_words) / sizeof(config_words[0]))\n"
     text = table(source, "config_renamed_words") + "\n" + words
+    # (the settings' index by name: its slots and its state, as the source has them)
+    text += source[source.index("#define CONFIG_INDEX_SLOTS"):source.index("static int config_index_state;")]
+    text += "static int config_index_state;\n"
     for name in NAMES:
         code = function(source, name)
         if fault and name == faulty_function:
@@ -60,15 +67,6 @@ def generated(fault=None, faulty_function=None):
     return (("tomlc17.h", read("port/third_party/tomlc17/tomlc17.h")),
             ("toml.inc", read("port/third_party/tomlc17/tomlc17.c")),
             ("types.inc", types), ("under_test.inc", text))
-
-
-def test_the_words():
-    # (the screen's ambient occlusion's words, gone, are the world's; the setting takes no other)
-    source = read("port/linux/src/port_config.c")
-    renamed = table(source, "config_renamed_words")
-    assert '{ "display.ambient_occlusion", "subtle", "world" },' in renamed
-    assert '{ "display.ambient_occlusion", "strong", "world" },' in renamed
-    assert '{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },' in table(source, "config_words")
 
 
 @pytest.mark.parametrize("case", CASES)

@@ -201,6 +201,12 @@ static void flag_render_proper(struct flag_datum_prefix *flag, struct flag_defin
 	drawn_at_all = TRUE;
 }
 
+/* (no feed of the HUD's Spartan link is drawn: spartan_link.c) */
+static boolean spartan_link_drawing(void)
+{
+	return FALSE;
+}
+
 #include "under_test.inc"
 
 static real_point3d lerp_point(real_point3d a, real_point3d b, real t)

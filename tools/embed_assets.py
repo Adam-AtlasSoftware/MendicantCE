@@ -47,6 +47,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HUD_ASSETS = Path("port/assets/hud")
 LAYOUT = HUD_ASSETS / "layout.json"
 CE_LAYOUT = HUD_ASSETS / "ce_layout.json"
+MCC_LAYOUT = HUD_ASSETS / "mcc_layout.json"
 CE_STOCK = HUD_ASSETS / "ce_stock.json"
 # the HUD textures whose bitmaps Halo Custom Edition lays out alike
 CUSTOM_EDITION_HUD = HUD_ASSETS / "custom_edition.json"
@@ -54,8 +55,11 @@ TITLE_ASSETS = Path("port/assets/titles")
 TITLE_LIST = TITLE_ASSETS / "titles.json"
 BUTTON_ASSETS = Path("port/assets/buttons")
 BUTTON_LIST = BUTTON_ASSETS / "buttons.json"
+CONTROLLER_ASSETS = Path("port/assets/controller_buttons")
+CONTROLLER_LIST = CONTROLLER_ASSETS / "buttons.json"
 FONT_ASSETS = Path("port/assets/fonts")
 FONT_LIST = FONT_ASSETS / "fonts.json"
+MSDF_ATLAS = FONT_ASSETS / "msdf_atlas.zlib"
 MENU_ASSETS = Path("port/assets/menus")
 MENU_LIST = MENU_ASSETS / "menus.json"
 # the tag packs' manifests, each maps/<name>.pack (port/linux/src/port_tag_packs.c)
@@ -90,7 +94,9 @@ def textures() -> List[tuple]:
     text)."""
     result = []
     for folder, listing, title in ((HUD_ASSETS, LAYOUT, False), (TITLE_ASSETS, TITLE_LIST, True),
-                                   (BUTTON_ASSETS, BUTTON_LIST, True), (HUD_ASSETS, CE_LAYOUT, False)):
+                                   (BUTTON_ASSETS, BUTTON_LIST, True), (HUD_ASSETS, CE_LAYOUT, False),
+                                   (HUD_ASSETS, MCC_LAYOUT, False),
+                                   (CONTROLLER_ASSETS, CONTROLLER_LIST, True)):
         if (ROOT / listing).is_file():
             result += [(folder, asset, title) for asset in json.loads((ROOT / listing).read_text())["assets"]]
     return result
@@ -194,11 +200,12 @@ def tag_pack_files() -> List[str]:
 
 def hud_asset_inputs() -> List[Path]:
     """The files the generated source is made from."""
-    inputs = [listing for listing in (LAYOUT, CE_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, FONT_LIST, MENU_LIST)
+    inputs = [listing for listing in (LAYOUT, CE_LAYOUT, MCC_LAYOUT, CE_STOCK, CUSTOM_EDITION_HUD, TITLE_LIST, BUTTON_LIST, CONTROLLER_LIST, FONT_LIST, MENU_LIST)
               if (ROOT / listing).is_file()]
     return [*inputs, *(folder / f"{asset['name']}.png" for folder, asset, _ in textures()),
             *(FONT_ASSETS / name for name in font_files()), *(MENU_ASSETS / name for name in menu_files()),
             *(TAG_PACK_ASSETS / name for name in tag_pack_files()),
+            *([MSDF_ATLAS] if (ROOT / MSDF_ATLAS).is_file() else []),
             *([WINDOW_ICON] if (ROOT / WINDOW_ICON).is_file() else []),
             *([LOADING_PICTURE] if (ROOT / LOADING_PICTURE).is_file() else []),
             *([MENU_CURSOR] if (ROOT / MENU_CURSOR).is_file() else []),
@@ -210,7 +217,8 @@ def hud_configure_inputs() -> List[Path]:
     folders, for files added or removed), not each file, which a change of a
     list may rename or remove."""
     inputs = []
-    for folder, listing in ((HUD_ASSETS, LAYOUT), (HUD_ASSETS, CE_LAYOUT), (TITLE_ASSETS, TITLE_LIST), (BUTTON_ASSETS, BUTTON_LIST),
+    for folder, listing in ((HUD_ASSETS, LAYOUT), (HUD_ASSETS, CE_LAYOUT), (HUD_ASSETS, MCC_LAYOUT), (TITLE_ASSETS, TITLE_LIST), (BUTTON_ASSETS, BUTTON_LIST),
+                            (CONTROLLER_ASSETS, CONTROLLER_LIST),
                             (FONT_ASSETS, FONT_LIST), (MENU_ASSETS, MENU_LIST)):
         if (ROOT / listing).is_file():
             inputs += [folder, listing]
@@ -399,6 +407,11 @@ def main() -> None:
         lines.append("\t{ 0 },")
     lines.append("};")
     lines.append(f"const unsigned int text_hires_embedded_count = {len(fonts)};")
+    # the fonts' glyphs' MSDF atlas (the high-res text's, made by
+    # tools/msdf_atlas.py; of size 0 where the checkout has none)
+    data = (ROOT / MSDF_ATLAS).read_bytes() if files and (ROOT / MSDF_ATLAS).is_file() else b""
+    lines.append(f"const unsigned int text_hires_msdf_offset = {assets.add(data) if data else 0}u;")
+    lines.append(f"const unsigned int text_hires_msdf_size = {len(data)}u;")
     lines.append("")
     # the menus' files (menu_files.h)
     lines.append('#include "menu_files.h"')

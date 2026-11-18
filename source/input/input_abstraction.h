@@ -78,6 +78,12 @@ port/linux/src/xinput_sdl.c), which turns the player itself: with the
 default stick layout, whose right stick looks */
 boolean input_abstraction_port_flick_stick(
 	short controller_index);
+/* port: the stick that alone looks (both its directions), whose dead zone
+Modern aim makes round (input.aim_style: input_xbox.c's
+input_port_fix_stick_dead_zones): the right with the default layout, the
+left with Southpaw; NONE with the Legacy layouts, which look with both */
+short input_abstraction_port_look_stick(
+	short controller_index);
 /* port: a sub-step's reading of a controller (port/linux/game/sim_rate.h):
 FALSE when it is the frame's */
 boolean input_abstraction_port_substep_state(

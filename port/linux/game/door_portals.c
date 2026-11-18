@@ -56,6 +56,7 @@ debug.dynamic_lights_log logs each door's pairing.
 
 /* port/linux/src/port_config.c */
 int config_boolean(const char *name);
+unsigned long config_changes(void);
 /* port/linux/src (halo.log) */
 void platform_log(const char *format, ...);
 /* structures.c */
@@ -352,7 +353,7 @@ static void door_portals_pair(
 		coverage = door_portals_coverage(TAG_BLOCK_GET_ELEMENT(&portal->vertices, 0, real_point3d),
 			(short)portal->vertices.count, &TAG_BLOCK_GET_ELEMENT(&bsp->planes, portal->plane_index, real_plane3d)->n,
 			door_portals.points, door_portals.point_counts, polygon_count);
-		if (config_boolean("debug.dynamic_lights_log") && coverage > 0.0f)
+		if (coverage > 0.0f && config_boolean("debug.dynamic_lights_log"))
 		{
 			platform_log("door portals: %s at (%.2f %.2f %.2f), position %d: portal %ld (clusters %d %d) %.0f%% covered",
 				tag_get_name(object->definition_index), object->object.position.x, object->object.position.y,
@@ -371,6 +372,11 @@ static void door_portals_pair(
 void door_portals_update(
 	void)
 {
+	/* (debug.doors_pass_light, read again as the settings change:
+	config_changes) */
+	static boolean pass_light_read;
+	static unsigned long pass_light_read_at;
+	static boolean pass_light;
 	struct structure_bsp *structure = global_structure_bsp_get();
 	struct object_iterator iterator;
 	struct machine_datum *machine;
@@ -378,7 +384,13 @@ void door_portals_update(
 	memset(door_portals.shut, 0, sizeof(door_portals.shut));
 	memset(door_portals.light_blocks, 0, sizeof(door_portals.light_blocks));
 	door_portals.shut_count = 0;
-	if (!structure || config_boolean("debug.doors_pass_light"))
+	if (!pass_light_read || pass_light_read_at != config_changes())
+	{
+		pass_light_read_at = config_changes();
+		pass_light_read = TRUE;
+		pass_light = config_boolean("debug.doors_pass_light") != 0;
+	}
+	if (!structure || pass_light)
 		return;
 	object_iterator_new(&iterator, _object_mask_machine, 0);
 	while ((machine = (struct machine_datum *)object_iterator_next(&iterator)) != NULL)

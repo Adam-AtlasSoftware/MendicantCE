@@ -1,6 +1,19 @@
 """Audio fixtures use the production structures, enums and capacities."""
 
-from harness import constant, enum_with, read, structure
+import re
+
+from harness import constant, enum_with, function, read, structure
+
+
+def class_table():
+    """The game's sound class table and names (sound_classes.c), with the class enum: a fixture's
+    sound_classes[] and sound_class_names[]."""
+    source = read("source/sound/sound_classes.c")
+    macro = re.search(r"^#define SOUND_CLASS_DEFINITION\(.*?[^\\]\n", source, re.M | re.S).group(0)
+    tables = [source[source.index(start):source.index("};", source.index(start)) + 2]
+              for start in ["struct sound_class_definition sound_classes[", "char const *sound_class_names["]]
+    return "\n".join([f"#define NUMBER_OF_SOUND_CLASSES {constant(source, 'NUMBER_OF_SOUND_CLASSES')}",
+                      enum_with(read("source/sound/sound_classes.h"), "_sound_class_music"), macro, *tables])
 
 
 def manager_types():
@@ -15,7 +28,9 @@ def manager_types():
                            (manager, "_fade_in_at_start_bit"), (manager, "_sound_spatialization_mode_none"),
                            (definitions, "_sound_definition_linked_permutations_bit"),
                            (definitions, "_looping_sound_fake_impulse_sound_bit"),
-                           (read("source/sound/sound_manager.h"), "_looping_sound_refresh_start")]:
+                           (read("source/sound/sound_manager.h"), "_looping_sound_refresh_start"),
+                           (read("port/linux/game/coop_sound_sync.h"), "_coop_sound_sync_start_part"),
+                           (read("port/linux/game/coop_sound_sync.h"), "_coop_sound_sync_play")]:
         text += enum_with(source, member) + "\n"
     for source, names in [(classes, ["MAXIMUM_SOUND_INSTANCES_PER_DEFINITION",
                                      "MAXIMUM_SOUND_INSTANCES_PER_OBJECT_PER_DEFINITION"]),
@@ -51,7 +66,9 @@ def stream_types():
 typedef long LONG, HRESULT;
 typedef int BOOL;
 typedef void *LPVOID, *LPDIRECTSOUND, *LPDIRECTSOUNDBUFFER;
+#ifndef _WIN32
 typedef long long __int64;
+#endif
 typedef void (*LPFNXMEDIAOBJECTCALLBACK)(void *, void *, unsigned long);
 #define CALLBACK
 #define STDMETHODCALLTYPE
@@ -63,7 +80,7 @@ typedef void (*LPFNXMEDIAOBJECTCALLBACK)(void *, void *, unsigned long);
         # These SDK status expressions include casts, unlike integer capacities.
         text += next(line for line in statuses.splitlines() if line.startswith("#define " + name + " ")) + "\n"
     for name in ["MAXIMUM_STREAM_PACKETS", "RESAMPLER_HISTORY", "HRTF_FRAMES", "HRTF_BANDS", "MAXIMUM_OUTPUT_CHANNELS",
-                 "VOICE_FLUSHING", "VOICE_FLUSHED"]:
+                 "CUT_FADE_FRAMES", "VOICE_FLUSHING", "VOICE_FLUSHED"]:
         text += f"#define {name} {constant(backend, name)}\n"
     for name in ["MAXIMUM_SOUND_CHANNELS", "NUMBER_OF_SOUND_CHANNEL_TYPES"]:
         text += f"#define {name} {constant(game, name)}\n"
@@ -89,3 +106,39 @@ def hand_off_state():
     backend = read("port/linux/src/dsound_sdl.c")
     start = backend.index("/* (voices_lock) the hand-offs the mixer has taken")
     return backend[start:backend.index("/* (the mixer's thread, voices_lock) the settings the game gave the voice */")]
+
+
+def pcm_permutation_rate():
+    """sound_definitions.h's sound_permutation_pcm_rate (a permutation imported and kept as 16-bit PCM at its own
+    rate) and its bounds, and sound_permutation_next_piece and sound_permutation_next (the pieces a long one is split
+    into, OpenH1 issue 1167)"""
+    text = read("source/sound/sound_definitions.h")
+    start = text.index("#define SOUND_PERMUTATION_PCM_MINIMUM_RATE")
+    end = text.index("/* ---------- structures */", start)
+    return text[start:end] + "\n"
+
+
+def permutation_picker():
+    """sound_definitions.c's pick of a pitch range's next permutation (sound_definition_next_permutation_from_seed)
+    with what it calls: the played bits of a range's permutations past 32 kept apart (OpenH1 issue 1170)"""
+    picker = read("source/sound/sound_definitions.c")
+    picker = picker[picker.index("/* ---------- constants */"):]
+    names = ["try_to_reset_permutations", "sound_definitions_played_beyond_clear", "sound_pitch_range_played_beyond",
+             "sound_pitch_range_permutation_played", "sound_pitch_range_permutation_set_played",
+             "try_to_reset_permutations_beyond", "sound_definition_next_permutation_from_seed"]
+    table = "static struct sound_played_beyond_table sound_played_beyond_table;"
+    assert table in picker, "sound_definitions.c's table of played bits past 32 is not where it was"
+    return "\n".join([enum_with(picker, "SOUND_PLAYED_BEYOND_LONGS"), structure(picker, "sound_played_beyond"),
+                      structure(picker, "sound_played_beyond_table"), table,
+                      *(function(picker, name) for name in names)]) + "\n"
+
+
+def dsound_port_formats_state():
+    """sound_dsound_xbox.c's record of its channels' stream formats (dsound_port_formats), and its kept streams'
+    structure, taken from the source"""
+    game = read("source/sound/sound_dsound_xbox.c")
+    kept_start = game.index("struct dsound_kept_stream\n{")
+    kept_end = game.index("};", kept_start) + 2
+    start = game.index("static struct\n{", kept_end)
+    end = game.index("} dsound_port_formats;", start) + len("} dsound_port_formats;")
+    return game[kept_start:kept_end] + "\n\n" + game[start:end] + "\n"

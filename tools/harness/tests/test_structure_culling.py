@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, inline, mutated, read, run, structure
+from harness import skip_without_32_bit_abi
 
 CASES = ["outside-near", "outside-far", "outside-side", "crossing-kept",
          "facing-away", "facing-toward", "facing-sphere", "edge-on-kept", "degenerate-kept",
@@ -53,10 +54,11 @@ CONTROLS = {
     "scratch-total-capacity": (("size += largest_group_count * scratch_unit_size;", "size += capacity * scratch_unit_size;"), "structure_culling_build_begin", "load-small-group-scratch"),
     "last-group-maximum": (("MAX(*maximum_group_count, count)", "count"), "structure_culling_build_lists", "load-small-group-scratch"),
     "sort-descending": (("distances[order[j - 1]] > distances[entry]", "distances[order[j - 1]] < distances[entry]"), "structure_culling_order_clusters", "cluster-order"),
+    "keep-moved-vertices": ((" && structure_culling_vertices_match(kept, structure)", ""), "structure_culling_switch", "switch-kept"),
     "rebuild-kept": (("structure_culling = *kept;", "free(kept->allocation);"), "structure_culling_switch", "switch-kept"),
     "drop-structure-check": (("structure_culling.structure == structure &&", "TRUE &&"), "structure_culling_data_matches", "stale-structure"),
     "ignore-zero-mask": (("!structure_culling_tests || ", ""), "structure_culling_traverse", "walk-fallback"),
-    "use-fog-far": (("render_far_clip_distance()", "render.camera.z_far"), "structure_culling_traverse", "walk-planes"),
+    "use-fog-far": (("render_far_clip_distance(render.local_player_index)", "render.camera.z_far"), "structure_culling_traverse", "walk-planes"),
     "skip-forward-normalization": (("scale_vector3d(&render.camera.forward, 1.0f / square_root(magnitude_squared3d(&render.camera.forward)),\n\t\t&planes[_structure_culling_frustum_plane_far].n);", "planes[_structure_culling_frustum_plane_far].n = render.camera.forward;"), "structure_culling_traverse", "walk-unit-forward"),
     "drop-source-box": (("if (bucket->source_bounds && !render_frustum_cube_visible", "if (FALSE && bucket->source_bounds && !render_frustum_cube_visible"), "structure_culling_traverse", "source-fog-rejected"),
     "clamp-finer-box": (("render_frustum_cube_visible(frustum, bucket->source_bounds, FALSE)", "render_frustum_cube_visible(frustum, &bucket->bounds, FALSE)"), "structure_culling_traverse", "source-fog-straddling"),
@@ -78,7 +80,7 @@ def generated(control=None):
              "structure_culling_cone_build", "structure_culling_cone_facing", "structure_culling_box_test",
              "structure_culling_split_class", "structure_culling_split_compare", "structure_culling_split_range",
              "structure_culling_split", "structure_culling_gather_pairings", "structure_culling_set_camera_radius",
-             "structure_culling_dispose", "structure_culling_switch", "structure_culling_pairing_points",
+             "structure_culling_dispose", "structure_culling_vertices_match", "structure_culling_switch", "structure_culling_pairing_points",
              "structure_culling_bounds_add", "structure_culling_build_group", "structure_culling_build_lists",
              "structure_culling_build_begin", "structure_culling_build_end", "structure_culling_builder_main",
              "structure_culling_builder_start", "structure_culling_job_wait", "structure_culling_wait",
@@ -158,13 +160,22 @@ static void fixture_visibility_surface_walk(struct structure_bsp *structure)
                                    "\n".join(parts.values()) + "\n" + surface_walk))
 
 
+# what only the game's 32-bit ABI shows (harness.NATIVE_64_BIT)
+ABI_DEPENDENT = {
+    "load-small-group-scratch": "the scratch's size is counted in the game's 32-bit pointers and longs",
+    "compact-allocation-failure": "the compacted lists' size is counted in the game's 32-bit pointers and longs",
+}
+
+
 @pytest.mark.parametrize("case", CASES)
 def test_case(case):
+    skip_without_32_bit_abi(ABI_DEPENDENT, case)
     status, output = run(build("structure_culling", generated()), case)
     assert status == 0, output
 
 
 @pytest.mark.parametrize("control", CONTROLS)
 def test_negative_control(control):
+    skip_without_32_bit_abi(ABI_DEPENDENT, CONTROLS[control][2])
     status, output = run(build("structure_culling", generated(control)), CONTROLS[control][2])
     assert status == CHECK_FAILED and "check failed:" in output, f"{control} escaped its CHECK: {status}: {output}"

@@ -280,7 +280,7 @@ void dynamic_lights_submit(
 				(double)out->radius, (double)out->color[0], (double)out->color[1], (double)out->color[2]);
 		}
 	}
-	if (config_boolean("debug.dynamic_lights_log") && !(dynamic_lights.frame % 72))
+	if (!(dynamic_lights.frame % 72) && config_boolean("debug.dynamic_lights_log"))
 	{
 		long projectiles = 0, models_only = 0;
 

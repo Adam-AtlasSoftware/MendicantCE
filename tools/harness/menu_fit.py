@@ -103,7 +103,8 @@ def texts_off_middle(widgets, names):
 
 def prompt_overflows(widgets, names):
     """the footers' prompts (prompt_*, with a part's picture) whose words end past their picture's frame: their
-    key's cap and words as drawn (port_settings.prompt_words_end), in a server browser with its keys"""
+    key's cap and words as drawn (port_settings.prompt_words_end), in a server browser with its keys, in the lobby
+    (which a browser opens) with the wider of its keys and the browser's"""
     problems = []
     for name in names:
         widget = widgets[name]
@@ -112,7 +113,8 @@ def prompt_overflows(widgets, names):
                 "text" not in attributes:
             continue
         browser = "/join_game/" in name
-        end = int(attributes.get("text_x", 0)) + port_settings.prompt_words_end(attributes["text"], browser)
+        end = int(attributes.get("text_x", 0)) + port_settings.prompt_words_end(attributes["text"], browser,
+                                                                                 "/lobby/" in name)
         room = int(attributes["width"]) - port_settings.PROMPT_RIGHT_ROOM
         if end > room:
             problems.append(f"{name}: its words end at {end}, its picture's room at {room}")

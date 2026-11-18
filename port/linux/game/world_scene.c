@@ -448,6 +448,8 @@ static void world_scene_static_instance(void)
 /* every object that may be drawn (not invisible, and in the map or held by
 one), as it's drawn: its root node in render_interpolation.c's pose (the
 frame is drawn between the ticks), its bounding sphere moved with it */
+boolean menu_spartan_object(long object_index); /* (menu_spartan.c) */
+
 static void world_scene_objects(void)
 {
 	struct object_iterator iterator;
@@ -463,9 +465,12 @@ static void world_scene_objects(void)
 		real_point3d center;
 		real radius;
 
+		/* (nor the menus' Spartans, drawn in a view of their own:
+		menu_spartan.c) */
 		if (TEST_FLAG(object->object.flags, _object_invisible_bit) ||
 			(!TEST_FLAG(object->object.flags, _object_connected_to_map_bit) &&
-				object->object.parent_object_index == NONE))
+				object->object.parent_object_index == NONE) ||
+			menu_spartan_object(object_get_ultimate_parent(object_index)))
 		{
 			continue;
 		}

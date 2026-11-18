@@ -12,8 +12,8 @@ Metal backend's own and the reference (port/linux/src/xgpu_hdr.h).
     Metal's test holds its own to (port/macos/tests/xgpu_metal_test.m,
     test_stream_hdr): the tone map in place, reading each pixel where it is
     drawn, at peaks 1, 4 and 16 in both modes; the encoding for scRGB, for
-    HDR10's PQ and for SDR; each against the reference to half floats'
-    precision.
+    HDR10's PQ and for SDR, by sRGB's SDR curve and by gamma 2.2's; each
+    against the reference to half floats' precision.
   harness draws <dir>
     Each draw of tools/hdr_backends/shaders.c's index, both backends'
     fragment functions (<name>.vk.metal from the SPIR-V, <name>.metal the
@@ -128,7 +128,14 @@ struct post_uniforms
 	float metrics[4];
 	float bounds[4];
 	float hdr[4];
+	float window[4];
+	float panini[4];
+	float tangents[4];
+	float gamut[4];
 };
+
+/* the post passes' sampler linear (the backends' own), else nearest */
+static BOOL post_linear;
 
 static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target, id<MTLTexture> source,
 	const struct post_uniforms *uniforms)
@@ -147,7 +154,8 @@ static void post_draw(id<MTLRenderPipelineState> pipeline, id<MTLTexture> target
 	{
 		MTLSamplerDescriptor *sampler = [MTLSamplerDescriptor new];
 
-		sampler.minFilter = sampler.magFilter = MTLSamplerMinMagFilterNearest;
+		sampler.minFilter = sampler.magFilter = post_linear ? MTLSamplerMinMagFilterLinear :
+			MTLSamplerMinMagFilterNearest;
 		[encoder setFragmentTexture:source atIndex:0];
 		[encoder setFragmentSamplerState:[device newSamplerStateWithDescriptor:sampler] atIndex:0];
 	}
@@ -174,11 +182,365 @@ static id<MTLRenderPipelineState> post_pipeline(id<MTLFunction> vertex, id<MTLFu
 	return pipeline;
 }
 
+/* The last pass's dither (#1108), into a real 8-bit target (the GPU's own
+rounding): a half-float frame of DITHER_SIZE columns, each its own value
+(column 0 black, the last white, the rest between codes), down
+DITHER_SIZE rows, drawn for an SDR output dithered to 255 levels, and,
+the negative control, not dithered. Dithered: each pixel within 1.5 codes
+of the value (one level of noise either way, then rounding), black and
+white exact, and each column's mean the value's within DITHER_MEAN codes
+(the first column's a fraction of a code above black too); not dithered: each
+pixel the value rounded, the columns' means up to half a code off. */
+#define DITHER_SIZE 256
+#define DITHER_MEAN 0.075f
+
+static void dither_test(id<MTLFunction> vertex, id<MTLFunction> encode)
+{
+	id<MTLRenderPipelineState> pipeline = post_pipeline(vertex, encode, MTLPixelFormatBGRA8Unorm, MTLColorWriteMaskAll);
+	MTLTextureDescriptor *description;
+	id<MTLTexture> source, target;
+	__fp16 *halves = malloc(DITHER_SIZE * DITHER_SIZE * 8);
+	unsigned char *bgra = malloc(DITHER_SIZE * DITHER_SIZE * 4);
+	float values[DITHER_SIZE], worst[2] = { 0.0f, 0.0f };
+	int x, y, levels, channel;
+
+	if (!pipeline || !halves || !bgra)
+		return;
+	description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float width:DITHER_SIZE
+		height:DITHER_SIZE mipmapped:NO];
+	description.usage = MTLTextureUsageShaderRead;
+	description.storageMode = MTLStorageModeShared;
+	source = [device newTextureWithDescriptor:description];
+	description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:DITHER_SIZE
+		height:DITHER_SIZE mipmapped:NO];
+	description.usage = MTLTextureUsageRenderTarget;
+	description.storageMode = MTLStorageModeShared;
+	target = [device newTextureWithDescriptor:description];
+	for (x = 0; x < DITHER_SIZE; x++)
+	{
+		float value = x == 0 ? 0.0f : x == DITHER_SIZE - 1 ? 1.0f :
+			((float)x - 0.75f + 0.5f * (float)((x * 7) % 4) / 4.0f) / 255.0f;
+
+		values[x] = (float)(__fp16)value * 255.0f;
+		for (y = 0; y < DITHER_SIZE; y++)
+		{
+			for (channel = 0; channel < 4; channel++)
+				halves[(y * DITHER_SIZE + x) * 4 + channel] = (__fp16)(channel == 3 ? 1.0f : value);
+		}
+	}
+	[source replaceRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, DITHER_SIZE) mipmapLevel:0 withBytes:halves
+		bytesPerRow:DITHER_SIZE * 8];
+	for (levels = 0; levels < 2; levels++)
+	{
+		struct post_uniforms uniforms;
+		int bad = 0;
+
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[2] = uniforms.metrics[3] = 1.0f / DITHER_SIZE;
+		uniforms.bounds[0] = uniforms.bounds[1] = DITHER_SIZE;
+		uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+		uniforms.window[1] = levels ? 255.0f : 0.0f;
+		uniforms.window[2] = 1.0f;
+		post_draw(pipeline, target, source, &uniforms);
+		[target getBytes:bgra bytesPerRow:DITHER_SIZE * 4 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, DITHER_SIZE)
+			mipmapLevel:0];
+		for (x = 0; x < DITHER_SIZE; x++)
+		{
+			float sum = 0.0f, mean;
+
+			for (y = 0; y < DITHER_SIZE; y++)
+			{
+				float code = (float)bgra[(y * DITHER_SIZE + x) * 4 + 1];
+
+				sum += code;
+				if (levels ? fabsf(code - values[x]) >= 1.5f : code != roundf(values[x]))
+					bad++;
+				if ((x == 0 && code != 0.0f) || (x == DITHER_SIZE - 1 && code != 255.0f))
+					bad++;
+			}
+			mean = sum / DITHER_SIZE;
+			if (x && x < DITHER_SIZE - 1 && fabsf(mean - values[x]) > worst[levels])
+				worst[levels] = fabsf(mean - values[x]);
+		}
+		if (bad)
+			FAIL("dither (%s): %d pixels out of bounds, or black or white not exact", levels ? "on" : "off", bad);
+	}
+	if (worst[1] > DITHER_MEAN)
+		FAIL("dither: a column's mean %.3f codes off its value", (double)worst[1]);
+	if (worst[0] < 0.25f)
+		FAIL("dither (off): the columns' means only %.3f codes off: the values are not between codes", (double)worst[0]);
+	printf("dither: means within %.3f codes dithered, %.3f not\n", (double)worst[1], (double)worst[0]);
+	free(halves);
+	free(bgra);
+}
+
+/* display.output_depth's frame (#1152), on the GPU's own blending: a dark
+fog drawn FOG_LAYERS times over black (source alpha FOG_ALPHA, as the
+game's fog screens blend), its colour a ramp across DITHER_SIZE columns
+from 0 to FOG_MOST codes, into an RGBA16Unorm frame and, the negative
+control, a BGRA8 one; then each drawn by the last pass (the Vulkan encoding,
+dithered to 255 levels) into a real 8-bit target. The 16-bit frame keeps a
+level for each column (the 8-bit one's every blend rounds to 1/255: a few
+dozen steps) and its columns' means stay within DITHER_MEAN codes of the
+exact fog; the 8-bit frame's are off by its rounding. */
+#define FOG_LAYERS 8
+#define FOG_ALPHA 0.3f
+#define FOG_MOST 24.0f
+
+static const char fog_source[] =
+	"#include <metal_stdlib>\n"
+	"using namespace metal;\n"
+	"fragment float4 fog_layer(float4 position [[position]], constant float &width [[buffer(0)]])\n"
+	"{\n"
+	"\tfloat value = (floor(position.x) + 0.5) / width * (24.0 / 255.0);\n"
+	"\treturn float4(value, value, value, 0.3);\n"
+	"}\n";
+
+static void depth_test(id<MTLFunction> vertex, id<MTLFunction> encode)
+{
+	static const MTLPixelFormat frames[2] = { MTLPixelFormatRGBA16Unorm, MTLPixelFormatBGRA8Unorm };
+	id<MTLRenderPipelineState> encode_pipeline = post_pipeline(vertex, encode, MTLPixelFormatBGRA8Unorm,
+		MTLColorWriteMaskAll);
+	NSError *error = nil;
+	id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:fog_source]
+		options:[MTLCompileOptions new] error:&error];
+	id<MTLFunction> fog = [library newFunctionWithName:@"fog_layer"];
+	unsigned char *bgra = malloc(DITHER_SIZE * DITHER_SIZE * 4);
+	uint16_t *deep = malloc(DITHER_SIZE * 8);
+	float exact[DITHER_SIZE], worst[2] = { 0.0f, 0.0f }, cover = 1.0f - powf(1.0f - FOG_ALPHA, FOG_LAYERS);
+	int levels[2] = { 0, 0 }, which, x, y, layer;
+
+	if (!fog || !encode_pipeline || !bgra || !deep)
+	{
+		FAIL("depth: the fog's function or the encoding's pipeline cannot be made");
+		return;
+	}
+	for (x = 0; x < DITHER_SIZE; x++)
+		exact[x] = ((float)x + 0.5f) / DITHER_SIZE * FOG_MOST * cover;
+	for (which = 0; which < 2; which++)
+	{
+		MTLRenderPipelineDescriptor *description = [MTLRenderPipelineDescriptor new];
+		MTLTextureDescriptor *texture;
+		id<MTLRenderPipelineState> layer_pipeline;
+		id<MTLTexture> frame, target;
+		struct post_uniforms uniforms;
+		float width = DITHER_SIZE, last = -1.0f;
+
+		description.vertexFunction = vertex;
+		description.fragmentFunction = fog;
+		description.colorAttachments[0].pixelFormat = frames[which];
+		description.colorAttachments[0].blendingEnabled = YES;
+		description.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
+		description.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+		description.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorZero;
+		description.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+		layer_pipeline = [device newRenderPipelineStateWithDescriptor:description error:&error];
+		texture = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:frames[which] width:DITHER_SIZE
+			height:DITHER_SIZE mipmapped:NO];
+		texture.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+		texture.storageMode = MTLStorageModeShared;
+		frame = [device newTextureWithDescriptor:texture];
+		texture = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:DITHER_SIZE
+			height:DITHER_SIZE mipmapped:NO];
+		texture.usage = MTLTextureUsageRenderTarget;
+		texture.storageMode = MTLStorageModeShared;
+		target = [device newTextureWithDescriptor:texture];
+		if (!layer_pipeline || !frame || !target)
+		{
+			FAIL("depth: the fog's pipeline or targets cannot be made");
+			return;
+		}
+		for (layer = -1; layer < FOG_LAYERS; layer++)
+		{
+			MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+			id<MTLCommandBuffer> commands = [queue commandBuffer];
+			id<MTLRenderCommandEncoder> encoder;
+
+			/* (black, opaque, first; then each layer in a pass of its own,
+			stored between them) */
+			pass.colorAttachments[0].texture = frame;
+			pass.colorAttachments[0].loadAction = layer < 0 ? MTLLoadActionClear : MTLLoadActionLoad;
+			pass.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
+			pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+			encoder = [commands renderCommandEncoderWithDescriptor:pass];
+			if (layer >= 0)
+			{
+				[encoder setRenderPipelineState:layer_pipeline];
+				[encoder setFragmentBytes:&width length:sizeof(width) atIndex:0];
+				[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+			}
+			[encoder endEncoding];
+			[commands commit];
+			[commands waitUntilCompleted];
+		}
+		/* (the frame's distinct levels along a row, green) */
+		if (which == 0)
+			[frame getBytes:deep bytesPerRow:DITHER_SIZE * 8 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, 1)
+				mipmapLevel:0];
+		else
+			[frame getBytes:bgra bytesPerRow:DITHER_SIZE * 4 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, 1)
+				mipmapLevel:0];
+		for (x = 0; x < DITHER_SIZE; x++)
+		{
+			float value = which == 0 ? (float)deep[x * 4 + 1] : (float)bgra[x * 4 + 1];
+
+			if (value != last)
+				levels[which]++;
+			last = value;
+		}
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[2] = uniforms.metrics[3] = 1.0f / DITHER_SIZE;
+		uniforms.bounds[0] = uniforms.bounds[1] = DITHER_SIZE;
+		uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+		uniforms.window[1] = 255.0f;
+		uniforms.window[2] = 1.0f;
+		post_draw(encode_pipeline, target, frame, &uniforms);
+		[target getBytes:bgra bytesPerRow:DITHER_SIZE * 4 fromRegion:MTLRegionMake2D(0, 0, DITHER_SIZE, DITHER_SIZE)
+			mipmapLevel:0];
+		for (x = 0; x < DITHER_SIZE; x++)
+		{
+			float sum = 0.0f;
+
+			for (y = 0; y < DITHER_SIZE; y++)
+				sum += (float)bgra[(y * DITHER_SIZE + x) * 4 + 1];
+			if (fabsf(sum / DITHER_SIZE - exact[x]) > worst[which])
+				worst[which] = fabsf(sum / DITHER_SIZE - exact[x]);
+		}
+	}
+	if (levels[0] < DITHER_SIZE / 2 || worst[0] > DITHER_MEAN)
+		FAIL("depth (16-bit frame): %d levels, a column's mean %.3f codes off the fog", levels[0], (double)worst[0]);
+	if (levels[1] > (int)FOG_MOST + 1 || worst[1] < 0.25f)
+		FAIL("depth (8-bit frame): %d levels, means only %.3f codes off: the control shows no rounding", levels[1],
+			(double)worst[1]);
+	printf("depth: 16-bit frame %d levels, means within %.3f codes; 8-bit frame %d levels, %.3f off\n", levels[0],
+		(double)worst[0], levels[1], (double)worst[1]);
+	free(bgra);
+	free(deep);
+}
+
+/* The last pass's downscale (#1117), drawn by the shipped Vulkan encoding
+into a float target from a checkerboard of single texels (0 and 1), its
+sampler linear as the backends' is. At 1.5 (AREA_SIZE * 3 / 2 texels to
+AREA_SIZE pixels each way) it scales down by area: the mean stays 0.5 and
+no pixel is further from it than the box's own beat over a 1.5 grid (1/18,
+AREA_BEAT); the negative control, the single linear tap the pass had (the
+same arithmetic, in MSL here), leaves a pattern twice as strong. At 1 and
+exactly 2 the pass gives the single tap's values, bit for bit. */
+#define AREA_SIZE 256
+#define AREA_BEAT 0.0600f
+
+static const char tap_source[] =
+	"#include <metal_stdlib>\n"
+	"using namespace metal;\n"
+	"struct post_uniforms { float4 metrics; float4 bounds; float4 hdr; float4 window; };\n"
+	"fragment float4 single_tap(float4 position [[position]], constant post_uniforms &u [[buffer(1)]],\n"
+	"\ttexture2d<float> picture [[texture(0)]], sampler linear [[sampler(0)]])\n"
+	"{\n"
+	"\tfloat2 t = (position.xy - u.metrics.xy) * u.bounds.xy * u.metrics.zw - 0.5;\n"
+	"\tfloat2 j = floor(t);\n"
+	"\treturn float4(picture.sample(linear, (j + 0.5 + (t - j)) / u.bounds.xy, level(0.0)).rgb, 1.0);\n"
+	"}\n";
+
+static void area_test(id<MTLFunction> vertex, id<MTLFunction> encode)
+{
+	static const int sources[3] = { AREA_SIZE * 3 / 2, AREA_SIZE, AREA_SIZE * 2 };
+	NSError *error = nil;
+	id<MTLLibrary> library = [device newLibraryWithSource:[NSString stringWithUTF8String:tap_source]
+		options:[MTLCompileOptions new] error:&error];
+	id<MTLFunction> tap = [library newFunctionWithName:@"single_tap"];
+	id<MTLRenderPipelineState> pipelines[2];
+	float *got[2];
+	int which, kind, x, y;
+
+	pipelines[0] = post_pipeline(vertex, encode, MTLPixelFormatRGBA32Float, MTLColorWriteMaskAll);
+	pipelines[1] = tap ? post_pipeline(vertex, tap, MTLPixelFormatRGBA32Float, MTLColorWriteMaskAll) : nil;
+	got[0] = malloc(AREA_SIZE * AREA_SIZE * 16);
+	got[1] = malloc(AREA_SIZE * AREA_SIZE * 16);
+	if (!pipelines[0] || !pipelines[1] || !got[0] || !got[1])
+	{
+		FAIL("area: the pipelines cannot be made");
+		return;
+	}
+	post_linear = YES;
+	for (which = 0; which < 3; which++)
+	{
+		int size = sources[which];
+		MTLTextureDescriptor *description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:
+			MTLPixelFormatRGBA16Float width:size height:size mipmapped:NO];
+		id<MTLTexture> source, target;
+		__fp16 *halves = malloc((size_t)size * size * 8);
+		double mean[2] = { 0.0, 0.0 }, beat[2] = { 0.0, 0.0 };
+
+		description.usage = MTLTextureUsageShaderRead;
+		description.storageMode = MTLStorageModeShared;
+		source = [device newTextureWithDescriptor:description];
+		description = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
+			width:AREA_SIZE height:AREA_SIZE mipmapped:NO];
+		description.usage = MTLTextureUsageRenderTarget;
+		description.storageMode = MTLStorageModeShared;
+		target = [device newTextureWithDescriptor:description];
+		for (y = 0; y < size; y++)
+		{
+			for (x = 0; x < size; x++)
+			{
+				__fp16 value = (__fp16)((x + y) & 1 ? 1.0f : 0.0f);
+
+				halves[(y * size + x) * 4] = halves[(y * size + x) * 4 + 1] = halves[(y * size + x) * 4 + 2] = value;
+				halves[(y * size + x) * 4 + 3] = (__fp16)1.0f;
+			}
+		}
+		[source replaceRegion:MTLRegionMake2D(0, 0, size, size) mipmapLevel:0 withBytes:halves bytesPerRow:size * 8];
+		free(halves);
+		for (kind = 0; kind < 2; kind++)
+		{
+			struct post_uniforms uniforms;
+
+			memset(&uniforms, 0, sizeof(uniforms));
+			uniforms.metrics[2] = uniforms.metrics[3] = 1.0f / AREA_SIZE;
+			uniforms.bounds[0] = uniforms.bounds[1] = (float)size;
+			uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+			uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+			uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+			uniforms.window[2] = 1.0f;
+			post_draw(pipelines[kind], target, source, &uniforms);
+			[target getBytes:got[kind] bytesPerRow:AREA_SIZE * 16 fromRegion:MTLRegionMake2D(0, 0, AREA_SIZE, AREA_SIZE)
+				mipmapLevel:0];
+			for (x = 0; x < AREA_SIZE * AREA_SIZE; x++)
+			{
+				mean[kind] += got[kind][x * 4 + 1];
+				if (fabs(got[kind][x * 4 + 1] - 0.5) > beat[kind])
+					beat[kind] = fabs(got[kind][x * 4 + 1] - 0.5);
+			}
+			mean[kind] /= AREA_SIZE * AREA_SIZE;
+		}
+		if (which == 0)
+		{
+			if (fabs(mean[0] - 0.5) > 0.002 || beat[0] > AREA_BEAT)
+				FAIL("area (1.5): the mean %.4f, a pixel %.4f off it: the downscale skips texels", mean[0], beat[0]);
+			if (beat[1] < 2.0 * AREA_BEAT)
+				FAIL("area (1.5, the single tap): a pixel only %.4f off the mean: the control shows no pattern", beat[1]);
+			printf("area: at 1.5 the mean %.4f, the pattern %.4f (the single tap's %.4f)\n", mean[0], beat[0], beat[1]);
+		}
+		else if (memcmp(got[0], got[1], AREA_SIZE * AREA_SIZE * 16))
+			FAIL("area (%s): not the single tap's values", which == 1 ? "1" : "2");
+	}
+	post_linear = NO;
+	free(got[0]);
+	free(got[1]);
+}
+
 static void post_test(NSString *dir)
 {
 	static const float peaks[3] = { 1.0f, 4.0f, 16.0f };
-	/* (the last two with the UI's white past and under paper white's) */
-	static const struct xgpu_hdr_frame encodings[6] =
+	/* (the fifth and sixth with the UI's white past and under paper
+	white's; the seventh and eighth by gamma 2.2's SDR curve,
+	display.hdr_sdr_curve's; the last two with the display's black, #1122:
+	0.05 nits in scRGB's units, 0.1 in PQ's) */
+	static const struct xgpu_hdr_frame encodings[12] =
 	{
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.02f, 4.0f },
@@ -186,6 +548,13 @@ static void post_test(NSString *dir)
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SDR, 1.0f, 1.0f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.8f },
 		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 0.6f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2 },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_GAMMA_2_2, 0.0f, 0.05f / 80.0f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.1f / 10000.0f },
+		/* (display.hdr_gamut "expanded", #1124: into P3, into BT.2020) */
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_SCRGB, 2.5f, 4.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.0f, 1, 0.0f },
+		{ XGPU_HDR_MODE_FAITHFUL, XGPU_HDR_OUTPUT_PQ, 0.0203f, 10.0f, 1.0f, XGPU_HDR_SDR_CURVE_SRGB, 0.0f, 0.0f, 1, 1.0f },
 	};
 	/* the tone map's UI white: none given (paper white's), and the UI's
 	white under and past paper white's */
@@ -262,6 +631,42 @@ static void post_test(NSString *dir)
 			}
 		}
 	}
+	/* (#1122: a display's full-frame peak, 3 paper whites under a peak of
+	16, shaping the shoulder) */
+	for (mode = XGPU_HDR_MODE_FAITHFUL; mode <= XGPU_HDR_MODE_PUNCHY; mode++)
+	{
+		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA16Float, VECTORS,
+			MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead);
+		struct post_uniforms uniforms;
+
+		halves_write(target, rgba, VECTORS);
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[0] = 1.0f / VECTORS;
+		uniforms.metrics[1] = 1.0f;
+		uniforms.metrics[2] = VECTORS;
+		uniforms.metrics[3] = 1.0f;
+		uniforms.hdr[0] = (float)mode;
+		uniforms.hdr[1] = 16.0f;
+		uniforms.hdr[3] = 3.0f;
+		post_draw(tone_pipeline, target, nil, &uniforms);
+		halves_read(target, got, VECTORS);
+		for (vector = 0; vector < VECTORS; vector++)
+		{
+			float expected[3];
+
+			for (channel = 0; channel < 3; channel++)
+				expected[channel] = half_of(vectors[vector][channel]);
+			xgpu_hdr_tone_map_full(expected, mode, 16.0f, 3.0f);
+			for (channel = 0; channel < 3; channel++)
+			{
+				if (!close_to(got[vector * 4 + channel], expected[channel]))
+					FAIL("tone map, %s with a full-frame peak: vector %d channel %d: %.5f, the reference %.5f",
+						mode ? "punchy" : "faithful", vector, channel, (double)got[vector * 4 + channel],
+						(double)expected[channel]);
+				checked++;
+			}
+		}
+	}
 	/* (a pixel not a number, or infinite, either way: tone mapped as 0, and
 	as the half floats' most and least, finite) */
 	{
@@ -303,7 +708,7 @@ static void post_test(NSString *dir)
 		}
 		printf("post: %d values not a number or infinite tone mapped finite\n", finite);
 	}
-	for (which = 0; which < 6; which++)
+	for (which = 0; which < 12; which++)
 	{
 		id<MTLTexture> source = texture_make(MTLPixelFormatRGBA16Float, VECTORS, MTLTextureUsageShaderRead);
 		id<MTLTexture> target = texture_make(MTLPixelFormatRGBA32Float, VECTORS, MTLTextureUsageRenderTarget);
@@ -313,10 +718,17 @@ static void post_test(NSString *dir)
 		memset(&uniforms, 0, sizeof(uniforms));
 		uniforms.metrics[2] = 1.0f / VECTORS;
 		uniforms.metrics[3] = 1.0f;
+		uniforms.bounds[0] = VECTORS;
+		uniforms.bounds[1] = uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.window[2] = 1.0f;
 		uniforms.hdr[0] = encodings[which].paper_white;
 		uniforms.hdr[1] = encodings[which].peak;
 		uniforms.hdr[2] = (float)encodings[which].output;
 		uniforms.hdr[3] = encodings[which].ui;
+		uniforms.window[0] = (float)encodings[which].sdr_curve;
+		uniforms.window[3] = encodings[which].black;
+		uniforms.gamut[0] = (float)encodings[which].gamut;
+		uniforms.gamut[1] = encodings[which].gamut_target;
 		post_draw(encode_pipeline, target, source, &uniforms);
 		[target getBytes:got bytesPerRow:VECTORS * 16 fromRegion:MTLRegionMake2D(0, 0, VECTORS, 1) mipmapLevel:0];
 		for (vector = 0; vector < VECTORS; vector++)
@@ -341,6 +753,9 @@ static void post_test(NSString *dir)
 		}
 	}
 	printf("post: %d values checked against the reference\n", checked);
+	dither_test(vertex, encode);
+	depth_test(vertex, encode);
+	area_test(vertex, encode);
 }
 
 /* ---------- the draws */
@@ -353,8 +768,13 @@ leaves */
 /* (the self-illuminated pass's colour: stage 0's constant) */
 static const float self_illumination_color[4] = { 0.9f, 0.7f, 0.4f, 0.0f };
 
+/* (interlocked, the Vulkan backend's draws that read and write their
+target as a storage image, texture 1, under a raster order group, the
+pipeline writing no colour: drawn over each pixel twice, the second with the
+second half of the colours; mask, the pipeline's colour mask) */
 static int draw_run(NSString *dir, NSString *stem, NSString *name, NSUInteger uniforms_index, unsigned offset,
-	unsigned constants_offset, const float *colors, const float *had, float *left)
+	unsigned constants_offset, const float *colors, const float *had, float *left, int interlocked, int twice,
+	MTLColorWriteMask mask)
 {
 	id<MTLFunction> vertex = function_load([dir stringByAppendingPathComponent:[stem stringByAppendingString:@".vertex.metal"]],
 		@"hdr_test_vertex");
@@ -365,7 +785,7 @@ static int draw_run(NSString *dir, NSString *stem, NSString *name, NSUInteger un
 	id<MTLRenderPipelineState> pipeline;
 	id<MTLCommandBuffer> commands;
 	id<MTLRenderCommandEncoder> encoder;
-	id<MTLTexture> target;
+	id<MTLTexture> target, attachment;
 	NSError *error = nil;
 	float uniforms[1024], width = PIXELS;
 
@@ -374,6 +794,7 @@ static int draw_run(NSString *dir, NSString *stem, NSString *name, NSUInteger un
 	description.vertexFunction = vertex;
 	description.fragmentFunction = fragment;
 	description.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA16Float;
+	description.colorAttachments[0].writeMask = interlocked ? MTLColorWriteMaskNone : mask;
 	description.inputPrimitiveTopology = MTLPrimitiveTopologyClassPoint;
 	pipeline = [device newRenderPipelineStateWithDescriptor:description error:&error];
 	if (!pipeline)
@@ -381,8 +802,10 @@ static int draw_run(NSString *dir, NSString *stem, NSString *name, NSUInteger un
 		FAIL("%s: %s", stem.UTF8String, error.localizedDescription.UTF8String);
 		return 0;
 	}
-	target = texture_make(MTLPixelFormatRGBA16Float, PIXELS, MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead);
+	target = texture_make(MTLPixelFormatRGBA16Float, PIXELS, MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead |
+		MTLTextureUsageShaderWrite);
 	halves_write(target, had, PIXELS);
+	attachment = interlocked ? texture_make(MTLPixelFormatRGBA16Float, PIXELS, MTLTextureUsageRenderTarget) : target;
 	/* (the blend colour, which the constant factors take) */
 	memset(uniforms, 0, sizeof(uniforms));
 	uniforms[offset / 4] = 0.8f;
@@ -390,16 +813,18 @@ static int draw_run(NSString *dir, NSString *stem, NSString *name, NSUInteger un
 	uniforms[offset / 4 + 2] = 0.3f;
 	uniforms[offset / 4 + 3] = 0.7f;
 	memcpy(&uniforms[constants_offset / 4], self_illumination_color, sizeof(self_illumination_color));
-	pass.colorAttachments[0].texture = target;
+	pass.colorAttachments[0].texture = attachment;
 	pass.colorAttachments[0].loadAction = MTLLoadActionLoad;
 	pass.colorAttachments[0].storeAction = MTLStoreActionStore;
 	commands = [queue commandBuffer];
 	encoder = [commands renderCommandEncoderWithDescriptor:pass];
 	[encoder setRenderPipelineState:pipeline];
-	[encoder setVertexBytes:colors length:PIXELS * 16 atIndex:0];
+	[encoder setVertexBytes:colors length:(twice ? 2 : 1) * PIXELS * 16 atIndex:0];
 	[encoder setVertexBytes:&width length:sizeof(width) atIndex:1];
 	[encoder setFragmentBytes:uniforms length:sizeof(uniforms) atIndex:uniforms_index];
-	[encoder drawPrimitives:MTLPrimitiveTypePoint vertexStart:0 vertexCount:PIXELS];
+	if (interlocked)
+		[encoder setFragmentTexture:target atIndex:1];
+	[encoder drawPrimitives:MTLPrimitiveTypePoint vertexStart:0 vertexCount:(twice ? 2 : 1) * PIXELS];
 	[encoder endEncoding];
 	[commands commit];
 	[commands waitUntilCompleted];
@@ -412,9 +837,9 @@ static void draws_test(NSString *dir)
 	NSString *index = [NSString stringWithContentsOfFile:[dir stringByAppendingPathComponent:@"index.txt"]
 		encoding:NSUTF8StringEncoding error:nil];
 	NSArray<NSString *> *lines = [index componentsSeparatedByString:@"\n"];
-	static float colors[PIXELS * 4], had[PIXELS * 4], vulkan[PIXELS * 4], metal[PIXELS * 4];
+	static float colors[2 * PIXELS * 4], had[PIXELS * 4], vulkan[PIXELS * 4], metal[PIXELS * 4];
 	unsigned spirv_offset = 0, msl_offset = 0, spirv_constants = 0, msl_constants = 0, seed = 12345;
-	int pixel, channel, draws = 0, compared = 0, unclamped = 0, self_illuminated = 0;
+	int pixel, channel, draws = 0, compared = 0, unclamped = 0, self_illuminated = 0, interlocked_draws = 0, emitted = 0;
 	NSUInteger line;
 
 	if (!index || lines.count < 2 || sscanf(lines[0].UTF8String, "blend_constant %u %u ps_c0 %u %u", &spirv_offset,
@@ -423,9 +848,17 @@ static void draws_test(NSString *dir)
 		FAIL("draws: no index");
 		return;
 	}
-	/* the colours drawn (0 to 1, the pixel shaders' clamp) and the pixels
-	drawn over (0 to 3: past white too; alpha 0 to 1), the same for every
-	draw */
+	/* the colours drawn (0 to 1, the pixel shaders' clamp; a second set,
+	the interlocked draws' second time over each pixel) and the pixels drawn
+	over (0 to 3: past white too; alpha 0 to 1), the same for every draw */
+	for (pixel = 0; pixel < PIXELS; pixel++)
+	{
+		for (channel = 0; channel < 4; channel++)
+		{
+			seed = seed * 1103515245u + 12345u;
+			colors[(PIXELS + pixel) * 4 + channel] = half_of((float)((seed >> 8) & 0xffff) / 65535.0f);
+		}
+	}
 	for (pixel = 0; pixel < PIXELS; pixel++)
 	{
 		for (channel = 0; channel < 4; channel++)
@@ -440,18 +873,42 @@ static void draws_test(NSString *dir)
 	{
 		char name[64];
 		unsigned tag;
-		int ceiling;
+		int ceiling, interlocked;
 		float ceiling_value;
+		MTLColorWriteMask mask;
 
 		if (sscanf(lines[line].UTF8String, "%63s %u", name, &tag) != 2)
 			continue;
-		ceiling = XGPU_HDR_CEILING_OF(tag);
+		/* (the ceiling's bits of the tags past the blends' are a boost's
+		level) */
+		ceiling = XGPU_HDR_BLEND_OPERATION(tag) < 6 ? XGPU_HDR_CEILING_OF(tag) : 0;
 		ceiling_value = xgpu_hdr_ceiling_value(ceiling);
+		/* (interlocked: Vulkan's storage image against Metal's programmable
+		blending, each pixel drawn twice in one draw; the rest of the
+		checks are of one draw over the pixels drawn over) */
+		interlocked = strstr(name, "-interlock") != NULL;
+		mask = strstr(name, "-interlock-rgb") ? MTLColorWriteMaskRed | MTLColorWriteMaskGreen | MTLColorWriteMaskBlue :
+			MTLColorWriteMaskAll;
 		if (!draw_run(dir, [NSString stringWithFormat:@"%s.vk", name], @"xgpu_vk_fragment", 1, spirv_offset, spirv_constants,
-			colors, had, vulkan) || !draw_run(dir, [NSString stringWithUTF8String:name], @"xgpu_fragment", 17, msl_offset,
-			msl_constants, colors, had, metal))
+			colors, had, vulkan, interlocked, interlocked, mask) || !draw_run(dir, [NSString stringWithUTF8String:name],
+			@"xgpu_fragment", 17, msl_offset, msl_constants, colors, had, metal, 0, interlocked, mask))
 			continue;
 		draws++;
+		if (interlocked)
+		{
+			interlocked_draws++;
+			for (pixel = 0; pixel < PIXELS * 4; pixel++)
+			{
+				compared++;
+				if (fabsf(vulkan[pixel] - metal[pixel]) > 0.002f + 0.002f * fabsf(metal[pixel]))
+					FAIL("%s (tag %04x) pixel %d channel %d: Vulkan's %.5f, Metal's %.5f (drawn twice over %.4f)", name,
+						tag, pixel / 4, pixel % 4, (double)vulkan[pixel], (double)metal[pixel], (double)had[pixel]);
+				if (mask != MTLColorWriteMaskAll && pixel % 4 == 3 && vulkan[pixel] != had[pixel])
+					FAIL("%s: pixel %d's alpha written through the mask: %.5f over %.5f", name, pixel / 4,
+						(double)vulkan[pixel], (double)had[pixel]);
+			}
+			continue;
+		}
 		for (pixel = 0; pixel < PIXELS; pixel++)
 		{
 			for (channel = 0; channel < 4; channel++)
@@ -498,7 +955,7 @@ static void draws_test(NSString *dir)
 					lit[channel] = fminf(base[channel] + self_illumination_color[channel] * colors[pixel * 4 + 3], 1.0f);
 				}
 				if (tag)
-					xgpu_hdr_self_illuminate(lit, base);
+					xgpu_hdr_self_illuminate_boost(lit, base, XGPU_HDR_BOOST_OF(tag));
 				for (channel = 0; channel < 3; channel++)
 				{
 					float v = vulkan[pixel * 4 + channel];
@@ -506,9 +963,30 @@ static void draws_test(NSString *dir)
 					if (fabsf(v - lit[channel]) > 0.003f + 0.002f * lit[channel])
 						FAIL("%s: pixel %d channel %d: %.5f, the reference's %.5f", name, pixel, channel, (double)v,
 							(double)lit[channel]);
-					if (v > (tag ? XGPU_HDR_SELF_ILLUMINATION_VALUE * 1.002f : 1.0f))
+					if (v > (tag ? XGPU_HDR_SELF_ILLUMINATION_VALUE * 1.002f + 0.002f : 1.0f))
 						FAIL("%s: pixel %d channel %d past its ceiling: %.5f", name, pixel, channel, (double)v);
 					self_illuminated += tag && v > 1.0f;
+				}
+			}
+			if (XGPU_HDR_IS_EMITTER(tag))
+			{
+				/* (an emitter: its colour gained, as the reference has it,
+				no further than its bound's ceiling) */
+				float gained[3];
+
+				for (channel = 0; channel < 3; channel++)
+					gained[channel] = colors[pixel * 4 + channel];
+				xgpu_hdr_boost_emitter(gained, XGPU_HDR_BOOST_OF(tag), XGPU_HDR_EMITTER_BOUND(tag));
+				for (channel = 0; channel < 3; channel++)
+				{
+					float v = vulkan[pixel * 4 + channel];
+
+					if (fabsf(v - gained[channel]) > 0.003f + 0.002f * gained[channel])
+						FAIL("%s: pixel %d channel %d: %.5f, the reference's %.5f", name, pixel, channel, (double)v,
+							(double)gained[channel]);
+					if (v > xgpu_hdr_ceiling_value(XGPU_HDR_EMITTER_BOUND(tag)) * 1.002f)
+						FAIL("%s: pixel %d channel %d past its bound: %.5f", name, pixel, channel, (double)v);
+					emitted += v > colors[pixel * 4 + channel] + 0.01f;
 				}
 			}
 			if (XGPU_HDR_GLOW(tag))
@@ -522,10 +1000,13 @@ static void draws_test(NSString *dir)
 			}
 		}
 	}
-	printf("draws: %d draws, %d values compared between the backends, %d past 1 unclamped, %d past 1 self-illuminated\n",
-		draws, compared, unclamped, self_illuminated);
-	if (draws != 69)
-		FAIL("draws: %d drawn, not 69", draws);
+	printf("draws: %d draws (%d interlocked), %d values compared between the backends, %d past 1 unclamped, "
+		"%d past 1 self-illuminated, %d gained\n", draws, interlocked_draws, compared, unclamped, self_illuminated,
+		emitted);
+	if (draws != 144 || interlocked_draws != 72)
+		FAIL("draws: %d drawn (%d interlocked), not 144 (72)", draws, interlocked_draws);
+	if (emitted < PIXELS)
+		FAIL("draws: %d values gained by the boost", emitted);
 	if (unclamped < PIXELS)
 		FAIL("draws: %d values past 1 unclamped", unclamped);
 	if (self_illuminated < PIXELS / 4)

@@ -93,6 +93,9 @@ symbols in this file:
 #include "render/render.h"
 #include "render/render_sprite.h"
 #include "saved games/game_state.h"
+#include "shaders/shader_definitions.h" /* port: (glow_port_enumerate) */
+#include "tag_files/tag_groups.h" /* port: (glow_port_enumerate) */
+#include "cache/cache_files.h" /* port: (glow_port_enumerate) */
 
 /* ---------- constants */
 
@@ -554,12 +557,14 @@ void glow_render(
 
 	glow = glow_get(glow_index);
 	definition = glow_definition_get(glow->definition_index);
+	render_marks_next(RENDER_MARK_EFFECT, definition->texture.index); /* port: debug.render_marks */
 	build_sprites_begin(
 		&sprite_data,
 		glow->number_of_particles,
 		definition->texture.index,
 		&global_shader_effect_additive,
-		0);
+		/* port: a glow is light: display.hdr_highlight_boost's */
+		FLAG(_build_sprites_emitter_bit));
 
 	for (particle = glow->head_particle; particle; particle = particle->next)
 	{
@@ -1539,4 +1544,18 @@ void glow_submit(
 	}
 
 	return;
+}
+
+/* port: each glow's sprite, as glow_render draws it (the effects' additive
+shader, a light: display.hdr_highlight_boost's emitter), for a map's
+preparation (port/linux/game/render_enumerate.c) */
+void glow_port_enumerate(
+	void (*draw)(long bitmap_group_index, struct shader_effect_definition const *shader))
+{
+	struct tag_iterator iterator;
+	long tag_index;
+
+	tag_iterator_new(&iterator, GLOW_TAG);
+	while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		draw(glow_definition_get(tag_index)->texture.index, &global_shader_effect_additive);
 }

@@ -105,9 +105,10 @@ def test_none_without_it(shaders):
     for (name, occlusion), text in shaders["bare"].items():
         for word in ("world_ao", "world_sdf", "world_proxy", "occlusion"):
             assert word not in text, (name, occlusion)
+    # (the enhanced dynamic lights' own list of the world's lights, dynamic_light_world, is theirs)
     for (name, occlusion), text in shaders["world"].items():
         if not occlusion:
-            assert "world" not in text.replace("xWorld", ""), name
+            assert not re.search(r"world_(ao|sdf|prox|cascade|trace)|WORLD_AO", text), name
 
 
 def test_the_world_in_the_ambient_light_alone(shaders):

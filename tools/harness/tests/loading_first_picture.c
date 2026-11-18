@@ -25,6 +25,7 @@ static int pictures;
 
 static uint64_t monotonic_nanoseconds(void) { return now_ns; }
 #define host_load_trace(...) ((void)0)
+#define host_stall_loading(active) ((void)(active))
 #define loading_presentation_build(frame) ((void)0)
 static uint64_t picture(void *context, struct loading_presentation_frame *frame)
 {

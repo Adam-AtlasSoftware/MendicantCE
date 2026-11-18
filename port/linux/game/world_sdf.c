@@ -81,6 +81,7 @@ into place, and a file that fails any check is deleted (and baked again).
 
 #include <pthread.h>
 #include <stdio.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -114,6 +115,9 @@ enum
 	WORLD_SDF_FILE_CRC = 4,
 	/* the deflate's level */
 	WORLD_SDF_DEFLATE_LEVEL = 6,
+	/* the most threads a bake runs on while a game is played (its passes
+	begun then): the game's threads have the processors */
+	WORLD_SDF_PLAY_THREADS = 2,
 };
 
 /* the fade in, in nanoseconds */
@@ -229,6 +233,9 @@ struct sdf_object_copy
 	/* (logged: its tag's name, and its slices' time on the threads) */
 	char name[128];
 	unsigned long long nanoseconds;
+	/* its field found among those kept by their geometry (another map's,
+	sdf_object_cache_load): not baked */
+	int cached;
 };
 
 /* a field's name: its map (and that map's checksum) and BSP */
@@ -271,6 +278,8 @@ struct sdf_job
 the shaders they are drawn with, by tag (sdf_shader_opacity) */
 	struct sdf_object_copy *object_copies;
 	long object_count;
+	/* (logged) how many of their fields were found kept by their geometry */
+	long objects_cached;
 	long opacity_tags[64];
 	float opacities[64];
 	long opacity_count;
@@ -321,6 +330,14 @@ static struct
 	int hold;
 	struct sdf_key baking_key;
 	struct sdf_job *results;
+	/* (under world_sdf_lock, the game's thread's as each frame takes the
+	lock) "world" off, a game played, and the field drawn (wanted_known: a
+	map loaded): a bake runs only while it is on, and in a game only the
+	field drawn is baked; another baking stops for it (sdf_yield) and waits
+	behind it, its copies kept, until the game is left (the main menu's
+	idle time) */
+	int off, playing, wanted_known;
+	struct sdf_key wanted;
 
 	/* (the game's) the map and BSP drawn, and its field */
 	int map_known;
@@ -1222,6 +1239,20 @@ timed) and whether this one prepared a map */
 static struct world_sdf_pace sdf_pace;
 static unsigned long long sdf_frame_last;
 static int sdf_frame_prepared;
+/* the bake running asked to stop for another (the game's thread sets it,
+under world_sdf_lock; the baker clears it as it takes the next), whether
+the pass running may stop (the baker's: not the static scenery's pages,
+after which a bake cannot be begun again from its copies), and a game
+played (the game's thread's: the threads a pass begun runs on) */
+static int sdf_yield;
+static int sdf_yield_able;
+static int sdf_playing;
+
+/* whether the bake's threads are to stop where they are (sdf_yield) */
+static int sdf_yielding(void)
+{
+	return __atomic_load_n(&sdf_yield_able, __ATOMIC_RELAXED) && __atomic_load_n(&sdf_yield, __ATOMIC_RELAXED);
+}
 
 /* (a bake's thread, between its items) while the game's frames want it to
 rest; not when the game has said nothing for a while (no frames drawn: a
@@ -1229,7 +1260,7 @@ window minimized, "world" turned off, a load), when nothing is to be kept
 from waiting */
 static void sdf_pace_wait(void)
 {
-	while (!__atomic_load_n(&sdf_pace_running, __ATOMIC_RELAXED) &&
+	while (!sdf_yielding() && !__atomic_load_n(&sdf_pace_running, __ATOMIC_RELAXED) &&
 		sdf_now() - __atomic_load_n(&sdf_pace_said, __ATOMIC_RELAXED) < WORLD_SDF_PACE_SILENCE_NS)
 		SDL_Delay(WORLD_SDF_PACE_NAP_MS);
 }
@@ -1239,6 +1270,9 @@ and the next so many */
 static unsigned long sdf_next_many(unsigned long *next, unsigned long count)
 {
 	sdf_pace_wait();
+	/* (stopping: no more items, past every pass's end) */
+	if (sdf_yielding())
+		return (unsigned long)LONG_MAX;
 	return __atomic_fetch_add(next, count, __ATOMIC_RELAXED);
 }
 
@@ -1260,8 +1294,11 @@ static void sdf_thread_background(void)
 static long sdf_threads(void)
 {
 	char const *forced = getenv("HALO_WORLD_SDF_THREADS");
+	long threads = world_sdf_bake_threads(sysconf(_SC_NPROCESSORS_ONLN), forced ? atol(forced) : 0);
 
-	return world_sdf_bake_threads(sysconf(_SC_NPROCESSORS_ONLN), forced ? atol(forced) : 0);
+	if (!forced && __atomic_load_n(&sdf_playing, __ATOMIC_RELAXED) && threads > WORLD_SDF_PLAY_THREADS)
+		threads = WORLD_SDF_PLAY_THREADS;
+	return threads;
 }
 
 /* a bake's working memory let go of */
@@ -1553,6 +1590,7 @@ static long sdf_pass(struct sdf_job *job, int pass)
 	job->pass = pass;
 	job->next_slice = 0;
 	job->next_item = 0;
+	__atomic_store_n(&sdf_yield_able, pass != _sdf_pass_scenery, __ATOMIC_RELAXED);
 	for (index = 1; index < thread_count; index++)
 	{
 		if (pthread_create(&threads[started], NULL, sdf_bake_worker, job) == 0)
@@ -1788,17 +1826,180 @@ static int sdf_bake_scenery(struct sdf_job *job)
 	return 1;
 }
 
+/* ---------- the objects' fields kept by their geometry
+
+An object's field is made of its geometry alone: its triangles, their
+opacities, its solids and its grid (sdf_object_copy). The same object is in
+many maps (a Warthog, a flag base, a storage crate: the 217 objects' fields
+of the playtest that found this were 119 objects'), so each field baked is kept apart too, named by a
+hash of all of that, and a map's bake takes it from there instead of baking
+it again: <data>/world_sdf/objects/<hash>.wsdo, the magic, WORLD_SDF_VERSION,
+the hash (8 bytes), the part's size, the part (sdf_objects_write's, of the
+one object) and the CRC-32 of all before it. A file that fails a check is
+baked again (and written over). */
+
+enum
+{
+	WORLD_SDF_OBJECT_FILE_MAGIC = 0x4F465348,
+	WORLD_SDF_OBJECT_FILE_HEADER = 20,
+};
+
+/* (FNV-1a, 64 bits) */
+static unsigned long long sdf_hash_bytes(unsigned long long hash, void const *bytes, unsigned long size)
+{
+	unsigned char const *byte = bytes;
+	unsigned long index;
+
+	for (index = 0; index < size; index++)
+		hash = (hash ^ byte[index]) * 0x100000001B3ULL;
+	return hash;
+}
+
+static unsigned long long sdf_hash_long(unsigned long long hash, unsigned long value)
+{
+	unsigned char bytes[4];
+
+	sdf_put32(bytes, value);
+	return sdf_hash_bytes(hash, bytes, 4);
+}
+
+/* what an object's field is made of, laid out (copy->field's grid) */
+static unsigned long long sdf_object_hash(struct sdf_object_copy const *copy)
+{
+	unsigned long long hash = 0xCBF29CE484222325ULL;
+	long index;
+
+	hash = sdf_hash_long(hash, WORLD_SDF_VERSION);
+	hash = sdf_hash_long(hash, (unsigned long)copy->scenery);
+	hash = sdf_hash_long(hash, copy->field.width);
+	hash = sdf_hash_long(hash, copy->field.height);
+	hash = sdf_hash_long(hash, copy->field.depth);
+	hash = sdf_hash_bytes(hash, copy->field.origin, sizeof(copy->field.origin));
+	hash = sdf_hash_bytes(hash, &copy->field.voxel, sizeof(copy->field.voxel));
+	hash = sdf_hash_bytes(hash, copy->bounds, sizeof(copy->bounds));
+	hash = sdf_hash_long(hash, (unsigned long)copy->triangle_count);
+	hash = sdf_hash_bytes(hash, copy->positions, (unsigned long)copy->triangle_count * 9 * sizeof(float));
+	hash = sdf_hash_long(hash, copy->opacities != NULL);
+	if (copy->opacities)
+		hash = sdf_hash_bytes(hash, copy->opacities, (unsigned long)copy->triangle_count * sizeof(float));
+	hash = sdf_hash_long(hash, (unsigned long)copy->solid_count);
+	for (index = 0; index < copy->solid_count; index++)
+	{
+		struct sdf_solid const *solid = &copy->solids[index];
+
+		hash = sdf_hash_bytes(hash, solid->to_local, sizeof(solid->to_local));
+		hash = sdf_hash_bytes(hash, solid->centre, sizeof(solid->centre));
+		hash = sdf_hash_bytes(hash, &solid->radius, sizeof(solid->radius));
+		hash = sdf_hash_long(hash, (unsigned long)solid->bsp.node_count);
+		hash = sdf_hash_bytes(hash, solid->bsp.nodes, (unsigned long)solid->bsp.node_count * sizeof(*solid->bsp.nodes));
+		hash = sdf_hash_long(hash, (unsigned long)solid->bsp.plane_count);
+		hash = sdf_hash_bytes(hash, solid->bsp.planes,
+			(unsigned long)solid->bsp.plane_count * sizeof(*solid->bsp.planes));
+	}
+	return hash;
+}
+
+static void sdf_object_cache_path(unsigned long long hash, char *path, size_t size)
+{
+	snprintf(path, size, "world_sdf/objects/%08lx%08lx.wsdo", (unsigned long)(hash >> 32),
+		(unsigned long)(hash & 0xFFFFFFFFUL));
+}
+
+/* an object's field from those kept, if its geometry's was (copy->field
+laid out: its texels and reach taken, its definition kept); FALSE if not */
+static int sdf_object_cache_load(struct sdf_object_copy *copy, unsigned long long hash)
+{
+	char path[128];
+	unsigned long size = 0, part;
+	unsigned char *bytes;
+	struct world_sdf_objects objects;
+	int found = 0;
+
+	sdf_object_cache_path(hash, path, sizeof(path));
+	bytes = sdf_file_read(path, WORLD_SDF_OBJECT_FILE_HEADER + 4 + WORLD_SDF_OBJECT_ENTRY +
+		(unsigned long)WORLD_SDF_OBJECT_MOST_VOXELS * WORLD_SDF_OBJECT_TEXEL + WORLD_SDF_FILE_CRC, &size);
+	if (!bytes)
+		return 0;
+	part = size >= WORLD_SDF_OBJECT_FILE_HEADER + WORLD_SDF_FILE_CRC ? sdf_get32(bytes + 16) : 0;
+	if (size >= WORLD_SDF_OBJECT_FILE_HEADER + WORLD_SDF_FILE_CRC && sdf_get32(bytes) == WORLD_SDF_OBJECT_FILE_MAGIC &&
+		sdf_get32(bytes + 4) == WORLD_SDF_VERSION && sdf_get32(bytes + 8) == (unsigned long)(hash >> 32) &&
+		sdf_get32(bytes + 12) == (unsigned long)(hash & 0xFFFFFFFFUL) &&
+		part == size - WORLD_SDF_OBJECT_FILE_HEADER - WORLD_SDF_FILE_CRC &&
+		sdf_get32(bytes + size - WORLD_SDF_FILE_CRC) == sdf_crc(0, bytes, size - WORLD_SDF_FILE_CRC) &&
+		sdf_objects_read(bytes + WORLD_SDF_OBJECT_FILE_HEADER, part, &objects))
+	{
+		struct world_sdf_object *object = &objects.objects[0];
+
+		if (objects.count == 1 && object->width == copy->field.width && object->height == copy->field.height &&
+			object->depth == copy->field.depth)
+		{
+			free(copy->field.texels);
+			copy->field.texels = object->texels;
+			copy->field.reach = object->reach;
+			memcpy(copy->field.origin, object->origin, sizeof(copy->field.origin));
+			copy->field.voxel = object->voxel;
+			memcpy(copy->field.bounds, object->bounds, sizeof(copy->field.bounds));
+			object->texels = NULL;
+			found = 1;
+		}
+		sdf_objects_free(&objects);
+	}
+	free(bytes);
+	return found;
+}
+
+/* an object's field baked, kept for the other maps that have it */
+static void sdf_object_cache_write(struct sdf_object_copy const *copy, unsigned long long hash)
+{
+	char path[128];
+	struct world_sdf_objects objects;
+	struct world_sdf_object object = copy->field;
+	unsigned long part, size;
+	unsigned char *bytes;
+
+	objects.count = 1;
+	objects.objects = &object;
+	part = sdf_objects_size(&objects);
+	size = WORLD_SDF_OBJECT_FILE_HEADER + part + WORLD_SDF_FILE_CRC;
+	bytes = malloc(size);
+	if (!bytes)
+		return;
+	sdf_put32(bytes, WORLD_SDF_OBJECT_FILE_MAGIC);
+	sdf_put32(bytes + 4, WORLD_SDF_VERSION);
+	sdf_put32(bytes + 8, (unsigned long)(hash >> 32));
+	sdf_put32(bytes + 12, (unsigned long)(hash & 0xFFFFFFFFUL));
+	sdf_put32(bytes + 16, part);
+	sdf_objects_write(&objects, bytes + WORLD_SDF_OBJECT_FILE_HEADER);
+	sdf_put32(bytes + size - WORLD_SDF_FILE_CRC, sdf_crc(0, bytes, size - WORLD_SDF_FILE_CRC));
+	mkdir(sdf_folder(), 0755);
+	sdf_object_cache_path(hash, path, sizeof(path));
+	{
+		char folder[1100];
+
+		snprintf(folder, sizeof(folder), "%s/objects", sdf_folder());
+		mkdir(folder, 0755);
+	}
+	sdf_file_write(path, bytes, size);
+	free(bytes);
+}
+
 /* the objects' occlusion fields (docs/world-ao.md, "The objects' occlusion fields"):
 each laid out about its geometry, its rows baked on the bake's threads, its
-voxels in solid filled and its reach found; FALSE if no memory. Their
-milliseconds in the header */
+voxels in solid filled and its reach found; FALSE if no memory, -1 if it
+stopped for another bake (sdf_yield). Their milliseconds in the header */
 static int sdf_bake_objects(struct sdf_job *job)
 {
 	struct world_sdf_objects *objects = &job->volume.objects;
 	unsigned long long began = sdf_now();
-	long index, any = 0;
+	unsigned long long *hashes;
+	long index, baking = 0, cached = 0;
 
 	memset(objects, 0, sizeof(*objects));
+	if (!job->object_count)
+		return 1;
+	hashes = calloc((size_t)job->object_count, sizeof(*hashes));
+	if (!hashes)
+		return 0;
 	for (index = 0; index < job->object_count; index++)
 	{
 		struct sdf_object_copy *copy = &job->object_copies[index];
@@ -1807,30 +2008,60 @@ static int sdf_bake_objects(struct sdf_job *job)
 		world_sdf_object_layout(copy->bounds, copy->scenery ? WORLD_SDF_OBJECT_SCENERY_VOXELS :
 			WORLD_SDF_OBJECT_MOST_VOXELS, &copy->field);
 		copy->field.definition = copy->definition;
+		/* (another map's, the same geometry: kept) */
+		hashes[index] = sdf_object_hash(copy);
+		copy->cached = sdf_object_cache_load(copy, hashes[index]);
+		if (copy->cached)
+		{
+			cached++;
+			continue;
+		}
 		voxels = copy->field.width * copy->field.height * copy->field.depth;
 		copy->values = malloc(voxels * 4 * sizeof(float));
 		copy->solid = malloc(voxels);
 		if (!copy->values || !copy->solid)
+		{
+			free(hashes);
 			return 0;
-		any = 1;
+		}
+		baking++;
 	}
-	if (!any)
-		return 1;
-	job->object_tables = world_sdf_object_tables_make();
-	if (!job->object_tables)
-		return 0;
-	sdf_pass(job, _sdf_pass_objects);
-	world_sdf_object_tables_free(job->object_tables);
-	job->object_tables = NULL;
+	if (baking)
+	{
+		job->object_tables = world_sdf_object_tables_make();
+		if (!job->object_tables)
+		{
+			free(hashes);
+			return 0;
+		}
+		sdf_pass(job, _sdf_pass_objects);
+		world_sdf_object_tables_free(job->object_tables);
+		job->object_tables = NULL;
+		if (sdf_yielding())
+		{
+			free(hashes);
+			return -1;
+		}
+	}
 	objects->objects = calloc((size_t)job->object_count, sizeof(*objects->objects));
 	if (!objects->objects)
+	{
+		free(hashes);
 		return 0;
+	}
 	for (index = 0; index < job->object_count; index++)
 	{
 		struct sdf_object_copy *copy = &job->object_copies[index];
 
-		if (!world_sdf_object_finish(&copy->field, copy->values, copy->solid))
-			return 0;
+		if (!copy->cached)
+		{
+			if (!world_sdf_object_finish(&copy->field, copy->values, copy->solid))
+			{
+				free(hashes);
+				return 0;
+			}
+			sdf_object_cache_write(copy, hashes[index]);
+		}
 		{
 			/* (a piece of scenery's triangles partly drawn, its leaves', and
 			their mean opacity) */
@@ -1845,12 +2076,17 @@ static int sdf_bake_objects(struct sdf_job *job)
 					opacity += copy->opacities[triangle];
 				}
 			}
-			platform_log("world sdf: %s bsp %d: %s's occlusion field: %ld triangles (%ld partly drawn, %.2f of each), "
-				"%lux%lux%lu voxels of %.3f, reach %.1f, %.1f ms on the threads, %lu bytes", job->key.map,
-				(int)job->key.bsp, copy->name, copy->triangle_count, partly, partly ? opacity / (double)partly : 1.0,
-				copy->field.width, copy->field.height, copy->field.depth, (double)copy->field.voxel,
-				(double)(copy->field.reach * copy->field.voxel), (double)copy->nanoseconds / 1e6,
-				copy->field.width * copy->field.height * copy->field.depth * (unsigned long)WORLD_SDF_OBJECT_TEXEL);
+			if (copy->cached)
+				platform_log("world sdf: %s bsp %d: %s's occlusion field: %ld triangles, %lux%lux%lu voxels, the "
+					"same geometry's baked before (world_sdf/objects)", job->key.map, (int)job->key.bsp, copy->name,
+					copy->triangle_count, copy->field.width, copy->field.height, copy->field.depth);
+			else
+				platform_log("world sdf: %s bsp %d: %s's occlusion field: %ld triangles (%ld partly drawn, %.2f of "
+					"each), %lux%lux%lu voxels of %.3f, reach %.1f, %.1f ms on the threads, %lu bytes", job->key.map,
+					(int)job->key.bsp, copy->name, copy->triangle_count, partly, partly ? opacity / (double)partly :
+					1.0, copy->field.width, copy->field.height, copy->field.depth, (double)copy->field.voxel,
+					(double)(copy->field.reach * copy->field.voxel), (double)copy->nanoseconds / 1e6,
+					copy->field.width * copy->field.height * copy->field.depth * (unsigned long)WORLD_SDF_OBJECT_TEXEL);
 		}
 		objects->objects[objects->count++] = copy->field;
 		copy->field.texels = NULL;
@@ -1859,6 +2095,7 @@ static int sdf_bake_objects(struct sdf_job *job)
 		copy->values = NULL;
 		copy->solid = NULL;
 	}
+	free(hashes);
 	if (world_sdf_objects_place(objects) < objects->count)
 	{
 		for (index = 0; index < (long)objects->count; index++)
@@ -1869,15 +2106,18 @@ static int sdf_bake_objects(struct sdf_job *job)
 		}
 	}
 	job->volume.header.objects_milliseconds = (unsigned long)((sdf_now() - began) / 1000000ULL);
+	job->objects_cached = cached;
 	return 1;
 }
 
 /* a field baked on the bake's threads, written to the cache; FALSE if it
-could not be */
+could not be, -1 if it stopped for another (sdf_yield: begun again later,
+from its copies) */
 static int sdf_bake(struct sdf_job *job)
 {
 	struct world_sdf_header *header = &job->volume.header;
 	long threads;
+	int objects;
 	unsigned long long began = sdf_now();
 	unsigned long cells, cell, size = 0;
 	unsigned char *file;
@@ -1888,6 +2128,8 @@ static int sdf_bake(struct sdf_job *job)
 	/* (the finest voxel its memory allows; the cells a surface may reach,
 	and the triangles that may reach each) */
 	job->marks = world_sdf_plan(job->bounds, job->positions, job->triangle_count, header, sdf_mark, job);
+	if (sdf_yielding())
+		return -1;
 	if (!job->marks)
 		return 0;
 	header->magic = WORLD_SDF_MAGIC;
@@ -1901,10 +2143,14 @@ static int sdf_bake(struct sdf_job *job)
 	if (!job->firsts)
 		return 0;
 	sdf_pass(job, _sdf_pass_count);
+	if (sdf_yielding())
+		return -1;
 	job->triangles = world_sdf_bin_place(header, job->firsts);
 	if (!job->triangles)
 		return 0;
 	sdf_pass(job, _sdf_pass_fill);
+	if (sdf_yielding())
+		return -1;
 	world_sdf_bin_placed(header, job->firsts);
 	job->marked_count = 0;
 	for (cell = 0; cell < cells; cell++)
@@ -1920,9 +2166,16 @@ static int sdf_bake(struct sdf_job *job)
 			job->marked[job->marked_count++] = cell;
 	}
 	threads = sdf_pass(job, _sdf_pass_bake);
+	if (sdf_yielding())
+		return -1;
 	/* (the objects' fields before the static scenery's pages, which the
 fields shade where a placement has one) */
-	if (!sdf_bake_gather(job) || !sdf_bake_objects(job) || !sdf_bake_scenery(job))
+	if (!sdf_bake_gather(job))
+		return 0;
+	objects = sdf_bake_objects(job);
+	if (objects <= 0)
+		return objects;
+	if (!sdf_bake_scenery(job))
 		return 0;
 	sdf_job_scratch_free(job);
 	header->bake_milliseconds = (unsigned long)((sdf_now() - began) / 1000000ULL);
@@ -1934,7 +2187,7 @@ fields shade where a placement has one) */
 	free(file);
 	platform_log("world sdf: %s bsp %d: %ld triangles copied in %.1f ms; within %.0fx%.0fx%.0f, %lux%lux%lu cells, %lu "
 		"bricks, voxel %.3f; static scenery %lu placements, %ld shapes, %lu of %ld lightmap pages in %lu layers of "
-		"%lux%lu (%lu ms); %lu objects' occlusion fields (%lu ms, %lu bytes in the atlas); in %lu ms on %lu threads, "
+		"%lux%lu (%lu ms); %lu objects' occlusion fields (%ld of them baked before, %lu ms, %lu bytes in the atlas); in %lu ms on %lu threads, "
 		"%lu bytes in memory, %lu cached%s", job->key.map,
 		(int)job->key.bsp, job->triangle_count, job->copy_milliseconds, (double)(job->bounds[3] - job->bounds[0]),
 		(double)(job->bounds[4] - job->bounds[1]), (double)(job->bounds[5] - job->bounds[2]), header->width,
@@ -1942,7 +2195,7 @@ fields shade where a placement has one) */
 		job->volume.scenery.placement_count, job->shape_count, sdf_pages_layered(&job->volume.scenery),
 		job->page_count > 0 ? job->page_count : 0L, job->volume.scenery.layer_count, job->volume.scenery.width,
 		job->volume.scenery.height, header->scenery_milliseconds, job->volume.objects.count,
-		header->objects_milliseconds, sdf_objects_gpu_bytes(&job->volume.objects), header->bake_milliseconds,
+		job->objects_cached, header->objects_milliseconds, sdf_objects_gpu_bytes(&job->volume.objects), header->bake_milliseconds,
 		header->bake_threads, world_sdf_bytes(header, header->brick_count) + sdf_scenery_gpu_bytes(&job->volume.scenery) +
 		sdf_objects_gpu_bytes(&job->volume.objects),
 		written ? size : 0UL, written ? "" : file ? " (not written: the file could not be)" : " (not written: the deflate failed)");
@@ -1956,6 +2209,68 @@ fields shade where a placement has one) */
 	return 1;
 }
 
+/* (under the lock) whether a field may be baked now: "world" on, and in a
+game only the field drawn */
+static int sdf_bake_wanted_locked(struct sdf_key const *key)
+{
+	return !world_sdf.off && (!world_sdf.playing || (world_sdf.wanted_known && sdf_key_same(key, &world_sdf.wanted)));
+}
+
+/* (under the lock) the next bake to run, taken from those waiting: the
+field drawn first (sdf_bake_queued puts it first), and in a game no other;
+NULL while none may run (the start-up pass holding them, "world" off) */
+static struct sdf_job *sdf_bake_next_locked(void)
+{
+	struct sdf_job **link;
+
+	if (world_sdf.hold || world_sdf.off)
+		return NULL;
+	for (link = &world_sdf.bakes; *link; link = &(*link)->next)
+	{
+		if (sdf_bake_wanted_locked(&(*link)->key))
+		{
+			struct sdf_job *job = *link;
+
+			*link = job->next;
+			job->next = NULL;
+			return job;
+		}
+	}
+	return NULL;
+}
+
+/* a bake stopped for another (sdf_bake's -1): what it made let go of, its
+copies kept, and put back last among those waiting */
+static void sdf_bake_yielded(struct sdf_job *job)
+{
+	struct sdf_job **last;
+	long index;
+
+	sdf_job_scratch_free(job);
+	for (index = 0; index < job->object_count; index++)
+	{
+		free(job->object_copies[index].values);
+		free(job->object_copies[index].solid);
+		free(job->object_copies[index].field.texels);
+		job->object_copies[index].values = NULL;
+		job->object_copies[index].solid = NULL;
+		job->object_copies[index].field.texels = NULL;
+		job->object_copies[index].cached = 0;
+		job->object_copies[index].nanoseconds = 0;
+	}
+	if (job->object_tables)
+		world_sdf_object_tables_free(job->object_tables);
+	job->object_tables = NULL;
+	sdf_volume_free(&job->volume);
+	memset(&job->volume, 0, sizeof(job->volume));
+	pthread_mutex_lock(&world_sdf_lock);
+	for (last = &world_sdf.bakes; *last; last = &(*last)->next)
+		;
+	*last = job;
+	job->next = NULL;
+	pthread_mutex_unlock(&world_sdf_lock);
+}
+
 static void *sdf_baker(void *context)
 {
 	(void)context;
@@ -1964,23 +2279,32 @@ static void *sdf_baker(void *context)
 	{
 		struct sdf_job *job;
 		char path[1100];
-		int result;
+		int result, baked;
 
 		pthread_mutex_lock(&world_sdf_lock);
 		world_sdf.baking = 0;
-		while (!world_sdf.bakes || world_sdf.hold)
+		while (!(job = sdf_bake_next_locked()))
 			pthread_cond_wait(&world_sdf_bake_wake, &world_sdf_lock);
-		job = world_sdf.bakes;
-		world_sdf.bakes = job->next;
 		world_sdf.baking = 1;
 		world_sdf.baking_key = job->key;
+		__atomic_store_n(&sdf_yield, 0, __ATOMIC_RELAXED);
 		pthread_mutex_unlock(&world_sdf_lock);
 		/* (baked meanwhile: found) */
 		sdf_path(&job->key, path, sizeof(path));
 		if (sdf_cache_load(path, job->key.checksum, (unsigned long)job->key.bsp, &job->volume))
 			result = _sdf_result_found;
 		else
-			result = sdf_bake(job) ? _sdf_result_baked : _sdf_result_failed;
+		{
+			baked = sdf_bake(job);
+			if (baked < 0)
+			{
+				platform_log("world sdf: %s bsp %d: its bake stopped for the field drawn, to begin again after it",
+					job->key.map, (int)job->key.bsp);
+				sdf_bake_yielded(job);
+				continue;
+			}
+			result = baked ? _sdf_result_baked : _sdf_result_failed;
+		}
 		pthread_mutex_lock(&world_sdf_lock);
 		sdf_result_locked(job, result);
 		pthread_mutex_unlock(&world_sdf_lock);
@@ -3523,6 +3847,9 @@ static void sdf_results(void)
 			{
 			case _sdf_result_found:
 			case _sdf_result_baked:
+				if (job->result == _sdf_result_found)
+					platform_log("world sdf: %s bsp %d: its field cached (baked in %lu ms on %lu threads)", job->key.map,
+						(int)job->key.bsp, job->volume.header.bake_milliseconds, job->volume.header.bake_threads);
 				world_sdf.field = job->volume;
 				job->volume.cells = NULL;
 				job->volume.bricks = NULL;
@@ -3674,12 +4001,55 @@ static void sdf_startup_total(void)
 		menu_pictures_pass_seconds() + (double)milliseconds / 1e3);
 }
 
+/* (under the lock) whether the field drawn waits for a bake, another
+baking */
+static int sdf_drawn_waits_locked(void)
+{
+	struct sdf_job *job;
+
+	if (!world_sdf.wanted_known || !world_sdf.baking || sdf_key_same(&world_sdf.baking_key, &world_sdf.wanted))
+		return 0;
+	for (job = world_sdf.bakes; job; job = job->next)
+	{
+		if (sdf_key_same(&job->key, &world_sdf.wanted))
+			return 1;
+	}
+	return 0;
+}
+
+/* the bake's schedule told what the game is doing ("world" off, a game
+played, the field drawn), and the bake running stopped if it is not to run
+now: in a game, any but the field drawn's (the start-up pass's others wait
+for the main menu), and anywhere one the field drawn waits behind. Each
+frame, if the lock is free (the game's thread never waits for it) */
+static void sdf_schedule_said(int off)
+{
+	int playing = !off && pc_menu_game_playing();
+	int changed;
+
+	__atomic_store_n(&sdf_playing, playing, __ATOMIC_RELAXED);
+	if (pthread_mutex_trylock(&world_sdf_lock) != 0)
+		return;
+	changed = off != world_sdf.off || playing != world_sdf.playing || world_sdf.map_known != world_sdf.wanted_known ||
+		(world_sdf.map_known && !sdf_key_same(&world_sdf.current, &world_sdf.wanted));
+	world_sdf.off = off;
+	world_sdf.playing = playing;
+	world_sdf.wanted_known = world_sdf.map_known;
+	world_sdf.wanted = world_sdf.current;
+	if (world_sdf.baking && (!sdf_bake_wanted_locked(&world_sdf.baking_key) || sdf_drawn_waits_locked()))
+		__atomic_store_n(&sdf_yield, 1, __ATOMIC_RELAXED);
+	if (changed)
+		pthread_cond_signal(&world_sdf_bake_wake);
+	pthread_mutex_unlock(&world_sdf_lock);
+}
+
 void world_sdf_frame(void)
 {
 	struct sdf_key key;
-	int hold;
+	int hold, off = sdf_off();
 
-	if (sdf_off())
+	sdf_schedule_said(off);
+	if (off)
 		return;
 	/* (no bake while the start-up pass runs, up to the main menu shown:
 	they begin once it is) */

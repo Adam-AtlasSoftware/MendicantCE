@@ -46,8 +46,15 @@ static boolean materials_new=1;
 static struct enumerated_materials *materials_asked;
 static int structure_bsp;
 static void *global_structure_bsp_get(void) { return &structure_bsp; }
-static boolean structure_materials(void *structure_bsp, struct enumerated_materials *materials, boolean add)
-{ (void)structure_bsp; assert(!add); materials_asked=materials; return materials_new; }
+static boolean structure_materials(void *structure_bsp, struct enumerated_materials *materials, boolean add,
+    boolean mirrors)
+{ (void)structure_bsp; (void)mirrors; assert(!add); materials_asked=materials; return materials_new; }
+/* (the structure's mirrors: structure_visibility.c's) */
+static boolean structure_visibility_port_has_mirrors(void) { return FALSE; }
+/* (the settings as the front end took them up, and what they make of the
+draws: d3d8_device.c's, render_prepared.c's; unchanged here) */
+static unsigned long halo_gpu_settings_taken(void) { return 0; }
+static unsigned long long render_prepared_derivation(void) { return 0; }
 static void platform_log(const char *format, ...) { (void)format; }
 /* (no menu pictures' pass: render_prepared.c records none) */
 static int menu_pictures_preparing(void) { return 0; }
@@ -56,6 +63,10 @@ static int menu_pictures_stock_maps(void) { return 0; }
     start = code.index("static struct\n", code.index("/* the maps enumerated (a map"))
     end = code.index("static short enumerated_map_count = 0;", start)
     source += code[start:end] + "static short enumerated_map_count = 0;\n"
+    # (the maps' enumerations forgotten as the settings make other pipelines: render_enumerate_pending's)
+    derivation = code.index("static struct\n", end)
+    source += code[derivation:code.index("} enumerated_derivation;", derivation)] + "} enumerated_derivation;\n"
+    source += function(code, "enumerated_derivation_check") + "\n"
     for name in ("map_structures_enumerated", "render_enumerate_new_map", "render_enumerate_pending"):
         source += function(code, name) + "\n"
     source += r"""

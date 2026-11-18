@@ -57,8 +57,9 @@ of the rendering renders every picture again (3: drawn without mods, as
 the maps shipped: those drawn with mods before are drawn again; 4: made as
 a phase of the game's start, with the game to itself: the failures and the
 movie's frames of the passes run under the intro movie, issue 550, are made
-again) */
-#define MENU_PICTURES_VERSION 4
+again; 5: the player's body removed, which the scripts' object_destroy had
+refused: a10's had the Master Chief in it, issue 881) */
+#define MENU_PICTURES_VERSION 5
 /* renders of a pose (for a map) that did not finish before the original is
 kept */
 #define MENU_PICTURE_FAILURES 2

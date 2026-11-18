@@ -56,10 +56,11 @@ static struct {
     unsigned long environment_surface_flags[4096];
     long environment_surface_count;
     long frame_index;
+    short local_player_index;
 } render;
 static struct { real far_clip_distance; } rasterizer_globals;
 /* (port/linux/game/far_clip.c: the game's own far clip, display.draw_distance at its default) */
-static real render_far_clip_distance(void) { return rasterizer_globals.far_clip_distance; }
+static real render_far_clip_distance(short local_player_index) { (void)local_player_index; return rasterizer_globals.far_clip_distance; }
 /* (PRISM's remodelled level is never drawn in the fixture: every facing test stays) */
 static int prism_world_geometry_drawn(void) { return 0; }
 static boolean structures_use_pvs_for_vs;
@@ -461,6 +462,17 @@ int main(int argc, char **argv)
         global_structure_bsp_index=0; calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();
         CHECK(structure_culling.allocation==first && fixture_malloc_calls==calls && !structure_culling_kept[0].allocation &&
             structure_culling_kept[1].allocation==second,"a switch back takes its buckets back, built nothing");
+        {
+            /* an MCC map's bsp is given new vertices each time it loads (mcc_geometry.c) */
+            static struct fixture_vertex moved[3];
+            memcpy(moved,fixture_vertices,sizeof(moved));
+            global_structure_bsp_index=1; structure_culling_structure_bsp_loaded(); second=structure_culling.allocation;
+            fixture_materials[0].compressed_vertex_data.address=moved;
+            global_structure_bsp_index=0; calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();
+            CHECK(fixture_malloc_calls>calls && !structure_culling_kept[0].allocation &&
+                structure_culling.materials[0].vertices==(byte const *)moved,"kept buckets of a bsp given new vertices are built again");
+            fixture_materials[0].compressed_vertex_data.address=fixture_vertices;
+        }
         calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();
         CHECK(structure_culling.allocation && fixture_malloc_calls>calls && !structure_culling_kept[0].allocation,"the same bsp loaded again is built again");
         ++fixture_bsp.surfaces.count; global_structure_bsp_index=1; calls=fixture_malloc_calls; structure_culling_structure_bsp_loaded();

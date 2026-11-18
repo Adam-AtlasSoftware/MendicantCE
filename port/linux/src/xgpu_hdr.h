@@ -113,6 +113,34 @@ view (the HUD, the menus, the screen flashes) in nits, these at most and
 least (0: paper white's) */
 #define XGPU_HDR_UI_NITS_LEAST 80
 #define XGPU_HDR_UI_NITS_MOST 500
+
+/* display.hdr_sdr_curve: the curve the encoding takes the frame's values
+(SDR codes) to light by, the one an SDR display of the platform shows them
+with, so that HDR's shadows are as dark as SDR's (xgpu_hdr_frame.sdr_curve:
+SRGB or GAMMA_2_2; the setting's AUTO, the platform's:
+xgpu_hdr_sdr_curve_of). sRGB's piecewise curve is the Mac's (its colour
+management shows SDR so); most PC monitors and TVs show SDR at gamma 2.2,
+which is darker near black (code 1 sixty times, code 10 four times). The
+2.2 curve is gamma 2.2 to XGPU_HDR_SDR_TOE_START and sRGB's from
+XGPU_HDR_SDR_TOE_END (code 51) up, joined smoothly between them, so that
+only the shadows move. */
+enum
+{
+	XGPU_HDR_SDR_CURVE_SRGB,
+	XGPU_HDR_SDR_CURVE_GAMMA_2_2,
+	XGPU_HDR_SDR_CURVE_AUTO,
+};
+#define XGPU_HDR_SDR_TOE_START 0.1f
+#define XGPU_HDR_SDR_TOE_END 0.2f
+
+/* the curve of a setting (XGPU_HDR_SDR_CURVE_*) on a platform (apple: macOS
+or iOS, which show SDR with sRGB's curve) */
+static inline int xgpu_hdr_sdr_curve_of(int setting, int apple)
+{
+	if (setting == XGPU_HDR_SDR_CURVE_SRGB || setting == XGPU_HDR_SDR_CURVE_GAMMA_2_2)
+		return setting;
+	return apple ? XGPU_HDR_SDR_CURVE_SRGB : XGPU_HDR_SDR_CURVE_GAMMA_2_2;
+}
 /* the system's SDR white in nits where it gives none: BT.2408's reference
 white (Vulkan's, without SDL's), and EDR's 1.0 as macOS's reference modes
 show it (Metal's: macOS and iOS give no nits, their SDR white following the
@@ -162,10 +190,13 @@ XGPU_HDR_ALPHA_LIMIT */
 #define XGPU_HDR_CEILING_OF(hdr) (((hdr) >> 11) & 7)
 #define XGPU_HDR_ALPHA_LIMIT 0x4000
 #define XGPU_HDR_LIGHTS 0x8000
-/* the shader blends the draw itself (its fixed-function blend is off) */
-#define XGPU_HDR_SHADER_BLENDS(hdr) (XGPU_HDR_CEILING_OF(hdr) != 0 || ((hdr) & XGPU_HDR_ALPHA_LIMIT) != 0)
+/* the shader blends the draw itself (its fixed-function blend is off; a
+blend operation a draw has: the operations past them, 6 and 7, are the
+tags below, whose ceiling's bits are a highlight boost's level) */
+#define XGPU_HDR_SHADER_BLENDS(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) < 6 && \
+	(XGPU_HDR_CEILING_OF(hdr) != 0 || ((hdr) & XGPU_HDR_ALPHA_LIMIT) != 0))
 /* the draw is a glow, brightened toward its ceiling (xgpu_hdr_expand) */
-#define XGPU_HDR_GLOW(hdr) (XGPU_HDR_CEILING_OF(hdr) >= XGPU_HDR_CEILING_WEAPON)
+#define XGPU_HDR_GLOW(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) < 6 && XGPU_HDR_CEILING_OF(hdr) >= XGPU_HDR_CEILING_WEAPON)
 /* the pixel stage unclamped above (a blend operation no draw has, without
 a ceiling or the alpha limit: no draw the shader blends) */
 #define XGPU_HDR_UNCLAMPED XGPU_HDR_BLEND(0, 0, 7)
@@ -175,8 +206,27 @@ without a ceiling or the alpha limit; XGPU_HDR_LIGHTS may be set too): the
 combiner stages whose constants are the self-illumination's colours, a bit
 each (stage n's 1 << n) */
 #define XGPU_HDR_SELF_ILLUMINATION(stages) ((unsigned short)(XGPU_HDR_BLEND(0, 0, 6) | ((stages) & 0xff)))
-#define XGPU_HDR_IS_SELF_ILLUMINATED(hdr) (!XGPU_HDR_SHADER_BLENDS(hdr) && XGPU_HDR_BLEND_OPERATION(hdr) == 6)
+#define XGPU_HDR_IS_SELF_ILLUMINATED(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) == 6 && !((hdr) & XGPU_HDR_ALPHA_LIMIT))
 #define XGPU_HDR_SELF_ILLUMINATION_STAGES(hdr) ((hdr) & 0xff)
+/* display.hdr_highlight_boost (#1123): its level (0 none, the picture as
+it was; at most XGPU_HDR_BOOST_MOST), in the ceiling's bits of a
+self-illuminated surface's tag (XGPU_HDR_SELF_ILLUMINATION's) and of an
+emitter's. An emitter's draw (an additive self-illuminated particle, a
+glow, a sun's lens flare and glow, blended by the fixed function) has its
+pixel's colour gained before the blend, its bound (XGPU_HDR_CEILING_LIGHT,
+or XGPU_HDR_CEILING_WEAPON for the first-person weapon's effects) in the
+blend's source bits: xgpu_hdr_boost_emitter */
+#define XGPU_HDR_BOOST(level) XGPU_HDR_CEILING(level)
+#define XGPU_HDR_BOOST_OF(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) >= 6 ? XGPU_HDR_CEILING_OF(hdr) : 0)
+#define XGPU_HDR_EMITTER(level, bound) ((unsigned short)(XGPU_HDR_BLEND((bound), 0, 7) | XGPU_HDR_BOOST(level)))
+#define XGPU_HDR_IS_EMITTER(hdr) (XGPU_HDR_BLEND_OPERATION(hdr) == 7 && !((hdr) & XGPU_HDR_ALPHA_LIMIT) && \
+	XGPU_HDR_BLEND_SOURCE(hdr) != 0 && XGPU_HDR_CEILING_OF(hdr) != 0)
+#define XGPU_HDR_EMITTER_BOUND(hdr) XGPU_HDR_BLEND_SOURCE(hdr)
+#define XGPU_HDR_BOOST_MOST 4
+/* a level's gain on the emitter's light, in the frame's values: 1 and a
+quarter more a level (twice at the most: about 5 times its light where
+nothing bounds it) */
+#define XGPU_HDR_BOOST_STEP 0.25f
 
 /* the ceilings, in the frame's values (sRGB's curve, extended): paper
 white; then the glows': the first-person weapon's, 1.75 times paper
@@ -255,7 +305,17 @@ for scRGB; nits over 10 000 for PQ), the peak in paper whites (the display's hea
 white: 1 for SDR). ui is the UI's white over paper white
 (display.hdr_ui_nits: 1, or 0, for paper white's; 1 for SDR): the frame's
 1.0 is the UI's white, the tone map leaves the 3D view in it (its light
-over ui), and the encoding takes the frame's light times it. */
+over ui), and the encoding takes the frame's light times it. sdr_curve is
+the curve the encoding takes the frame's values to light by
+(XGPU_HDR_SDR_CURVE_SRGB or _GAMMA_2_2: display.hdr_sdr_curve's).
+full_frame and black are the display's own (#1122: Windows' DXGI reports
+them), given only with a peak of the player's (display.hdr_peak_nits), 0
+otherwise, so that the System peak's picture is as it always was:
+full_frame the most the display holds over the whole screen, in paper
+whites as the peak is (the tone map's shoulder holds the bright parts
+near it, xgpu_hdr_highlight); black the least it shows, in the output's
+units as paper white is (the encoding lifts what is darker into its
+range, xgpu_hdr_black). */
 struct xgpu_hdr_frame
 {
 	int mode;
@@ -263,7 +323,72 @@ struct xgpu_hdr_frame
 	float paper_white;
 	float peak;
 	float ui;
+	int sdr_curve;
+	float full_frame;
+	float black;
+	/* display.hdr_gamut (#1124): "expanded" (1) or "srgb" (0, the picture
+	as it was); and the gamut the highlights are expanded into
+	(xgpu_hdr_gamut_target's: -1 sRGB's, 0 P3's, 1 BT.2020's) */
+	int gamut;
+	float gamut_target;
 };
+
+/* display.hdr_gamut "expanded" (#1124): what is past paper white (from
+it, smoothly to XGPU_HDR_GAMUT_REACH times it) has its chroma in Oklab
+scaled out, by up to 1 + XGPU_HDR_GAMUT_CHROMA, its hue and lightness
+kept, softly compressed (a shoulder from XGPU_HDR_GAMUT_KNEE of the room
+on) into the target's gamut and the peak; the room found by
+XGPU_HDR_GAMUT_STEPS halvings */
+#define XGPU_HDR_GAMUT_CHROMA 0.5f
+#define XGPU_HDR_GAMUT_REACH 4.0f
+#define XGPU_HDR_GAMUT_KNEE 0.75f
+#define XGPU_HDR_GAMUT_STEPS 12
+
+/* the gamut target (xgpu_hdr_frame.gamut_target) of a display's
+primaries (red, green, blue, white: x and y each; DXGI's), by the area of
+their triangle: sRGB's -1, P3's 0, BT.2020's 1, between them linearly; 0
+(P3: DCI-P3 at D65, Display P3's) where they are none or make no sense */
+static inline float xgpu_hdr_gamut_target(const float primaries[8])
+{
+	const float srgb = 0.11205f, p3 = 0.15200f, bt2020 = 0.21187f;
+	float area;
+
+	if (!primaries)
+		return 0.0f;
+	area = 0.5f * ((primaries[2] - primaries[0]) * (primaries[5] - primaries[1]) -
+		(primaries[4] - primaries[0]) * (primaries[3] - primaries[1]));
+	area = area < 0.0f ? -area : area;
+	if (!(area > 0.05f && area < 0.3f))
+		return 0.0f;
+	if (area <= p3)
+	{
+		float t = (area - p3) / (p3 - srgb);
+
+		return t < -1.0f ? -1.0f : t;
+	}
+	return area >= bt2020 ? 1.0f : (area - p3) / (bt2020 - p3);
+}
+
+/* display.hdr_peak_nits (#1122): the display's peak in nits, of the
+player's, these at most and least (0: the system's) */
+#define XGPU_HDR_PEAK_NITS_LEAST 200
+#define XGPU_HDR_PEAK_NITS_MOST 10000
+
+/* the display's headroom over its SDR white (system_white, in nits) as the
+encoding takes it: the system's (system_headroom), or the player's peak in
+nits over that white (display.hdr_peak_nits; 0 the system's), at least 1 */
+static inline float xgpu_hdr_peak_headroom(int peak_nits, float system_headroom, float system_white)
+{
+	float headroom = system_headroom;
+
+	if (peak_nits > 0 && system_white > 0.0f)
+		headroom = (float)peak_nits / system_white;
+	return headroom >= 1.0f ? headroom : 1.0f;
+}
+
+/* the black lift's reach (xgpu_hdr_black): light under this many times
+the display's black is lifted into its range, the rest is as it was */
+#define XGPU_HDR_BLACK_REACH 4.0f
 
 
 /* ---------- the reference (host code and tests: the system's maths) */
@@ -283,6 +408,24 @@ static inline float xgpu_hdr_encoded(float linear)
 	if (linear <= 0.0f)
 		return 0.0f;
 	return linear <= 0.0031308f ? linear * 12.92f : 1.055f * powf(linear, 1.0f / 2.4f) - 0.055f;
+}
+
+/* a value of the frame (an SDR code, extended past 1) as light by an SDR
+curve (XGPU_HDR_SDR_CURVE_*): sRGB's, or gamma 2.2 joined to sRGB's by a
+smoothstep from XGPU_HDR_SDR_TOE_START to XGPU_HDR_SDR_TOE_END (where sRGB's
+is the brighter, so the join never falls) */
+static inline float xgpu_hdr_sdr_light(float value, int curve)
+{
+	float srgb = xgpu_hdr_linear(value), t;
+
+	if (curve != XGPU_HDR_SDR_CURVE_GAMMA_2_2 || value >= XGPU_HDR_SDR_TOE_END)
+		return srgb;
+	if (value <= 0.0f)
+		return 0.0f;
+	t = (value - XGPU_HDR_SDR_TOE_START) / (XGPU_HDR_SDR_TOE_END - XGPU_HDR_SDR_TOE_START);
+	t = t < 0.0f ? 0.0f : t > 1.0f ? 1.0f : t;
+	t = t * t * (3.0f - 2.0f * t);
+	return powf(value, 2.2f) * (1.0f - t) + srgb * t;
 }
 
 static inline float xgpu_hdr_ceiling_value(int ceiling)
@@ -339,6 +482,48 @@ static inline void xgpu_hdr_self_illuminate(float rgb[3], const float base[3])
 	xgpu_hdr_expand_toward(rgb, base, XGPU_HDR_SELF_ILLUMINATION_VALUE, XGPU_HDR_SELF_ILLUMINATION_KNEE);
 }
 
+/* display.hdr_highlight_boost (#1123): a gain (1 + XGPU_HDR_BOOST_STEP a
+level) on the light an emitter adds to what was under it (rgb, after
+today's: what it had, base), bounded: its brightest channel taken no
+further than max(ceiling, its brightest as it was), so the boost never
+passes the ceiling, nor takes away what the pixel had past it (the
+emitter's light scaled, its hue kept). Level 0: as it was, exactly */
+static inline void xgpu_hdr_boost_toward(float rgb[3], const float base[3], int level, float ceiling)
+{
+	float extra[3], extra_most, most = fmaxf(rgb[0], fmaxf(rgb[1], rgb[2])), share;
+	int channel;
+
+	if (level <= 0)
+		return;
+	for (channel = 0; channel < 3; channel++)
+		extra[channel] = fmaxf(rgb[channel] - base[channel], 0.0f) * (XGPU_HDR_BOOST_STEP * (float)level);
+	extra_most = fmaxf(extra[0], fmaxf(extra[1], extra[2]));
+	if (!(extra_most > 0.0f))
+		return;
+	share = (ceiling - most) / extra_most;
+	share = share < 0.0f ? 0.0f : share > 1.0f ? 1.0f : share;
+	for (channel = 0; channel < 3; channel++)
+		rgb[channel] += extra[channel] * share;
+}
+
+/* a self-illuminated surface's pixel as xgpu_hdr_self_illuminate leaves
+it, with a boost's level (XGPU_HDR_BOOST_OF), toward its own ceiling */
+static inline void xgpu_hdr_self_illuminate_boost(float rgb[3], const float base[3], int level)
+{
+	xgpu_hdr_self_illuminate(rgb, base);
+	xgpu_hdr_boost_toward(rgb, base, level, XGPU_HDR_SELF_ILLUMINATION_VALUE);
+}
+
+/* an emitter's pixel (rgb, the shader's colour in [0, 1], before the
+fixed-function blend adds it) gained by a boost's level, its brightest
+no further than its bound's ceiling (XGPU_HDR_CEILING_LIGHT, _WEAPON) */
+static inline void xgpu_hdr_boost_emitter(float rgb[3], int level, int bound)
+{
+	static const float none[3] = { 0.0f, 0.0f, 0.0f };
+
+	xgpu_hdr_boost_toward(rgb, none, level, xgpu_hdr_ceiling_value(bound));
+}
+
 /* the soft shoulder: identity to the knee, then toward the peak, never
 reaching it (Reinhard's, meeting the line at its slope) */
 static inline float xgpu_hdr_shoulder(float x, float knee, float peak)
@@ -353,12 +538,36 @@ static inline float xgpu_hdr_shoulder(float x, float knee, float peak)
 	return knee + range * t / (1.0f + t);
 }
 
+/* the highlights' curve (#1122): the shoulder toward the peak, or, with
+a full-frame peak between the knee and the peak (a display that cannot
+hold its peak over the whole screen), two shoulders summed: one toward the
+full-frame peak, at the knee's slope (bright surfaces, the sky, held near
+what the display holds over the screen), and one toward the rest of the
+peak that rises from the knee flat (a small core of light still reaching
+for the peak). Identity to the knee either way, rising, never reaching the
+peak; without a full-frame peak (0, or at the peak) the shoulder itself. */
+static inline float xgpu_hdr_highlight(float x, float knee, float peak, float full_frame)
+{
+	float body, rest, u, v;
+
+	if (!(full_frame > knee && full_frame < peak))
+		return xgpu_hdr_shoulder(x, knee, peak);
+	if (x <= knee)
+		return x;
+	body = full_frame - knee;
+	rest = peak - full_frame;
+	u = (x - knee) / body;
+	v = (x - knee) / rest;
+	return knee + body * u / (1.0f + u) + rest * v * v / (1.0f + v * v);
+}
+
 /* the tone map of one pixel's colour, in place: the light (made linear,
 lifted in Punchy) keeps its hue under the shoulder, and toward the SDR
 frame's colour, white-hot, brightened by the light the SDR frame clipped,
 as it is further past white. Faithful leaves a pixel no channel of which is
-past white as it is. */
-static inline void xgpu_hdr_tone_map(float rgb[3], int mode, float peak)
+past white as it is. full_frame: the display's full-frame peak in paper
+whites (xgpu_hdr_frame's, 0 none: xgpu_hdr_highlight) */
+static inline void xgpu_hdr_tone_map_full(float rgb[3], int mode, float peak, float full_frame)
 {
 	static const float luma[3] = { 0.2126f, 0.7152f, 0.0722f };
 	float sdr[3], light[3], sdr_luminance = 0.0f, luminance = 0.0f, most, gain = 1.0f, knee = 1.0f, clipped, hue,
@@ -389,10 +598,33 @@ static inline void xgpu_hdr_tone_map(float rgb[3], int mode, float peak)
 	value_most = fmaxf(rgb[0], fmaxf(rgb[1], rgb[2]));
 	clipped = xgpu_hdr_smoothstep(1.0f, XGPU_HDR_FAITHFUL_CLIPPED, value_most);
 	most = fmaxf(light[0], fmaxf(light[1], light[2])) * gain;
-	hue = most > 0.0f ? gain * xgpu_hdr_shoulder(most, knee, peak) / most : 0.0f;
-	brightened = sdr_luminance > 0.0f ? xgpu_hdr_shoulder(gain * luminance / sdr_luminance, knee, peak) : 0.0f;
+	hue = most > 0.0f ? gain * xgpu_hdr_highlight(most, knee, peak, full_frame) / most : 0.0f;
+	brightened = sdr_luminance > 0.0f ?
+		xgpu_hdr_highlight(gain * luminance / sdr_luminance, knee, peak, full_frame) : 0.0f;
 	for (channel = 0; channel < 3; channel++)
 		rgb[channel] = xgpu_hdr_encoded(light[channel] * hue * (1.0f - clipped) + sdr[channel] * brightened * clipped);
+}
+
+/* (no full-frame peak: the shoulder toward the peak alone) */
+static inline void xgpu_hdr_tone_map(float rgb[3], int mode, float peak)
+{
+	xgpu_hdr_tone_map_full(rgb, mode, peak, 0.0f);
+}
+
+/* the display's black (#1122; xgpu_hdr_frame.black, the output's units):
+light under XGPU_HDR_BLACK_REACH times it lifted smoothly into its range
+(0 to the black, the reach to itself, rising at half the slope or more,
+meeting the line at its slope), so that a display that cannot show less
+than its black shows the shadows' detail rather than one black; the rest,
+and all of it without a black (0), as it was */
+static inline float xgpu_hdr_black(float light, float black)
+{
+	float reach = XGPU_HDR_BLACK_REACH * black, t;
+
+	if (!(black > 0.0f) || light >= reach)
+		return light;
+	t = 1.0f - (light > 0.0f ? light : 0.0f) / reach;
+	return (light > 0.0f ? light : 0.0f) + black * t * t;
 }
 
 /* the 3D view's tone mapped colour (xgpu_hdr_tone_map's) in the frame's
@@ -408,9 +640,128 @@ static inline void xgpu_hdr_to_ui(float rgb[3], float ui)
 		rgb[channel] = xgpu_hdr_encoded(xgpu_hdr_linear(rgb[channel]) / ui);
 }
 
+/* Oklab (#1124), of linear sRGB and back */
+static inline void xgpu_hdr_oklab(const float rgb[3], float lab[3])
+{
+	float l = cbrtf(fmaxf(0.4122214708f * rgb[0] + 0.5363325363f * rgb[1] + 0.0514459929f * rgb[2], 0.0f));
+	float m = cbrtf(fmaxf(0.2119034982f * rgb[0] + 0.6806995451f * rgb[1] + 0.1073969566f * rgb[2], 0.0f));
+	float s = cbrtf(fmaxf(0.0883024619f * rgb[0] + 0.2817188376f * rgb[1] + 0.6299787005f * rgb[2], 0.0f));
+
+	lab[0] = 0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * s;
+	lab[1] = 1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * s;
+	lab[2] = 0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s;
+}
+
+static inline void xgpu_hdr_linear_of_oklab(const float lab[3], float rgb[3])
+{
+	float l = lab[0] + 0.3963377774f * lab[1] + 0.2158037573f * lab[2];
+	float m = lab[0] - 0.1055613458f * lab[1] - 0.0638541728f * lab[2];
+	float s = lab[0] - 0.0894841775f * lab[1] - 1.2914855480f * lab[2];
+
+	l = l * l * l;
+	m = m * m * m;
+	s = s * s * s;
+	rgb[0] = 4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s;
+	rgb[1] = -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s;
+	rgb[2] = -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s;
+}
+
+/* the matrix of linear sRGB to the gamut target's primaries (the target:
+xgpu_hdr_gamut_target's), rows; sRGB's itself to P3's, P3's to BT.2020's
+interpolated */
+static inline void xgpu_hdr_gamut_matrix(float target, float matrix[3][3])
+{
+	static const float p3[3][3] =
+	{
+		{ 0.822462f, 0.177538f, 0.0f },
+		{ 0.033194f, 0.966806f, 0.0f },
+		{ 0.017083f, 0.072397f, 0.910520f },
+	};
+	static const float wide[3][3] =
+	{
+		{ 0.627404f, 0.329283f, 0.043313f },
+		{ 0.069097f, 0.919540f, 0.011362f },
+		{ 0.016391f, 0.088013f, 0.895595f },
+	};
+	int row, column;
+
+	for (row = 0; row < 3; row++)
+	{
+		for (column = 0; column < 3; column++)
+		{
+			float identity = row == column ? 1.0f : 0.0f;
+
+			matrix[row][column] = target < 0.0f ? identity + (p3[row][column] - identity) * (1.0f + target) :
+				p3[row][column] + (wide[row][column] - p3[row][column]) * target;
+		}
+	}
+}
+
+/* a colour of Oklab within the target's gamut (its channels from 0 to the
+peak, to a hair) */
+static inline int xgpu_hdr_in_gamut(const float lab[3], float matrix[3][3], float peak)
+{
+	float rgb[3];
+	int row;
+
+	xgpu_hdr_linear_of_oklab(lab, rgb);
+	for (row = 0; row < 3; row++)
+	{
+		float value = matrix[row][0] * rgb[0] + matrix[row][1] * rgb[1] + matrix[row][2] * rgb[2];
+
+		if (value < -1.0e-5f * peak || value > peak * (1.0f + 1.0e-5f))
+			return 0;
+	}
+	return 1;
+}
+
+/* display.hdr_gamut "expanded" (#1124): one pixel's light (linear sRGB,
+over paper white, at most the peak), in place, past white (white: the
+UI's white or paper white, the brighter) its chroma scaled out in Oklab,
+its hue and lightness kept, softly into the target's gamut; under white
+exactly as it was */
+static inline void xgpu_hdr_gamut(float rgb[3], float peak, float white, float target)
+{
+	float most = fmaxf(rgb[0], fmaxf(rgb[1], rgb[2])), lab[3], matrix[3][3], low = 1.0f,
+		high = 1.0f + XGPU_HDR_GAMUT_CHROMA, room, scale, weight, tried[3];
+	int step;
+
+	weight = xgpu_hdr_smoothstep(white, XGPU_HDR_GAMUT_REACH * white, most);
+	if (!(weight > 0.0f))
+		return;
+	xgpu_hdr_oklab(rgb, lab);
+	if (!(sqrtf(lab[1] * lab[1] + lab[2] * lab[2]) >= 1.0e-6f))
+		return;
+	xgpu_hdr_gamut_matrix(target, matrix);
+	tried[0] = lab[0];
+	tried[1] = lab[1] * high;
+	tried[2] = lab[2] * high;
+	if (!xgpu_hdr_in_gamut(tried, matrix, peak))
+	{
+		for (step = 0; step < XGPU_HDR_GAMUT_STEPS; step++)
+		{
+			float middle = 0.5f * (low + high);
+
+			tried[1] = lab[1] * middle;
+			tried[2] = lab[2] * middle;
+			if (xgpu_hdr_in_gamut(tried, matrix, peak))
+				low = middle;
+			else
+				high = middle;
+		}
+		room = low;
+	}
+	else
+		room = high;
+	scale = xgpu_hdr_shoulder(1.0f + XGPU_HDR_GAMUT_CHROMA * weight, 1.0f + XGPU_HDR_GAMUT_KNEE * (room - 1.0f), room);
+	tried[1] = lab[1] * scale;
+	tried[2] = lab[2] * scale;
+	xgpu_hdr_linear_of_oklab(tried, rgb);
+}
+
 /* the encoding of one pixel's colour (the frame's values after the tone
-map and the HUD) for the display, in place: linear, times the UI's white,
-at most the peak, times paper white (and PQ's primaries and curve) */
+map and the HUD) for the display, in place: linear (by the SDR curve),
+times the UI's white, at most the peak, times paper white (and PQ's primaries and curve) */
 static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *frame)
 {
 	float light[3], ui = frame->ui > 0.0f ? frame->ui : 1.0f;
@@ -423,10 +774,15 @@ static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *fr
 			rgb[channel] = rgb[channel] < 0.0f ? 0.0f : rgb[channel] > 1.0f ? 1.0f : rgb[channel];
 			continue;
 		}
-		light[channel] = fminf(xgpu_hdr_linear(rgb[channel]) * ui, frame->peak) * frame->paper_white;
+		light[channel] = fminf(xgpu_hdr_sdr_light(rgb[channel], frame->sdr_curve) * ui, frame->peak);
 	}
 	if (frame->output == XGPU_HDR_OUTPUT_SDR)
 		return;
+	/* (display.hdr_gamut "expanded": past white, #1124) */
+	if (frame->gamut)
+		xgpu_hdr_gamut(light, frame->peak, ui > 1.0f ? ui : 1.0f, frame->gamut_target);
+	for (channel = 0; channel < 3; channel++)
+		light[channel] = xgpu_hdr_black(light[channel] * frame->paper_white, frame->black);
 	if (frame->output != XGPU_HDR_OUTPUT_PQ)
 	{
 		for (channel = 0; channel < 3; channel++)
@@ -451,6 +807,37 @@ static inline void xgpu_hdr_encode(float rgb[3], const struct xgpu_hdr_frame *fr
 			rgb[channel] = powf((c1 + c2 * p) / (1.0f + c3 * p), m2);
 		}
 	}
+}
+
+/* the final write's dither (#1108; the encoding's pass, xgpu_hdr.c): a
+pixel's static noise, triangular in [-1, 1] (interleaved gradient noise,
+a high-frequency uniform pattern, through the triangle's inverse
+distribution), and an output code (0 to 1) dithered to levels (255 for 8
+bits, 1023 for 10; 0 none) by up to one level either way. Within half a
+level of black and of white the noise narrows to what never rounds past
+them (no clipping: a curve's code a fraction of a level up is shown on
+average, about half of it, not black), and at black and white themselves
+it is none, so that they stay exact */
+static inline float xgpu_hdr_noise(float x, float y)
+{
+	float d = floorf(x) * 0.06711056f + floorf(y) * 0.00583715f, u;
+
+	u = 52.9829189f * (d - floorf(d));
+	u -= floorf(u);
+	return u < 0.5f ? sqrtf(2.0f * u) - 1.0f : 1.0f - sqrtf(2.0f - 2.0f * u);
+}
+
+static inline float xgpu_hdr_dither(float code, float x, float y, float levels)
+{
+	float room;
+
+	if (!(levels > 0.0f))
+		return code;
+	if (!(code > 0.0f && code < 1.0f))
+		return code;
+	room = fminf(code, 1.0f - code) * levels + 0.49f;
+	room = room > 1.0f ? 1.0f : room;
+	return code + xgpu_hdr_noise(x, y) * room / levels;
 }
 
 /* the enhanced dynamic lights' shoulder (xgpu_spirv.c, xgpu_msl.c):
@@ -480,7 +867,11 @@ static inline void xgpu_hdr_sdr_pixel(const float rgba[4], unsigned char bgra[4]
 	float rgb[3] = { rgba[0], rgba[1], rgba[2] };
 	int channel;
 
-	xgpu_hdr_tone_map(rgb, XGPU_HDR_MODE_FAITHFUL, 1.0f);
+	/* (Faithful leaves a pixel no channel of which is past white as it is:
+	most of a frame, whose six powf a pixel took a 4K frame more than a
+	second on the render thread) */
+	if (rgb[0] > 1.0f || rgb[1] > 1.0f || rgb[2] > 1.0f)
+		xgpu_hdr_tone_map(rgb, XGPU_HDR_MODE_FAITHFUL, 1.0f);
 	for (channel = 0; channel < 4; channel++)
 	{
 		float value = channel == 3 ? rgba[3] : rgb[channel];
@@ -511,6 +902,9 @@ struct xgpu_hdr_draw
 	/* a structure's lightmap pass lit by the enhanced dynamic lights */
 	int dynamic_lights;
 	int mode;
+	/* display.hdr_highlight_boost's level (0 none: XGPU_HDR_BOOST_MOST at
+	most) */
+	int boost;
 };
 
 /* halo_hdr_draw_kind's (port/linux/include/halo_linux_source_fixups.h has
@@ -538,6 +932,11 @@ whose constants are its colours, a bit each, in the bits above 8
 (HALO_HDR_KIND_SELF_ILLUMINATION_STAGES) */
 #define HALO_HDR_KIND_SELF_ILLUMINATION 64
 #define HALO_HDR_KIND_SELF_ILLUMINATION_STAGES(stages) ((stages) << 8)
+/* an emitter of light the boost gains (#1123): a self-illuminated
+particle, a glow, a sun's lens flare and its glow; ... the first-person
+weapon's (its effects: a muzzle flash), toward the weapon's ceiling */
+#define HALO_HDR_KIND_EMITTER 128
+#define HALO_HDR_KIND_EMITTER_FIRST_PERSON (1 << 16)
 #endif
 
 /* ---------- the display, as the menus and the log show it (xgpu_hdr.c) */

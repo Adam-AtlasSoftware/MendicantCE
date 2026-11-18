@@ -15,6 +15,18 @@ real render_fov_vertical(short local_player_index, real native_vertical_field_of
 last local view's own projection against the game's): 1 for the stock view.
 A scope's own pieces, drawn zoomed over its picture, keep to it */
 real render_fov_reticle_scale(short local_player_index);
+/* a scope's own pieces' scale: the view's (render_fov_reticle_scale), but
+the picture's own (1) with display.scale_scoped_fov, whose zoomed view is
+wider than the picture was drawn for (#731) */
+real render_fov_scope_piece_scale(short local_player_index);
+/* whether a zoomed reticle takes its scope's scale (the Xbox's zoom) rather
+than keeping its unzoomed size (display.scale_scoped_fov's: #738, #594) */
+boolean render_fov_zoomed_reticle_with_scope(short local_player_index);
+/* whether the view is still zoomed by the Xbox's zoom (display.scale_scoped_fov
+off): at a scope's zoom or along its transition, in or out. The zoom level
+is gone as a scope is let go, but the view eases back to the unzoomed one,
+and the reticle slides back with it as it slid in (#747) */
+boolean render_fov_zoom_easing(short local_player_index);
 /* the weapon's reticle's size: its scale at the unzoomed view (display.panini's
 magnification of the middle with it), kept through the zoom (the stock game
 draws its reticle one size at every zoom: display.fov sizes it, the zoom
@@ -50,14 +62,15 @@ real viewmodel_near_clip_distance(void);
 /* where the first-person weapon and hands are drawn: moved along the view's
 right, up and forward, in world units (display.viewmodel_offset_x, _y and
 _z), and turned, in radians, muzzle up (display.viewmodel_pitch), right
-(_yaw) and top to the right (_roll); each weapon's own (display.viewmodel_weapon,
-by its tag's path) added. FALSE when it has none */
+(_yaw) and top to the right (_roll), the local player's own (their profile's:
+player_settings.c); each weapon's own (display.viewmodel_weapon, by its tag's
+path) added. FALSE when it has none */
 struct viewmodel_offset
 {
 	real right, up, forward;
 	real pitch, yaw, roll;
 };
-boolean viewmodel_offset(long weapon_index, struct viewmodel_offset *offset);
+boolean viewmodel_offset(short local_player_index, long weapon_index, struct viewmodel_offset *offset);
 /* the local player's weapon's and hands' node matrices, built at the camera,
 turned about their middle and moved by that offset: what is drawn and the
 markers the muzzle's effects, the shells and the lights are placed at,
@@ -72,7 +85,8 @@ WEAPON rows); FALSE with none */
 boolean viewmodel_held_weapon(short local_player_index, char *path, unsigned int size);
 
 /* whether the first-person weapon, hands and attached visuals are drawn
-(display.viewmodel_visible); its firing, sounds and lights go on either way */
+(display.viewmodel_visible) in the view drawn now (render.local_player_index's
+own); its firing, sounds and lights go on either way */
 boolean viewmodel_is_visible(void);
 /* display.viewmodel_shield: the unit's energy shield flare drawn on the
 first-person arms too, as on its body */

@@ -4,7 +4,8 @@ MENU_SHAPES.C
 Shapes the port draws at the display's resolution rather than from a
 picture: a box with rounded corners, filled and edged (the prompts' key
 caps, port/linux/game/hud_key_prompts.c; the name keyboard's panels and
-keys, source/interface/virtual_keyboard.c), a picture with its corners cut
+keys, source/interface/virtual_keyboard.c; the keyboard's panels shaded
+from one colour at the top to another at the bottom), a picture with its corners cut
 round (a menu bitmap's radius: the campaign's mission pictures,
 source/interface/ui_widget.c), a text field's caret (a bar about the
 capitals, source/interface/ui_widget.c), and a band shaded from one colour
@@ -36,6 +37,8 @@ void menu_shape_rounded_box_pixels(real x0, real y0, real x1, real y1, real radi
 	pixel32 color);
 void menu_shape_rounded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 fill,
 	pixel32 color);
+void menu_shape_shaded_box(real x0, real y0, real x1, real y1, real radius, real edge, pixel32 top, pixel32 bottom,
+	pixel32 color);
 void menu_shape_rounded_picture(struct bitmap_data *bitmap, real x0, real y0, real x1, real y1, real u0, real v0,
 	real u1, real v1, real radius, pixel32 color);
 void menu_shape_band(real x0, real y0, real x1, real y1, pixel32 top, pixel32 bottom);
@@ -65,13 +68,36 @@ static struct bitmap_data *menu_shape_white(void)
 
 /* a picture's texture laid over a shape: the texture's coordinates (u0, v0)
 at the display's pixel x0, y0 and (u1, v1) at x1, y1, each corner's between
-them where it falls (NULL: the maps' white texture, its coordinates 0) */
+them where it falls (bitmap NULL, or the whole NULL: the maps' white
+texture, its coordinates 0); and a shade over it, top at y0 to bottom at
+y1, which each corner's colour is multiplied by (white for none) */
 struct menu_shape_texture
 {
 	struct bitmap_data *bitmap;
 	real x0, y0, x1, y1;
 	real u0, v0, u1, v1;
+	pixel32 top, bottom;
 };
+
+/* a colour times the texture's shade where y falls between its top and
+bottom (each channel of the one by the other's, out of 255) */
+static pixel32 menu_shape_shaded(struct menu_shape_texture const *texture, real y, pixel32 color)
+{
+	real along = (y - texture->y0) / (texture->y1 - texture->y0);
+	pixel32 result = 0;
+	short shift;
+
+	along = along < 0.0f ? 0.0f : along > 1.0f ? 1.0f : along;
+	for (shift = 0; shift < 32; shift += 8)
+	{
+		real top = (real)((texture->top >> shift) & 0xFF);
+		real shade = top + ((real)((texture->bottom >> shift) & 0xFF) - top) * along;
+		unsigned long channel = (unsigned long)(shade * (real)((color >> shift) & 0xFF) / 255.0f + 0.5f);
+
+		result |= (pixel32)(MIN(channel, 0xFFUL) << shift);
+	}
+	return result;
+}
 
 /* a quadrilateral, its corners in the display's pixels and their colours,
 the colours blended between them, of the white texture or a picture's */
@@ -86,14 +112,14 @@ static void menu_shape_quad(struct bitmap_data *white, struct menu_shape_texture
 	{
 		vertices[index].position.x = x[index] / pixels + MENU_SHAPE_PIXEL_ORIGIN;
 		vertices[index].position.y = y[index] / pixels + MENU_SHAPE_PIXEL_ORIGIN;
-		vertices[index].texture_coordinates.x = !texture ? 0.0f :
+		vertices[index].texture_coordinates.x = !texture || !texture->bitmap ? 0.0f :
 			texture->u0 + (x[index] - texture->x0) * (texture->u1 - texture->u0) / (texture->x1 - texture->x0);
-		vertices[index].texture_coordinates.y = !texture ? 0.0f :
+		vertices[index].texture_coordinates.y = !texture || !texture->bitmap ? 0.0f :
 			texture->v0 + (y[index] - texture->y0) * (texture->v1 - texture->v0) / (texture->y1 - texture->y0);
-		vertices[index].color = color[index];
+		vertices[index].color = texture ? menu_shape_shaded(texture, y[index], color[index]) : color[index];
 	}
 	csmemset(&parameters, 0, sizeof(parameters));
-	parameters.map[0] = texture ? texture->bitmap : white;
+	parameters.map[0] = texture && texture->bitmap ? texture->bitmap : white;
 	parameters.map_texture_scale[0].i = parameters.map_texture_scale[0].j = 1.0f;
 	parameters.map_scale[0].i = parameters.map_scale[0].j = 1.0f;
 	rasterizer_globals.current_lock_operation = _rasterizer_lock_cinematics;
@@ -283,6 +309,38 @@ void menu_shape_rounded_box(
 		color);
 }
 
+/* a box in the screen's units, as menu_shape_rounded_box draws it, its fill
+shaded from top at its top to bottom at its bottom */
+void menu_shape_shaded_box(
+	real x0,
+	real y0,
+	real x1,
+	real y1,
+	real radius,
+	real edge,
+	pixel32 top,
+	pixel32 bottom,
+	pixel32 color)
+{
+	struct bitmap_data *white = menu_shape_white();
+	struct menu_shape_texture shade;
+	real pixels = menu_shape_pixels();
+
+	if (!white)
+		return;
+	csmemset(&shade, 0, sizeof(shade));
+	shade.x0 = menu_shape_pixel_edge(x0, pixels);
+	shade.y0 = menu_shape_pixel_edge(y0, pixels);
+	shade.x1 = menu_shape_pixel_edge(x1, pixels);
+	shade.y1 = menu_shape_pixel_edge(y1, pixels);
+	shade.top = top;
+	shade.bottom = bottom;
+	if (shade.x1 <= shade.x0 || shade.y1 <= shade.y0)
+		return;
+	menu_shape_rounded(white, &shade, pixels, shade.x0, shade.y0, shade.x1, shade.y1, floorf(radius * pixels + 0.5f),
+		edge > 0.0f ? MAX(floorf(edge * pixels + 0.5f), 1.0f) : 0.0f, 0xFFFFFFFFUL, color);
+}
+
 /* a picture (a frame's texture, from u0, v0 at its top left to u1, v1 at
 its bottom right) drawn over a box in the screen's units, its corners cut
 round by radius units, the curves' edges blended over their last pixel:
@@ -317,6 +375,7 @@ void menu_shape_rounded_picture(
 	texture.v0 = v0;
 	texture.u1 = u1;
 	texture.v1 = v1;
+	texture.top = texture.bottom = 0xFFFFFFFFUL;
 	if (texture.x1 <= texture.x0 || texture.y1 <= texture.y0)
 		return;
 	menu_shape_rounded(NULL, &texture, pixels, texture.x0, texture.y0, texture.x1, texture.y1,

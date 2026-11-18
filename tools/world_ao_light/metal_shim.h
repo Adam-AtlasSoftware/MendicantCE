@@ -19,6 +19,7 @@ scene's cascades, tools/world_trace/trace_check.cpp).
 #include <cmath>
 
 #define constant const
+#define thread
 
 struct float3
 {
@@ -140,12 +141,12 @@ struct level
 snorm; its table: four bytes a texel, read as RGBA8 */
 template <typename T> struct texture3d
 {
-	const signed char *voxels;
-	const unsigned char *texels;
+	const signed char *voxels = nullptr;
+	const unsigned char *texels = nullptr;
 	/* (or four floats a texel, filtered: the vehicles' fields' atlas; or
 	two signed bytes a texel, sampled as RG8 snorm: the distance-field
 	scene's cascades) */
-	const float *values;
+	const float *values = nullptr;
 	const signed char *pairs = nullptr;
 	int width, height, depth;
 	float4 read(uint3 at) const

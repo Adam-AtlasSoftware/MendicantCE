@@ -90,6 +90,7 @@ symbols in this file:
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
 #include "custom_edition_cache.h" /* port: port/linux/game/custom_edition_cache.c */
+#include "mcc_sprites.h" /* port: port/linux/game/mcc_sprites.c */
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
 #ifdef HALO_VR
 /* port: port/linux/game/vr_render.c's: the VR mode's eye pass */
@@ -156,6 +157,12 @@ enum
 	_rasterizer_geometry_vr_thick_bit = NUMBER_OF_RASTERIZER_GEOMETRY_FLAGS,
 };
 #endif
+
+/* port: (rasterizer_xbox_transparent_geometry.c's) */
+enum
+{
+	_rasterizer_geometry_emitter_bit = NUMBER_OF_RASTERIZER_GEOMETRY_FLAGS + 1,
+};
 
 /* ---------- macros */
 
@@ -310,6 +317,11 @@ void build_sprites_end(
 					geometry_flags,
 					_rasterizer_geometry_first_person_bit,
 					TEST_FLAG(data->flags, _build_sprites_first_person_bit));
+				/* port: (display.hdr_highlight_boost's emitters) */
+				SET_FLAG(
+					geometry_flags,
+					_rasterizer_geometry_emitter_bit,
+					TEST_FLAG(data->flags, _build_sprites_emitter_bit));
 #ifdef HALO_VR
 				/* port: (thick: VR_THICK_ANGLE) */
 				SET_FLAG(
@@ -333,6 +345,8 @@ void build_sprites_end(
 	}
 
 	SET_FLAG(data->flags, _build_sprites_valid_bit, FALSE);
+	/* port: debug.render_marks: the groups' maker said (render_marks_next) */
+	render_marks_next(NONE, NONE);
 	/* port: (view_fov.c) */
 	if (TEST_FLAG(data->flags, _build_sprites_first_person_bit))
 		viewmodel_projection_end();
@@ -844,6 +858,11 @@ static short build_sprite_get_group(
 		if (data->groups[group_index].bitmap == bitmap)
 			break;
 	}
+
+	/* port: MCC submits another bounded batch without losing bitmap pages. */
+	if (group_index == data->group_count && data->group_count == MAXIMUM_BUILD_SPRITE_GROUPS &&
+		mcc_sprites_continue(data))
+		group_index = 0;
 
 	/* port: a Halo PC map's particle may be drawn from more bitmaps than a
 	call takes (beavercreek_rev_beta's fluid bursts have a bitmap a frame, up

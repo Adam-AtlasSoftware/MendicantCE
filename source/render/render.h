@@ -166,6 +166,11 @@ void render_objects(
 	void);
 void render_object_shadows(
 	void);
+/* port: an object and what it carries drawn alone, lit as given, in the
+rasterizer's view now (render_objects.c) */
+void render_object_alone(
+	long object_index,
+	struct render_lighting *lighting);
 
 /* ---------- globals */
 

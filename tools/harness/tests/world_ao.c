@@ -11,6 +11,7 @@ tools/test_world_ao_light.py. */
 #include "world_ao.h"
 #include "world_cascades.h"
 #include "world_proxies.h"
+#include "world_rt.h"
 #include "world_scene.h"
 #include "world_sdf.h"
 
@@ -27,6 +28,11 @@ static struct
 static int object_owner = -100;
 unsigned char render_enumerating;
 static float object_reference = -100.0f;
+/* ("ray_traced": the backend's ray queries, the object's owner among the
+ray-traced scene's instances, its frames and the log's lines) */
+static int ray_queries, backend_ready;
+static unsigned long object_rays_owner = 12345, rt_frames;
+static int rt_unloads, logged;
 /* (the window's span as the front end was last told it) */
 static int span = -100;
 
@@ -104,6 +110,17 @@ void prism_lightmaps_map_unloaded(void) { }
 int prism_rt_mode(void) { return 0; }
 void prism_rt_frame_begin(void) { }
 void prism_rt_map_unloaded(void) { }
+/* (PRISM v4's hooks: port/linux/game/prism_deferred.c, prism_scene_static.c, prism_scene_lights.c, prism_bake.c,
+not under test: off) */
+void prism_deferred_object(long object_index) { (void)object_index; }
+void prism_deferred_lightmap(void const *lightmap_bitmap) { (void)lightmap_bitmap; }
+void prism_deferred_first_person(int drawing) { (void)drawing; }
+void prism_scene_static_frame(void) { }
+void prism_scene_static_map_unloaded(void) { }
+void prism_scene_lights_frame(void) { }
+void prism_scene_lights_map_unloaded(void) { }
+void prism_bake_frame(void) { }
+void prism_bake_map_unloaded(void) { }
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */
 static struct world_sdf_volume volume;
@@ -119,11 +136,16 @@ float world_sdf_fade(void)
 	return 0.5f;
 }
 
-/* (no static scenery) */
+/* (static scenery: object 400, with collision geometry, and 500, a shrub
+without) */
 int world_proxies_source_baked(long id)
 {
-	(void)id;
-	return 0;
+	return id == 400 || id == 500;
+}
+
+int world_proxies_source_solid(long id)
+{
+	return id == 400;
 }
 
 /* (no static scenery's pages) */
@@ -165,11 +187,11 @@ struct world_scene_instance const *world_scene_instance_find(long id)
 {
 	static struct world_scene_instance instance;
 
-	if (id != 200)
+	if (id != 200 && id != 500)
 		return NULL;
 	memset(&instance, 0, sizeof(instance));
 	instance.id = id;
-	instance.lighting_point[2] = 7.0f;
+	instance.lighting_point[2] = id == 200 ? 7.0f : 6.0f;
 	return &instance;
 }
 
@@ -210,10 +232,51 @@ void halo_world_ao_span(int value)
 	span = value;
 }
 
-void halo_world_ao_object(int owner, float reference)
+void halo_world_ao_object(int owner, float reference, unsigned long rays_owner)
 {
 	object_owner = owner;
 	object_reference = reference;
+	object_rays_owner = rays_owner;
+}
+
+static int object_cards = -1;
+
+void halo_world_ao_cards(int cards)
+{
+	object_cards = cards;
+}
+
+int halo_world_ao_ray_queries(void)
+{
+	return ray_queries;
+}
+
+char const *halo_world_ao_ray_queries_missing(void)
+{
+	return backend_ready && !ray_queries ? "none here" : NULL;
+}
+
+void platform_log(const char *format, ...)
+{
+	(void)format;
+	logged++;
+}
+
+/* (world_rt.c's, tested apart: test_world_rt.py) */
+void world_rt_frame(unsigned long frame)
+{
+	(void)frame;
+	rt_frames++;
+}
+
+void world_rt_map_unloaded(void)
+{
+	rt_unloads++;
+}
+
+unsigned long world_rt_owner(long object_index)
+{
+	return object_index == -1 ? 0 : (unsigned long)(object_index & 0xFFFF) + 1;
 }
 
 /* (the made-up field made sparse and handed on: world_sdf_bake.c's and
@@ -389,6 +452,17 @@ static void window_case(void)
 	CHECK(object_owner == 0 && object_reference == 1.0f, "%d %g", object_owner, object_reference);
 	world_ao_object_begin(300);
 	CHECK(object_owner == WORLD_AO_OWNER_NONE && object_reference == 1.0f, "%d %g", object_owner, object_reference);
+	/* a static placement the field holds: none (from its own depth); one
+	the field does not hold (a shrub): its reference, as a moving object's */
+	world_ao_object_begin(400);
+	CHECK(object_reference == WORLD_AO_REFERENCE_NO_FIELD, "a baked rock: %g", object_reference);
+	world_ao_object_begin(500);
+	CHECK(object_reference == 0.6f, "a baked shrub: %g", object_reference);
+	/* a two-sided shader's cards, and after them */
+	world_ao_cards(1);
+	CHECK(object_cards == 1, "cards: %d", object_cards);
+	world_ao_cards(0);
+	CHECK(object_cards == 0, "cards drawn: %d", object_cards);
 	world_ao_first_person(1);
 	CHECK(object_owner == WORLD_AO_OWNER_UNLIT, "the first-person weapon: %d", object_owner);
 	world_ao_first_person(0);
@@ -400,6 +474,9 @@ static void window_case(void)
 	object_owner = -100;
 	world_ao_object_begin(200);
 	CHECK(object_owner == -100, "an object named with no window");
+	object_cards = -1;
+	world_ao_cards(1);
+	CHECK(object_cards == -1, "cards with no window: %d", object_cards);
 	/* without a field: none faded in, every reference 1 */
 	field_ready = 0;
 	world_ao_window_begin(0, 0, camera);
@@ -414,6 +491,51 @@ static void window_case(void)
 	world_ao_window_begin(0, 0, camera);
 	world_ao_window_end();
 	CHECK(scene_updates == 2, "%d updates in two frames", scene_updates);
+}
+
+/* "ray_traced": "world" and the rays where the backend has ray queries
+(said once where it has not, once it is ready); the ray-traced scene's
+frame once a frame, each object's owner handed on */
+static void rays_case(void)
+{
+	float const camera[3] = { 1.0f, 2.0f, 3.0f };
+
+	setting = "ray_traced";
+	changes++;
+	CHECK(world_ao_mode() == (WORLD_AO_PROXIES | WORLD_AO_FIELD), "before the backend is ready: %d", world_ao_mode());
+	CHECK(logged == 0, "said before the backend was ready");
+	backend_ready = 1;
+	CHECK(world_ao_mode() == (WORLD_AO_PROXIES | WORLD_AO_FIELD), "without ray queries: %d", world_ao_mode());
+	CHECK(world_ao_mode() == (WORLD_AO_PROXIES | WORLD_AO_FIELD) && logged == 1, "said once: %d", logged);
+	world_ao_window_begin(0, 0, camera);
+	CHECK(rt_frames == 0, "the ray-traced scene's frame without ray queries");
+	world_ao_object_begin(200);
+	CHECK(object_rays_owner == 0, "an owner without ray queries: %lu", object_rays_owner);
+	world_ao_window_end();
+	ray_queries = 1;
+	CHECK(world_ao_mode() == (WORLD_AO_PROXIES | WORLD_AO_FIELD | WORLD_AO_RAYS), "with them: %d", world_ao_mode());
+	world_ao_frame_begin();
+	world_ao_window_begin(0, 0, camera);
+	CHECK(rt_frames == 1, "the scene's frame: %lu", rt_frames);
+	world_ao_object_begin(200);
+	CHECK(object_owner == 1 && object_rays_owner == 201, "%d %lu", object_owner, object_rays_owner);
+	world_ao_object_begin(-1);
+	CHECK(object_rays_owner == 0, "the structure's owner: %lu", object_rays_owner);
+	world_ao_first_person(1);
+	CHECK(object_rays_owner == 0, "the first-person weapon's owner: %lu", object_rays_owner);
+	world_ao_first_person(0);
+	world_ao_window_end();
+	/* ("world" again: none) */
+	setting = "world";
+	changes++;
+	world_ao_frame_begin();
+	world_ao_window_begin(0, 0, camera);
+	CHECK(rt_frames == 1, "the scene's frame with \"world\": %lu", rt_frames);
+	world_ao_object_begin(200);
+	CHECK(object_rays_owner == 0, "an owner with \"world\": %lu", object_rays_owner);
+	world_ao_window_end();
+	world_ao_map_unloaded();
+	CHECK(rt_unloads == 1, "the scene let go of at the map's end: %d", rt_unloads);
 }
 
 static void test_case(void)
@@ -449,6 +571,8 @@ int main(int argc, char **argv)
 		window_case();
 	else if (!strcmp(name, "test"))
 		test_case();
+	else if (!strcmp(name, "rays"))
+		rays_case();
 	else
 		return 2;
 	return 0;

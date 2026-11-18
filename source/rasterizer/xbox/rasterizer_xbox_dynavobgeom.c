@@ -729,6 +729,8 @@ void _rasterizer_dynamic_unlit_geometry_draw(
 		centroid);
 
 	group = rasterizer_transparent_geometry_new_group();
+	/* port: debug.render_marks: what made it (port/linux/game/render_marks.c) */
+	render_marks_group_made(group);
 	if (group)
 	{
 		zero_plane.n.i = 0.0f;

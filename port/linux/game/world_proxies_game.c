@@ -23,6 +23,7 @@ object's node matrices, read inside the frame's render_interpolation pose
 #include "render/render_debug.h"
 #include "tag_files/tag_groups.h"
 
+#include "object_mesh.h"
 #include "world_proxies.h"
 #include "world_proxies_source.h"
 #include "world_scene.h"
@@ -138,6 +139,32 @@ int world_proxies_source_baked(long id)
 	return object && object_baked(id, object->definition_index);
 }
 
+int world_proxies_source_solid(long id)
+{
+	struct object_datum *object = (struct object_datum *)object_try_and_get(id);
+	struct object_definition const *definition;
+	struct collision_model const *collision;
+	long node_index;
+
+	if (!object)
+		return FALSE;
+	definition = object_definition_get(object->definition_index);
+	collision = definition && definition->object.collision_model.index != NONE ?
+		collision_model_definition_get(definition->object.collision_model.index) : NULL;
+	/* (any node's first BSP with triangles, as the bake folds them) */
+	for (node_index = 0; collision && collision->nodes.address && node_index < collision->nodes.count; node_index++)
+	{
+		struct collision_node const *node = TAG_BLOCK_GET_ELEMENT(&collision->nodes, node_index, struct collision_node);
+
+		if (node->bsps.address && node->bsps.count > 0 &&
+			world_scene_collision_fan(TAG_BLOCK_GET_ELEMENT(&node->bsps, 0, struct collision_bsp), NULL) > 0)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 int world_proxies_source_field(long definition, struct world_proxies_source_field *field)
 {
 	unsigned long atlas[3];
@@ -161,8 +188,41 @@ int world_proxies_source_field(long definition, struct world_proxies_source_fiel
 	return TRUE;
 }
 
+/* the bounds of what a model draws opaque, in node 0's space (its default
+pose's: each vertex by node 0's default inverse); FALSE when it draws
+nothing opaque */
+static int model_drawn_bounds(long model_index, float bounds[2][3])
+{
+	struct object_mesh const *mesh = object_mesh_get_model(model_index);
+	long index;
+	int axis;
+
+	if (!mesh || mesh->vertex_count <= 0 || mesh->node_count <= 0)
+		return FALSE;
+	for (index = 0; index < mesh->vertex_count; index++)
+	{
+		real_point3d point;
+		float at[3];
+
+		matrix4x3_transform_point(&mesh->inverse[0], &mesh->vertices[index].position, &point);
+		at[0] = point.x;
+		at[1] = point.y;
+		at[2] = point.z;
+		for (axis = 0; axis < 3; axis++)
+		{
+			if (!index || at[axis] < bounds[0][axis])
+				bounds[0][axis] = at[axis];
+			if (!index || at[axis] > bounds[1][axis])
+				bounds[1][axis] = at[axis];
+		}
+	}
+	return TRUE;
+}
+
 int world_proxies_source_definition(long definition, struct world_proxies_source *source)
 {
+	int collision_any = FALSE;
+
 	struct object_definition const *object_definition;
 	struct model const *model;
 	struct collision_model const *collision_model;
@@ -170,6 +230,7 @@ int world_proxies_source_definition(long definition, struct world_proxies_source
 
 	source->shape_class = _world_proxies_source_none;
 	source->node_count = 0;
+	source->drawn = 0;
 	if (definition == NONE)
 		return FALSE;
 	object_definition = object_definition_get(definition);
@@ -216,10 +277,16 @@ int world_proxies_source_definition(long definition, struct world_proxies_source
 				{
 					node->vertex_count = bsp->vertices.count;
 					node->vertices = &TAG_BLOCK_GET_ELEMENT(&bsp->vertices, 0, struct collision_vertex)->point.x;
+					collision_any = TRUE;
 				}
 			}
 		}
 	}
+	/* (a box without collision geometry is of what it draws: its bounding
+	sphere is a bound for culling and pickups, about its origin on the
+	floor, and much larger than a grenade or a floor marker, #773) */
+	if (source->shape_class == _world_proxies_source_box && !collision_any)
+		source->drawn = (short)model_drawn_bounds(object_definition->object.model.index, source->drawn_bounds);
 	return TRUE;
 }
 

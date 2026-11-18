@@ -4,7 +4,8 @@
 
 /* A fake view for the HUD's marks over the world: a waypoint and its distance (hud_nav_points.c's
 custom_render_nav_point: a scenario's flag, an object, a game engine goal, Basic Training's spots), a teammate's
-triangle and a player's name (hud.c's hud_draw_friendly_indicator, hud_draw_player_name) and the passenger's reticle
+triangle and a player's name (hud.c's hud_draw_friendly_indicator, hud_draw_player_name), a ping's name over its arrow
+(network_markers.c's markers_draw_name) and the passenger's reticle
 (passenger_camera.c's passenger_camera_reticle_offset), each drawn through the HUD's screen quads and text
 (rasterizer.c's rasterizer_psuedo_dynamic_screen_quad_draw, rasterizer_text.c's character quads). The camera turns
 and strafes past a point 40 world units away, a frame at a time at 60, 120 and 144 frames a second, in the game's
@@ -42,6 +43,8 @@ static real arctangent(real y, real x) { return atan2f(y, x); }
 static real sine(real x) { return sinf(x); }
 static real cosine(real x) { return cosf(x); }
 static real power(real x, real y) { return powf(x, y); }
+/* mcc_hud_draw.c's: a stock map's bitmaps are at their own scale */
+static real mcc_hud_bitmap_scale(long bitmap_group_index) { (void)bitmap_group_index; return 1.0f; }
 static long fast_ftol(real value) { return lrintf(value); }
 static long fast_ftol_C(real value) { return lrintf(value); }
 static real distance3d(real_point3d const *a, real_point3d const *b)
@@ -504,6 +507,50 @@ int main(int argc, char **argv)
 				CHECK(text_scale == 1.0f, "the text left scaled");
 			}
 			CHECK(worst < WORST, "at %ld frames a second the name %.3f units (%.2f pixels) off its point",
+				rates[rate_index], worst, worst * PIXELS_PER_UNIT);
+		}
+		return 0;
+	}
+
+	/* a ping's name (network_markers.c), each frame: its text's middle over its arrow (drawn where the point
+	projects), its bottom 2 units above the arrow's top */
+	CASE("ping_name")
+	{
+		static wchar_t const name[] = { 'K', 'e', 'y', 'e', 's', 0 };
+		real_rgb_color const color = { 1.0f, 0.5f, 0.25f };
+		short rate_index;
+
+		for (rate_index = 0; rate_index < (short)NUMBEROF(rates); rate_index++)
+		{
+			long frame, frames = 0;
+			double worst = 0.0;
+
+			for (frame = 0; frame < 2 * rates[rate_index]; frame++)
+			{
+				double x, y, text_x, text_y;
+				real_point2d drawn;
+				real half_height;
+				short drawn_type;
+				real_vector2d offset;
+
+				scripted_camera(frame, rates[rate_index]);
+				if (!projected(&mark, &x, &y))
+					continue;
+				begin_frame();
+				CHECK(hud_render_nav_point_colored(0, &mark, 0, _waypoint_on_screen, &color, 1.0f, &drawn,
+					&half_height, &drawn_type), "the arrow not drawn");
+				markers_draw_name(1, name, &color, 1.0f, &drawn, half_height);
+				CHECK(character_count == 1, "%d characters drawn", character_count);
+				quad_middle(characters[0], &text_x, &text_y);
+				worst = MAX(worst, fabs(text_x - x));
+				worst = MAX(worst, fabs(characters[0][2].position.y - (y - half_height - 2.0)));
+				rasterizer_screen_offset_get(&offset);
+				CHECK(offset.i == 0.0f && offset.j == 0.0f, "the rest of the HUD moved after it");
+				CHECK(text_scale == 1.0f, "the text left scaled");
+				frames++;
+			}
+			CHECK(frames > rates[rate_index], "the point on the screen in only %ld frames", frames);
+			CHECK(worst < WORST, "at %ld frames a second the ping's name %.3f units (%.2f pixels) off its arrow",
 				rates[rate_index], worst, worst * PIXELS_PER_UNIT);
 		}
 		return 0;

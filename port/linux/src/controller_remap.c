@@ -8,15 +8,18 @@
 
 unsigned char const controller_remap_controls[CONTROLLER_REMAP_GAME_ACTIONS] = {0,1,2,3,4,5,6,7,10,11};
 static unsigned char const remap_buttons[CONTROLLER_REMAP_BUTTONS] = {0,1,2,3,4,5,6,7,14,15,8,9,10,11,13,
-    CONTROLLER_REMAP_PADDLE, CONTROLLER_REMAP_PADDLE + 1, CONTROLLER_REMAP_PADDLE + 2, CONTROLLER_REMAP_PADDLE + 3};
-static char const *const remap_names[] = {"south","east","west","north","rb","lb","lt","rt","ls","rs",
-    "dpad_up","dpad_down","dpad_left","dpad_right","back",
-    "left_paddle","right_paddle","left_paddle2","right_paddle2"};
+    CONTROLLER_REMAP_PADDLE, CONTROLLER_REMAP_PADDLE + 1, CONTROLLER_REMAP_PADDLE + 2, CONTROLLER_REMAP_PADDLE + 3,
+    CONTROLLER_REMAP_TOUCHPAD, CONTROLLER_REMAP_MISC, CONTROLLER_REMAP_MISC + 1, CONTROLLER_REMAP_MISC + 2,
+    CONTROLLER_REMAP_MISC + 3, CONTROLLER_REMAP_MISC + 4, CONTROLLER_REMAP_MISC + 5};
+static char const *const remap_names[CONTROLLER_REMAP_BUTTONS] = {"south","east","west","north","rb","lb","lt","rt",
+    "ls","rs","dpad_up","dpad_down","dpad_left","dpad_right","back",
+    "left_paddle","right_paddle","left_paddle2","right_paddle2",
+    "touchpad","misc1","misc2","misc3","misc4","misc5","misc6"};
 
 void controller_remap_defaults(unsigned char *buttons)
 {
     static unsigned char const defaults[CONTROLLER_REMAP_ACTIONS] = {
-        0,4,2,3,1,5,6,7,14,15, 13,255,255,9,10,11, 8,255,255,255, 8,9,15,7,6,4
+        0,4,2,3,1,5,6,7,14,15, 13,255,255,9,10,255, 8,255,255,255, 8,9,15,7,6,4, 11
     };
     memcpy(buttons, defaults, sizeof(defaults));
 }
@@ -26,19 +29,20 @@ void controller_remap_defaults(unsigned char *buttons)
 void controller_remap_complete(unsigned char *buttons)
 {
     int i, j;
-    for (i = CONTROLLER_REMAP_GAME_ACTIONS; i < PAD_CAMERA_FASTER; i++)
-        if (buttons[i] != CONTROLLER_REMAP_UNBOUND)
+    for (i = CONTROLLER_REMAP_GAME_ACTIONS; i < CONTROLLER_REMAP_ACTIONS; i++)
+        if (!CONTROLLER_REMAP_DEBUG_ACTION(i) && buttons[i] != CONTROLLER_REMAP_UNBOUND)
             for (j = 0; j < i; j++)
-                if (buttons[i] == buttons[j]) { buttons[i] = CONTROLLER_REMAP_UNBOUND; break; }
+                if (!CONTROLLER_REMAP_DEBUG_ACTION(j) && buttons[i] == buttons[j])
+                { buttons[i] = CONTROLLER_REMAP_UNBOUND; break; }
 }
 
 int controller_remap_conflict(unsigned char const *buttons, int action, int button)
 {
-    int i, first, end;
+    int i;
     if (action < 0 || action >= CONTROLLER_REMAP_ACTIONS || button == CONTROLLER_REMAP_UNBOUND) return -1;
-    first = action >= PAD_CAMERA_FASTER ? PAD_CAMERA_FASTER : 0;
-    end = action >= PAD_CAMERA_FASTER ? CONTROLLER_REMAP_ACTIONS : PAD_CAMERA_FASTER;
-    for (i = first; i < end; i++) if (i != action && buttons[i] == button) return i;
+    for (i = 0; i < CONTROLLER_REMAP_ACTIONS; i++)
+        if (i != action && CONTROLLER_REMAP_DEBUG_ACTION(i) == CONTROLLER_REMAP_DEBUG_ACTION(action) &&
+            buttons[i] == button) return i;
     return -1;
 }
 
@@ -50,6 +54,24 @@ static int valid_button(int button)
     return 0;
 }
 
+/* a physical token's button ("south", "left_paddle", "unbound": 255), -1
+for none; length: the token's characters (it need not end there) */
+int controller_remap_token(char const *text, size_t length)
+{
+    int i;
+    if (length == 7 && !strncmp(text, "unbound", 7)) return CONTROLLER_REMAP_UNBOUND;
+    for (i = 0; i < CONTROLLER_REMAP_BUTTONS; i++)
+        if (strlen(remap_names[i]) == length && !strncmp(text, remap_names[i], length)) return remap_buttons[i];
+    return -1;
+}
+
+char const *controller_remap_token_name(int button)
+{
+    int i;
+    for (i = 0; i < CONTROLLER_REMAP_BUTTONS; i++) if (remap_buttons[i] == button) return remap_names[i];
+    return "unbound";
+}
+
 char const *controller_remap_setting(short port)
 {
     static char const *const settings[] = {"input.controller_p1", "input.controller_p2",
@@ -57,13 +79,26 @@ char const *controller_remap_setting(short port)
     return port >= 0 && port < 4 ? settings[port] : NULL;
 }
 
+/* the layout a port's player plays with: their profile's own
+(input.controller), else the port's (input.controller_p<n>: the older
+versions' every player's, so an upgrade keeps them); the port's
+environment variable wins */
+char const *controller_remap_text(short port)
+{
+    char const *setting = controller_remap_setting(port);
+    if (!setting) return "";
+    if (config_player_has(port, "input.controller") && !config_pinned_by_environment(setting))
+        return config_player_string(port, "input.controller");
+    return config_string(setting);
+}
+
 int controller_remap_parse(char const *text, unsigned char *buttons)
 {
     unsigned char parsed[CONTROLLER_REMAP_ACTIONS];
     int action, i, count;
     if (!text || !*text) return 0;
-    count = !strncmp(text, "v3:", 3) ? CONTROLLER_REMAP_ACTIONS :
-        !strncmp(text, "v2:", 3) ? 25 : CONTROLLER_REMAP_GAME_ACTIONS;
+    count = !strncmp(text, "v4:", 3) ? CONTROLLER_REMAP_ACTIONS : !strncmp(text, "v3:", 3) ? PAD_PING :
+        !strncmp(text, "v2:", 3) ? PAD_CAMERA_CYCLE : CONTROLLER_REMAP_GAME_ACTIONS;
     if (count != CONTROLLER_REMAP_GAME_ACTIONS) text += 3;
     controller_remap_defaults(parsed);
     for (action = 0; action < count; action++)
@@ -77,8 +112,9 @@ int controller_remap_parse(char const *text, unsigned char *buttons)
             if (i == CONTROLLER_REMAP_BUTTONS) return 0;
             button = remap_buttons[i];
         }
-        for (i = action >= PAD_CAMERA_FASTER ? PAD_CAMERA_FASTER : 0; i < action; i++)
-            if (button != CONTROLLER_REMAP_UNBOUND && parsed[i] == button) return 0;
+        for (i = 0; i < action; i++)
+            if (CONTROLLER_REMAP_DEBUG_ACTION(i) == CONTROLLER_REMAP_DEBUG_ACTION(action) &&
+                button != CONTROLLER_REMAP_UNBOUND && parsed[i] == button) return 0;
         parsed[action] = (unsigned char)button;
         text += length;
         if (action < count - 1) { if (*text++ != ',') return 0; }
@@ -86,9 +122,12 @@ int controller_remap_parse(char const *text, unsigned char *buttons)
     }
     if (count == CONTROLLER_REMAP_GAME_ACTIONS) controller_remap_complete(parsed);
     /* Older debug layouts keep their buttons if RB is already assigned. */
-    if (count < CONTROLLER_REMAP_ACTIONS &&
+    if (count <= PAD_CAMERA_CYCLE &&
         controller_remap_conflict(parsed, PAD_CAMERA_CYCLE, parsed[PAD_CAMERA_CYCLE]) >= 0)
         parsed[PAD_CAMERA_CYCLE] = CONTROLLER_REMAP_UNBOUND;
+    /* ... and older layouts their buttons, Ping's D-pad Right among them. */
+    if (count <= PAD_PING && controller_remap_conflict(parsed, PAD_PING, parsed[PAD_PING]) >= 0)
+        parsed[PAD_PING] = CONTROLLER_REMAP_UNBOUND;
     memcpy(buttons, parsed, sizeof(parsed));
     return 1;
 }
@@ -100,7 +139,7 @@ void controller_remap_format(unsigned char const *buttons, char *text, unsigned 
     if (!size) return;
     *text = 0;
     if (size < 4) return;
-    strcpy(text, "v3:");
+    strcpy(text, "v4:");
     for (action = 0; action < CONTROLLER_REMAP_ACTIONS; action++)
     {
         char const *name = "unbound";
@@ -124,9 +163,9 @@ int controller_remap_read(short port, unsigned char *buttons)
     {
         for (i = 0; i < 4; i++)
         {
-            char const *text = config_string(controller_remap_setting((short)i));
+            char const *text = controller_remap_text((short)i);
             valid[i] = controller_remap_parse(text, layouts[i]);
-            if (valid[i] && i && strncmp(text, "v2:", 3) && strncmp(text, "v3:", 3))
+            if (valid[i] && i && strncmp(text, "v2:", 3) && strncmp(text, "v3:", 3) && strncmp(text, "v4:", 3))
             {
                 layouts[i][PAD_CHAT] = CONTROLLER_REMAP_UNBOUND;
                 layouts[i][PAD_FORWARD] = 8;
@@ -156,23 +195,43 @@ int controller_remap_cycle(int button, int direction)
     return i == CONTROLLER_REMAP_BUTTONS ? CONTROLLER_REMAP_UNBOUND : remap_buttons[i];
 }
 
+/* misc1 is a Series pad's Share, a DualSense's mic, a Switch pad's Capture
+(and the Steam Deck's Quick Access, never offered); the Steam Deck's
+touchpad and misc2 are its left and right trackpads' clicks, its misc3 and
+misc4 its sticks' touches (never offered: controller_extras_reserved) */
 char const *controller_remap_button_name(int button, int family)
 {
     static char const *const labels[5][CONTROLLER_REMAP_BUTTONS] = {
         {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
-         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2"},
+         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2",
+         "TOUCHPAD","MISC 1","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
         {"A","B","X","Y","RB / BLACK","LB / WHITE","LT","RT","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
-         "P3","P1","P4","P2"},
-        {"CROSS","CIRCLE","SQUARE","TRIANGLE","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","TOUCHPAD / SELECT",
-         "LEFT BACK","RIGHT BACK","LEFT BACK 2","RIGHT BACK 2"},
+         "P3","P1","P4","P2",
+         "TOUCHPAD","SHARE","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
+        {"CROSS","CIRCLE","SQUARE","TRIANGLE","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","SHARE / SELECT",
+         "LEFT BACK","RIGHT BACK","LEFT BACK 2","RIGHT BACK 2",
+         "TOUCHPAD","MIC","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
         {"B","A","Y","X","R","L","ZL","ZR","LEFT STICK","RIGHT STICK","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","BACK / SELECT",
-         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2"},
+         "LEFT PADDLE","RIGHT PADDLE","LEFT PADDLE 2","RIGHT PADDLE 2",
+         "TOUCHPAD","CAPTURE","MISC 2","MISC 3","MISC 4","MISC 5","MISC 6"},
         {"A","B","X","Y","R1","L1","L2","R2","L3","R3","D-PAD UP","D-PAD DOWN","D-PAD LEFT","D-PAD RIGHT","VIEW",
-         "L4","R4","L5","R5"}
+         "L4","R4","L5","R5",
+         "LEFT TRACKPAD","QUICK ACCESS","RIGHT TRACKPAD","LEFT STICK TOUCH","RIGHT STICK TOUCH","MISC 5","MISC 6"}
     };
     int i;
     if (family < 0 || family > 4) family = 0;
     for (i = 0; i < CONTROLLER_REMAP_BUTTONS; i++)
         if (remap_buttons[i] == button) return labels[family][i];
     return "UNBOUND";
+}
+
+char const *controller_remap_device_button_name(int button, struct controller_device const *device)
+{
+    static char const *const playstation_back[3] = {"SELECT", "SHARE", "CREATE"};
+    if (!device) return controller_remap_button_name(button, CONTROLLER_UNKNOWN);
+    /* (13: the pad's Back, SDL's; a PS4 or PS5 pad's touchpad is its own) */
+    if (button == 13 && device->family == CONTROLLER_PLAYSTATION &&
+        device->playstation >= 3 && device->playstation <= 5)
+        return playstation_back[device->playstation - 3];
+    return controller_remap_button_name(button, device->family);
 }

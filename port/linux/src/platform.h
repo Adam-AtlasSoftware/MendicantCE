@@ -36,8 +36,8 @@ void platform_log(const char *format, ...) __attribute__((format(printf, 1, 2)))
 
 /* opens the url in the system's browser (a Discord link's page: player_link.c);
 in the web build, the page offers it to be opened (a page may open a tab only
-when it is clicked) */
-void platform_open_url(const char *url);
+when it is clicked); 0 if it could not be opened */
+int platform_open_url(const char *url);
 
 /* reports an SDK entry point the Linux port does not implement, once per
 name; the caller then behaves as a failing or empty call */
@@ -168,6 +168,10 @@ system: they stay the block's, with their protection, and read as zeros
 (also declared for the game in halo_linux_source_fixups.h) */
 void platform_contiguous_discard(void *address, unsigned long size);
 BOOL platform_is_contiguous(const void *address);
+/* whether size bytes at address are in the contiguous window, allocated
+(XPhysicalAlloc, a placed block) and readable now: a played back record's
+reads checked before they are made (d3d8_device.c, #1169) */
+BOOL platform_contiguous_readable(const void *address, unsigned long size);
 #define PLATFORM_PHYSICAL_TO_VIRTUAL(physical) ((void *)((unsigned long)(physical) | PLATFORM_CONTIGUOUS_BASE))
 #define PLATFORM_VIRTUAL_TO_PHYSICAL(address) ((unsigned long)(address) & ~PLATFORM_CONTIGUOUS_BASE)
 

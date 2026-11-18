@@ -41,6 +41,8 @@ struct machine_definition { struct { short type; } machine; };
 
 static int pass_light;
 static int config_boolean(char const *name) { return !strcmp(name, "debug.doors_pass_light") && pass_light; }
+/* (moves as the setting changes, as config.toml's count does) */
+static unsigned long config_changes(void) { return (unsigned long)pass_light; }
 static void platform_log(char const *format, ...) { (void)format; }
 static char const *tag_get_name(long index) { (void)index; return "door"; }
 

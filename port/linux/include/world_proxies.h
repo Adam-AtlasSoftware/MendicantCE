@@ -77,9 +77,10 @@ struct world_proxy
 /* ---------- prototypes (port/linux/game/world_proxies.c) */
 
 /* a definition's shapes (made the first time it is asked for: from the
-model's nodes and the collision model's pieces, or a sphere of its bound
-radius); NULL none (an object that occludes nothing: a projectile, a
-light-weight effect object) */
+model's nodes and the collision model's pieces, a box of what it draws
+opaque without them, or a sphere of its bound radius); NULL none (an
+object that occludes nothing: a projectile, a light-weight effect object,
+a box without collision geometry that draws nothing opaque) */
 struct world_proxy_set const *world_proxies_definition(long definition);
 /* the map unloaded: every definition's shapes forgotten */
 void world_proxies_map_unloaded(void);
@@ -104,6 +105,11 @@ and its pages hold (world_sdf.h's world_sdf_scenery_baked): its draws take
 none of the field, which holds its own geometry
 (port/linux/game/world_proxies_game.c, which reads the object) */
 int world_proxies_source_baked(long id);
+/* whether a static scenery placement's own geometry is in the field: its
+definition has collision geometry, which the bake folds in (world_sdf.c's
+sdf_scenery_copy). A shrub's or a fern's has none: the field does not hold
+it (port/linux/game/world_proxies_game.c) */
+int world_proxies_source_solid(long id);
 struct world_proxies_frame;
 /* a definition's shapes placed on these nodes (world space; at most
 maximum): how many. The static scenery's, baked where it stands */
@@ -119,8 +125,8 @@ void world_proxies_field_place(struct world_proxies_source_field const *field, s
 	struct world_proxy proxies[WORLD_PROXY_FIELD_SLOTS]);
 /* whether a definition's occlusion field stands in for this shape of its
 set where the field is drawn: a vehicle's boxes (its wheels' spheres
-stay), and the one shape of anything else (its box, or a sphere of its
-bound where it has no collision geometry) */
+stay), and the one shape of anything else (its box: of its collision
+geometry, else of what it draws) */
 int world_proxy_set_fielded(struct world_proxy_set const *set, short shape_index);
 
 /* ---------- the arithmetic (shared with D's shaders: their reference;

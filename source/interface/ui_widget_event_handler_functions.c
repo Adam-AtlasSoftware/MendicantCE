@@ -932,6 +932,7 @@ symbols in this file:
 #include "saved games/saved_game_files.h"
 #include "text/unicode.h"
 #include "halo_menus.h" /* port: PC_MENU_FUNCTION_BASE */
+#include "mcc_ui.h" /* port: port/linux/game/mcc_ui.c */
 
 /* ---------- constants */
 
@@ -1027,10 +1028,11 @@ void game_engine_playlist_next(
 	long);
 void playlist_profile_delete(
 	long profile_index);
-boolean virtual_keyboard_launch(
-	void *text,
-	long maximum_length,
-	long keyboard_type);
+/* port: the on-screen keyboard of the mode's (port/linux/game/keyboard.c) */
+boolean keyboard_name_launch(
+	wchar_t *text,
+	word size,
+	short caption_index);
 void *network_game_client_get_game(
 	void *client);
 short network_game_client_get_machine_index(
@@ -1459,7 +1461,7 @@ static boolean new_campaign_chosen(
 	struct widget_instance *widget,
 	struct event_record *event,
 	boolean *widget_deleted);
-boolean virtual_keyboard_last_exit_saved_text(
+boolean keyboard_last_kept(
 	void);
 static boolean new_campaign_decision(
 	struct widget_instance *widget,
@@ -1792,7 +1794,7 @@ static boolean new_campaign_decision(
 	result = FALSE;
 	if (event_handler_functions.unknown74 != NONE)
 	{
-		if (virtual_keyboard_last_exit_saved_text())
+		if (keyboard_last_kept())
 		{
 			if (new_campaign_profile_name[0])
 			{
@@ -1875,7 +1877,7 @@ static boolean create_and_begin_editing_new_gametype_profile(
 				*(short *)(profile + 0x64) = 0;
 				ustrncpy((wchar_t *)profile, name, 11);
 				*(short *)(profile + 0x16) = 0;
-				result = virtual_keyboard_launch(profile, 24, 9);
+				result = keyboard_name_launch((wchar_t *)profile, 24, 9);
 			}
 			else
 			{
@@ -1925,7 +1927,8 @@ static boolean network_game_join_game_from_server_list(
 			if ((word)generated_count > (word)zero)
 			{
 				server = ((byte **)widget->generated_list)[widget->data3C.selected_index];
-				if (server[0xE0] == TRUE)
+				/* port: a row with no game behind it joins nothing (#732) */
+				if (server && server[0xE0] == TRUE)
 				{
 					if (*(short *)(server + 0xDE) == zero)
 					{
@@ -2395,7 +2398,7 @@ static boolean playlist_profile_change_name(
 
 	if (profile)
 	{
-		if (!virtual_keyboard_launch(profile, 24, 9))
+		if (!keyboard_name_launch((wchar_t *)profile, 24, 9))
 			error(2, "failed to invoke virtual keyboard on profile name");
 	}
 	else
@@ -2416,7 +2419,7 @@ static boolean player_profile_change_name(
 
 	if (profile)
 	{
-		if (!virtual_keyboard_launch(profile->player_name, sizeof(profile->player_name), 8))
+		if (!keyboard_name_launch(profile->player_name, sizeof(profile->player_name), 8))
 		{
 			error(2, "failed to invoke virtual keyboard on player profile name");
 			result = FALSE;
@@ -2974,7 +2977,7 @@ static boolean create_and_begin_editing_new_player_profile(
 			{
 				ustrncpy(profile->player_name, name, MAXIMUM_PLAYER_PROFILE_NAME_LENGTH-1);
 				profile->player_name[MAXIMUM_PLAYER_PROFILE_NAME_LENGTH-1] = 0;
-				result = virtual_keyboard_launch(profile->player_name, sizeof(profile->player_name), 8);
+				result = keyboard_name_launch(profile->player_name, sizeof(profile->player_name), 8);
 			}
 			else
 			{
@@ -3474,6 +3477,9 @@ static boolean ui_widget_function_denied(
 	boolean denied = FALSE;
 	short index;
 
+	/* port: only MCC's own pause widgets may use its private actions */
+	if (mcc_ui_trusted_action(widget, function_index))
+		return FALSE;
 	if (pc_menu_tag(widget->definition_tag_index))
 		return FALSE;
 	if (function_index >= PC_MENU_FUNCTION_BASE && function_index < 0x8000)
@@ -3518,6 +3524,9 @@ boolean ui_widget_event_handler_function_invoke(
 	screens after it) */
 	if (ui_widget_function_denied(widget, function_index))
 		return FALSE;
+	/* port: MCC's additional in-map functions have their own dispatcher (mcc_ui.c) */
+	if (mcc_ui_event_function(widget, event, function_index, widget_deleted, &result))
+		return result;
 	/* port: the menus' own functions (port/linux/game/menu_functions.c) */
 	if (function_index >= PC_MENU_FUNCTION_BASE && function_index < 0x8000)
 	{
@@ -3596,7 +3605,7 @@ static boolean new_campaign_chosen(
 	ustrncpy(new_campaign_profile_name, name, 11);
 	new_campaign_profile_name[11] = L'\0';
 	event_handler_functions.unknown74 = event->controller_index;
-	if (!virtual_keyboard_launch(new_campaign_profile_name, 24, 8))
+	if (!keyboard_name_launch(new_campaign_profile_name, 24, 8))
 		error(2, "failed to invoke the virtual keyboard for a new campaign profile name");
 	return TRUE;
 }
@@ -6402,7 +6411,11 @@ boolean ui_widget_port_game_variant_set(
 }
 
 /* the gametype editor's OK (as playlist_profile_save_changes, which fails
-when nothing changed, after closing the screen: the menus show a failure) */
+when nothing changed, after closing the screen: the menus show a failure).
+A save closes the screen too: the Xbox's saving screen followed it, and the
+screen came back after it only to close itself, no longer editing ("close
+if not editing profile"); the save takes a few hundredths of a second here
+(port/linux/game/saving_screens.c) */
 boolean ui_widget_port_gametype_save(
 	struct widget_instance *widget,
 	boolean *widget_deleted)
@@ -6421,6 +6434,10 @@ boolean ui_widget_port_gametype_save(
 		player_ui_prompt_user_to_rename_edit_profile();
 		return FALSE;
 	}
-	return player_ui_save_profile();
+	if (!player_ui_save_profile())
+		return FALSE;
+	ui_widget_delete(widget_instance_get_topmost_parent(widget));
+	*widget_deleted = TRUE;
+	return TRUE;
 }
 

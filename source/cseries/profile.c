@@ -1152,6 +1152,13 @@ void profile_frame_start(
 	/* (after the step, which rolls up what the sections timed last frame:
 	the console no longer turns it off mid-frame, console.c) */
 	profile_global_enable = profile_trace_recording();
+#else
+	/* port: debug.timings (profile_port_timings): the sections timed from
+	this frame on, or not (here, where none is open; off, as the game
+	clears it at its start, cseries_initialize) */
+	profile_global_enable = profile_port_timings();
+	if (profile_global_enable && profile_globals.stack_depth)
+		profile_port_sections_closed();
 #endif
 
 	csmemset(&profile_globals.current_frame, 0, sizeof(profile_globals.current_frame));
@@ -1386,6 +1393,71 @@ void profile_exit_private(
 	}
 
 	return;
+}
+
+void profile_port_sections_closed(
+	void)
+{
+	short index;
+
+	for (index = 0; index<profile_globals.section_count; index++)
+	{
+		profile_globals.sections[index]->stack_depth = NONE;
+	}
+	profile_globals.stack_depth = 0;
+
+	return;
+}
+
+short profile_port_busiest(
+	char const **names,
+	real *milliseconds,
+	real *calls,
+	short most)
+{
+	short count = 0;
+	short index;
+
+	if (!profile_global_enable || profile_globals.timebase_frequency <= 0)
+	{
+		return 0;
+	}
+	for (index = 0; index<profile_globals.section_count; index++)
+	{
+		struct profile_section *section = profile_globals.sections[index];
+		/* (the frames the history holds: fewer just after it was turned on) */
+		long frames = MIN(section->sample_count, MAXIMUM_PROFILE_HISTORY);
+		real section_milliseconds;
+		short place;
+
+		if (!section->active || frames <= 0)
+		{
+			continue;
+		}
+		section_milliseconds = (real)((double)section->recent_elapsed_timebase*1000.0/
+			(double)profile_globals.timebase_frequency/(double)frames);
+		for (place = count; place>0 && milliseconds[place-1]<section_milliseconds; place--)
+		{
+			if (place<most)
+			{
+				names[place] = names[place-1];
+				milliseconds[place] = milliseconds[place-1];
+				calls[place] = calls[place-1];
+			}
+		}
+		if (place<most)
+		{
+			names[place] = section->name;
+			milliseconds[place] = section_milliseconds;
+			calls[place] = (real)section->recent_call_count/(real)frames;
+			if (count<most)
+			{
+				count++;
+			}
+		}
+	}
+
+	return count;
 }
 
 static void profile_timesection_inherit(

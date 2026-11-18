@@ -263,6 +263,7 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/vehicle_definitions.h"
 #include "units/vehicles.h"
+#include "vehicle_riding_bipeds.h" /* port: port/linux/game/vehicle_riding_bipeds.c */
 #include "physics/breakable_surfaces.h"
 #include "physics/collision_bsp.h"
 #include "physics/collision_bsp_definitions.h"
@@ -283,6 +284,9 @@ symbols in this file:
 file's own too) */
 boolean machine_elevator_carried(long biped_index, real_vector3d *offset);
 void machine_elevator_carried_forget(void);
+#include "mcc_seats.h" /* port: port/linux/game/mcc_seats.c */
+#include "mcc_script_effects.h" /* port: MCC campaign effects and host-owned possession */
+#include "mcc_movement.h" /* port: MCC weapon-authored movement penalties */
 
 /* port: port/linux/game/network_objects.c's (a client deletes the host's
 objects on the host's word alone) */
@@ -322,32 +326,11 @@ enum
 
 enum
 {
-	_biped_physics_in_airborne_bit = 0,
-	_biped_physics_in_slipping_bit,
-	_biped_physics_in_crouched_bit,
-	_biped_physics_in_trying_to_stand_bit,
-	_biped_physics_in_flying_bit,
-	_biped_physics_in_absolute_movement_bit,
-	_biped_physics_in_no_collision_bit,
-	_biped_physics_in_dead_bit,
-	_biped_physics_in_pass_through_bipeds_bit,
-	_biped_physics_in_climb_anything_bit,
-	/* port: a player's, in a co-op game without player collisions: the other
-	players' bipeds are not in its way (network_coop_player_collisions) */
-	_biped_physics_in_pass_through_players_bit,
 	/* port: a sub-step on the ground its tick's step met or landed on
 	(biped_substep_move), past the one that met it: the tick's push into
-	it given already, and no gap left to go down */
-	_biped_physics_in_pushed_bit,
-};
-
-enum
-{
-	_biped_physics_out_airborne_bit = 0,
-	_biped_physics_out_slipping_bit,
-	_biped_physics_out_cannot_stand_bit,
-	_biped_physics_out_splatter_bit,
-	_biped_physics_out_volatile_collision_bit,
+	it given already, and no gap left to go down (after the other in-flags,
+	vehicle_riding_bipeds.h's, with struct biped_physics) */
+	_biped_physics_in_pushed_bit = _biped_physics_in_pass_through_players_bit + 1,
 };
 
 enum
@@ -406,46 +389,6 @@ struct game_globals_falling_damage
 	real runtime_maximum_falling_velocity;
 	real runtime_minimum_damage_velocity;
 	real runtime_maximum_damage_velocity;
-};
-
-struct biped_physics
-{
-	long biped_index;
-	word in_flags;
-	word pad6;
-	real_point3d position;
-	real_vector3d forward;
-	real_vector3d aiming;
-	real_vector3d velocity;
-	real crouch_velocity;
-	real_vector3d movement_desired;
-	real movement_penalty;
-	real acceleration_maximum;
-	real airborne_acceleration_maximum;
-	real height;
-	real width;
-	real ground_tangential_velocity_max;
-	real ground_tangential_angle;
-	real minimum_normal_k;
-	real downhill_k0;
-	real downhill_k1;
-	real downhill_velocity_scale;
-	real uphill_k0;
-	real uphill_k1;
-	real uphill_velocity_scale;
-	real_plane3d ground_plane;
-	long existing_support_surface_index;
-	real gravity;
-	long bumped_object_index;
-	long elevator_object_index;
-	word out_flags;
-	word padA2;
-	long support_surface_index;
-	long stick_surface_index;
-	real_point3d new_position;
-	real_vector3d new_velocity;
-	real landing_velocity;
-	real collision_velocity;
 };
 
 struct animation_frame_info_dx_dy
@@ -552,6 +495,10 @@ static void biped_snap_facing(
 static void biped_physics_apply_step(
 	long biped_index,
 	struct biped_physics *physics);
+static void biped_physics_riding_finish(
+	long biped_index,
+	struct biped_physics *physics,
+	struct biped_riding_tick *riding_tick);
 static void biped_physics_apply_tick(
 	long biped_index,
 	struct biped_physics *physics,
@@ -674,6 +621,14 @@ struct biped_substep_datum
 	real_plane3d ground_plane;
 	long support_surface_index;
 	real_vector3d leave_velocity;
+	/* port: the vehicle the ground the tick stands on is part of (its
+	support: vehicle_riding_bipeds.c's biped_riding_support), with the ground;
+	and the tick's riding, made ready with its movement (biped_riding_prepare)
+	and recorded at its last sub-step (biped_riding_finish) */
+	long support_object_index;
+	short support_node_index;
+	real_vector3d support_velocity;
+	struct biped_riding_tick riding_tick;
 };
 
 /* biped_substep_datum's ground */
@@ -793,6 +748,9 @@ void bipeds_initialize(
 void bipeds_initialize_for_new_map(
 	void)
 {
+	/* port: (no biped exists yet: the settings only) */
+	vehicle_riding_latch();
+
 	return;
 }
 
@@ -833,6 +791,9 @@ void biped_reset(
 	csmemset(&biped->biped, 0, sizeof(biped->biped));
 	biped->biped.ground_plane = depths_of_hell;
 	biped->biped.last_falling_communication_time = NONE;
+	/* port: (vehicle_riding.c) */
+	biped->biped.riding_object_index = NONE;
+	biped->biped.riding_node_index = NONE;
 
 	return;
 }
@@ -970,7 +931,9 @@ static void biped_bumped_object(
 				biped->biped.bump_ticks++;
 				if (biped->biped.bump_ticks > 3)
 				{
-					if (object->object.type == _object_type_biped && cheat.bump_possession)
+					/* port: MCC handles local/remote ownership without the local-only helper. */
+					if (!mcc_script_effects_bump(biped_index, object_index) &&
+						object->object.type == _object_type_biped && cheat.bump_possession)
 					{
 						short local_player_index = unit_get_local_player_index(biped_index);
 
@@ -1002,9 +965,11 @@ static void biped_falling_damage(
 	boolean immune =
 		TEST_FLAG(biped->unit.flags, _unit_no_falling_damage_bit) ||
 		TEST_FLAG(definition->biped.flags, _biped_immune_to_falling_damage_bit);
-	real falling_velocity = biped->object.translational_velocity.k;
+	/* port: relative to the deck while riding or falling from it (vehicle_riding.c) */
+	real falling_velocity = biped_riding_falling_velocity(biped);
 
-	if (!cheat.jetpack || biped->unit.player_index == NONE)
+	/* port: MCC clients predict only the effect received from the host. */
+	if (!(cheat.jetpack || mcc_script_effect_enabled(MCC_EFFECT_JETPACK)) || biped->unit.player_index == NONE)
 	{
 		if (collision_velocity > falling_damage->runtime_minimum_damage_velocity)
 		{
@@ -2066,6 +2031,9 @@ static boolean biped_jump(
 		long actor_index;
 		real_vector3d jump_velocity;
 		real jump_magnitude;
+		/* port: (vehicle_riding.c) */
+		struct vehicle_riding_state riding;
+		real_vector3d jump_frame;
 
 		jumped = TRUE;
 		jump_magnitude = definition->biped.jump_velocity;
@@ -2080,10 +2048,16 @@ static boolean biped_jump(
 			jump_magnitude *=
 				1.f - biped->unit.body_stun*player_information->stun_turning_penalty;
 		}
-		if (cheat.super_jump && biped->unit.player_index!=NONE)
+		/* port: MCC's host-approved jump also applies to client prediction. */
+		if ((cheat.super_jump || mcc_script_effect_enabled(MCC_EFFECT_SUPER_JUMP)) && biped->unit.player_index!=NONE)
 			jump_magnitude *= 4.f;
 
+		/* port: the jump is above the deck the biped stands on (vehicle_riding.c;
+		the state the recording of this tick left) */
+		biped_riding_get(biped, &riding);
+		vehicle_riding_jump_frame(&riding, &jump_frame);
 		jump_velocity = biped->object.translational_velocity;
+		subtract_vectors3d(&jump_velocity, &jump_frame, &jump_velocity);
 		{
 			real upward_velocity =
 				jump_velocity.i*biped->object.up.i +
@@ -2099,6 +2073,8 @@ static boolean biped_jump(
 					(real_point3d *)&jump_velocity);
 			}
 		}
+
+		add_vectors3d(&jump_velocity, &jump_frame, &jump_velocity);
 
 		actor_index = biped->unit.swarm_actor_index;
 		if (actor_index==NONE)
@@ -2122,6 +2098,8 @@ static boolean biped_jump(
 			SET_FLAG(biped->biped.flags, _biped_airborne_bit, TRUE);
 			biped->biped.jump_recovery_timer = 0;
 			biped->biped.support_surface_index = NONE;
+			/* port: a rider's jump leaves its deck at its next tick, even against a steep wall of an enclosed vehicle */
+			biped_riding_take_off(biped_index, biped, &riding);
 			biped_make_footstep(biped_index, _material_effect_biped_jump, 0);
 			biped_make_footstep(biped_index, _material_effect_biped_jump, 1);
 		}
@@ -2401,11 +2379,15 @@ static void biped_update_slipping(
 	struct unit_animation_update_data *animation)
 {
 	struct biped_datum *biped = biped_get(biped_index);
+	/* port: (vehicle_riding.c) */
+	real_vector3d sliding_velocity;
 
 	biped_definition_get(biped->definition_index);
 
+	/* port: (relative to the deck it rides, vehicle_riding.c) */
+	biped_riding_relative_velocity(biped_index, &sliding_velocity);
 	if (biped->biped.slipping_ticks>3 &&
-		magnitude_squared3d(&biped->object.translational_velocity)>MINIMUM_SLIPPING_FOOTSTEP_VELOCITY_SQUARED)
+		magnitude_squared3d(&sliding_velocity)>MINIMUM_SLIPPING_FOOTSTEP_VELOCITY_SQUARED)
 	{
 		biped_make_footstep(biped_index, _material_effect_biped_sliding, 0);
 		biped_make_footstep(biped_index, _material_effect_biped_sliding, 1);
@@ -2436,7 +2418,8 @@ static void biped_update_jumping(
 		}
 	}
 
-	if (cheat.jetpack && biped->unit.player_index != NONE)
+	/* port: MCC clients use replicated campaign state, not local cheat permissions. */
+	if ((cheat.jetpack || mcc_script_effect_enabled(MCC_EFFECT_JETPACK)) && biped->unit.player_index != NONE)
 	{
 		struct player_datum *player = player_get(biped->unit.player_index);
 		/* inferred, descriptive names (not recovered Bungie identifiers): no PDB records the locals of this block */
@@ -2689,6 +2672,11 @@ static void biped_update_physics(
 		desired_velocity.j = physics->movement_desired.j * physics->forward.i +
 			physics->movement_desired.i * physics->forward.j;
 		scale_vector2d(&desired_velocity, 1.f - physics->movement_penalty, &desired_velocity);
+		/* port: relative to the air frame of the vehicle the biped just left
+		(vehicle_riding.c), so without input it keeps the deck's motion rather
+		than braking toward the world's rest; zero, the original game */
+		desired_velocity.i += physics->air_frame_velocity.i;
+		desired_velocity.j += physics->air_frame_velocity.j;
 		acceleration.i = desired_velocity.i - tick_velocity->i;
 		acceleration.j = desired_velocity.j - tick_velocity->j;
 		direction = acceleration;
@@ -3285,15 +3273,24 @@ static void biped_update_physics(
 				SET_FLAG(physics->out_flags, _biped_physics_out_airborne_bit, FALSE);
 				physics->ground_plane = collision->plane;
 				physics->support_surface_index = collision->surface_index;
+				/* port: (vehicle_riding.c: the ridden vehicle keeps its rider while it holds it up) */
+				biped_riding_support(physics,
+					&collisions[biped_riding_claimed_support(physics, collisions, collision_count, best_collision_index)]);
 				if (physics->support_surface_index == NONE ||
 					physics->support_surface_index != physics->stick_surface_index)
 				{
 					/* (port: as the tick's step at 30 lands, at the velocity it ends
-					at, in whichever sub-step the landing is) */
+					at, in whichever sub-step the landing is; measured against what
+					it lands on, vehicle_riding.c: the original's while nothing
+					rides, no frame and no support velocity) */
 					real_vector3d landing = tick_new_velocity;
 
 					landing.k += physics->crouch_velocity;
-					physics->landing_velocity = -dot_product3d(&landing, &physics->ground_plane.n);
+					physics->landing_velocity = vehicle_riding_landing_velocity(
+						&landing,
+						&physics->riding_frame_velocity,
+						&physics->support_velocity,
+						&physics->ground_plane.n);
 				}
 				else
 				{
@@ -3316,6 +3313,11 @@ static void biped_update_physics(
 			physics->landing_velocity = 0.f;
 		}
 	}
+
+	/* port: (vehicle_riding.c: an enclosed rider's steep vehicle still
+	carries it, whatever ground its physics chose) */
+	if (physics->cabin_object_index != NONE)
+		biped_riding_cabin_carrier(physics, collisions, collision_count);
 
 	{
 		long bumped_object_index = NONE;
@@ -3934,7 +3936,8 @@ static boolean biped_physics_prepare(
 	long biped_index,
 	struct unit_animation_update_data *animation,
 	struct biped_physics *result,
-	struct biped_player_speeds *speeds)
+	struct biped_player_speeds *speeds,
+	struct biped_riding_tick *riding_tick)
 {
 	struct biped_physics physics;
 	struct biped_definition *definition;
@@ -3970,6 +3973,12 @@ static boolean biped_physics_prepare(
 		&physics.position,
 		&physics.height,
 		&physics.width);
+	/* port: carry and seed before the native movement (vehicle_riding_bipeds.c).
+	A biped in a vehicle's window moves in its tick at any game.sim_rate
+	(biped_riding_holds_lane), carried as at 30; one that moves in the
+	sub-steps rides nothing yet (nothing to carry or seed) and has its
+	riding recorded at its last sub-step (biped_substep_move) */
+	biped_riding_prepare(biped_index, biped, definition, &physics, riding_tick);
 	physics.minimum_normal_k = definition->biped.runtime_minimum_normal_k;
 	physics.downhill_k0 = definition->biped.runtime_downhill_k0;
 	physics.downhill_k1 = definition->biped.runtime_downhill_k1;
@@ -4254,6 +4263,8 @@ static boolean biped_physics_prepare(
 
 				physics.acceleration_maximum = acceleration / TICKS_PER_SECOND;
 				biped_player_movement(speeds, &biped->unit.throttle, &physics.movement_desired);
+				/* port: MCC-only input scaling; legacy player physics is unchanged. */
+				mcc_movement_apply(biped_index, &physics.movement_desired);
 				physics.airborne_acceleration_maximum =
 					player_information->airborne_acceleration / TICKS_PER_SECOND;
 				if (!TEST_FLAG(
@@ -4674,7 +4685,8 @@ static boolean biped_substep_defer(
 	struct biped_physics const *physics,
 	struct unit_animation_update_data const *animation,
 	struct biped_player_speeds const *speeds,
-	real crouch_start)
+	real crouch_start,
+	struct biped_riding_tick const *riding_tick)
 {
 	long tick = game_time_get();
 	struct biped_substep_datum *datum = NULL;
@@ -4713,6 +4725,10 @@ static boolean biped_substep_defer(
 	datum->launch_velocity = *global_zero_vector3d;
 	datum->crouch_start = crouch_start;
 	datum->crouch_end = biped_get(biped_index)->biped.crouch;
+	datum->support_object_index = NONE;
+	datum->support_node_index = NONE;
+	datum->support_velocity = *global_zero_vector3d;
+	datum->riding_tick = *riding_tick;
 	biped_get(biped_index)->biped.crouch = crouch_start;
 
 	return TRUE;
@@ -4793,6 +4809,7 @@ static void biped_substep_move(
 	struct biped_substep_datum *datum,
 	short substep_index,
 	real tick_fraction,
+	boolean last,
 	struct biped_physics *result)
 {
 	struct biped_datum *biped = biped_get(biped_index);
@@ -4826,6 +4843,8 @@ static void biped_substep_move(
 		if (magnitude_squared3d(&throttle) < 0.1f * 0.1f)
 			throttle = *global_zero_vector3d;
 		biped_player_movement(&datum->speeds, &throttle, &physics.movement_desired);
+		/* port: (MCC's, as the tick's: biped_physics_prepare) */
+		mcc_movement_apply(biped_index, &physics.movement_desired);
 		if (!TEST_FLAG(biped->unit.control_flags, _unit_control_look_dont_turn_bit))
 		{
 			struct biped_definition *definition = biped_definition_get(biped->definition_index);
@@ -4910,6 +4929,9 @@ static void biped_substep_move(
 				datum->ground = _biped_substep_ground_tick;
 				datum->ground_plane = tick.ground_plane;
 				datum->support_surface_index = tick.support_surface_index;
+				datum->support_object_index = tick.support_object_index;
+				datum->support_node_index = tick.support_node_index;
+				datum->support_velocity = tick.support_velocity;
 				datum->landing_velocity = tick.landing_velocity;
 				datum->elevator_object_index = tick.elevator_object_index;
 			}
@@ -4959,6 +4981,9 @@ static void biped_substep_move(
 		SET_FLAG(physics.out_flags, _biped_physics_out_airborne_bit, FALSE);
 		physics.ground_plane = datum->ground_plane;
 		physics.support_surface_index = datum->support_surface_index;
+		physics.support_object_index = datum->support_object_index;
+		physics.support_node_index = datum->support_node_index;
+		physics.support_velocity = datum->support_velocity;
 		physics.landing_velocity = 0.f;
 	}
 	else if (datum->ground == _biped_substep_ground_probed &&
@@ -4972,7 +4997,15 @@ static void biped_substep_move(
 		datum->ground = _biped_substep_ground_landed;
 		datum->ground_plane = physics.ground_plane;
 		datum->support_surface_index = physics.support_surface_index;
+		datum->support_object_index = physics.support_object_index;
+		datum->support_node_index = physics.support_node_index;
+		datum->support_velocity = physics.support_velocity;
 	}
+	/* port: the tick's riding recorded where its last sub-step leaves it, as
+	the tick's step at 30 records it where it leaves it: what it stands on
+	then (a deck it rides from its next tick, vehicle_riding_bipeds.c) */
+	if (last)
+		biped_physics_riding_finish(biped_index, &physics, &datum->riding_tick);
 	biped_physics_apply_step(biped_index, &physics);
 	vector_from_points3d(&old_position, &biped->object.position, &moved);
 	biped_carry_nodes(biped_index, &moved);
@@ -5036,7 +5069,8 @@ static boolean biped_substep_inline(
 	long biped_index,
 	struct biped_physics const *physics,
 	struct unit_animation_update_data *animation,
-	struct biped_player_speeds const *speeds)
+	struct biped_player_speeds const *speeds,
+	struct biped_riding_tick const *riding_tick)
 {
 	struct biped_substep_datum datum;
 	struct biped_replay_datum *replay = NULL;
@@ -5086,6 +5120,10 @@ static boolean biped_substep_inline(
 	datum.bumped_velocity = physics->velocity;
 	datum.jumped = FALSE;
 	datum.launch_velocity = *global_zero_vector3d;
+	datum.support_object_index = NONE;
+	datum.support_node_index = NONE;
+	datum.support_velocity = *global_zero_vector3d;
+	datum.riding_tick = *riding_tick;
 
 	if (biped_substep_too_small(physics, substep_count))
 	{
@@ -5096,6 +5134,7 @@ static boolean biped_substep_inline(
 
 		step = *physics;
 		biped_update_physics(&step, 1.f, global_gravity, &step.velocity, NULL);
+		biped_physics_riding_finish(biped_index, &step, &datum.riding_tick);
 		biped_physics_apply_step(biped_index, &step);
 		biped_physics_apply_tick(biped_index, &step, animation);
 		end = &biped_get(biped_index)->object.position;
@@ -5117,7 +5156,8 @@ static boolean biped_substep_inline(
 			/* (on the macro lane where the sub-step sees it, a lift it
 			stands on a share of its movement: objects.h) */
 			object_lane_view_substep(biped_index, substep_index);
-			biped_substep_move(biped_index, &datum, substep_index, tick_fraction, &step);
+			biped_substep_move(biped_index, &datum, substep_index, tick_fraction,
+				substep_index == substep_count - 1, &step);
 			if (replay)
 				replay->poses[substep_index] = biped_get(biped_index)->object.position;
 			if (substep_index < substep_count - 1)
@@ -5310,7 +5350,7 @@ static void bipeds_substep(
 		}
 
 		profile_enter(biped_update_section);
-		biped_substep_move(biped_index, datum, substep_index, tick_fraction, &physics);
+		biped_substep_move(biped_index, datum, substep_index, tick_fraction, last, &physics);
 		/* (its crouch its share of the tick's change of it, which the
 		sub-step moved with as the tick's step moves with the crouch it
 		starts with: the last the tick's own) */
@@ -5342,6 +5382,29 @@ static void bipeds_substep(
 	return;
 }
 
+/* port: the tick's riding settled and recorded after its movement, before
+the movement is applied (vehicle_riding_bipeds.c's biped_riding_finish), a
+suspended unit's held where it was first: after the tick's step at 30, and
+after the last sub-step of one that moves in the sub-steps */
+static void biped_physics_riding_finish(
+	long biped_index,
+	struct biped_physics *physics,
+	struct biped_riding_tick *riding_tick)
+{
+	struct biped_datum *biped = biped_get(biped_index);
+
+	if (TEST_FLAG(biped->unit.flags, _unit_suspended_bit))
+	{
+		physics->new_position = physics->position;
+		SET_FLAG(physics->out_flags, _biped_physics_out_airborne_bit, FALSE);
+		physics->new_velocity = *global_zero_vector3d;
+		physics->velocity = *global_zero_vector3d;
+	}
+	biped_riding_finish(biped_index, biped, biped_definition_get(biped->definition_index), physics, riding_tick);
+
+	return;
+}
+
 /* the biped's movement this tick (port: biped_physics_prepare, then its steps
 applied): TRUE when it waits for the fast phase (biped_substep_defer) */
 static boolean biped_update_moving(
@@ -5350,16 +5413,20 @@ static boolean biped_update_moving(
 {
 	struct biped_physics physics;
 	struct biped_player_speeds speeds;
+	/* port: port/linux/game/vehicle_riding_bipeds.c */
+	struct biped_riding_tick riding_tick;
 	real crouch = biped_get(biped_index)->biped.crouch;
 
-	if (!biped_physics_prepare(biped_index, animation, &physics, &speeds))
+	if (!biped_physics_prepare(biped_index, animation, &physics, &speeds, &riding_tick))
 		return FALSE;
-	if (biped_substep_defer(biped_index, &physics, animation, &speeds, crouch))
+	if (biped_substep_defer(biped_index, &physics, animation, &speeds, crouch, &riding_tick))
 		return TRUE;
-	if (biped_substep_inline(biped_index, &physics, animation, &speeds))
+	if (biped_substep_inline(biped_index, &physics, animation, &speeds, &riding_tick))
 		return FALSE;
 
 	biped_update_physics(&physics, 1.f, global_gravity, &physics.velocity, NULL);
+	/* port: settle and record after the native movement (vehicle_riding_bipeds.c) */
+	biped_physics_riding_finish(biped_index, &physics, &riding_tick);
 	biped_physics_apply_step(biped_index, &physics);
 	biped_physics_apply_tick(biped_index, &physics, animation);
 
@@ -5385,6 +5452,8 @@ boolean biped_new(
 	biped_snap_facing(biped_index);
 	biped->biped.elevator_object_index = NONE;
 	biped->biped.elevator_ticks = 0;
+	/* port: (vehicle_riding.c) */
+	biped_riding_clear(biped);
 
 	return TRUE;
 }
@@ -5568,6 +5637,8 @@ boolean biped_update(
 	if (biped->object.parent_object_index!=NONE)
 	{
 		struct object_datum *parent = object_get(biped->object.parent_object_index);
+		/* port: (vehicle_riding.c) */
+		biped_riding_seated(biped_index, biped);
 
 		if (parent->object.type==_object_type_vehicle)
 		{
@@ -5577,8 +5648,11 @@ boolean biped_update(
 			if (TEST_FLAG(biped->unit.control_flags, _unit_control_action_bit))
 				unit_try_and_exit_seat(biped_index);
 
+			/* port: a vehicle on its side throws its riders too, as the retail
+			game does (vehicle_is_flipped: up.k below 0.2). This build threw
+			them only once the vehicle was upside down (up.k below 0). */
 			if (rider_ejection &&
-				vehicle->object.up.k<0.f &&
+				vehicle_is_flipped(biped->object.parent_object_index) &&
 				TEST_FLAG(vehicle->object.flags, _object_on_ground_bit))
 			{
 				unit_exit_seat_end(biped_index);
@@ -5588,6 +5662,9 @@ boolean biped_update(
 		{
 			animation.state_desired =
 				(char)((parent->object.damage_flags & FLAG(_object_dead_bit)) | 0x20);
+			/* port: MCC seats use seat animations, not infection attachment. */
+			if (mcc_seat_update(biped_index))
+				animation.state_desired = _unit_state_idle;
 		}
 	}
 	else

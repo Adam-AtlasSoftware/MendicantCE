@@ -32,9 +32,14 @@ read the game's settings file.
 #include "xgpu_metal_combiner.h"
 
 #include <stddef.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+_Static_assert(XGPU_METAL_BORDER_REGION == XGPU_BORDER_REGION, "a region's border bit");
+_Static_assert(XGPU_METAL_BORDER_MSDF == XGPU_BORDER_MSDF, "the distance fields' border bit");
+_Static_assert(XGPU_METAL_ADDRESS_MSDF == XGPU_ADDRESS_MSDF, "XGPU_ADDRESS_MSDF's number");
 
 /* the stream's copies of the intermediate form's pieces are their bytes */
 _Static_assert(sizeof(struct xgpu_vertex_instruction) == XGPU_STREAM_VERTEX_INSTRUCTION_SIZE, "vertex instruction");
@@ -67,7 +72,9 @@ _Static_assert(XGPU_METAL_VERTEX_CONSTANT_COUNT == XGPU_VERTEX_CONSTANT_COUNT, "
 _Static_assert(XGPU_MSL_TEXTURE_WORLD_AO_PIXELS == XGPU_METAL_TEXTURE_WORLD_AO_PIXELS &&
 	XGPU_MSL_TEXTURE_WORLD_AO_OBJECTS == XGPU_METAL_TEXTURE_WORLD_AO_OBJECTS &&
 	XGPU_MSL_BUFFER_WORLD_AO == XGPU_METAL_BUFFER_WORLD_AO && XGPU_MSL_WORLD_AO_PASS_HISTORY == XGPU_METAL_WORLD_AO_PASS_HISTORY &&
-	XGPU_MSL_WORLD_AO_PASS_CASCADES == XGPU_METAL_WORLD_AO_PASS_CASCADES, "the world's occlusion's bindings");
+	XGPU_MSL_WORLD_AO_PASS_CASCADES == XGPU_METAL_WORLD_AO_PASS_CASCADES &&
+	XGPU_MSL_TEXTURE_WORLD_SDF == XGPU_METAL_TEXTURE_WORLD_SDF &&
+	XGPU_MSL_TEXTURE_WORLD_SDF_TABLE == XGPU_METAL_TEXTURE_WORLD_SDF_TABLE, "the world's occlusion's bindings");
 /* (setVertexBytes' limit) */
 _Static_assert(sizeof(struct xgpu_msl_uniforms) <= 4096 && sizeof(struct xgpu_msl_halo_uniforms) <= 4096,
 	"uniforms' size");
@@ -333,6 +340,11 @@ static uint32_t uniforms_make(void *context, const struct xgpu_metal_stream_unif
 		/* (display.ambient_occlusion "world": the draw's object) */
 		to->world_ao[0] = from->world_ao[0];
 		to->world_ao[1] = from->world_ao[1];
+		to->world_ao[3] = from->world_ao[3];
+		/* (the enhanced dynamic lights' tint, in linear light) */
+		for (stage = 0; stage < 3; stage++)
+			to->dynamic_light_tint[stage] = powf(from->ps_final_c0[stage], 2.2f);
+		to->dynamic_light_tint[3] = 1.0f;
 	}
 	if (inputs->blend_color)
 		memcpy(to->blend_constant, inputs->blend_color, sizeof(to->blend_constant));

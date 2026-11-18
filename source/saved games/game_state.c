@@ -102,12 +102,14 @@ symbols in this file:
 #include "game_state.h"
 #include "coop_vehicles.h" /* port: preserve replacement-vehicle homes across reverts */
 #include "mendicant/mendicant.h" /* port: port/linux/game/mendicant/mendicant_main.c */
+#include "network_coop.h" /* port: checkpoint roster restoration and host team-wipe policy */
 #include "game.h"
 #include "tag_files.h"
 #include "cache_files.h"
 #include "scenario.h"
 #include "main.h"
 #include "objects.h"
+#include "objects/object_types.h" /* port: object_type_definitions (the saved game's layout checksum) */
 #include "game_sound.h"
 #include "sound_manager.h"
 #include "observer.h"
@@ -124,10 +126,20 @@ symbols in this file:
 #include "lruv_cache.h"
 #include "memory_pool.h"
 #include "cluster_partitions.h"
+#include "mcc_cache.h" /* port: port/linux/game/mcc_cache.h */
+#include "mcc_checkpoint.h" /* port: port/linux/game/mcc_checkpoint.h */
+#include "hs_console_state.h" /* port: port/linux/game/hs_console_state.inl */
 /* port: object_bounds_cache.c's */
 void object_bounds_cache_invalidate(void);
 /* port: port/linux/game/determinism_log.c */
 void determinism_log_game_state_allocation(char const *name, void const *address, long size);
+#include "demo.h" /* port: port/linux/game/demo.c */
+
+/* port: riding taken from the settings after every load (bipeds.c) */
+void bipeds_riding_latch(void);
+
+/* port: (object_types.c) */
+extern struct object_type_definition *object_type_definitions[NUMBER_OF_OBJECT_TYPES];
 
 void platform_log(const char *format, ...);
 
@@ -213,6 +225,8 @@ static game_state_before_load_proc before_load_procs[] =
 static game_state_after_load_proc after_load_procs[] =
 {
 	scenario_reload_structure_bsp_if_necessary,
+	/* port: the session roster is not part of a gameplay checkpoint. */
+	network_coop_restore_players,
 	sound_stop_all,
 	game_sound_restore,
 	observer_initialize_for_new_map,
@@ -229,7 +243,9 @@ static game_state_after_load_proc after_load_procs[] =
 	coop_vehicles_after_load,
 	/* port: no firing position index beyond the level's own lists (MENDICANT
 	AI's maneuver slots), and its orders start over (port/linux/game/mendicant) */
-	mendicant_game_state_after_load
+	mendicant_game_state_after_load,
+	/* port: (vehicle_riding.c: also for a revert in the same structure) */
+	bipeds_riding_latch
 };
 
 /* ---------- public code */
@@ -278,6 +294,9 @@ static void game_state_call_after_load_procs(
 	{
 		(*proc)();
 	}
+	/* port: the game state rewritten as a whole, for the demo being
+	recorded (port/linux/game/demo.c) */
+	demo_note_state_loaded();
 
 	return;
 }
@@ -345,9 +364,22 @@ void game_state_save(
 	void)
 {
 	game_state_call_before_save_procs();
+	/* port: syntax outside the CPU image must accompany saved threads, and
+	MCC's extra slots occupy only proven-unused CPU bytes in this image. A
+	state that cannot be taken is not saved: the previous checkpoint, if
+	there is one, stays the one a revert goes back to */
+	if (!hs_console_state_capture() ||
+		(mcc_cache_tags_loaded() && !mcc_checkpoint_capture(game_state_globals.base_address,
+		GAME_STATE_SIZE, game_state_globals.cpu_allocation_size, GAME_STATE_CPU_SIZE)))
+	{
+		return;
+	}
 
 	main_stop_time();
 	game_state_globals.saved_game_valid = (game_state_write_to_file()!=FALSE);
+	/* port: never associate new players with an older or failed save. */
+	if (game_state_globals.saved_game_valid)
+		network_coop_checkpoint_saved();
 	main_start_time();
 	game_state_note_event("checkpoint saved");
 
@@ -412,6 +444,12 @@ void game_state_port_restore(
 void game_state_revert(
 	void)
 {
+	/* port: a demo's playback reverts to nothing of its own: the game state
+	the recording's revert gave comes whole with its next tick
+	(port/linux/game/demo.c), and after a seek the playback may have no
+	checkpoint (the map would start over) */
+	if (demo_playing())
+		return;
 	game_state_saved_game_written();
 	if (!game_state_globals.saved_game_valid && !recover_saved_games_hack)
 	{
@@ -443,7 +481,8 @@ void game_state_save_to_persistent_storage(
 	not a game state no checkpoint has (game_state_revert would start the
 	map over and leave the game state as it is, written with no map's
 	header) */
-	if (player_spawn_count==1 && (game_state_port_saved_game_valid() || recover_saved_games_hack))
+	/* port: (nothing of a demo's playback: port/linux/game/demo.c) */
+	if (player_spawn_count==1 && !demo_playing() && (game_state_port_saved_game_valid() || recover_saved_games_hack))
 	{
 		game_state_note_event("save and quit");
 		game_state_revert();
@@ -500,6 +539,10 @@ boolean game_state_test_persistent_storage(
 			&file_corrupted);
 	if (corrupted)
 		*corrupted = file_corrupted ? TRUE : FALSE;
+	/* port: a saved game of another build's layout is not offered (the
+	level would refuse it and start from its beginning) */
+	if (success && header.allocation_size_checksum != (unsigned long)game_state_globals.allocation_size_checksum)
+		success = FALSE;
 	if (success)
 	{
 		*difficulty = header.difficulty;
@@ -518,6 +561,12 @@ boolean game_state_test_persistent_storage(
 void game_state_save_core(
 	const char *name)
 {
+	/* port: cores share the checkpoint's console syntax ownership. */
+	if (!hs_console_state_capture())
+		return;
+	if (mcc_cache_tags_loaded() && !mcc_checkpoint_capture(game_state_globals.base_address,
+		GAME_STATE_SIZE, game_state_globals.cpu_allocation_size, GAME_STATE_CPU_SIZE))
+		return;
 	/* the whole of the native builds' larger game state */
 	if (game_state_write_core(name, game_state_globals.base_address, GAME_STATE_SIZE))
 	{
@@ -556,14 +605,8 @@ static boolean game_state_header_valid(
 	}
 	else if (header->allocation_size_checksum != game_state_globals.allocation_size_checksum)
 	{
-		if (halt_on_error)
-		{
-			match_vassert(
-				"c:\\halo\\SOURCE\\saved games\\game_state.c",
-				413,
-				FALSE,
-				csprintf(temporary, "allocation checksum mismatch"));
-		}
+		/* port: a different build's saved allocation layout is an expected
+		refusal (including images without saved console syntax), not a crash. */
 	}
 	else if (header->player_count != player_spawn_count)
 	{
@@ -638,6 +681,14 @@ static void game_state_set_revert_time(
 	return;
 }
 
+/* port: read-only arena bounds for MCC-owned state; no allocator changes. */
+void *game_state_port_cpu_region(unsigned long *used, unsigned long *capacity)
+{
+	*used=game_state_globals.cpu_allocation_size;
+	*capacity=GAME_STATE_CPU_SIZE;
+	return game_state_globals.base_address;
+}
+
 void *game_state_malloc(
 	const char *name,
 	const char *type,
@@ -653,8 +704,9 @@ void *game_state_malloc(
 
 	pointer = (byte *)game_state_globals.base_address+game_state_globals.cpu_allocation_size;
 	game_state_globals.cpu_allocation_size+= size;
-	/* port: (debug.determinism_log) */
+	/* port: (debug.determinism_log, and the demos) */
 	determinism_log_game_state_allocation(name, pointer, size);
+	demo_game_state_allocation(name, pointer, size);
 
 	crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &size, sizeof(size));
 
@@ -676,8 +728,9 @@ void *game_state_gpu_malloc(
 
 	game_state_globals.gpu_allocation_size+= size;
 	pointer = (byte *)game_state_globals.base_address-game_state_globals.gpu_allocation_size+GAME_STATE_SIZE;
-	/* port: (debug.determinism_log) */
+	/* port: (debug.determinism_log, and the demos) */
 	determinism_log_game_state_allocation(name, pointer, size);
+	demo_game_state_allocation(name, pointer, size);
 
 	crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &size, sizeof(size));
 
@@ -914,40 +967,13 @@ static boolean game_state_image_lruv_cache_valid(
 	return game_state_image_data_valid(image, blocks_live, allocation->maximum_count, sizeof(struct lruv_cache_block));
 }
 
-long game_state_image_size(
-	void)
-{
-	return game_state_globals.cpu_allocation_size + game_state_globals.gpu_allocation_size;
-}
-
-/* the CPU's allocations, from the game state's start, then the GPU's, from
-its end down: the rest of it is never written */
-void game_state_image_take(
+/* port: what game_state_image_accept checks of an image (the live game
+state itself, for the demos: game_state_port_demo_load) */
+static boolean game_state_image_valid(
 	void *image)
 {
-	byte const *base = game_state_globals.base_address;
-
-	csmemcpy(image, base, game_state_globals.cpu_allocation_size);
-	csmemcpy((byte *)image + game_state_globals.cpu_allocation_size,
-		base + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
-		game_state_globals.gpu_allocation_size);
-}
-
-/* (what is checked is in the CPU's allocations, at the same place in an
-image of either size) */
-boolean game_state_image_accept(
-	void *image,
-	long size)
-{
-	byte *gpu_image;
 	long index;
 
-	if (size == GAME_STATE_SIZE)
-		gpu_image = (byte *)image + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size;
-	else if (size == game_state_image_size())
-		gpu_image = (byte *)image + game_state_globals.cpu_allocation_size;
-	else
-		return game_state_image_refuse("the image", "is of another size");
 	for (index = 0; index < game_state_allocation_count; index++)
 	{
 		struct game_state_allocation const *allocation = &game_state_allocations[index];
@@ -972,11 +998,110 @@ boolean game_state_image_accept(
 		if (!valid)
 			return FALSE;
 	}
-	csmemcpy(game_state_globals.base_address, image, game_state_globals.cpu_allocation_size);
-	csmemcpy((byte *)game_state_globals.base_address + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
-		gpu_image, game_state_globals.gpu_allocation_size);
+	return TRUE;
+}
+
+long game_state_image_size(
+	void)
+{
+	/* port: an MCC map's checkpoint keeps its extra state at the end of the
+	CPU's part, past its allocations (mcc_checkpoint.c): its image is the
+	whole game state */
+	if (mcc_cache_tags_loaded())
+		return GAME_STATE_SIZE;
+	return game_state_globals.cpu_allocation_size + game_state_globals.gpu_allocation_size;
+}
+
+/* the CPU's allocations, from the game state's start, then the GPU's, from
+its end down: the rest of it is never written */
+void game_state_image_take(
+	void *image)
+{
+	byte const *base = game_state_globals.base_address;
+
+	/* (an MCC map's whole: game_state_image_size) */
+	if (mcc_cache_tags_loaded())
+	{
+		csmemcpy(image, base, GAME_STATE_SIZE);
+		return;
+	}
+	csmemcpy(image, base, game_state_globals.cpu_allocation_size);
+	csmemcpy((byte *)image + game_state_globals.cpu_allocation_size,
+		base + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
+		game_state_globals.gpu_allocation_size);
+}
+
+/* (what is checked is in the CPU's allocations, at the same place in an
+image of either size) */
+boolean game_state_image_accept(
+	void *image,
+	long size)
+{
+	byte *gpu_image;
+
+	if (size == GAME_STATE_SIZE)
+		gpu_image = (byte *)image + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size;
+	else if (size == game_state_image_size())
+		gpu_image = (byte *)image + game_state_globals.cpu_allocation_size;
+	else
+		return game_state_image_refuse("the image", "is of another size");
+	/* port: (the checks, the demos' too: game_state_image_valid) */
+	if (!game_state_image_valid(image))
+		return FALSE;
+	/* port: an MCC map's extra state, which only a whole image holds
+	(game_state_image_size) */
+	if (mcc_cache_tags_loaded() && !mcc_checkpoint_validate(image, size,
+		game_state_globals.cpu_allocation_size, GAME_STATE_CPU_SIZE, game_state_globals.base_address))
+		return FALSE;
+	/* port: validate console references before publishing any saved state. */
+	if (!hs_console_state_validate(image, game_state_globals.base_address, size))
+		return FALSE;
+	if (size == GAME_STATE_SIZE && mcc_cache_tags_loaded())
+	{
+		csmemcpy(game_state_globals.base_address, image, GAME_STATE_SIZE);
+	}
+	else
+	{
+		csmemcpy(game_state_globals.base_address, image, game_state_globals.cpu_allocation_size);
+		csmemcpy((byte *)game_state_globals.base_address + GAME_STATE_SIZE - game_state_globals.gpu_allocation_size,
+			gpu_image, game_state_globals.gpu_allocation_size);
+	}
+	hs_console_state_restore(); /* port: restore the syntax before threads run. */
+	if (mcc_cache_tags_loaded() && !mcc_checkpoint_restore(game_state_globals.base_address, GAME_STATE_SIZE,
+		game_state_globals.cpu_allocation_size, GAME_STATE_CPU_SIZE))
+		return FALSE;
 	error(_error_silent, "the saved game is taken");
 
+	return TRUE;
+}
+
+/* port: the game state's memory, its size and its allocations' checksum,
+for the demos (port/linux/game/demo.c) */
+void *game_state_port_base(
+	long *size,
+	unsigned long *checksum)
+{
+	*size = GAME_STATE_SIZE;
+	*checksum = (unsigned long)game_state_globals.allocation_size_checksum;
+	return game_state_globals.base_address;
+}
+
+/* port: a demo's snapshot taken as a saved game is (port/linux/game/demo.c):
+the loading's procedures before write writes it over the game state and
+after, the game state checked between them in place; whether it was. Or,
+with no procedures, only written and checked */
+boolean game_state_port_demo_load(
+	void (*write)(void *context),
+	void *context,
+	boolean procedures)
+{
+	if (procedures)
+		game_state_call_before_load_procs();
+	write(context);
+	if (!game_state_image_valid(game_state_globals.base_address))
+		return FALSE;
+	if (procedures)
+		game_state_call_after_load_procs();
 	return TRUE;
 }
 
@@ -1167,7 +1292,22 @@ void game_state_load_core(
 void game_state_initialize(
 	void)
 {
+	short object_type;
+
 	crc_new(&game_state_globals.allocation_size_checksum);
+	/* port: a saved game holds each object's datum in the layout of the
+	build that wrote it: one of another layout is refused, never read into
+	this one's (vehicle_riding.c grew the biped's) */
+	for (object_type = 0; object_type < NUMBER_OF_OBJECT_TYPES; object_type++)
+	{
+		if (object_type_definitions[object_type])
+		{
+			long datum_size = object_type_definitions[object_type]->game_datum_size;
+
+			crc_checksum_buffer((unsigned long *)&game_state_globals.allocation_size_checksum, &datum_size,
+				sizeof(datum_size));
+		}
+	}
 	/* the native builds place their larger game state above the tag cache
 	(halo_port_capacity.h, cache/physical_memory_map.c) */
 	game_state_globals.base_address = game_state_allocate_buffer(HALO_PORT_GAME_STATE_BASE_ADDRESS, GAME_STATE_CPU_SIZE, GAME_STATE_GPU_SIZE);

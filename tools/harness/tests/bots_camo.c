@@ -341,7 +341,7 @@ static void case_aim(void)
 			wander[blurred] = 0.0f;
 			for (tick = 0; tick < 4 * TICKS_PER_SECOND; tick++)
 			{
-				bots_aim_settle(&bot, definition, 1.0f, blurred ? bots_camo_blur(&quiet) : 1.0f);
+				bots_aim_settle(&bot, definition, 1.0f, blurred ? bots_camo_blur(&quiet) : 1.0f, 0.0f);
 				if (tick == TICKS_PER_SECOND / 2)
 					error[blurred] = bot.aim_error_yaw;
 				wander[blurred] = MAX(wander[blurred], sqrtf(bot.wander_yaw * bot.wander_yaw +

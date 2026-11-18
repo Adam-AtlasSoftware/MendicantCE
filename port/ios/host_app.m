@@ -146,17 +146,15 @@ int host_app_audio_output_latency(void)
 three pixels to the point draws two of them (2/3 each way, under half the
 pixels), sharp at a phone's distance and inside the 120 Hz frame where all
 of them were not (an iPhone 15 Pro Max: 8 to 10 ms of GPU a frame at 3x,
-so 60 Hz); an iPad and a 2x phone draw all of theirs */
+so 60 Hz); a 2x phone 0.8, as an Android phone does; an iPad all of its
+own */
 static float render_scale_for_device(void)
 {
 	__block float scale = 1.0f;
 
 	void (^choose)(void) = ^{
-		if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone &&
-			[UIScreen mainScreen].nativeScale >= 2.5)
-		{
-			scale = 2.0f / 3.0f;
-		}
+		if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone)
+			scale = [UIScreen mainScreen].nativeScale >= 2.5 ? 2.0f / 3.0f : 0.8f;
 	};
 	if ([NSThread isMainThread])
 		choose();

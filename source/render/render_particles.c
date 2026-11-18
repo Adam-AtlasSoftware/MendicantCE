@@ -32,6 +32,8 @@ symbols in this file:
 #include "view_fov.h" /* port: port/linux/game/view_fov.c */
 #include "rasterizer/rasterizer.h" /* port: (render_particles_cut_run) */
 #include "network_replay.h" /* port: port/linux/game/network_replay_playback.c */
+/* port: port/linux/game/spartan_link.c: a feed of the HUD's Spartan link is drawn */
+boolean spartan_link_drawing(void);
 
 /* ---------- constants */
 
@@ -360,11 +362,17 @@ void render_particles(
 					(short)particle->definition_index;
 				rendered_particle->cluster_index =
 					particle->location.cluster_index;
+				/* port: a charge stuck to the viewmodel is drawn with it.
+				One that also shows on the body was left on the world's
+				view, and the near plane cut it down. */
 				rendered_particle->attached_to_first_person_weapon =
 					owned_by_local_player &&
+					(TEST_FLAG(
+						particle->flags,
+						_particle_datum_dont_draw_third_person_bit) ||
 					TEST_FLAG(
 						particle->flags,
-						_particle_datum_dont_draw_third_person_bit);
+						_particle_datum_attached_to_local_player_bit));
 			}
 		}
 
@@ -479,14 +487,21 @@ void render_particles(
 						real total_radius = 0.0f;
 						short built_particle_count = 0;
 
+						render_marks_next(RENDER_MARK_PARTICLE, definition->bitmap.index); /* port: debug.render_marks */
 						build_sprites_begin(
 							&sprite_data,
 							render_particles_part_ends[part_index] - order_index,
 							definition->bitmap.index,
 							&definition->shader,
-							rendered_particle->attached_to_first_person_weapon
+							(rendered_particle->attached_to_first_person_weapon
 								? FLAG(_build_sprites_first_person_bit)
-								: 0);
+								: 0) |
+							/* port: a self-illuminated particle is light
+							(particles.c's _particle_definition_self_illuminated_bit,
+							9): display.hdr_highlight_boost's */
+							(TEST_FLAG(definition->flags, 9)
+								? FLAG(_build_sprites_emitter_bit)
+								: 0));
 
 						for (; order_index < render_particles_part_ends[part_index]; order_index++)
 						{
@@ -580,8 +595,13 @@ void render_particles(
 										fade,
 										flags);
 
-									particle->last_rendered_frame_index =
-										render.frame_index;
+									/* port: not by a feed of the HUD's Spartan link:
+									a particle a player's own view no longer draws goes,
+									as before, and makes no effect where it strikes
+									(port/linux/game/spartan_link.c) */
+									if (!spartan_link_drawing())
+										particle->last_rendered_frame_index =
+											render.frame_index;
 								}
 							}
 						}

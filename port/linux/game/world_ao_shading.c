@@ -59,6 +59,35 @@ float world_ao_field_occlusion_from(struct world_sdf_volume const *volume, float
 	return 1.0f - saturate(WORLD_AO_K * occlusion);
 }
 
+float world_ao_cards_occlusion(struct world_sdf_volume const *volume, float const point[3], float normal[3],
+	float own)
+{
+	float directions[3][3], best;
+	int index, axis, found;
+
+	for (axis = 0; axis < 3; axis++)
+	{
+		directions[0][axis] = axis == 2 ? 1.0f : 0.0f;
+		directions[1][axis] = normal[axis];
+		directions[2][axis] = -normal[axis];
+	}
+	best = world_ao_field_occlusion_from(volume, point, directions[0], own);
+	found = 0;
+	for (index = 1; index < 3; index++)
+	{
+		float occlusion = world_ao_field_occlusion_from(volume, point, directions[index], own);
+
+		if (occlusion > best)
+		{
+			best = occlusion;
+			found = index;
+		}
+	}
+	for (axis = 0; axis < 3; axis++)
+		normal[axis] = directions[found][axis];
+	return best;
+}
+
 float world_ao_reference(struct world_sdf_volume const *volume, float const lighting_point[3])
 {
 	static const float up[3] = { 0.0f, 0.0f, 1.0f };
@@ -473,11 +502,30 @@ long world_ao_proxies_walked(float const parameters[2][4], long count, float ref
 
 float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume const *volume,
 	struct world_proxy const *proxies, long count, float const point[3], float const normal[3], float owner,
-	float reference, int lightmap, float scenery)
+	float reference, int lightmap, float scenery, int cards)
 {
-	float proxied = world_ao_proxies_occlusion(proxies, world_ao_proxies_walked(parameters, count, reference, lightmap),
-		point, normal, owner), field, ao_floor;
+	float proxied, field, own = 0.0f, found[3];
+	/* (PRISM: a static scenery placement's own draw, its reference negative,
+	is floored at WORLD_AO_SCENERY_FLOOR) */
+	float ao_floor = reference < 0.0f ? WORLD_AO_SCENERY_FLOOR : WORLD_AO_FLOOR;
 
+	memcpy(found, normal, sizeof(found));
+	/* (a static scenery placement's own draw, its reference negative: the
+	field holds its own geometry, so taken from the pixel's own depth in it,
+	where its surface is inside its collision (a canopy within its hull), and
+	relative to none) */
+	if (!lightmap && reference < 0.0f)
+	{
+		float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
+
+		own = inside < 0.0f ? inside : 0.0f;
+	}
+	/* (a two-sided shader's cards: about their most open direction, the
+	shapes too) */
+	field = lightmap ? 1.0f : cards ? world_ao_cards_occlusion(volume, point, found, own) :
+		world_ao_field_occlusion_from(volume, point, normal, own);
+	proxied = world_ao_proxies_occlusion(proxies, world_ao_proxies_walked(parameters, count, reference, lightmap),
+		point, found, owner);
 	if (lightmap)
 	{
 		/* (the static scenery's, from its page) */
@@ -485,22 +533,8 @@ float world_ao_occlusion(float const parameters[2][4], struct world_sdf_volume c
 			proxied *= scenery;
 		return mix(1.0f, proxied > WORLD_AO_FLOOR ? proxied : WORLD_AO_FLOOR, parameters[0][1]);
 	}
-	/* (a static scenery placement's own draw, its reference negative: the
-	field holds its own geometry, so taken from the pixel's own depth in it,
-	where its surface is inside its collision (a canopy within its hull), and
-	relative to none) */
-	ao_floor = reference < 0.0f ? WORLD_AO_SCENERY_FLOOR : WORLD_AO_FLOOR;
 	if (reference < 0.0f)
-	{
-		float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
-
-		field = world_ao_field_occlusion_from(volume, point, normal, inside < 0.0f ? inside : 0.0f);
 		reference = 1.0f;
-	}
-	else
-	{
-		field = world_ao_field_occlusion(volume, point, normal);
-	}
 	field = mix(field, saturate(field / (reference > WORLD_AO_REFERENCE_LEAST ? reference : WORLD_AO_REFERENCE_LEAST)),
 		parameters[1][0]);
 	field = mix(1.0f, field, parameters[0][2]) * proxied;
@@ -592,7 +626,7 @@ static float world_ao_snorm16_float(unsigned int bits)
 	return value < -1.0f ? -1.0f : value;
 }
 
-void world_ao_inputs_pack(float const normal[3], float owner, float value, int lightmap, int all_shapes,
+void world_ao_inputs_pack(float const normal[3], float owner, float value, int lightmap, int all_shapes, int cards,
 	float distance, unsigned int words[4])
 {
 	float length = fabsf(normal[0]) + fabsf(normal[1]) + fabsf(normal[2]), x, y;
@@ -612,13 +646,13 @@ void world_ao_inputs_pack(float const normal[3], float owner, float value, int l
 	words[0] = world_ao_snorm16(x) | world_ao_snorm16(y) << 16;
 	words[1] = ((unsigned int)(int)(owner + 2.0f) & 0xffu) | XGPU_WORLD_AO_INPUT_PRESENT_BIT |
 		(lightmap ? XGPU_WORLD_AO_INPUT_LIGHTMAP_BIT : 0) | (all_shapes ? XGPU_WORLD_AO_INPUT_ALL_SHAPES_BIT : 0) |
-		world_ao_half(value) << 16;
+		(cards ? XGPU_WORLD_AO_INPUT_CARDS_BIT : 0) | world_ao_half(value) << 16;
 	memcpy(&words[2], &distance, sizeof(distance));
 	words[3] = 0;
 }
 
 int world_ao_inputs_unpack(unsigned int const words[4], float normal[3], float *owner, float *value, int *lightmap,
-	int *all_shapes, float *distance)
+	int *all_shapes, int *cards, float *distance)
 {
 	float x = world_ao_snorm16_float(words[0] & 0xffffu), y = world_ao_snorm16_float(words[0] >> 16);
 	float z = 1.0f - fabsf(x) - fabsf(y), t = z < 0.0f ? -z : 0.0f, length;
@@ -635,6 +669,7 @@ int world_ao_inputs_unpack(unsigned int const words[4], float normal[3], float *
 	*value = world_ao_half_float(words[1] >> 16);
 	*lightmap = (words[1] & XGPU_WORLD_AO_INPUT_LIGHTMAP_BIT) != 0;
 	*all_shapes = (words[1] & XGPU_WORLD_AO_INPUT_ALL_SHAPES_BIT) != 0;
+	*cards = (words[1] & XGPU_WORLD_AO_INPUT_CARDS_BIT) != 0;
 	memcpy(distance, &words[2], sizeof(*distance));
 	return 1;
 }
@@ -643,12 +678,27 @@ float world_ao_pass_occlusion(float const parameters[2][4], struct world_sdf_vol
 	struct world_proxy const *proxies, long count, float const grid[2][4],
 	unsigned int const cells[WORLD_AO_GRID_CELLS / 2][4], float const point[3], unsigned int const words[4])
 {
-	float normal[3], owner, value, proxied = 1.0f, factor, field, reference, distance, ao_floor;
-	int lightmap, all_shapes, cell, word, bit;
+	float normal[3], owner, value, proxied = 1.0f, factor, field = 1.0f, reference, distance, own = 0.0f, ao_floor;
+	int lightmap, all_shapes, cards, cell, word, bit;
 	long limit;
 
-	if (!world_ao_inputs_unpack(words, normal, &owner, &value, &lightmap, &all_shapes, &distance))
+	if (!world_ao_inputs_unpack(words, normal, &owner, &value, &lightmap, &all_shapes, &cards, &distance))
 		return 1.0f;
+	/* (a model's field: from the pixel's own depth in it where its
+	reference is negative, a static scenery placement's own draw; a
+	two-sided shader's cards about their most open direction, the shapes
+	too) */
+	if (!lightmap)
+	{
+		if (value < 0.0f)
+		{
+			float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
+
+			own = inside < 0.0f ? inside : 0.0f;
+		}
+		field = cards ? world_ao_cards_occlusion(volume, point, normal, own) :
+			world_ao_field_occlusion_from(volume, point, normal, own);
+	}
 	/* (the shapes walked: the dynamic objects' alone, or every one) */
 	limit = all_shapes ? count : (long)parameters[1][1] < count ? (long)parameters[1][1] : count;
 	cell = world_ao_grid_cell(grid, point);
@@ -670,19 +720,8 @@ float world_ao_pass_occlusion(float const parameters[2][4], struct world_sdf_vol
 		proxied *= value;
 		return mix(1.0f, proxied > WORLD_AO_FLOOR ? proxied : WORLD_AO_FLOOR, parameters[0][1]);
 	}
-	reference = value;
-	ao_floor = reference < 0.0f ? WORLD_AO_SCENERY_FLOOR : WORLD_AO_FLOOR;
-	if (reference < 0.0f)
-	{
-		float inside = volume ? world_sdf_sample(volume, point) : 0.0f;
-
-		field = world_ao_field_occlusion_from(volume, point, normal, inside < 0.0f ? inside : 0.0f);
-		reference = 1.0f;
-	}
-	else
-	{
-		field = world_ao_field_occlusion(volume, point, normal);
-	}
+	ao_floor = value < 0.0f ? WORLD_AO_SCENERY_FLOOR : WORLD_AO_FLOOR;
+	reference = value < 0.0f ? 1.0f : value;
 	field = mix(field, saturate(field / (reference > WORLD_AO_REFERENCE_LEAST ? reference : WORLD_AO_REFERENCE_LEAST)),
 		parameters[1][0]);
 	field = mix(1.0f, field, parameters[0][2]) * proxied;

@@ -30,9 +30,9 @@ TOUCH_DISPLAYS = [("phone", 2400, 1080, 420), ("phone 21:9", 2520, 1080, 420), (
 # (the screens: their roots, and the names menu_functions.c finds in them)
 SCREENS = {
     "multiplayer": (f"{MT}/multiplayer_type_select_screen",
-                    ["hub_matchmaking", "hub_join_internet", "hub_join_lan_item", "hub_join_direct", "hub_party",
+                    ["hub_join_internet", "hub_join_lan_item", "hub_join_direct", "hub_party",
                      "hub_friends", "hub_create", "hub_coop", "hub_gametypes", "browser_note",
-                     "item_note", "invite_note", "party_note", "matchmaking_note", "friends_note", "hub_panel",
+                     "item_note", "invite_note", "party_note", "friends_note", "hub_panel",
                      "multiplayer_status", "multiplayer_status_detail",
                      "multiplayer_options_txt", "online_now_label", "online_games_2", "online_players_2",
                      "best_2_name", "best_2_badge", "best_2_players", "best_2_ping", "prompt_refresh"]),

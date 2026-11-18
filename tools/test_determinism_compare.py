@@ -160,3 +160,29 @@ def test_dump_leaves_out_the_frames_attachments(tmp_path):
     status, out = run(tmp_path / "a.txt", tmp_path / "a.txt", "--dump", tmp_path / "a.bin", tmp_path / "b.bin")
     assert status == 1
     assert "+100 in it" in out
+
+
+def test_free_slots_left_out_of_the_simulation(tmp_path):
+    # (a data array's free slots apart, its datums in use alike: the u line)
+    for name, whole in (("a.txt", "0000000a"), ("b.txt", "0000000b")):
+        lines = ["alloc 0 0 16 header", "alloc 1 10 64 effect"]
+        for number in (1, 2):
+            lines += [f"a 00000001 {whole}", "u = 00000005", f"t {number} g 00000001 l 00000002 h 00000001"]
+        (tmp_path / name).write_text("\n".join(lines) + "\n")
+    status, out = run(tmp_path / "a.txt", tmp_path / "b.txt")
+    assert status == 1 and "differs in 1 allocations: effect" in out
+    status, out = run(tmp_path / "a.txt", tmp_path / "b.txt", "--simulation")
+    assert status == 0, out
+
+
+def test_another_builds_allocations_by_name(tmp_path):
+    # (B's build has an allocation more, before objects: compared by name)
+    write_log(tmp_path / "a.txt", [(1, 10), (2, 11)])
+    lines = ["alloc 0 0 16 header", "alloc 1 10 8 speakers", "alloc 2 18 64 objects"]
+    for number, state, objects in ((1, 10, 1), (2, 11, 1)):
+        lines += [f"a {state:08x} 00000007 {objects:08x}", f"t {number} g 00000001 l 00000002 h {state:08x}",
+                  "G 2: 88001000*2"]
+    (tmp_path / "b.txt").write_text("\n".join(lines) + "\n")
+    status, out = run(tmp_path / "a.txt", tmp_path / "b.txt")
+    assert status == 0, out
+    assert "compared by name, not: speakers" in out

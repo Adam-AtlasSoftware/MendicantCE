@@ -384,12 +384,17 @@ symbols in this file:
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "network_voice.h" /* port: port/linux/game/network_voice.c */
 #include "network_chat.h" /* port: port/linux/game/network_chat.c */
+#include "network_markers.h" /* port: port/linux/game/network_markers.c */
+#include "spartan_link.h" /* port: port/linux/game/spartan_link.c */
 #include "network_party.h" /* port: port/linux/game/network_party.c */
 #include "network_host_controls.h" /* port: port/linux/game/network_host_controls.c */
 #include "party.h" /* port: port/linux/game/party_menu.inc */
 #include "matchmaking.h" /* port: port/linux/game/matchmaking.c */
+#include "perf_overlay.h" /* port: port/linux/game/perf_overlay.c */
+#include "benchmark.h" /* port: port/linux/game/benchmark.c */
 #include "network_aim_assist.h" /* port: port/linux/game/network_aim_assist.c */
 #include "network_shield_effects.h" /* port: port/linux/game/network_shield_effects.c */
+#include "network_riding_map.h" /* port: port/linux/game/network_riding_map.c */
 #include "map_share.h" /* port: port/linux/game/map_share.c */
 #include "profile_sections.h" /* port: port/linux/include/profile_sections.h */
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
@@ -408,9 +413,13 @@ symbols in this file:
 #include "text/font_group.h"
 #include "tag_files/files.h"
 #include "custom_edition_cache.h" /* port: custom_edition_level_name */
+#include "mcc_cache.h" /* port: port/linux/game/mcc_cache.h */
+#include "mcc_main.h" /* port: port/linux/game/mcc_main.h */
+#include "custom_edition_maps.h" /* port: main_script_map_name, a Custom Edition campaign's maps */
 #include "view_fov.h" /* port: display.fov, before the projection and culling */
 #include "far_clip.h" /* port: display.draw_distance, the far clip plane */
 #include "lowered_reticle.h" /* port: display.lowered_reticle, the view above the aim */
+#include "player_settings.h" /* port: each local player's own settings, their profile's */
 
 #if defined(HALO_WINDOWS) || defined(HALO_ANDROID) || defined(__linux__)
 #define HALO_NATIVE_BUILD_INFO 1
@@ -699,6 +708,9 @@ typedef char screenshot_and_framerate_globals_size_assert[
 	sizeof(struct _screenshot_and_framerate_globals) == 0x38B ? 1 : -1];
 
 void network_test_update(boolean main_menu_loaded, real seconds);
+/* port: the host's control connection to its bots (port/linux/src/bot_control.c) */
+void bot_control_frame(void);
+#include "demo.h" /* port: port/linux/game/demo.c */
 /* port: port/linux/game/basic_training.c */
 void basic_training_update(boolean main_menu_loaded, real seconds);
 /* port: the menus' pictures drawn again from the player's maps, rendered
@@ -720,6 +732,9 @@ boolean network_clock_server_pace_first(void);
 boolean network_clock_server_paced(void);
 /* port: port/linux/src/port_config.c */
 double config_real(const char *name);
+/* the display's pixels a screen unit (port/linux/game/menu_shapes.c: the
+performance overlay's text scaled to be readable) */
+real menu_shape_pixels(void);
 #ifdef HALO_VR
 void vr_seat_test_update(void);
 void vr_death_test_update(void);
@@ -730,6 +745,9 @@ void vr_death_test_update(void);
 #include "mods.h" /* port: port/linux/game/mod_textures.c */
 #include "camera_pose.h" /* port: port/linux/game/camera_pose.c */
 #include "prism_popin.h" /* port: port/linux/game/prism_popin.c */
+#include "speedrun_state.h" /* port: port/linux/game/speedrun_state.c */
+#include "stream_state.h" /* port: port/linux/game/stream_state.c */
+#include "practice.h" /* port: port/linux/game/practice.c */
 
 /* ---------- prototypes */
 
@@ -926,6 +944,12 @@ void game_connection_set(
 short game_connection(
 	void)
 {
+	/* port: a demo's playback of a co-op game this machine hosted runs its
+	ticks as the host's (port/linux/game/demo.c) */
+	short connection;
+
+	if (demo_playback_connection(&connection))
+		return connection;
 	return main_globals.connection;
 }
 
@@ -979,6 +1003,82 @@ void main_won_map(
 {
 	main_globals.saving_map = FALSE;
 	main_globals.won_map = TRUE;
+	return;
+}
+
+/* port: the level a campaign map's own script named with map_name, which
+main_won_map_private takes next; empty for none */
+static char main_script_next_level[64];
+
+/* port: the level the scripts name in the same campaign as `current`: a
+mission of the same MCC package, else a Custom Edition campaign map; FALSE
+for any other. The name may have a path and an extension (".map"); only its
+last part counts */
+static boolean main_script_level_resolve(
+	char const *current,
+	char const *requested,
+	char *next,
+	size_t size)
+{
+	char const *leaf = requested;
+	char const *cursor;
+	char candidate[160];
+	size_t length;
+
+	if (!current || !current[0] || !requested)
+		return FALSE;
+	/* port: package mission identities and lookup belong to mcc_main.c. */
+	if (mcc_level_name(current))
+		return mcc_main_script_level_resolve(current, requested, next, size);
+	for (cursor = requested; *cursor; cursor++)
+	{
+		if (*cursor == '\\' || *cursor == '/')
+			leaf = cursor + 1;
+	}
+	length = strlen(leaf);
+	if (length > 4 && !_stricmp(leaf + length - 4, ".map"))
+		length -= 4;
+	if (!length || length > 64)
+		return FALSE;
+	if (custom_edition_level_name(current))
+	{
+		snprintf(candidate, sizeof(candidate), "%s%.*s", CUSTOM_EDITION_LEVEL_NAME_PREFIX, (int)length, leaf);
+		if (!custom_edition_maps_level_campaign(candidate) || strlen(candidate) >= size)
+			return FALSE;
+		csstrncpy(next, candidate, size - 1);
+		next[size - 1] = 0;
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+/* port: H1A and Custom Edition campaigns end a level by naming the next with
+map_name in its scripts, where the Xbox's game_won takes it to the next of
+its own levels. A campaign map's script that does so ends the level as a won
+one, with the level it names next (main_won_map_private): alone, it loads; in
+network co-op the host takes every machine there, and a dedicated server
+plays its rotation's next, as after any won level. Only a level of the same
+campaign is taken; any other name does nothing, and the map's other scripts
+run on (no map's script may switch to any map: hs.c) */
+void main_script_map_name(
+	char const *map_name)
+{
+	struct network_game *game = game_connection() == _game_connection_network_server ?
+		network_game_get_game() : NULL;
+	char const *current = game ? game->map.name : main_globals.soloplayer_map_name;
+	char next[NUMBEROF(main_script_next_level)];
+
+	if (!main_script_level_resolve(current, map_name, next, sizeof(next)))
+	{
+		error(_error_silent, "the scripts' map_name %s is no level of %s's campaign: nothing happens",
+			map_name ? map_name : "", current);
+		return;
+	}
+	error(_error_silent, "the scripts end %s, with %s next", current, next);
+	csstrncpy(main_script_next_level, next, sizeof(main_script_next_level) - 1);
+	main_script_next_level[sizeof(main_script_next_level) - 1] = 0;
+	main_won_map();
 	return;
 }
 
@@ -1280,7 +1380,7 @@ void set_window_camera_values(
 	window->rasterizer_camera.mirrored = FALSE;
 	window->rasterizer_camera.z_near = rasterizer_globals.near_clip_distance;
 	/* port: display.draw_distance (far_clip.c) */
-	window->rasterizer_camera.z_far = render_far_clip_distance();
+	window->rasterizer_camera.z_far = render_far_clip_distance(window->local_player_index);
 	if (!debug_render_freeze)
 		window->render_camera = window->rasterizer_camera;
 
@@ -1342,6 +1442,9 @@ short main_get_solo_level_from_name(
 {
 	char lower_name[128] = { 0 };
 	short level;
+
+	if (mcc_level_name(name))
+		return NONE;
 
 	/* port: a Custom Edition map (custom_maps\a30) is never one of the
 	campaign's levels, whatever its name holds
@@ -1534,6 +1637,8 @@ boolean main_menu_is_loaded(
 	return main_globals.main_menu_scenario_loaded;
 }
 
+static void main_map_change_failed(char const *map_name); /* port: (below) */
+
 static void main_new_map(
 	struct game_options *options)
 {
@@ -1543,8 +1648,33 @@ static void main_new_map(
 	{
 		game_initialize_for_new_map();
 	}
+	/* port: a map that does not load (its tags damaged: tag_validate.c)
+	leaves the game at the main menu, with its error, where the Xbox's
+	stopped for good (_error_immediate: halt_and_catch_fire); a failure of
+	the main menu's own map is as it was */
+	else if (!main_globals.main_menu_scenario_loaded)
+	{
+		error(_error_silent, "game_load() failed.");
+		errors_handle();
+		main_map_change_failed(options->map_name);
+		main_globals.want_to_be_at_main_menu = TRUE;
+		main_globals.reset_map = FALSE;
+		main_globals.revert_map = FALSE;
+		main_globals.skip_cinematic = FALSE;
+		main_globals.saving_map = FALSE;
+		main_globals.won_map = FALSE;
+		main_globals.lost_map = FALSE;
+		main_globals.respawn = FALSE;
+		main_globals.save_core = FALSE;
+		main_globals.load_core = FALSE;
+		main_globals.switch_to_structure_bsp_index = NONE;
+		return;
+	}
 	else
 	{
+		/* port: an MCC map that fails to load goes back to the menus (mcc_main.c) */
+		if (mcc_main_load_failed(options->map_name))
+			return;
 		error(_error_immediate, "game_load() failed.");
 	}
 
@@ -1587,9 +1717,79 @@ static void main_new_map(
 /* port: the platform layer's (port/linux/src/port_config.c) */
 int config_boolean(const char *name);
 
+/* port: the solo map's name before map_name changed it (main_set_map_name),
+for a change refused (main_map_change_refused) */
+static char main_map_name_before_change[256];
+
+/* port: a map that cannot be loaded (a name typed wrong at the console or in
+init.txt, a map file missing or damaged) refused once, before the game it
+would end is left: the reason logged (cache_files_map_loadable) and shown (a
+line of the console; at the main menu its error dialog too), and the game as
+it was. The Xbox's precache took a missing map for a damaged disc, whose
+error stopped the game for good (display_error_damaged_media,
+main_loop_of_death): a map's name typed at a computer's console is no disc */
+static void main_map_change_failed(
+	char const *map_name)
+{
+	static wchar_t text[320];
+	char message[320];
+	short index;
+
+	error(_error_silent, "can't load map '%s'", map_name);
+	console_warning("can't load map '%s' (debug.txt says why)", map_name);
+	snprintf(message, sizeof(message),
+		"The map \"%s\" could not be loaded: it is not in the maps folder, or it is damaged.", map_name);
+	for (index = 0; message[index] && index < NUMBEROF(text) - 1; index++)
+		text[index] = (wchar_t)(unsigned char)message[index];
+	text[index] = 0;
+	if (main_globals.main_menu_scenario_loaded)
+		display_error_text_deferred(text, NONE);
+	else if (!game_in_progress())
+		display_error_text_when_main_menu_loaded(text);
+	csstrncpy(main_globals.soloplayer_map_name, main_map_name_before_change,
+		NUMBEROF(main_globals.soloplayer_map_name) - 1);
+	main_globals.soloplayer_map_name[NUMBEROF(main_globals.soloplayer_map_name) - 1] = 0;
+	main_globals.defer_map_change = FALSE;
+	main_globals.map_change_load_timer = 0;
+
+	return;
+}
+
+static boolean main_map_change_refused(
+	char const *map_name)
+{
+	if (cache_files_map_loadable(map_name))
+		return FALSE;
+	main_map_change_failed(map_name);
+
+	return TRUE;
+}
+
+/* port: a game of this machine alone has no network game: a client or
+server the menus made and left behind is let go of as its map loads. The
+server browser's (as CAMPAIGN's CO-OP opens it), backed out of to CAMPAIGN
+and a mission started there, left its client searching, which the Xbox's
+main menu let go of (main_menu_initialize) and CAMPAIGN never does; the
+campaign then took itself for a network game (network_game_is_active), and
+Start or Escape asked for a multiplayer game's pause screen the map has not:
+no pause, whichever controller pressed it. (Not for the menus' pictures,
+whose maps load behind the menus.) */
+static void main_local_game_leave_network(
+	void)
+{
+	if (menu_pictures_preparing())
+		return;
+	dispose_global_network_game_client();
+	dispose_global_network_game_server();
+}
+
 static void main_change_map_name(
 	void)
 {
+	/* port: (a map that cannot be loaded refused, the game as it was) */
+	if (!main_globals.map_change_load_timer && main_map_change_refused(main_globals.soloplayer_map_name))
+		return;
+
 	/* port: (none for the menus' pictures: menu_pictures_render.c) */
 	if (main_globals.main_menu_scenario_loaded == TRUE && !menu_pictures_preparing())
 	{
@@ -1624,6 +1824,21 @@ static void main_change_map_name(
 
 	if (main_globals.frame_start_milliseconds >= main_globals.map_change_load_timer)
 	{
+		/* port: the map copied into the cache before anything of this game
+		is left, as the main menu's map is (main_load_ui_scenario): a map
+		whose copy fails (its file damaged) is refused, and the game stays,
+		where the Xbox's took it for a damaged disc and stopped for good. The
+		menus the copy's loading screen closed are opened again. */
+		if (game_in_progress() && main_globals.connection == _game_connection_local &&
+			!game_precache_new_map_refusable(main_globals.soloplayer_map_name))
+		{
+			ui_widgets_set_fade_value(-1.0f);
+			ui_widgets_inhibit_processing(FALSE);
+			if (main_globals.main_menu_scenario_loaded)
+				main_screen_shell_load();
+			main_map_change_failed(main_globals.soloplayer_map_name);
+			return;
+		}
 		ui_widgets_set_fade_value(-1.0f);
 		ui_stop_main_menu_music();
 		main_menu_active(FALSE);
@@ -1642,6 +1857,7 @@ static void main_change_map_name(
 				NUMBEROF(options.map_name) - 1);
 			options.map_name[NUMBEROF(options.map_name) - 1] = 0;
 			options.difficulty = global_difficulty_level;
+			main_local_game_leave_network();
 			game_dispose_from_old_map();
 			game_precache_new_map(options.map_name, TRUE);
 			game_unload();
@@ -1650,7 +1866,7 @@ static void main_change_map_name(
 			/* port: (not a map of the menus' pictures: the player's last level
 			is as it was) */
 			for (local_player_index = 0;
-				local_player_index < player_spawn_count && !menu_pictures_preparing();
+				local_player_index < player_spawn_count && !menu_pictures_preparing() && !demo_playing();
 				local_player_index++)
 			{
 				player_profile_save_last_level_played(local_player_index);
@@ -1810,12 +2026,12 @@ void main_crash(
 /* port: the name a build shows for itself (the halt screen, version, Profile's
 ABOUT, a replay's header, and what a client tells the hosts it joins). fork:
 this fork's builds (HALO_FORK_MENDICANT, tools/build_common.py's FORK_DEFINE)
-are MendicantCE's, never OpenH1's, and a build without a number names the
+are MendicantCE's, never GOAT H1's (OpenH1's), and a build without a number names the
 commit it was made from where the build knows it (CI's GITHUB_SHA) */
 #ifdef HALO_FORK_MENDICANT
 #define HALO_BUILD_PRODUCT "MendicantCE"
 #else
-#define HALO_BUILD_PRODUCT "OpenH1"
+#define HALO_BUILD_PRODUCT "GOAT H1"
 #endif
 #ifndef HALO_BUILD_COMMIT
 #define HALO_BUILD_COMMIT ""
@@ -2053,6 +2269,9 @@ void main_load_ui_scenario(
 void main_roll_credits(
 	void)
 {
+	/* port: standalone MCC scenarios finish through their own menu transition. */
+	if (mcc_main_map_completed())
+		return;
 	error(_error_silent, "congratulations, you won the game!");
 	main_menu_load();
 	game_end_credits_start();
@@ -2340,13 +2559,12 @@ static void main_lost_map_private(
 	{
 		main_globals.lost_map = FALSE;
 		main_globals.loss_timer = 0;
-		/* port: in network co-op, everyone dying respawns the players where
-		they were at the last checkpoint, without a revert. A mission the
-		scripts failed (game_lost, with players still alive: d40's timer,
-		a50's Keyes) does revert, or its failure cutscene would never end. */
+		/* port: the co-op host chooses whether a team wipe rewinds or only
+		respawns. Scripted failures still revert, or their cutscene would
+		never end. A missing save falls back to checkpoint positions. */
 		if (game_connection() != _game_connection_network_server)
 			game_state_revert();
-		else if (players_are_all_dead() || !main_coop_host_revert())
+		else if ((players_are_all_dead() && !network_coop_wipe_reverts()) || !main_coop_host_revert())
 			players_respawn_at_checkpoint();
 	}
 	return;
@@ -2375,6 +2593,26 @@ static void main_respawn_private(
 		main_globals.respawn_timer = 0;
 	}
 	return;
+}
+
+/* port: what the ticks ask of the main loop and its frames carry out (a
+respawn, a lost level's revert), with its timers, by part, for the demos
+(port/linux/game/demo.c's G records): a playback's main loop has the
+recording's, after a seek too; NULL past the last */
+void *main_port_demo_state(
+	short part,
+	long *size)
+{
+	switch (part)
+	{
+	case 0: *size = sizeof(main_globals.respawn); return &main_globals.respawn;
+	case 1: *size = sizeof(main_globals.respawn_timer); return &main_globals.respawn_timer;
+	case 2: *size = sizeof(main_respawn_last_tick); return &main_respawn_last_tick;
+	case 3: *size = sizeof(main_globals.lost_map); return &main_globals.lost_map;
+	case 4: *size = sizeof(main_globals.loss_timer); return &main_globals.loss_timer;
+	case 5: *size = sizeof(main_loss_last_tick); return &main_loss_last_tick;
+	}
+	return NULL;
 }
 
 static void main_load_core_private(
@@ -2519,11 +2757,28 @@ static void main_won_map_private(
 {
 	short level;
 	short local_player_index;
+	/* port: the level the scripts named with map_name (main_script_map_name),
+	if they did */
+	char next[NUMBEROF(main_script_next_level)];
+
+	/* port: (port/linux/game/speedrun_state.c) */
+	speedrun_state_level_won();
+	csstrncpy(next, main_script_next_level, sizeof(next) - 1);
+	next[sizeof(next) - 1] = 0;
+	main_script_next_level[0] = 0;
+
+	/* port: explicit MCC campaigns own their mission order and host decision.
+	 * The Xbox/CE level table below cannot represent package mission identities. */
+	if (mcc_main_campaign_won(next[0] ? next : NULL))
+	{
+		main_globals.won_map = FALSE;
+		return;
+	}
 
 	/* port: when a network co-op level is won, the round ends for everyone as
 	in multiplayer, back to the lobby, and the next round is the campaign's
-	next level (The Maw's: The Pillar of Autumn). A level not in the campaign
-	repeats. */
+	next level (The Maw's: The Pillar of Autumn), or the one the scripts named.
+	A level not in the campaign repeats. */
 	if (game_connection() == _game_connection_network_server && network_coop_active())
 	{
 		struct network_game *game = network_game_get_game();
@@ -2531,7 +2786,7 @@ static void main_won_map_private(
 		main_globals.won_map = FALSE;
 		level = game ? main_get_solo_level_from_name(game->map.name) : NONE;
 		player_profile_save_level_completed(0);
-		network_game_server_port_cooperative_won(level != NONE ?
+		network_game_server_port_cooperative_won(next[0] ? next : level != NONE ?
 			main_get_solo_level_name((level + 1) % NUMBER_OF_SINGLE_PLAYER_LEVELS) : NULL);
 		return;
 	}
@@ -2545,6 +2800,14 @@ static void main_won_map_private(
 		level = NONE;
 	for (local_player_index = 0; local_player_index < player_spawn_count; local_player_index++)
 		player_profile_save_level_completed(local_player_index);
+	/* port: a Custom Edition campaign's next level, as its scripts named it,
+	begun anew as ui_set_next_level begins one (no saved game taken) */
+	if (next[0])
+	{
+		main_set_map_name(next);
+		main_disallow_persistent_storage();
+		return;
+	}
 	ui_set_next_level(level);
 	return;
 }
@@ -2553,6 +2816,12 @@ void main_set_map_name(
 	char const *map_name)
 {
 	main_globals.want_to_be_at_main_menu = FALSE;
+	/* port: (the name a change refused goes back to: main_map_change_refused) */
+	if (!main_globals.defer_map_change)
+	{
+		csstrncpy(main_map_name_before_change, main_globals.soloplayer_map_name, NUMBEROF(main_map_name_before_change) - 1);
+		main_map_name_before_change[NUMBEROF(main_map_name_before_change) - 1] = 0;
+	}
 	csstrncpy(main_globals.soloplayer_map_name, map_name, NUMBEROF(main_globals.soloplayer_map_name) - 1);
 	main_globals.soloplayer_map_name[NUMBEROF(main_globals.soloplayer_map_name) - 1] = 0;
 	main_globals.allow_persistent_storage = TRUE;
@@ -3138,9 +3407,15 @@ static void main_setup_connection(
 		main_globals.want_to_be_at_main_menu = TRUE;
 		main_menu_load();
 	}
+	/* port: a map of init.txt's map_name that cannot be loaded refused, and
+	the main menu loaded in its place (main_map_change_refused) */
+	else if (main_map_change_refused(main_globals.soloplayer_map_name))
+	{
+		main_globals.want_to_be_at_main_menu = TRUE;
+		main_menu_load();
+	}
 	else
 	{
-		main_globals.connection = _game_connection_local;
 		game_options_new(&options);
 		csstrncpy(
 			options.map_name,
@@ -3148,7 +3423,15 @@ static void main_setup_connection(
 			NUMBEROF(options.map_name) - 1);
 		options.map_name[NUMBEROF(options.map_name) - 1] = 0;
 		options.difficulty = global_difficulty_level;
-		game_precache_new_map(options.map_name, TRUE);
+		/* port: (and one whose copy fails: game_precache_new_map_refusable) */
+		if (!game_precache_new_map_refusable(options.map_name))
+		{
+			main_map_change_failed(options.map_name);
+			main_globals.want_to_be_at_main_menu = TRUE;
+			main_menu_load();
+			return;
+		}
+		main_globals.connection = _game_connection_local;
 		game_dispose_from_old_map();
 		main_new_map(&options);
 	}
@@ -3272,31 +3555,15 @@ static void screenshot_render(
 	return;
 }
 
-/* port: Settings > Video's SHOW FRAME RATE (display.show_frame_rate, off by
-default), read again when it changes, which draws the frame rate as the
-console's display_framerate does */
-int config_boolean(const char *name);
-unsigned long config_changes(void);
-
-static boolean main_show_frame_rate_setting(
-	void)
-{
-	static boolean setting = FALSE;
-	static unsigned long read_at = (unsigned long)-1;
-
-	if (read_at != config_changes())
-	{
-		read_at = config_changes();
-		setting = config_boolean("display.show_frame_rate") != 0;
-	}
-
-	return setting;
-}
-
 void main_framerate_render(
 	void)
 {
-	if (display_framerate || main_show_frame_rate_setting()) /* port: or the setting */
+	/* port: Settings > Video's PERFORMANCE OVERLAY (display.perf_overlay,
+	port/linux/game/perf_overlay.c): "simple" draws the frame rate as the
+	console's display_framerate does, "detailed" the frame's times above it */
+	short perf_overlay = perf_overlay_mode();
+
+	if (display_framerate || perf_overlay != _perf_overlay_off) /* port: or the setting */
 	{
 		long font_tag_index;
 
@@ -3352,6 +3619,57 @@ void main_framerate_render(
 				(short)frame_rate >= 30 ? global_real_argb_green : global_real_argb_red);
 			draw_string_set_font(font_tag_index);
 			rasterizer_draw_string(&bounds, NULL, NULL, 0, frame_rate_string);
+
+			/* port: "detailed": the frame's times in cells above the
+			counter, two to a row, a label at each cell's left and its value
+			at its right, scaled about the view's bottom right corner
+			(perf_overlay_place: compact, and readable from 720p to 4K and in
+			split screen) */
+			if (perf_overlay == _perf_overlay_detailed)
+			{
+				/* (the widest label seen, so that the cells keep their width
+				as the sections shown change) */
+				static short label_most = 0;
+				struct perf_overlay_cell cells[PERF_OVERLAY_CELLS];
+				struct perf_overlay_place place;
+				rectangle2d window = render.camera.window_bounds;
+				rectangle2d wide = window, text, cursor;
+				short count = perf_overlay_cells(cells);
+				short value_width, cell;
+
+				wide.x0 = 0;
+				wide.x1 = 0x3FFF;
+				draw_string_set_format(NONE, _text_justification_left, 0);
+				for (cell = 0; cell < count; cell++)
+				{
+					draw_string_compute_bounds(&wide, cells[cell].label, &text, &cursor);
+					label_most = (short)MAX(label_most, text.x1 - text.x0);
+				}
+				/* (a value as wide as the widest a cell shows) */
+				draw_string_compute_bounds(&wide, "000.00 ms", &text, &cursor);
+				value_width = (short)(text.x1 - text.x0);
+				perf_overlay_place(window.x0, window.y0, window.x1, window.y1, menu_shape_pixels(),
+					local_player_count() > 1, count, (short)(label_most + 24 + value_width),
+					draw_string_capital_height(), &place);
+				rasterizer_text_set_scale(place.scale, (real)place.anchor_x, (real)place.anchor_y);
+				draw_string_set_color(global_real_argb_white);
+				for (cell = 0; cell < place.rows * PERF_OVERLAY_COLUMNS && cell < count; cell++)
+				{
+					short row = (short)(cell / PERF_OVERLAY_COLUMNS);
+					short column = (short)(cell % PERF_OVERLAY_COLUMNS);
+
+					bounds.x0 = (short)(place.anchor_x - place.width + column * (place.cell_width + place.column_gap));
+					bounds.x1 = (short)(bounds.x0 + place.cell_width);
+					bounds.y0 = (short)(place.anchor_y - place.height + row * place.row_height);
+					bounds.y1 = window.y1;
+					draw_string_set_format(NONE, _text_justification_left, 0);
+					rasterizer_draw_string(&bounds, NULL, NULL, 0, cells[cell].label);
+					draw_string_set_format(NONE, _text_justification_right, 0);
+					rasterizer_draw_string(&bounds, NULL, NULL, 0, cells[cell].value);
+				}
+				rasterizer_text_set_scale(1.0f, 0.0f, 0.0f);
+				draw_string_set_format(NONE, _text_justification_left, 0);
+			}
 		}
 	}
 
@@ -3447,6 +3765,9 @@ void halt_and_catch_fire(
 	it ends with exit code 1 (port/linux/game/server_director.c) */
 	if (halo_server_mode())
 		server_fatal(error_get());
+	/* port: the halt offered as a crash's report at the next start
+	(port/linux/src/report.c) */
+	report_session_halted(error_get());
 	if (!global_screenshot_count.halt_recursion_lock)
 	{
 		scenario = global_scenario_try_and_get();
@@ -3756,6 +4077,7 @@ void main_loop(
 	boolean loading_game_frame; /* port: only a completed game picture ends loading */
 	boolean frames_unseen; /* port: nobody sees the frames (port/linux/game/unseen_frames.c) */
 	boolean frames_undrawn; /* port: ... and they need not be drawn */
+	long frame_ticks; /* port: the ticks the game ran this frame (speedrun_state.c) */
 
 	if (!game_in_editor())
 	{
@@ -3777,6 +4099,8 @@ void main_loop(
 	while (TRUE)
 	{
 		loading_game_frame = FALSE; /* port: loading presentation is independent of game frames */
+		frame_ticks = 0;
+		frames_undrawn = FALSE;
 		/* port: what follows changes the game as a whole (saves it, loads a
 		saved game, changes the map), between two ticks: with game.sim_rate's
 		sub-steps spread over the frames, not while a tick is open between two
@@ -3904,11 +4228,24 @@ void main_loop(
 			frames_unseen = halo_frames_unseen() != 0;
 			frames_undrawn = frames_unseen && !main_globals.main_menu_scenario_loaded && !ui_widgets_active();
 
+			/* port: the profile each local player plays with, whose own settings
+			(the field of view, the first-person view's) they see
+			(port/linux/game/player_settings.c) */
+			player_settings_update();
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			/* port: a demo asked for played, and the end of one
+			(port/linux/game/demo.c) */
+			demo_frame(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			/* port: the built-in benchmark, begun, measured and its results
+			shown (port/linux/game/benchmark.c) */
+			benchmark_frame(main_globals.main_menu_scenario_loaded);
 			/* port: Basic Training's game started, its skip buttons
 			(port/linux/game/basic_training.c) */
 			basic_training_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			/* port: the host's control connection to its bots, its requests
+			answered between frames (port/linux/src/bot_control.c) */
+			bot_control_frame();
 			/* port: the game's start's phases, and the menus' pictures in
 			theirs (port/linux/game/menu_pictures_render.c) */
 			main_startup_update();
@@ -3932,6 +4269,8 @@ void main_loop(
 			network_aim_assist_update();
 			/* port: the host's shield effects, for every machine (port/linux/game/network_shield_effects.c) */
 			network_shield_effects_update();
+			/* port: the map's riding choice, for every machine (port/linux/game/network_riding_map.c) */
+			network_riding_map_update();
 			/* port: map sharing, in the lobby and in game (port/linux/game/map_share.c) */
 			map_share_update();
 			/* port: the tag packs, written at the main menu when they are
@@ -3943,6 +4282,10 @@ void main_loop(
 			}
 			/* port: network games' text chat (port/linux/game/network_chat.c) */
 			network_chat_update();
+			/* port: the players' pings (port/linux/game/network_markers.c) */
+			network_markers_update();
+			/* port: the HUD's Spartan link (port/linux/game/spartan_link.c) */
+			spartan_link_update();
 			/* port: the party, which follows its leader into its games
 			(port/linux/game/party_menu.inc) */
 			party_update();
@@ -4081,11 +4424,16 @@ void main_loop(
 				if (!console_update() || main_globals.connection!=_game_connection_local)
 				{
 					/* port: not while a chat line is typed (its K plays an animation) */
-					if (!network_chat_typing())
-						debug_keys_update();
-					cheats_update();
-					forge_update();
-					player_control_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+					/* port: nor any of the machine's input in a demo's playback,
+					whose players play the recording's (port/linux/game/demo.c) */
+					if (!demo_playing())
+					{
+						if (!network_chat_typing())
+							debug_keys_update();
+						cheats_update();
+						forge_update();
+						player_control_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+					}
 
 					connection = main_globals.connection;
 					profile_scope_enter(main_network_end_frame_section)
@@ -4098,6 +4446,7 @@ void main_loop(
 
 					profile_scope(main_game_time_update_section,
 						game_time_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);)
+					frame_ticks = game_time_get_elapsed();
 
 					render_frame = main_globals.main_menu_scenario_loaded ||
 						(main_globals.halt_time_scale &&
@@ -4122,6 +4471,13 @@ void main_loop(
 					observer_update((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
 					collision_log_end_period();
 					game_engine_update_non_deterministic((real)main_globals.halt_time_scale*main_globals.seconds_elapsed);
+					/* port: the frames a multiplayer game's start leaves undrawn
+					place the sound's listeners at the cameras just placed, as a
+					drawn frame does: a sound of the first ticks (the first
+					weapon's ready sound) was judged from where they were before
+					the game, and dropped. The original's bug, fixed (#740) */
+					if (!render_frame && game_engine_running() && game_time_get()<3)
+						sound_render_listeners();
 					profile_scope_exit(main_non_deterministic_update_section)
 				}
 
@@ -4193,6 +4549,16 @@ void main_loop(
 		}
 
 		input_frame_end();
+		/* port: the practice keys and the PRACTICE mark
+		(port/linux/game/practice.c), before the block that holds the mark */
+		practice_frame();
+		/* port: the speedrun state block, for timers' autosplitters
+		(port/linux/game/speedrun_state.c) */
+		speedrun_state_frame(frame_ticks, loading_game_frame, frames_undrawn || debug_no_drawing,
+			main_globals.main_menu_scenario_loaded || menu_pictures_preparing());
+		/* port: the game's state for stream overlays (display.state_file,
+		port/linux/game/stream_state.c) */
+		stream_state_frame();
 		profile_frame_end();
 		main_frame_rate_debug();
 		halo_load_trace_frame(); /* port: debug.load_trace's long frames */

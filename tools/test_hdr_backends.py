@@ -6,7 +6,9 @@ made Metal's by SPIRV-Cross and run on its GPU (tools/hdr_backends/harness.m):
 - the tone map and the encoding as the Vulkan backend ships them (the
   modules of port/linux/vulkan/xgpu_vulkan_post_shaders.c) over the golden
   colours the Metal backend's own are held to, against the reference
-  (port/linux/src/xgpu_hdr.h);
+  (port/linux/src/xgpu_hdr.h); and its dither (#1108) into a real 8-bit
+  target: bounded, black and white exact, each column's mean kept, and
+  without it (the negative control) each value merely rounded;
 - each tagged draw (every ceiling, a glow's expansion, the alpha limit, over
   each blend) as the Vulkan backend's SPIR-V emitter writes it (reading the
   pixel drawn over as an input attachment) and as the Metal backend's MSL
@@ -87,7 +89,7 @@ def _vertex(fragment_source):
             "vertex hdr_test_out hdr_test_vertex(uint vertex_id [[vertex_id]], constant float4 *colors [[buffer(0)]],\n"
             "\tconstant float &width [[buffer(1)]])\n{\n"
             "\thdr_test_out out = {};\n"
-            "\tout.position = float4((float(vertex_id) + 0.5) / width * 2.0 - 1.0, 0.0, 0.0, 1.0);\n"
+            "\tout.position = float4((float(vertex_id % uint(width)) + 0.5) / width * 2.0 - 1.0, 0.0, 0.0, 1.0);\n"
             "\tout.point_size = 1.0;\n"
             "\tout.xD0 = colors[vertex_id];\n"
             "\treturn out;\n}\n")
@@ -122,8 +124,11 @@ def test_post_shaders_on_the_gpu(harness):
         spv.write_bytes(struct.pack(f"<{len(arrays[name])}I", *arrays[name]))
         _cross(spv, post / (name.replace("_frag", "") + ".metal"), stage, entry, fetch)
     output = _run(binary, "post", str(post))
-    assert "post: 1152 values checked" in output, output
+    assert "post: 1536 values checked" in output, output
     assert "post: 9 values not a number or infinite tone mapped finite" in output, output
+    assert "dither: means within" in output, output
+    assert "depth: 16-bit frame" in output, output
+    assert "area: at 1.5 the mean" in output, output
 
 
 def test_draws_agree_on_the_gpu(harness):
@@ -143,10 +148,16 @@ def test_draws_agree_on_the_gpu(harness):
     out = folder / "draws"
     subprocess.run([str(tool), str(out)], check=True)
     names = [line.split()[0] for line in (out / "index.txt").read_text().splitlines()[1:]]
-    assert len(names) == 69
+    assert len(names) == 144
+    validator = shutil.which("spirv-val")
     for name in names:
+        # (the interlocked draws: valid for Vulkan 1.3, their target a storage image under a raster order group)
+        if validator and "-interlock" in name:
+            subprocess.run([validator, "--target-env", "vulkan1.3", str(out / f"{name}.spv")], check=True)
         _cross(out / f"{name}.spv", out / f"{name}.vk.metal", "frag", "xgpu_vk_fragment", fetch=True)
+        if "-interlock" in name:
+            assert "raster_order_group(0)" in (out / f"{name}.vk.metal").read_text(), name
         for stem in (f"{name}.vk", name):
             (out / f"{stem}.vertex.metal").write_text(_vertex((out / f"{stem}.metal").read_text()))
     output = _run(binary, "draws", str(out))
-    assert "draws: 69 draws, 141312 values compared" in output, output
+    assert "draws: 144 draws (72 interlocked), 294912 values compared" in output, output

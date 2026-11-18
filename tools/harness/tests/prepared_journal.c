@@ -342,22 +342,24 @@ static void case_missing(void)
 /* ---------- one record under every settings
 
 A toy front end: a walk's draw is a game state (journal_state: its pipeline
-in render_state[0], its HDR tag in hdr_kind, the enhanced lights' count and
-its window's span as journal_capture notes them, whatever the settings: the
-walk draws the union as it records). Its pipeline under settings is derived
-as the front end derives it: the tag only with the HDR on, the lights only
-enhanced, the world's light (read from the pre-pass in a window it finds
-once a pixel: world_ao_key) only with display.ambient_occlusion "world".
+in render_state[0], its HDR tag in hdr_kind, the enhanced lights' count, its
+window's span and its effect's soft group as journal_capture notes them,
+whatever the settings: the walk draws the union as it records). Its pipeline
+under settings is derived as the front end derives it: the tag only with the
+HDR on, the lights only enhanced, the world's light (read from the pre-pass
+in a window it finds once a pixel: world_ao_key) only with
+display.ambient_occlusion "world", the effect soft (the pixel key's
+vr_effect: soft_effect_key) only with display.soft_particles.
 Recorded under some settings (a draw journaled where it is new in its
 derived pipeline or in journal_settings_blind_of's words:
 preparation_seen), played back under others, the record's pipelines must
 be the walk's under those. */
 
-enum { SETTING_HDR = 1, SETTING_LIGHTS = 2, SETTING_WORLD = 4, SETTINGS = 8 };
+enum { SETTING_HDR = 1, SETTING_LIGHTS = 2, SETTING_WORLD = 4, SETTING_SOFT = 8, SETTINGS = 16 };
 #define WALK 400
 #define DERIVED_MAXIMUM (WALK * 2)
 
-struct derived { uint32_t pipeline, tag, lit, world; };
+struct derived { uint32_t pipeline, tag, lit, world, soft; };
 
 static struct journal_state walk[WALK];
 
@@ -367,12 +369,13 @@ static struct derived derive(const struct journal_state *state, int settings)
 
 	memset(&derived, 0, sizeof(derived));
 	derived.pipeline = state->render_state[0];
-	derived.tag = (settings & SETTING_HDR) ? state->hdr_kind : 0;
-	derived.lit = (settings & SETTING_LIGHTS) && state->lights_count > 0;
+	derived.tag = (settings & SETTING_HDR) ? (uint32_t)state->inputs.hdr_kind : 0;
+	derived.lit = (settings & SETTING_LIGHTS) && state->inputs.lights_count > 0;
 	/* (the world's light, read from the pre-pass where found; a found
 	window's first-person weapon none, but its twin made) */
-	if ((settings & SETTING_WORLD) && state->world_span < 5)
-		derived.world = (uint32_t[]){ 0, 1, 0, 2, 3 }[state->world_span];
+	if ((settings & SETTING_WORLD) && state->inputs.world_span >= 0 && state->inputs.world_span < 5)
+		derived.world = (uint32_t[]){ 0, 1, 0, 2, 3 }[state->inputs.world_span];
+	derived.soft = (settings & SETTING_SOFT) && state->inputs.soft_group;
 	return derived;
 }
 
@@ -412,10 +415,11 @@ static void walk_make(void)
 		struct journal_state *state = &walk[index];
 
 		state->render_state[0] = (uint32_t)(rand() % 24);
-		state->hdr_kind = (uint32_t)(rand() % 3);
-		state->lights_count = (uint32_t)(rand() % 2);
+		state->inputs.hdr_kind = rand() % 3;
+		state->inputs.lights_count = rand() % 2;
 		/* (world_ao.h's WORLD_AO_SPAN_*: none, open, its first person, found, its first person) */
-		state->world_span = (uint32_t)(rand() % 5);
+		state->inputs.world_span = rand() % 5;
+		state->inputs.soft_group = (uint32_t)(rand() % 2);
 	}
 }
 
@@ -443,8 +447,7 @@ static int recorded(int settings)
 
 		memset(&key, 0, sizeof(key));
 		key.derived = derive(state, settings);
-		journal_settings_blind_of(key.blind, (int)state->hdr_category, (int)state->hdr_kind, (BOOL)state->hdr_view,
-			(int)state->lights_count, (BOOL)state->lights_environment, (int)state->world_span);
+		journal_settings_blind_of(key.blind, &state->inputs);
 		for (other = 0; other < seen_count && memcmp(&seen[other], &key, sizeof(key)); other++)
 			;
 		if (other < seen_count)
@@ -485,18 +488,27 @@ static void case_settings(void)
 	}
 }
 
+/* a record's key as render_prepared.c makes it (prepared_choose): its form,
+the journal's, the map's scenario, whether the frame draws mirrors and the
+structure it starts in */
+static unsigned long long record_key(char const *scenario, unsigned long journal_form, boolean mirrors,
+	long structure_bsp_index)
+{
+	return prepared_key(prepared_key_of(scenario, journal_form), mirrors, structure_bsp_index);
+}
+
 /* the key: no setting in it, every part of it telling records apart, and
 a record played back judged under its own derivation alone */
 static void case_key(void)
 {
-	unsigned long long key = render_prepared_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 0);
+	unsigned long long key = record_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 0);
 	struct prepared_header header;
 
-	CHECK(key == render_prepared_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 0), "the same map's the same");
-	CHECK(key != render_prepared_key("levels\\b30\\b30", 0x40000 | 400, TRUE, 0), "another scenario's");
-	CHECK(key != render_prepared_key("levels\\a10\\a10", 0x50000 | 400, TRUE, 0), "another journal form's");
-	CHECK(key != render_prepared_key("levels\\a10\\a10", 0x40000 | 400, FALSE, 0), "without mirrors");
-	CHECK(key != render_prepared_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 1), "another structure's");
+	CHECK(key == record_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 0), "the same map's the same");
+	CHECK(key != record_key("levels\\b30\\b30", 0x40000 | 400, TRUE, 0), "another scenario's");
+	CHECK(key != record_key("levels\\a10\\a10", 0x50000 | 400, TRUE, 0), "another journal form's");
+	CHECK(key != record_key("levels\\a10\\a10", 0x40000 | 400, FALSE, 0), "without mirrors");
+	CHECK(key != record_key("levels\\a10\\a10", 0x40000 | 400, TRUE, 1), "another structure's");
 	memset(&header, 0, sizeof(header));
 	header.magic = PREPARED_MAGIC;
 	header.version = PREPARED_VERSION;
@@ -506,7 +518,7 @@ static void case_key(void)
 	header.word_count = 100;
 	header.derivation = 0x99;
 	CHECK(prepared_header_fits(&header, 0x12345678, key), "a record under any derivation fits");
-	CHECK(!prepared_header_fits(&header, 0x12345678, render_prepared_key("levels\\a10\\a10", 0x50000 | 400, TRUE,
+	CHECK(!prepared_header_fits(&header, 0x12345678, record_key("levels\\a10\\a10", 0x50000 | 400, TRUE,
 		0)), "a stale form's key is refused");
 	CHECK(render_prepared_played(1, 0, 0, TRUE), "its own derivation's, every draw made");
 	CHECK(!render_prepared_played(1, 0, 3, TRUE), "its own derivation's, draws not made");

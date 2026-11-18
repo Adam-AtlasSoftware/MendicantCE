@@ -9,20 +9,21 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from harness import function
+from harness import ABI_FLAGS, function, structure
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_c(tmp_path, code):
-    """compiles the code as the game's 32-bit C (gnu89) and runs it"""
+    """compiles the code as the game's 32-bit C (gnu89) and runs it (as 64-bit C where the machine has no 32-bit
+    runtime: harness.NATIVE_64_BIT)"""
     compiler = shutil.which('clang')
     if not compiler:
         pytest.skip('clang required')
     source = tmp_path / 'remap.c'
     binary = tmp_path / 'remap.exe'
     source.write_text(code)
-    target = ['--target=i686-pc-windows-msvc'] if sys.platform == 'win32' else ['-m32']
+    target = ['--target=i686-pc-windows-msvc'] if sys.platform == 'win32' else ABI_FLAGS
     result = subprocess.run([compiler, *target, '-std=gnu89', '-O1', str(source), '-o', str(binary)],
                             capture_output=True, text=True)
     if result.returncode and 'm32' in ' '.join(target) and 'cannot find' in result.stderr:
@@ -48,9 +49,46 @@ static char const *config_string(char const *name) {return settings[name[strlen(
 static int config_write(char const *name,char const *value) {
  strcpy(settings[name[strlen(name)-1]-'1'],value); revision++; return 1;
 }
+/* each local player's profile's own layout (input.controller), while
+profile_has: in place of the port's */
+static char profile_layouts[4][512];
+static int profile_has[4];
+static int config_player_has(int local,char const *name) {(void)name;return local>=0&&local<4&&profile_has[local];}
+static char const *config_player_string(int local,char const *name) {(void)name;return profile_layouts[local];}
+static int config_pinned_by_environment(char const *name) {(void)name;return 0;}
 '''
 POLICY = (source('port/linux/include/controller_buttons.h') +
-          source('port/linux/include/controller_remap.h') + source('port/linux/src/controller_remap.c'))
+          source('port/linux/include/controller_remap.h') + source('port/linux/src/controller_remap.c') +
+          source('port/linux/include/controller_layouts.h') + r'''
+/* (no controller has a layout here: tools/test_controller_layouts.py tests them) */
+struct controller_layout const *controller_layout_for(char const *guid) {(void)guid;return 0;}
+char const *controller_layout_button_name(int button, struct controller_device const *device)
+{return controller_remap_device_button_name(button, device);}
+''')
+
+
+def test_profile_layout_in_place_of_the_port(tmp_path):
+    """a player whose profile has a layout of its own (input.controller) plays with it, the port's
+    input.controller_p<n> left as it is; a player without one has the port's, as an older version's"""
+    run_c(tmp_path, COMMON + POLICY + r'''
+int main(void) {
+ unsigned char a[CONTROLLER_REMAP_ACTIONS],b[CONTROLLER_REMAP_ACTIONS]; char text[512];
+ controller_remap_defaults(a);controller_remap_assign(a,PAD_JUMP,1);controller_remap_format(a,text,sizeof(text));
+ config_write("input.controller_p2",text);
+ assert(controller_remap_read(1,b) && b[PAD_JUMP]==1);
+ controller_remap_defaults(a);controller_remap_assign(a,PAD_JUMP,2);controller_remap_format(a,text,sizeof(text));
+ strcpy(profile_layouts[1],text);profile_has[1]=1;revision++;
+ assert(controller_remap_read(1,b) && b[PAD_JUMP]==2);
+ assert(!strcmp(controller_remap_text(1),text));
+ /* (a profile's own empty: its preset, the port's custom one not used) */
+ profile_layouts[1][0]=0;revision++;
+ assert(!controller_remap_read(1,b));
+ profile_has[1]=0;revision++;
+ assert(controller_remap_read(1,b) && b[PAD_JUMP]==1);
+ assert(!controller_remap_read(0,b));
+ return 0;
+}
+''')
 
 
 def test_policy_migration_unbound_replace_and_independent_ports(tmp_path):
@@ -101,16 +139,26 @@ def test_camera_cycle_layout_versions_and_conflicts(tmp_path):
     run_c(tmp_path, COMMON + POLICY + r'''
 int main(void) {
  unsigned char a[CONTROLLER_REMAP_ACTIONS],b[CONTROLLER_REMAP_ACTIONS];
- char old[512],text[512];char *last;int port;
+ char old[512],v3[512],text[512];char *last;int port;
  controller_remap_defaults(a);controller_remap_format(a,text,sizeof(text));
- assert(!strncmp(text,"v3:",3));assert(controller_remap_parse(text,b) && b[PAD_CAMERA_CYCLE]==4);
- strcpy(old,text);old[1]='2';last=strrchr(old,',');assert(last);*last=0;
+ assert(!strncmp(text,"v4:",3));assert(controller_remap_parse(text,b) && b[PAD_CAMERA_CYCLE]==4 && b[PAD_PING]==11);
+ /* v2 is v4 without its last two actions (Cycle Camera, Ping), v3 without Ping. */
+ strcpy(old,text);old[1]='2';last=strrchr(old,',');assert(last);*last=0;last=strrchr(old,',');*last=0;
  assert(controller_remap_parse(old,b) && !memcmp(a,b,sizeof(a)));
+ strcpy(v3,text);v3[1]='3';*strrchr(v3,',')=0;
+ assert(controller_remap_parse(v3,b) && !memcmp(a,b,sizeof(a)));
  /* Existing debug RB bindings win over the newly introduced default. */
  controller_remap_assign(a,PAD_CAMERA_UP,4);assert(a[PAD_CAMERA_CYCLE]==255);
- controller_remap_format(a,text,sizeof(text));text[1]='2';*strrchr(text,',')=0;
+ controller_remap_format(a,text,sizeof(text));text[1]='2';*strrchr(text,',')=0;*strrchr(text,',')=0;
  assert(controller_remap_parse(text,b) && b[PAD_CAMERA_UP]==4 && b[PAD_CAMERA_CYCLE]==255);
  assert(!memcmp(a,b,sizeof(a)));
+ /* ... and an older layout's D-pad Right (its strafe) over Ping's. */
+ controller_remap_defaults(a);controller_remap_assign(a,PAD_RIGHT,11);assert(a[PAD_PING]==255);
+ controller_remap_format(a,text,sizeof(text));text[1]='3';*strrchr(text,',')=0;
+ assert(controller_remap_parse(text,b) && b[PAD_RIGHT]==11 && b[PAD_PING]==255);
+ /* Ping is gameplay's: the debug camera may share its button. */
+ controller_remap_assign(a,PAD_PING,8);assert(a[PAD_CHAT]==255 && a[PAD_CAMERA_FASTER]==8);
+ controller_remap_defaults(a);controller_remap_assign(a,PAD_CAMERA_CYCLE,4);
  /* Modern layouts must not receive the ten-action P2-P4 movement migration. */
  a[PAD_FORWARD]=255;a[PAD_CHAT]=8;
  controller_remap_format(a,text,sizeof(text));
@@ -120,6 +168,7 @@ int main(void) {
   config_write(controller_remap_setting(port),old);
   assert(controller_remap_read(port,b) && b[PAD_CHAT]==8 && b[PAD_CAMERA_CYCLE]==4);
  }
+ controller_remap_assign(a,PAD_CAMERA_UP,4);
  controller_remap_assign(a,PAD_CAMERA_CYCLE,7);
  assert(a[PAD_CAMERA_UP]==4 && a[PAD_CAMERA_CYCLE]==7 && a[PAD_FIRE]==7);
  controller_remap_format(a,text,sizeof(text));assert(controller_remap_parse(text,b));
@@ -209,13 +258,13 @@ int main(void) {
  controller_remap_profile(0,b);controller_remap_assign(b,PAD_JUMP,CONTROLLER_REMAP_PADDLE+1);
  controller_remap_assign(b,PAD_SCOREBOARD,CONTROLLER_REMAP_PADDLE+2);
  controller_remap_format(b,text,sizeof(text));config_write("input.controller_p1",text);
- assert(strstr(text,"v3:right_paddle,") && strstr(text,",left_paddle2,"));
+ assert(strstr(text,"v4:right_paddle,") && strstr(text,",left_paddle2,"));
  assert(controller_remap_parse(text,c) && !memcmp(b,c,sizeof(b)));
  assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_PADDLE,CONTROLLER_STEAM_DECK),"L4"));
  assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_PADDLE+3,CONTROLLER_STEAM_DECK),"R5"));
  assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_PADDLE+1,CONTROLLER_XBOX),"P1"));
  assert(!strcmp(controller_remap_button_name(13,CONTROLLER_STEAM_DECK),"VIEW"));
- assert(controller_remap_cycle(13,1)==CONTROLLER_REMAP_PADDLE && controller_remap_cycle(CONTROLLER_REMAP_PADDLE+3,1)==255);
+ assert(controller_remap_cycle(13,1)==CONTROLLER_REMAP_PADDLE && controller_remap_cycle(CONTROLLER_REMAP_PADDLE+3,1)==CONTROLLER_REMAP_TOUCHPAD);
  /* (the layout's change waits for the paddles held across it to be let go) */
  controller_remap_paddles(0,0);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
  controller_remap_paddles(0,2);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
@@ -234,6 +283,64 @@ int main(void) {
  return 0;
 }
 """)
+
+def test_touchpad_and_misc_buttons_press_a_custom_layouts_actions(tmp_path):
+    """#1145: the touchpad's click and misc1 to misc6 are tokens (touchpad, misc1..misc6) a custom layout's actions
+    take, pressed through controller_remap_paddles' bits 4 to 10, captured, named per controller (PlayStation's Back
+    by its generation), and cycled to; a layout without them reads as before (the negative control)"""
+    run_c(tmp_path, COMMON + POLICY + INPUT + source('port/linux/src/controller_remap_input.c') + r"""
+int main(void) {
+ XINPUT_GAMEPAD pad={0};unsigned char b[CONTROLLER_REMAP_ACTIONS],c[CONTROLLER_REMAP_ACTIONS];char text[512];int button=-1;
+ struct controller_device ps={0};
+ /* a layout of the old tokens formats as it did, and reads back the same */
+ controller_remap_profile(0,b);controller_remap_format(b,text,sizeof(text));
+ assert(!strstr(text,"touchpad") && !strstr(text,"misc"));
+ assert(controller_remap_parse(text,c) && !memcmp(b,c,sizeof(b)));
+ /* the new tokens round-trip; an unknown one still refuses the layout */
+ controller_remap_assign(b,PAD_JUMP,CONTROLLER_REMAP_TOUCHPAD);
+ controller_remap_assign(b,PAD_SCOREBOARD,CONTROLLER_REMAP_MISC+5);
+ controller_remap_format(b,text,sizeof(text));config_write("input.controller_p1",text);
+ assert(!strncmp(text,"v4:touchpad,",12) && strstr(text,",misc6,"));
+ assert(controller_remap_parse(text,c) && !memcmp(b,c,sizeof(b)));
+ assert(!controller_remap_parse("v4:misc7,east,west,north,rb,lb,lt,rt,ls,rs,dpad_up,unbound,unbound,dpad_right,back,"
+  "unbound,ls,unbound,unbound,unbound,ls,rs,rs,rt,lt,rb,dpad_right",c));
+ /* (the layout's change waits for the buttons held across it to be let go) */
+ controller_remap_paddles(0,0);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ /* the touchpad's click jumps; misc1 (bit 5) is bound to nothing and presses nothing */
+ controller_remap_paddles(0,1u<<4);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ assert(pad.bAnalogButtons[0]==255);
+ controller_remap_paddles(0,1u<<5);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ assert(!pad.bAnalogButtons[0] && !pad.wButtons);
+ /* (bits past the eleven extra buttons are dropped) */
+ controller_remap_paddles(0,1u<<11);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ assert(!pad.bAnalogButtons[0] && !pad.wButtons);
+ /* capture takes misc3 */
+ controller_remap_paddles(0,0);
+ menu[0]=1;controller_remap_capture_begin(0);memset(&pad,0,sizeof(pad));controller_remap_input(0,&pad,1);
+ controller_remap_paddles(0,1u<<7);controller_remap_input(0,&pad,1);
+ assert(controller_remap_capture_poll(&button)==1 && button==CONTROLLER_REMAP_MISC+2);
+ /* cycling: right paddle 2, the touchpad, misc1 ... misc6, unbound */
+ assert(controller_remap_cycle(CONTROLLER_REMAP_TOUCHPAD,1)==CONTROLLER_REMAP_MISC);
+ assert(controller_remap_cycle(CONTROLLER_REMAP_MISC+5,1)==255 && controller_remap_cycle(255,-1)==CONTROLLER_REMAP_MISC+5);
+ /* names: PlayStation's Back by generation; the family's otherwise */
+ ps.family=CONTROLLER_PLAYSTATION;
+ ps.playstation=3;assert(!strcmp(controller_remap_device_button_name(13,&ps),"SELECT"));
+ ps.playstation=4;assert(!strcmp(controller_remap_device_button_name(13,&ps),"SHARE"));
+ ps.playstation=5;assert(!strcmp(controller_remap_device_button_name(13,&ps),"CREATE"));
+ assert(!strcmp(controller_remap_device_button_name(CONTROLLER_REMAP_TOUCHPAD,&ps),"TOUCHPAD"));
+ assert(!strcmp(controller_remap_device_button_name(CONTROLLER_REMAP_MISC,&ps),"MIC"));
+ assert(!strcmp(controller_remap_device_button_name(0,&ps),"CROSS"));
+ ps.family=CONTROLLER_XBOX;ps.playstation=0;
+ assert(!strcmp(controller_remap_device_button_name(13,&ps),"BACK / SELECT"));
+ assert(!strcmp(controller_remap_device_button_name(CONTROLLER_REMAP_MISC,&ps),"SHARE"));
+ assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_MISC,CONTROLLER_SWITCH),"CAPTURE"));
+ assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_MISC+3,CONTROLLER_UNKNOWN),"MISC 4"));
+ assert(!strcmp(controller_remap_button_name(CONTROLLER_REMAP_MISC+1,CONTROLLER_STEAM_DECK),"RIGHT TRACKPAD"));
+ assert(!strcmp(controller_remap_device_button_name(CONTROLLER_REMAP_MISC,NULL),"MISC 1"));
+ return 0;
+}
+""")
+
 
 def test_disabled_matches_original_sdl_merge(tmp_path):
     original = (ROOT / 'port/linux/src/xinput_sdl.c').read_text()
@@ -261,7 +368,11 @@ enum {SDL_GAMEPAD_AXIS_LEFT_TRIGGER,SDL_GAMEPAD_AXIS_RIGHT_TRIGGER,SDL_GAMEPAD_A
 typedef struct {short axes[6];int buttons[14];} SDL_Gamepad;
 static int SDL_GetGamepadButton(SDL_Gamepad *p,int b){return p->buttons[b];}
 static short SDL_GetGamepadAxis(SDL_Gamepad *p,int a){return p->axes[a];}
-''' + '\n'.join(function(original, name) for name in ['stick', 'merge_button', 'sdl_gamepad_state']) +
+typedef unsigned int Uint32;
+typedef int SDL_GamepadAxis;
+#define PLATFORM_GAMEPAD_TRIGGER_PRESSED 8000
+''' + structure(original, 'gamepad_taps') + '\n' + '\n'.join(function(original, name) for name in
+          ['stick', 'merge_button', 'gamepad_button_down', 'gamepad_trigger', 'sdl_gamepad_state']) +
           source('port/linux/src/controller_remap_input.c') + r'''
 int main(void) {
  SDL_Gamepad device;XINPUT_GAMEPAD old,current,physical;int n,i;
@@ -273,8 +384,8 @@ int main(void) {
   for(i=0;i<6;i++)device.axes[i]=(short)(n*931+i*9271);
   device.axes[0]&=32767;device.axes[1]&=32767;
   for(i=0;i<14;i++)device.buttons[i]=(n>>(i%7))&1;
-  sdl_gamepad_state(&device,&old);
-  sdl_gamepad_state(&device,&physical);
+  sdl_gamepad_state(&device,NULL,&old);
+  sdl_gamepad_state(&device,NULL,&physical);
   assert(!controller_remap_input(0,&physical,1));
   controller_remap_merge(&physical,&current);
   assert(!memcmp(&old,&current,sizeof(old)));
@@ -350,7 +461,8 @@ def test_generated_remapping_and_dead_zone_pages():
     assert 'setting="input.left_stick_dead_zone"' in dead_zones and 'setting="input.right_stick_dead_zone"' in dead_zones
     controller = '\n'.join(files[prefix + '.gamepad_setup.xml'])
     assert 'button_remapping_screen' in controller and 'dead_zones_screen' in controller
-    assert 'setting="input.invert_look_horizontal"' in controller
+    assert 'setting="input.look_vertical_sensitivity"' in controller
+    assert 'setting="input.invert_look_horizontal"' in '\n'.join(files[prefix + '.gamepad_setup.gyro.xml'])
     for name in ('gamepad_setup.xml', 'gamepad_setup.button_remapping.xml', 'gamepad_setup.dead_zones.xml'):
         filename = prefix + '.' + name
         assert 'ce/' + filename in manifest
@@ -398,12 +510,19 @@ int main(void) {
  assert(controller_remap_prompt_text(1,255)[0]=='U' && !controller_remap_prompt_text(1,0) && !controller_remap_prompt_text(1,16));
  /* a back paddle: past the icons, named as the player's controller names it (the Steam Deck's R5; an Elite's P2) */
  controller_remap_assign(b,0,CONTROLLER_REMAP_PADDLE+3);controller_remap_format(b,text,sizeof(text));
- assert(strstr(text,"v3:right_paddle2,"));config_write("input.controller_p3",text);
+ assert(strstr(text,"v4:right_paddle2,"));config_write("input.controller_p3",text);
  controller_remap_prompt(1,&profile);assert(profile.game_control_to_xbox_buttons[0]==CONTROLLER_REMAP_PROMPT_PADDLE+3);
  family=CONTROLLER_STEAM_DECK;{wchar_t const *w=controller_remap_prompt_text(1,profile.game_control_to_xbox_buttons[0]);
  assert(w[0]=='R' && w[1]=='5' && !w[2] && device_port==2);}
  family=CONTROLLER_XBOX;{wchar_t const *w=controller_remap_prompt_text(1,CONTROLLER_REMAP_PROMPT_PADDLE+3);
  assert(w[0]=='P' && w[1]=='2' && !w[2]);}
+ /* the touchpad and misc6 too, the last before UNBOUND (255) */
+ controller_remap_assign(b,0,CONTROLLER_REMAP_MISC+5);controller_remap_format(b,text,sizeof(text));
+ config_write("input.controller_p3",text);controller_remap_prompt(1,&profile);
+ assert(profile.game_control_to_xbox_buttons[0]==254);
+ {wchar_t const *w=controller_remap_prompt_text(1,254);assert(w[0]=='M' && w[5]=='6' && !w[6]);}
+ {wchar_t const *w=controller_remap_prompt_text(1,CONTROLLER_REMAP_PROMPT_PADDLE+4);assert(w[0]=='T' && w[7]=='D');}
+ assert(!controller_remap_prompt_text(1,CONTROLLER_REMAP_PROMPT_PADDLE-1));
  family=0;
  profile=original;controller_remap_prompt(0,&profile);assert(!memcmp(&profile,&original,sizeof(profile)));
  assert(controller_remap_playing(2) && !controller_remap_playing(0));menus=1;assert(!controller_remap_playing(2));menus=0;
@@ -444,6 +563,16 @@ int controller_remap_capture_poll(int *button){int r=capture_result;*button=capt
 void controller_remap_profile(short port,unsigned char *b){
  static unsigned char const normal[10]={0,4,2,3,1,5,6,7,14,15};controller_remap_defaults(b);memcpy(b,normal,10);
 }
+/* (each port's player's profile: none until active_profiles has one; its
+folder "0" to "3", its own layout profile_layouts') */
+static long active_profiles[4]={NONE,NONE,NONE,NONE};
+static long player_ui_get_active_player_profile_index(short local){return active_profiles[local];}
+static int player_settings_profile_folder(long index,char *folder,unsigned long size){
+ if(index==NONE)return 0;snprintf(folder,size,"%ld",index);return 1;
+}
+static int config_profile_write(char const *folder,char const *name,char const *value){
+ int local=atoi(folder);(void)name;strcpy(profile_layouts[local],value);profile_has[local]=1;revision++;return 1;
+}
 ''' + source('port/linux/game/controller_remap_menu.inl').replace('->parameters.text_box.text', '->text_box.text') + r'''
 int main(void) {
  unsigned char b[CONTROLLER_REMAP_ACTIONS];
@@ -476,6 +605,16 @@ int main(void) {
  pad_editor_event(&row,"port controller bind");capture_button=13;capture_result=1;
  pad_editor_update(&screen);pad_editor_save(&screen);
  assert(controller_remap_read(1,b) && b[PAD_CAMERA_CYCLE]==13);
+ /* (a player with a profile: their layout written into it, the port's
+ left as it is) */
+ {
+  char port_layout[512];
+  strcpy(port_layout,settings[1]);active_profiles[1]=1;
+  pad_editor.shown_group=0;row.name="op_pad_1";
+  pad_editor_event(&row,"port controller clear");pad_editor_save(&screen);
+  assert(profile_has[1] && !strcmp(settings[1],port_layout));
+  assert(controller_remap_read(1,b) && b[0]==255);
+ }
  return 0;
 }
 ''')
@@ -637,10 +776,19 @@ def test_chat_owner_identity_and_per_port_hold_over(tmp_path):
     code=COMMON+POLICY+INPUT+r'''
 #define NONE -1
 #define TRUE 1
+#define FALSE 0
 #define csmemset memset
 #define DATUM_INDEX_TO_ABSOLUTE_INDEX(p) ((p)&65535)
 typedef int boolean;
-static struct {boolean active,physical;short channel,controller;long player;char text[256];} chat_input;
+static struct {boolean active,physical,report,chosen,lobby;short channel,controller,lobby_slot;long player;char text[256];} chat_input;
+/* the channel chosen last: player 2's the vehicle's, the others' everyone's (network_chat.c's own are chat_logic's) */
+#define config_string(name) "all,all,vehicle"
+static int game_engine_has_teams(void){return 1;}
+#define chat_player_vehicle(player) 9
+static short chat_channel_remembered(char const *list,short local){return local==2?2:0;}
+static short chat_channel_opened(short remembered,boolean teams,boolean vehicle){return remembered;}
+static short remembered_player=NONE,remembered_channel=NONE;
+static void chat_channel_remember(short local,short channel){remembered_player=local;remembered_channel=channel;}
 static struct {int open;unsigned long opening_buttons;} chat_keyboard;
 static struct {short local_player_index;} players[4]={{0},{1},{2},{3}};
 static long occupants[4]={0x10004,0x20005,0x30006,0x40007};
@@ -650,8 +798,13 @@ static long local_player_get_player_index(short p){return p>=0&&p<4?occupants[p]
 short controller_remap_local_player(short p){return p;}
 struct key_stroke{int key;};
 static int input_get_key(struct key_stroke *key){return 0;}
+/* (the chat's lines scrolled back: opening and closing it go back to the newest) */
+static short chat_scroll;
 static WORD chat_held_buttons[4];
 static unsigned char chat_held_analog[4];
+/* (the new menus' keyboard, port/linux/game/keyboard.c: not up here) */
+static int keyboard_chat_up(void){return 0;}
+static void keyboard_close(void){}
 '''
     code+='\n'.join(function(chat,n) for n in ['chat_speaker','chat_input_begin','network_chat_controller','chat_input_end','chat_keyboard_buttons'])
     code+=function(xinput,'chat_pad_hold_over')+r'''
@@ -666,11 +819,15 @@ int main(void) {
  p0.bAnalogButtons[0]=255;p2.bAnalogButtons[0]=255;
  chat_pad_hold_over(0,&p0);chat_pad_hold_over(2,&p2);
  assert(p0.bAnalogButtons[0]==255 && !p2.bAnalogButtons[0]);
- chat_input_end();p2.bAnalogButtons[0]=255;chat_pad_hold_over(2,&p2);assert(!p2.bAnalogButtons[0]);
+ chat_input_end();assert(remembered_player==2 && remembered_channel==1); /* The owner's channel, chosen by the button. */
+ p2.bAnalogButtons[0]=255;chat_pad_hold_over(2,&p2);assert(!p2.bAnalogButtons[0]);
  chat_pad_hold_over(2,&p2);p2.bAnalogButtons[0]=255;chat_pad_hold_over(2,&p2);assert(p2.bAnalogButtons[0]==255);
  chat_input_begin(2,3,TRUE);assert(chat_speaker(TRUE)==7 && chat_input.channel==2);
  occupants[3]=0x50007;assert(chat_speaker(TRUE)==NONE); /* New player, same slot. */
  chat_input_end();chat_input_begin(0,NONE,FALSE);assert(chat_speaker(TRUE)==4 && !chat_input.physical);
+ chat_input_end();remembered_player=NONE;chat_input_begin(NONE,2,TRUE);
+ assert(chat_input.channel==2 && !chat_input.chosen); /* The channel player 2 chose last. */
+ chat_input_end();assert(remembered_player==NONE); /* Not chosen this time: nothing written. */
  return 0;
 }
 '''

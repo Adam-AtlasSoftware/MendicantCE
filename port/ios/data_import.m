@@ -123,16 +123,16 @@ static BOOL maps_usable(NSString *folder, NSString **problem)
 
 	[super viewDidLoad];
 	self.view.backgroundColor = UIColor.blackColor;
-	title.text = @"OpenH1 needs Halo’s maps";
+	title.text = @"GOAT H1 needs Halo’s maps";
 	title.font = [UIFont systemFontOfSize:24 weight:UIFontWeightBold];
 	title.textColor = UIColor.whiteColor;
 	message = [UILabel new];
 	message.numberOfLines = 0;
 	message.textColor = [UIColor colorWithWhite:0.85 alpha:1.0];
 	message.font = [UIFont systemFontOfSize:15];
-	message.text = @"Choose your disc image of Halo: Combat Evolved for the Xbox (.iso or .xiso), and OpenH1 copies "
-		"its maps. Or choose the Xbox game’s maps folder. Or copy that folder into OpenH1’s folder in the Files "
-		"app (On My iPhone, OpenH1), then look again. No game data comes with OpenH1.";
+	message.text = @"Choose your disc image of Halo: Combat Evolved for the Xbox (.iso or .xiso), and GOAT H1 copies "
+		"its maps. Or choose the Xbox game’s maps folder. Or copy that folder into GOAT H1’s folder in the Files "
+		"app (On My iPhone, GOAT H1), then look again. No game data comes with GOAT H1.";
 	progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
 	progress.hidden = YES;
 	buttons = [UIStackView new];
@@ -217,7 +217,7 @@ static BOOL maps_usable(NSString *folder, NSString **problem)
 	if (maps_usable([self mapsFolder], &problem))
 		self.finished = YES;
 	else
-		[self say:[NSString stringWithFormat:@"OpenH1’s folder has no maps folder of the Xbox game yet. %@",
+		[self say:[NSString stringWithFormat:@"GOAT H1’s folder has no maps folder of the Xbox game yet. %@",
 			[[NSFileManager defaultManager] fileExistsAtPath:[self mapsFolder]] ? problem : @""]];
 }
 

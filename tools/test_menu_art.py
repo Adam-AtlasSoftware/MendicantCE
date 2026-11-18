@@ -21,6 +21,7 @@ def test_menu_art_registration_replacement_and_forget(tmp_path):
 static unsigned int created, deleted, decoded;
 static void platform_log(const char *format, ...) { (void)format; }
 static void xgpu_image_delete(unsigned int image) { assert(image); deleted++; }
+static void xgpu_texture_replacements_changed(void) {}
 static const unsigned char *file_data(const char *name, unsigned long *size)
 {
     *size = 1;

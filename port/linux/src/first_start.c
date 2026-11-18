@@ -27,10 +27,17 @@ own, whatever becomes of the folder or wherever the app is.
 Custom Edition's installer (halocesetup_en_1.00.exe), found as the disc
 images are or picked with Browse..., is offered too, as an extra: its
 multiplayer maps (Halo PC's, with bitmaps.map, sounds.map and loc.map) are
-written into the custom_maps folder (map_import.c), and the screen comes
-back, since the game still needs the Xbox maps to start. A Halo PC CD
-image picked is explained, not copied: OpenH1 does not play Halo PC's own
-maps, and the installer has the same ones.
+written into the custom_maps folder (map_import.c). A Halo PC CD image
+picked is explained, not copied: OpenH1 does not play Halo PC's own maps,
+and the installer has the same ones.
+
+The two sources go in either order, at any time (map_sources.c, which says
+which the game has: the screen shows it). The game starts the moment it has
+its Xbox maps, which it cannot start without; Custom Edition's alone bring
+the list back, saying the Xbox maps are still needed. Settings' ADD MAPS
+asks for the screen at the next start (xbox_files.c), with the Xbox maps
+there and Start among its items, to add Custom Edition's or to copy the
+Xbox maps again.
 
 (Windows' first start is sdl_platform.c's.)
 */
@@ -45,6 +52,7 @@ maps, and the installer has the same ones.
 #include "ce_installer.h"
 #include "game_data_scan.h"
 #include "map_import.h"
+#include "map_sources.h"
 
 #include <SDL3/SDL.h>
 #include <pthread.h>
@@ -66,6 +74,8 @@ enum
 enum
 {
 	_action_candidate,
+	/* the game started: it has the Xbox maps */
+	_action_play,
 	_action_look_again,
 	_action_browse,
 	_action_back,
@@ -129,6 +139,10 @@ struct chooser
 	BOOL notice;
 	/* the left stick's last direction (-1, 0 or 1), moved once a push */
 	int stick;
+	/* which sources of maps the game has (read with each scan and copy) */
+	struct map_sources sources;
+	/* the player chose to start the game */
+	BOOL play;
 	struct chooser_copy copy;
 };
 
@@ -180,11 +194,11 @@ static SDL_Window *first_start_window(BOOL gamescope)
 		int width = desktop && desktop->w >= 640 ? desktop->w : 1280;
 		int height = desktop && desktop->h >= 400 ? desktop->h : 800;
 
-		return SDL_CreateWindow("OpenH1", width, height, SDL_WINDOW_HIGH_PIXEL_DENSITY);
+		return SDL_CreateWindow("GOAT H1", width, height, SDL_WINDOW_HIGH_PIXEL_DENSITY);
 	}
 	if (fullscreen)
 		flags |= SDL_WINDOW_FULLSCREEN;
-	return SDL_CreateWindow("OpenH1", 1024, 640, flags);
+	return SDL_CreateWindow("GOAT H1", 1024, 640, flags);
 }
 
 /* ---------- text */
@@ -303,13 +317,21 @@ static void items_add(int action, int candidate)
 	}
 }
 
-/* the list screen's items: what was found, then looking again, the
-system's dialog where there is one, and quitting */
+/* whether the game has its Xbox maps, and can start */
+static BOOL playable(void)
+{
+	return chooser.sources.present[_map_source_xbox] != 0;
+}
+
+/* the list screen's items: the game's Start once it can, what was found,
+then looking again, the system's dialog where there is one, and quitting */
 static void items_list(void)
 {
 	int index;
 
 	items_clear();
+	if (playable())
+		items_add(_action_play, -1);
 	for (index = 0; index < chooser.candidate_count; index++)
 		items_add(_action_candidate, index);
 	items_add(_action_look_again, -1);
@@ -333,6 +355,8 @@ static const char *item_label(const struct chooser_item *item)
 {
 	switch (item->action)
 	{
+	case _action_play:
+		return "Start GOAT H1";
 	case _action_look_again:
 		return "Look again";
 	case _action_browse:
@@ -379,7 +403,7 @@ static float draw_heading(float left, float width, const char *headline, SDL_Col
 	int unit = chooser.unit;
 	float y = (float)chooser.height * 0.07f;
 
-	text(left, y, unit * 2, colour_accent, "OpenH1");
+	text(left, y, unit * 2, colour_accent, "GOAT H1");
 	y += GLYPH * unit * 2 + unit * 6;
 	fill(left, y, width, (float)unit, colour_bar);
 	y += unit * 12;
@@ -449,7 +473,8 @@ static void draw_items(float left, float width, float top, float bottom)
 				if (chooser.installers[item->candidate])
 				{
 					fit(candidate->name, columns, line, sizeof(line));
-					snprintf(details, sizeof(details), "%s  -  Custom Edition installer (optional)", candidate->place);
+					snprintf(details, sizeof(details), "%s  -  Custom Edition installer (%s)", candidate->place,
+						chooser.sources.present[_map_source_custom_edition] ? "added already" : "optional");
 				}
 				else if (candidate->kind == _game_data_image)
 				{
@@ -498,6 +523,23 @@ static int first_xbox_candidate(void)
 	return 0;
 }
 
+/* which sources of maps the game has, a line each; returns the y below */
+static float draw_sources(float left, float y)
+{
+	int unit = chooser.unit;
+	float column = left + GLYPH * unit * 22;
+	BOOL xbox = chooser.sources.present[_map_source_xbox] != 0;
+	BOOL custom_edition = chooser.sources.present[_map_source_custom_edition] != 0;
+
+	text(left, y, unit, colour_text, "Xbox maps");
+	text(column, y, unit, xbox ? colour_accent : colour_error, xbox ? "Installed" : "Needed to play");
+	y += GLYPH * unit * 1.6f;
+	text(left, y, unit, colour_text, "Custom Edition maps");
+	text(column, y, unit, custom_edition ? colour_accent : colour_dim, custom_edition ? "Added" :
+		"Not added (optional)");
+	return y + GLYPH * unit;
+}
+
 static void draw_list(float left, float width)
 {
 	int unit = chooser.unit;
@@ -513,7 +555,22 @@ static void draw_list(float left, float width)
 		snprintf(missing, sizeof(missing), "The maps are no longer in %s, the folder paths.data names (moved, or "
 			"on a drive not connected?). ", chooser.missing);
 	}
-	if (chooser.candidate_count > installer_count())
+	if (playable())
+	{
+		BOOL custom_edition = chooser.sources.present[_map_source_custom_edition] != 0;
+
+		y = draw_heading(left, width, "Add maps", colour_text);
+		if (custom_edition)
+			snprintf(explanation, sizeof(explanation), "GOAT H1 has both sources of maps. A disc image copies the "
+				"Xbox maps to %s again; Custom Edition's installer writes only the maps that are missing.",
+				destination);
+		else
+			snprintf(explanation, sizeof(explanation), "GOAT H1 has your Xbox maps (in %s). Custom Edition's "
+				"installer (halocesetup_en_1.00.exe) adds its multiplayer maps: put it in Downloads and choose Look "
+				"again%s. Settings > Mods > Add Maps brings you back here.", destination,
+				chooser.browse ? ", or Browse" : "");
+	}
+	else if (chooser.candidate_count > installer_count())
 	{
 		BOOL one = chooser.candidate_count - installer_count() == 1;
 		const struct game_data_candidate *first = &chooser.candidates[first_xbox_candidate()];
@@ -522,7 +579,7 @@ static void draw_list(float left, float width)
 			first->kind == _game_data_image ? "Your Halo disc image was found" :
 			"Your Halo maps folder was found", colour_text);
 		snprintf(explanation, sizeof(explanation),
-			"%sOpenH1 plays the maps of your own Halo: Combat Evolved for the Xbox. Choosing %s copies "
+			"%sGOAT H1 plays the maps of your own Halo: Combat Evolved for the Xbox. Choosing %s copies "
 			"the maps (about 2 GB) to %s.%s", missing, one ? "it" : "one", destination,
 			installer_count() ? " Custom Edition's installer adds its multiplayer maps too (optional)." : "");
 	}
@@ -531,13 +588,13 @@ static void draw_list(float left, float width)
 		y = draw_heading(left, width, "Halo's Xbox maps were not found", colour_text);
 		snprintf(explanation, sizeof(explanation),
 #ifdef HALO_MACOS
-			"%sOpenH1 plays the maps of your own Halo: Combat Evolved for the Xbox. Choose Browse to pick its "
+			"%sGOAT H1 plays the maps of your own Halo: Combat Evolved for the Xbox. Choose Browse to pick its "
 			"disc image (.iso or .xiso) or its maps folder, or put either in Downloads and choose Look again. "
 			"The maps (about 2 GB) are copied to %s.\n\n"
 			"%sLooked in %s.",
 			missing, destination,
 #else
-			"%sOpenH1 plays the maps of your own Halo: Combat Evolved for the Xbox. Put your disc image (.iso) "
+			"%sGOAT H1 plays the maps of your own Halo: Combat Evolved for the Xbox. Put your disc image (.iso) "
 			"in Downloads or on your SD card, then press A to look again.\n\n"
 			"%sLooked in %s.",
 			missing,
@@ -545,9 +602,11 @@ static void draw_list(float left, float width)
 			chooser.looked_again ? "Still nothing found. " : "", chooser.places_text);
 	}
 	y = paragraph(left, y, width, unit, colour_dim, explanation);
+	y = draw_sources(left, y + unit * 6);
 	draw_items(left, width, y + unit * 8, (float)chooser.height - GLYPH * unit - (float)chooser.height * 0.05f -
 		unit * 20);
-	draw_footer(left, width, "A / Enter: choose     B / Esc: quit     D-pad / arrows: move");
+	draw_footer(left, width, playable() ? "A / Enter: choose     B / Esc: start the game     D-pad / arrows: move" :
+		"A / Enter: choose     B / Esc: quit     D-pad / arrows: move");
 }
 
 static void draw_copy(float left, float width)
@@ -680,6 +739,10 @@ static void scan(void)
 			chooser.candidates[index].kind == _game_data_image ? "disc image" : "maps folder",
 			chooser.candidates[index].path, chooser.candidates[index].place, chooser.candidates[index].size);
 	}
+	map_sources_read(chooser.places.destination, &chooser.sources);
+	platform_log("first start: Xbox maps %s, Custom Edition's maps %s",
+		chooser.sources.present[_map_source_xbox] ? "installed" : "missing",
+		chooser.sources.present[_map_source_custom_edition] ? "added" : "not added");
 	chooser.screen = _screen_list;
 	items_list();
 }
@@ -838,7 +901,7 @@ static void browse(void)
 		chooser.browse = FALSE;
 		snprintf(message, sizeof(message),
 			"This system has no file picker (it needs the desktop portal or zenity). That is fine: put your "
-			"disc image (.iso) in Downloads or on your SD card and choose Look again, and OpenH1 finds it.");
+			"disc image (.iso) in Downloads or on your SD card and choose Look again, and GOAT H1 finds it.");
 		show_error("No file picker here", message);
 		return;
 	}
@@ -890,6 +953,9 @@ static void activate(int index)
 	case _action_candidate:
 		start_copy(&chooser.candidates[item->candidate], chooser.installers[item->candidate]);
 		break;
+	case _action_play:
+		chooser.play = TRUE;
+		break;
 	case _action_look_again:
 		{
 			int before = chooser.candidate_count;
@@ -902,7 +968,11 @@ static void activate(int index)
 		browse();
 		break;
 	case _action_back:
-		scan();
+		/* (Continue, once the game has its Xbox maps: the game) */
+		if (chooser.notice && map_sources_next(&chooser.sources) == _map_sources_play)
+			chooser.play = TRUE;
+		else
+			scan();
 		break;
 	case _action_quit:
 		platform_log("first start: no game data: quitting");
@@ -910,12 +980,17 @@ static void activate(int index)
 	}
 }
 
-/* B, Escape: back from an error, else quit */
+/* B, Escape: back from an error, else the game when it can start, else
+quit */
 static void cancel(void)
 {
 	if (chooser.screen == _screen_error)
 	{
 		scan();
+	}
+	else if (chooser.screen == _screen_list && playable())
+	{
+		chooser.play = TRUE;
 	}
 	else if (chooser.screen == _screen_list)
 	{
@@ -1102,8 +1177,8 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 	game_data_default_places(&chooser.places, destination);
 	game_data_places_text(&chooser.places, chooser.places_text, sizeof(chooser.places_text));
 	snprintf(chooser.missing, sizeof(chooser.missing), "%s", missing ? missing : "");
-	platform_log("first start: no game data; looking for a disc image (%s)%s", chooser.places_text,
-		gamescope ? " under gamescope" : "");
+	platform_log("first start: looking for disc images and Custom Edition's installer (%s)%s",
+		chooser.places_text, gamescope ? " under gamescope" : "");
 	chooser.window = first_start_window(gamescope);
 	chooser.renderer = chooser.window ? SDL_CreateRenderer(chooser.window, NULL) : NULL;
 	if (!chooser.renderer)
@@ -1125,9 +1200,15 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 	{
 		SDL_Event event;
 
-		while (SDL_PollEvent(&event))
+		while (!chooser.play && SDL_PollEvent(&event))
 			handle(&event);
-		test_input();
+		if (!chooser.play)
+			test_input();
+		if (chooser.play)
+		{
+			platform_log("first start: starting the game");
+			break;
+		}
 		if (chooser.screen == _screen_copy)
 		{
 			BOOL finished, succeeded, installer;
@@ -1141,23 +1222,31 @@ BOOL platform_offer_game_data(const char *destination, const char *missing)
 			written = chooser.copy.written;
 			snprintf(error, sizeof(error), "%s", chooser.copy.error);
 			pthread_mutex_unlock(&chooser.copy.lock);
+			if (finished && succeeded)
+				map_sources_read(chooser.places.destination, &chooser.sources);
 			if (finished && succeeded && installer)
 			{
 				char folder[GAME_DATA_PATH_SIZE];
 				char message[GAME_DATA_PATH_SIZE + 400];
 
-				/* (the Xbox maps are still needed: back to the list) */
+				/* (Continue: the game, once it has both sources, else the
+				list) */
 				game_data_short_path(&chooser.places, chooser.copy.folder, folder, (int)sizeof(folder));
-				snprintf(message, sizeof(message), "%s %s. They show in the map lists' CUSTOM MULTIPLAYER.\n\n"
-					"OpenH1 still needs the maps of your Xbox disc to start: choose Continue, then its disc image.",
-					written ? "Custom Edition's maps are in" : "Custom Edition's maps were already in", folder);
+				snprintf(message, sizeof(message), "%s %s. They show in the map lists' CUSTOM MULTIPLAYER.\n\n%s",
+					written ? "Custom Edition's maps are in" : "Custom Edition's maps were already in", folder,
+					playable() ? "Choose Continue to start GOAT H1." :
+					"GOAT H1 still needs the maps of your Xbox disc to start: choose Continue, then its disc image.");
 				platform_log("first start: added Custom Edition's maps");
 				show_notice(written ? "Custom Edition's maps were added" : "Nothing to add", message);
 			}
 			else if (finished && succeeded)
 			{
+				/* (the game, now that it has its Xbox maps; Custom
+				Edition's are Settings' ADD MAPS's) */
 				platform_log("first start: copied the maps");
-				break;
+				if (map_sources_next(&chooser.sources) == _map_sources_play)
+					break;
+				scan();
 			}
 			else if (finished)
 			{

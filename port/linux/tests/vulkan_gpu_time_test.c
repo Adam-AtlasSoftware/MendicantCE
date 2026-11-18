@@ -15,6 +15,16 @@ void host_render_stream_display_paced(int paced)
 	(void)paced;
 }
 
+void host_render_stream_frames_ahead(int frames)
+{
+	(void)frames;
+}
+
+void host_render_stream_display_blocking(int blocking)
+{
+	(void)blocking;
+}
+
 void host_render_stream_frames_taken_reset(void)
 {
 }
@@ -56,6 +66,9 @@ static int available = 1;
 static VkResult create_result = VK_SUCCESS;
 static VkResult read_result = VK_SUCCESS;
 
+/* (debug.pass_times: never) */
+int host_pass_times;
+
 void host_logf(int priority, const char *format, ...)
 {
 	(void)priority;
@@ -73,7 +86,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_queries(VkDevice device, const VkQu
 {
 	(void)device;
 	(void)allocator;
-	assert(info->queryType == VK_QUERY_TYPE_TIMESTAMP && info->queryCount == GPU_TIME_FRAMES * 2);
+	/* (fork: GPU_TIME_QUERIES a frame: its start, end, the split and the marked interval's two) */
+	assert(info->queryType == VK_QUERY_TYPE_TIMESTAMP && info->queryCount == GPU_TIME_FRAMES * GPU_TIME_QUERIES);
 	creates++;
 	if (create_result == VK_SUCCESS)
 		*pool = (VkQueryPool)(uintptr_t)1;
@@ -83,8 +97,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_queries(VkDevice device, const VkQu
 static VKAPI_ATTR void VKAPI_CALL reset_queries(VkDevice device, VkQueryPool pool, uint32_t first, uint32_t count)
 {
 	(void)device;
-	assert(pool == vk.gpu_time_pool && count == 2 && !(first & 1));
-	assert(!vk.gpu_times[first / 2].used);
+	/* (fork: GPU_TIME_QUERIES a frame, xgpu_vulkan.c: its start and end, the split, the marked interval's two) */
+	assert(pool == vk.gpu_time_pool && count == GPU_TIME_QUERIES && !(first % GPU_TIME_QUERIES));
+	assert(!vk.gpu_times[first / GPU_TIME_QUERIES].used);
 	resets++;
 }
 
@@ -92,8 +107,9 @@ static VKAPI_ATTR void VKAPI_CALL timestamp(VkCommandBuffer commands, VkPipeline
 	VkQueryPool pool, uint32_t query)
 {
 	assert(pool == vk.gpu_time_pool);
-	assert(stage == ((query & 1) ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT));
-	assert(commands == ((query & 1) ? vk.slot->main : vk.slot->early));
+	assert(query % GPU_TIME_QUERIES < 2);
+	assert(stage == ((query % GPU_TIME_QUERIES) ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT));
+	assert(commands == ((query % GPU_TIME_QUERIES) ? vk.slot->main : vk.slot->early));
 	assert(!vk.pass_active);
 	writes++;
 }
@@ -112,10 +128,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL query_results(VkDevice device, VkQueryPool
 	uint64_t (*values)[2] = data;
 
 	(void)device;
-	assert(pool == vk.gpu_time_pool && count == 2 && !(first & 1));
+	/* (fork: the split's and the marks' timestamps, never written here: not ready) */
+	if (first % GPU_TIME_QUERIES)
+		return VK_NOT_READY;
+	assert(pool == vk.gpu_time_pool && count == 2);
 	assert(size == 4 * sizeof(uint64_t) && stride == 2 * sizeof(uint64_t));
 	assert(flags == (VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT));
-	assert(vk.gpu_times[first / 2].serial <= completed);
+	assert(vk.gpu_times[first / GPU_TIME_QUERIES].serial <= completed);
 	reads++;
 	values[0][0] = start_value;
 	values[1][0] = end_value;

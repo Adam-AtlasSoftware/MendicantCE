@@ -1240,6 +1240,10 @@ void rasterizer_lens_flares_draw(
 		short lens_flare_index;
 
 		rasterizer_widget_begin(_widget_type_internal_sprite, 0);
+		/* port: a lens flare (the sun's among them) and the sun's glow are
+		light: display.hdr_highlight_boost's (xgpu_hdr.h, #1123; the
+		widgets' sprites are drawn in batches, so the kind is the block's) */
+		halo_hdr_draw_kind(HALO_HDR_KIND_EMITTER);
 
 		for (lens_flare_index = 0; lens_flare_index < local_lens_flare_count; lens_flare_index++)
 		{
@@ -1525,6 +1529,7 @@ void rasterizer_lens_flares_draw(
 				}
 			}
 		}
+		halo_hdr_draw_kind(HALO_HDR_KIND_NONE); /* port: (drawn) */
 	}
 
 	rasterizer_profile_end(_rasterizer_profile_lens_flares);

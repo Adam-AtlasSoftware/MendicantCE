@@ -36,6 +36,7 @@ struct _object
 {
 	struct { short size; } node_matrices;
 	real_point3d position;
+	real_vector3d forward;
 	real_vector3d translational_velocity;
 	long parent_object_index;
 	real outgoing_function_values[NUMBER_OF_OUTGOING_OBJECT_FUNCTIONS];

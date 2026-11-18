@@ -66,6 +66,10 @@ enum
 
 /* ---------- prototypes/UI_WIDGET.C */
 
+/* port: MCC's menu actions name levels of its own catalog (mcc_maps.c) */
+boolean ui_widget_port_mcc_multiplayer_map_choose(char const *level_name);
+boolean ui_widget_port_mcc_cooperative_level_choose(char const *level_name, short difficulty);
+
 boolean event_controller_index_compatible_with_widget(
 	struct event_record const *event,
 	struct widget_instance const *widget);
@@ -225,6 +229,9 @@ void render_ui_widgets_postgame(
 void render_ui_widgets(
 	short local_player_index,
 	rectangle2d const *window_bounds);
+/* port: (port/linux/game/menu_view.c's menu_view_over_views) */
+void render_ui_widgets_over_views(
+	rectangle2d const *window_bounds);
 struct widget_instance *ui_widget_load_by_name_or_tag(
 	char const *name,
 	long tag_index,
@@ -233,6 +240,16 @@ struct widget_instance *ui_widget_load_by_name_or_tag(
 	long invoking_widget_tag,
 	long focused_child_parent_widget_tag,
 	short focused_child_index);
+/* port: the menus' pop-ups (a hand-written screen with a <dialog>, opened
+over the screen up without deleting it: ui_widget.c's
+ui_widget_port_popups): a local player's on top, its pop-up else its
+screen; its pop-up alone; every one closed */
+struct widget_instance *ui_widget_port_top_screen(
+	short local_player_index);
+struct widget_instance *ui_widget_port_popup(
+	short local_player_index);
+void ui_widget_port_popups_close(
+	void);
 void main_screen_shell_load(
 	void);
 void network_game_reset_to_pregame_ui(

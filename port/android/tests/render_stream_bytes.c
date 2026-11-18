@@ -88,6 +88,12 @@ static FILE *output;
 static struct xgpu_stream_ring *ring;
 static uint32_t written;
 
+/* (GOAT H1's port/linux/game/render_marks.c: a new pipeline in play named in the log; nothing here) */
+void render_marks_pipeline_unprepared(void);
+void render_marks_pipeline_unprepared(void)
+{
+}
+
 int host_render_stream_open(unsigned int address)
 {
 	ring = guest(address);

@@ -73,9 +73,13 @@ display's (both), for tests and for the replay, which has no window.
 
 display.gamma: into a BGRA8 layer, where the setting is not 1, the
 presentation draws the frame with its curve (each channel raised to one
-over the setting: xgpu_metal_post_shaders.h's) in place of the plain copy,
-so that it costs no pass of its own; the loading screen's colours are
-curved alike. An EDR layer is never curved: paper white is its brightness.
+over the setting: the frame's last pass, xgpu_metal_post_shaders.h's) in
+place of the plain copy, so that it costs no pass of its own, and dithers
+it to 8 bits after the curve (#1108); a half-float frame (display.hdr "on"
+over an SDR layer) is drawn so too, dithered, at gamma 1. An 8-bit frame
+at gamma 1 is copied as it is: it is the layer's codes already. The
+loading screen's colours are curved alike. An EDR layer is never curved:
+paper white is its brightness; its half floats need no dither.
 
 HALO_METAL_STATS=<seconds> logs the pacing that often: the link's
 refreshes, the frames presented, the intervals between the times the
@@ -114,6 +118,7 @@ from: port/ios/README.md).
 #include "frame_pacing.h"
 #define XGPU_HDR_REFERENCE
 #include "xgpu_hdr.h"
+#include "xgpu_astc.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_metal.h>
@@ -121,10 +126,12 @@ from: port/ios/README.md).
 #include <pthread.h>
 #include <errno.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <mach/thread_policy.h>
@@ -180,9 +187,15 @@ static struct
 	id<MTLRenderPipelineState> edr_pipeline, loading_edr_pipeline;
 	/* display.gamma: the presentation with its curve, into an SDR layer
 	(nil: none), and the setting (a float's bits; 0 or 1: none) */
-	id<MTLRenderPipelineState> gamma_pipeline;
+	id<MTLRenderPipelineState> sdr_pipeline;
 	_Atomic uint32_t gamma;
 	_Atomic int hdr_active, hdr_mode, hdr_paper_white_nits, hdr_paper_white, hdr_ui_nits;
+	/* display.hdr_sdr_curve's setting (XGPU_HDR_SDR_CURVE_*) */
+	_Atomic int hdr_sdr_curve;
+	/* display.hdr_peak_nits's (#1122; 0 the system's) */
+	_Atomic int hdr_peak_nits;
+	/* display.hdr_gamut's (#1124: 1 expanded) */
+	_Atomic int hdr_gamut;
 	_Atomic uint32_t edr_potential, edr_current;
 	BOOL layer_edr;
 	uint32_t edr_ticks;
@@ -196,6 +209,15 @@ static struct
 	id<MTLBuffer> loading_uploads[LOADING_UPLOADS];
 	BOOL loading_upload_busy[LOADING_UPLOADS];
 	BOOL loading_texture_valid;
+	/* the caption at the drawable's pixels (loading_art_caption_shown): the
+	frame this refresh's render gave (NULL: none), the caption's textures
+	(each with the refreshes in flight that draw it), the one drawn last
+	(its index and 1; 0: none) and its place in the frame as it is shown */
+	const uint8_t *loading_pixels;
+	id<MTLTexture> caption_textures[LOADING_UPLOADS];
+	int caption_busy[LOADING_UPLOADS];
+	int caption_drawn;
+	unsigned int caption_left, caption_top;
 	id<MTLSamplerState> present_sampler;
 	_Atomic int active;
 	/* the window's size in pixels, as SDL last reported it */
@@ -383,6 +405,21 @@ void host_metal_hdr_state(int active, int mode, int paper_white_nits, int paper_
 	atomic_store(&presentation.hdr_ui_nits, ui_nits > 0 ? ui_nits : 0);
 }
 
+void host_metal_hdr_sdr_curve(int curve)
+{
+	atomic_store(&presentation.hdr_sdr_curve, curve);
+}
+
+void host_metal_hdr_gamut(int expanded)
+{
+	atomic_store(&presentation.hdr_gamut, expanded != 0);
+}
+
+void host_metal_hdr_peak_nits(int nits)
+{
+	atomic_store(&presentation.hdr_peak_nits, nits > 0 ? nits : 0);
+}
+
 /* the layer is EDR's while the frame is drawn in HDR and the display has
 headroom at all (an SDR panel's dimmed white has some: display.hdr "on") */
 static BOOL edr_wanted(void)
@@ -399,6 +436,15 @@ void host_metal_hdr_frame(struct xgpu_hdr_frame *frame)
 
 	if (presentation.edr_override > 0.0f && !presentation.window)
 		current = presentation.edr_override;
+	/* (a peak of the player's, over EDR's white: no more than the layer
+	shows, which clips past its headroom) */
+	if (atomic_load(&presentation.hdr_peak_nits) > 0)
+	{
+		float peak = xgpu_hdr_peak_headroom(atomic_load(&presentation.hdr_peak_nits), current, XGPU_HDR_EDR_WHITE_NITS);
+
+		if (peak < current)
+			current = peak;
+	}
 	memset(frame, 0, sizeof(*frame));
 	frame->mode = atomic_load(&presentation.hdr_mode);
 	frame->output = XGPU_HDR_OUTPUT_SDR;
@@ -414,6 +460,10 @@ void host_metal_hdr_frame(struct xgpu_hdr_frame *frame)
 		if (paper_white > current)
 			paper_white = current;
 		frame->output = XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
+		frame->sdr_curve = xgpu_hdr_sdr_curve_of(atomic_load(&presentation.hdr_sdr_curve), 1);
+		/* (display.hdr_gamut: EDR's colour space is Display P3's, #1124) */
+		frame->gamut = atomic_load(&presentation.hdr_gamut);
+		frame->gamut_target = 0.0f;
 		frame->paper_white = paper_white;
 		frame->peak = current / paper_white;
 		/* (the UI's white, no brighter than the display either) */
@@ -433,7 +483,7 @@ static float gamma_power(void)
 {
 	float gamma = bits_float(atomic_load(&presentation.gamma));
 
-	return gamma > 0.0f && gamma != 1.0f && presentation.gamma_pipeline ? 1.0f / gamma : 0.0f;
+	return gamma > 0.0f && gamma != 1.0f && presentation.sdr_pipeline ? 1.0f / gamma : 0.0f;
 }
 
 /* a colour's channel (the frame's values) as an EDR drawable takes it:
@@ -450,22 +500,29 @@ static float edr_value(id<CAMetalDrawable> drawable, float value)
 	return xgpu_hdr_linear(value) * (frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.paper_white * frame.ui);
 }
 
+/* the layer's colour space: extended linear sRGB for EDR, else sRGB. Never
+none: a layer without one is not colour matched, so a wide-gamut (P3)
+display would show the frame's sRGB in its own, wider gamut, oversaturated */
+static void layer_space_set(BOOL edr)
+{
+	CGColorSpaceRef space = CGColorSpaceCreateWithName(edr ? kCGColorSpaceExtendedLinearSRGB : kCGColorSpaceSRGB);
+
+	presentation.layer.colorspace = space;
+	CGColorSpaceRelease(space);
+}
+
 /* (the presentation thread, before it draws into the drawable) the layer
 made EDR's or SDR's as the frame wants: the next drawables are */
 static void layer_hdr_choose(void)
 {
 	BOOL wanted = edr_wanted();
-	CGColorSpaceRef space;
 
 	if (wanted == presentation.layer_edr)
 		return;
 	presentation.layer_edr = wanted;
-	space = wanted ? CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearSRGB) : NULL;
 	presentation.layer.wantsExtendedDynamicRangeContent = wanted;
 	presentation.layer.pixelFormat = wanted ? MTLPixelFormatRGBA16Float : MTLPixelFormatBGRA8Unorm;
-	presentation.layer.colorspace = space;
-	if (space)
-		CGColorSpaceRelease(space);
+	layer_space_set(wanted);
 	host_logf(HOST_LOG_INFO, "metal: the window's layer: %s", wanted ? "EDR (half floats, extended linear sRGB)" : "SDR");
 }
 
@@ -529,6 +586,7 @@ void host_metal_loading_caption(void *context, const unsigned char *coverage, ui
 	(void)context;
 	pthread_mutex_lock(&presentation.lock);
 	loading_art_caption(&presentation.loading_art, coverage, width, height);
+	presentation.caption_drawn = 0;
 	presentation.loading_texture_valid = NO;
 	pthread_mutex_unlock(&presentation.lock);
 }
@@ -583,6 +641,7 @@ static id<MTLTexture> loading_upload(id<MTLCommandBuffer> buffer,
 	}
 	pixels = presentation.loading_texture && index < LOADING_UPLOADS ?
 		loading_art_render(&presentation.loading_art, frame) : NULL;
+	presentation.loading_pixels = pixels;
 	/* (what the render gave: the sharp frame's size, or, without its
 	memory, the 480 rows') */
 	if (pixels)
@@ -639,6 +698,142 @@ static id<MTLTexture> loading_upload(id<MTLCommandBuffer> buffer,
 	return texture;
 }
 
+/* HALO_LOADING_CAPTURE_DIR's pictures of the loading screen as it is shown
+(the frame scaled, the caption over it at the drawable's pixels), beside
+its frames' (host_loading_capture.h): the drawable read back once drawn, as
+screen-<epoch>-<serial>.ppm, every HALO_LOADING_SCREEN_EVERY frames of a
+load (60: a second's; 0: none); the drawable's BGRA8 only. */
+static void loading_screen_capture(id<MTLCommandBuffer> buffer, id<MTLTexture> texture,
+	const struct loading_presentation_frame *frame)
+{
+	static int checked;
+	static unsigned every;
+	static const char *directory;
+	id<MTLBuffer> pixels;
+	id<MTLBlitCommandEncoder> blit;
+	NSUInteger width = texture.width, height = texture.height;
+	unsigned long long epoch = frame->epoch, serial = frame->serial;
+	char *path;
+
+	if (!checked)
+	{
+		const char *value = getenv("HALO_LOADING_SCREEN_EVERY");
+
+		directory = getenv("HALO_LOADING_CAPTURE_DIR");
+		every = value ? (unsigned)strtoul(value, NULL, 10) : 60;
+		checked = 1;
+	}
+	if (!directory || !*directory || !every || frame->serial % every || texture.framebufferOnly ||
+		texture.pixelFormat != MTLPixelFormatBGRA8Unorm)
+		return;
+	pixels = [xgpu_metal_device() newBufferWithLength:width * height * 4 options:MTLResourceStorageModeShared];
+	if (!pixels || asprintf(&path, "%s/screen-%llu-%llu.ppm", directory, epoch, serial) < 0)
+		return;
+	blit = [buffer blitCommandEncoder];
+	[blit copyFromTexture:texture sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
+		sourceSize:MTLSizeMake(width, height, 1) toBuffer:pixels destinationOffset:0
+		destinationBytesPerRow:width * 4 destinationBytesPerImage:width * height * 4];
+	[blit endEncoding];
+	[buffer addCompletedHandler:^(id<MTLCommandBuffer> done) {
+		FILE *file = fopen(path, "wb");
+		const unsigned char *bgra = pixels.contents;
+		unsigned char *row = malloc(width * 3);
+		NSUInteger x, y;
+
+		(void)done;
+		if (file && row)
+		{
+			fprintf(file, "P6\n%lu %lu\n255\n", (unsigned long)width, (unsigned long)height);
+			for (y = 0; y < height; y++)
+			{
+				for (x = 0; x < width; x++)
+				{
+					row[x * 3] = bgra[(y * width + x) * 4 + 2];
+					row[x * 3 + 1] = bgra[(y * width + x) * 4 + 1];
+					row[x * 3 + 2] = bgra[(y * width + x) * 4];
+				}
+				fwrite(row, 3, width, file);
+			}
+			host_load_trace("loading.screen_capture", "epoch=%llu serial=%llu path=%s", epoch, serial, path);
+		}
+		if (file)
+			fclose(file);
+		free(row);
+		free(path);
+	}];
+}
+
+/* The caption over the loading frame shown `shown_width` by `shown_height`
+pixels: its texture, at those pixels (loading_art_caption_shown), and its
+place in them; nil: none. */
+static id<MTLTexture> loading_caption_upload(id<MTLCommandBuffer> buffer, NSUInteger shown_width,
+	NSUInteger shown_height, unsigned int *left, unsigned int *top)
+{
+	id<MTLTexture> texture = nil;
+	const uint8_t *tile = NULL;
+	unsigned int width = 0, height = 0;
+	int index = LOADING_UPLOADS;
+
+	pthread_mutex_lock(&presentation.lock);
+	if (presentation.loading_pixels)
+	{
+		/* (this refresh's frame: its caption made again, the background
+		under it the frame's) */
+		tile = loading_art_caption_shown(&presentation.loading_art, presentation.loading_pixels,
+			(unsigned int)shown_width, (unsigned int)shown_height, left, top, &width, &height);
+		presentation.caption_drawn = 0;
+		for (index = 0; tile && index < LOADING_UPLOADS; index++)
+		{
+			if (!presentation.caption_busy[index])
+				break;
+		}
+		if (tile && index < LOADING_UPLOADS)
+		{
+			texture = presentation.caption_textures[index];
+			if (!texture || texture.width != width || texture.height != height)
+			{
+				MTLTextureDescriptor *description = [MTLTextureDescriptor
+					texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:width height:height
+					mipmapped:NO];
+
+				description.storageMode = MTLStorageModeShared;
+				description.usage = MTLTextureUsageShaderRead;
+				texture = [xgpu_metal_device() newTextureWithDescriptor:description];
+				presentation.caption_textures[index] = texture;
+			}
+			if (texture)
+			{
+				[texture replaceRegion:MTLRegionMake2D(0, 0, width, height) mipmapLevel:0 withBytes:tile
+					bytesPerRow:width * 4];
+				presentation.caption_drawn = index + 1;
+				presentation.caption_left = *left;
+				presentation.caption_top = *top;
+			}
+		}
+	}
+	else if (presentation.caption_drawn)
+	{
+		/* (the frame shown again: its caption too) */
+		index = presentation.caption_drawn - 1;
+		texture = presentation.caption_textures[index];
+		*left = presentation.caption_left;
+		*top = presentation.caption_top;
+	}
+	if (texture)
+		presentation.caption_busy[index]++;
+	pthread_mutex_unlock(&presentation.lock);
+	if (texture)
+	{
+		[buffer addCompletedHandler:^(id<MTLCommandBuffer> done) {
+			(void)done;
+			pthread_mutex_lock(&presentation.lock);
+			presentation.caption_busy[index]--;
+			pthread_mutex_unlock(&presentation.lock);
+		}];
+	}
+	return texture;
+}
+
 int host_metal_loading_owned(void *context)
 {
 	int owned;
@@ -675,6 +870,87 @@ uint64_t host_metal_loading(void *context, const struct loading_presentation_fra
 	while (discarded-- > 0)
 		host_render_stream_frame_taken();
 	return presentation.refresh_rate > 0.0f ? (uint64_t)(1e9 / presentation.refresh_rate) : 16666667ull;
+}
+
+/* the picture is shown smaller than it is (supersampling) by other than 1
+or 2 each way: the last pass scales it down by its area (#1117) */
+static BOOL area_scaled(id<MTLTexture> picture, MTLViewport viewport)
+{
+	double width = (double)picture.width, height = (double)picture.height;
+	BOOL across = width <= viewport.width + 0.5 || fabs(width - 2.0 * viewport.width) <= 0.5;
+	BOOL down = height <= viewport.height + 0.5 || fabs(height - 2.0 * viewport.height) <= 0.5;
+
+	return (width > viewport.width + 0.5 || height > viewport.height + 0.5) && !(across && down);
+}
+
+/* A picture drawn into the viewport, as the drawable's layer wants it. */
+static void present_draw(id<MTLRenderCommandEncoder> encoder, id<CAMetalDrawable> drawable, id<MTLTexture> picture,
+	MTLViewport viewport)
+{
+	[encoder setViewport:viewport];
+	[encoder setFragmentTexture:picture atIndex:0];
+	[encoder setFragmentSamplerState:presentation.present_sampler atIndex:0];
+	if (drawable.texture.pixelFormat == MTLPixelFormatRGBA16Float && presentation.edr_pipeline)
+	{
+		/* display.hdr: the frame encoded for the EDR layer (xgpu_hdr.c) */
+		struct xgpu_metal_post_uniforms uniforms;
+		struct xgpu_hdr_frame frame;
+
+		host_metal_hdr_frame(&frame);
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[0] = (float)viewport.originX;
+		uniforms.metrics[1] = (float)viewport.originY;
+		uniforms.metrics[2] = 1.0f / (float)viewport.width;
+		uniforms.metrics[3] = 1.0f / (float)viewport.height;
+		uniforms.bounds[0] = (float)picture.width;
+		uniforms.bounds[1] = (float)picture.height;
+		uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.window[2] = 1.0f;
+		uniforms.hdr[0] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.paper_white;
+		uniforms.hdr[1] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.peak;
+		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
+		uniforms.hdr[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.ui;
+		uniforms.window[0] = (float)frame.sdr_curve;
+		uniforms.window[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 0.0f : frame.black;
+		uniforms.gamut[0] = frame.output != XGPU_HDR_OUTPUT_SDR && frame.gamut ? 1.0f : 0.0f;
+		uniforms.gamut[1] = frame.gamut_target;
+		[encoder setRenderPipelineState:presentation.edr_pipeline];
+		[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
+		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	}
+	else if (drawable.texture.pixelFormat == MTLPixelFormatBGRA8Unorm && presentation.sdr_pipeline &&
+		(gamma_power() > 0.0f || picture.pixelFormat == MTLPixelFormatRGBA16Float ||
+		picture.pixelFormat == MTLPixelFormatRGBA16Unorm || area_scaled(picture, viewport)))
+	{
+		/* display.gamma, or a half-float or 16-bit frame (display.hdr "on"
+		over SDR, display.output_depth): the frame curved and dithered to 8
+		bits as it is drawn into the SDR layer (no pass of its own: this is
+		the frame's last, #1108); a frame larger than the viewport, scaled
+		down by its area there (#1117) */
+		struct xgpu_metal_post_uniforms uniforms;
+		float power = gamma_power();
+
+		memset(&uniforms, 0, sizeof(uniforms));
+		uniforms.metrics[0] = (float)viewport.originX;
+		uniforms.metrics[1] = (float)viewport.originY;
+		uniforms.metrics[2] = 1.0f / (float)viewport.width;
+		uniforms.metrics[3] = 1.0f / (float)viewport.height;
+		uniforms.bounds[0] = (float)picture.width;
+		uniforms.bounds[1] = (float)picture.height;
+		uniforms.bounds[2] = uniforms.bounds[3] = 1.0f;
+		uniforms.hdr[0] = uniforms.hdr[1] = uniforms.hdr[3] = 1.0f;
+		uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_SDR;
+		uniforms.window[1] = 255.0f;
+		uniforms.window[2] = power > 0.0f ? power : 1.0f;
+		[encoder setRenderPipelineState:presentation.sdr_pipeline];
+		[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
+		[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	}
+	else
+	{
+		[encoder setRenderPipelineState:presentation.present_pipeline];
+		[encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+	}
 }
 
 /* ---------- the presentation images */
@@ -1308,11 +1584,19 @@ static void hidden_refresh(void)
 
 /* (the main thread, as the window's occlusion changes) whether it is
 hidden: the link's thread takes its frames while it is */
+/* (HALO_METAL_HIDE_TEST, the window's hiding tested in a run nobody
+watches: its state while window_hide_test says so, else -1) */
+static int window_hide_forced = -1;
+
 static void window_visibility_read(void)
 {
 	NSWindow *native = (__bridge NSWindow *)SDL_GetPointerProperty(SDL_GetWindowProperties(presentation.window),
 		SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, NULL);
-	int hidden = native && !(native.occlusionState & NSWindowOcclusionStateVisible);
+	/* (HALO_LOADING_CAPTURE_DIR's pictures of the screen need its frames
+	drawn: a window covered by others still draws them, at the pace its
+	link keeps, so that the pictures are taken whatever covers it) */
+	int hidden = window_hide_forced >= 0 ? window_hide_forced :
+		native && !(native.occlusionState & NSWindowOcclusionStateVisible) && !getenv("HALO_LOADING_CAPTURE_DIR");
 
 	if (atomic_exchange(&presentation.hidden, hidden) == hidden)
 		return;
@@ -1324,6 +1608,37 @@ static void window_visibility_read(void)
 		CFRunLoopPerformBlock(presentation.link_run_loop, kCFRunLoopDefaultMode, ^{ hidden_refresh(); });
 		CFRunLoopWakeUp(presentation.link_run_loop);
 	}
+}
+
+/* HALO_METAL_HIDE_TEST="<first>,<hidden>,<every>": the window taken as
+hidden <first> seconds after it opens, for <hidden> seconds, and again every
+<every> seconds (0: once), through the same path as the occlusion's
+notification (window_visibility_read), on the main thread: the way back
+from a hidden window measured in a run whose window is never shown */
+static void window_hide_test(double hidden_seconds, double every, BOOL hide)
+{
+	window_hide_forced = hide ? 1 : 0;
+	window_visibility_read();
+	if (hide)
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(hidden_seconds * NSEC_PER_SEC)),
+			dispatch_get_main_queue(), ^{ window_hide_test(hidden_seconds, every, NO); });
+	else if (every > hidden_seconds)
+		dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((every - hidden_seconds) * NSEC_PER_SEC)),
+			dispatch_get_main_queue(), ^{ window_hide_test(hidden_seconds, every, YES); });
+}
+
+static void window_hide_test_start(void)
+{
+	const char *test = getenv("HALO_METAL_HIDE_TEST");
+	double first = 0.0, hidden_seconds = 0.0, every = 0.0;
+
+	if (!test || sscanf(test, "%lf,%lf,%lf", &first, &hidden_seconds, &every) < 2 || hidden_seconds <= 0.0)
+		return;
+	host_logf(HOST_LOG_INFO, "metal: the window taken as hidden at %g s for %g s (every %g s): HALO_METAL_HIDE_TEST",
+		first, hidden_seconds, every);
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(first * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		window_hide_test(hidden_seconds, every, YES);
+	});
 }
 #endif
 
@@ -1572,49 +1887,18 @@ static BOOL rate_adapt(BOOL shown, double now)
 			MTLViewport viewport = { floor((drawable_width - fit_width) / 2.0), floor((drawable_height - fit_height) / 2.0),
 				floor(fit_width), floor(fit_height), 0.0, 1.0 };
 
-			[encoder setViewport:viewport];
-			[encoder setFragmentTexture:sampled_image atIndex:0];
-			[encoder setFragmentSamplerState:presentation.present_sampler atIndex:0];
-			if (drawable.texture.pixelFormat == MTLPixelFormatRGBA16Float && presentation.edr_pipeline)
+			present_draw(encoder, drawable, sampled_image, viewport);
+			/* (the loading screen's caption over it, at the drawable's
+			pixels) */
+			if (loading_image)
 			{
-				/* display.hdr: the frame encoded for the EDR layer (xgpu_hdr.c) */
-				struct xgpu_metal_post_uniforms uniforms;
-				struct xgpu_hdr_frame frame;
+				unsigned int left = 0, top = 0;
+				id<MTLTexture> caption = loading_caption_upload(buffer, (NSUInteger)viewport.width,
+					(NSUInteger)viewport.height, &left, &top);
 
-				host_metal_hdr_frame(&frame);
-				memset(&uniforms, 0, sizeof(uniforms));
-				uniforms.metrics[0] = (float)viewport.originX;
-				uniforms.metrics[1] = (float)viewport.originY;
-				uniforms.metrics[2] = 1.0f / (float)viewport.width;
-				uniforms.metrics[3] = 1.0f / (float)viewport.height;
-				uniforms.hdr[0] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.paper_white;
-				uniforms.hdr[1] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.peak;
-				uniforms.hdr[2] = (float)XGPU_HDR_OUTPUT_EXTENDED_LINEAR;
-				uniforms.hdr[3] = frame.output == XGPU_HDR_OUTPUT_SDR ? 1.0f : frame.ui;
-				[encoder setRenderPipelineState:presentation.edr_pipeline];
-				[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
-				[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-			}
-			else if (drawable.texture.pixelFormat == MTLPixelFormatBGRA8Unorm && gamma_power() > 0.0f)
-			{
-				/* display.gamma: the frame curved as it is drawn into the
-				SDR layer (no pass of its own: this is the frame's last) */
-				struct xgpu_metal_post_uniforms uniforms;
-
-				memset(&uniforms, 0, sizeof(uniforms));
-				uniforms.metrics[0] = (float)viewport.originX;
-				uniforms.metrics[1] = (float)viewport.originY;
-				uniforms.metrics[2] = 1.0f / (float)viewport.width;
-				uniforms.metrics[3] = 1.0f / (float)viewport.height;
-				uniforms.bounds[0] = gamma_power();
-				[encoder setRenderPipelineState:presentation.gamma_pipeline];
-				[encoder setFragmentBytes:&uniforms length:sizeof(uniforms) atIndex:XGPU_METAL_BUFFER_DRAW_UNIFORMS];
-				[encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-			}
-			else
-			{
-				[encoder setRenderPipelineState:presentation.present_pipeline];
-				[encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+				if (caption)
+					present_draw(encoder, drawable, caption, (MTLViewport){ viewport.originX + left,
+						viewport.originY + top, caption.width, caption.height, 0.0, 1.0 });
 			}
 		}
 		if (loading_frame.active && !loading_image)
@@ -1643,6 +1927,8 @@ static BOOL rate_adapt(BOOL shown, double now)
 			}
 		}
 		[encoder endEncoding];
+		if (loading_image)
+			loading_screen_capture(buffer, drawable.texture, &loading_frame);
 		atomic_fetch_add(&presentation.drawables_pending, 1);
 #if TARGET_OS_SIMULATOR
 		/* (the iOS simulator's drawables say nothing of their presentation:
@@ -1843,6 +2129,85 @@ static const char *shader_library_path(void)
 	return path;
 }
 
+/* ---------- the caches the player clears (host_caches, guest_host.h)
+
+The pipelines' archive and the ASTC textures' files are made again as the
+game plays. Settings' CLEAR CACHES asks for them to go at the next start
+(CACHES_REQUEST, a file in the app's caches folder), and they go as the
+backend is set up, before it reads them (host_metal_initialize). */
+
+#define CACHES_FOLDER "Library/Caches/OpenH1"
+#define CACHES_REQUEST "clear_caches"
+
+/* the pipelines' archive: HALO_METAL_ARCHIVE ("" none), or the app's caches
+folder's, into path; NULL for none */
+static const char *metal_archive_path(char *path, size_t size)
+{
+	const char *archive = getenv("HALO_METAL_ARCHIVE"), *home = getenv("HOME");
+
+	if (!archive && home)
+	{
+		snprintf(path, size, "%s/" CACHES_FOLDER "/metal_pipelines.bin", home);
+		archive = path;
+	}
+	return archive && *archive ? archive : NULL;
+}
+
+/* the caches' bytes, each file deleted with clear */
+static unsigned long long caches_bytes(int clear)
+{
+	char path[1024], folder[1024];
+	unsigned long long total = 0;
+	struct stat status;
+	const char *archive = metal_archive_path(path, sizeof(path));
+	const char *astc = xgpu_metal_textures_astc_folder(folder, sizeof(folder));
+
+	if (archive && !stat(archive, &status))
+	{
+		total += (unsigned long long)status.st_size;
+		if (clear)
+			remove(archive);
+	}
+	return total + xgpu_astc_cache_files(astc && *astc ? astc : NULL, clear);
+}
+
+/* the request's file, into path; NULL without a home */
+static const char *caches_request_path(char *path, size_t size)
+{
+	const char *home = getenv("HOME");
+
+	if (!home || !*home)
+		return NULL;
+	snprintf(path, size, "%s/" CACHES_FOLDER "/" CACHES_REQUEST, home);
+	return path;
+}
+
+/* (a host import: menu_functions.c's CLEAR CACHES, by game_caches.c) the
+caches' kilobytes; with what 1 their clearing asked for at the next start,
+2 that asked for no longer */
+unsigned int host_caches(int what)
+{
+	char path[1100];
+	unsigned long long kilobytes;
+
+	if ((what == 1 || what == 2) && caches_request_path(path, sizeof(path)))
+	{
+		if (what == 1)
+		{
+			FILE *file = fopen(path, "wb");
+
+			if (file)
+				fclose(file);
+		}
+		else
+		{
+			remove(path);
+		}
+	}
+	kilobytes = caches_bytes(0) / 1024ULL;
+	return kilobytes > 0xFFFFFFFFULL ? 0xFFFFFFFFu : (unsigned int)kilobytes;
+}
+
 /* the backend, set up for this process (once; host_main.c, before the
 guest starts, so that the command stream finds it) */
 int host_metal_initialize(void)
@@ -1851,11 +2216,17 @@ int host_metal_initialize(void)
 	const char *edr = getenv("HALO_METAL_EDR_HEADROOM");
 	struct xgpu_metal_options options;
 	char path[1024];
-	const char *archive = getenv("HALO_METAL_ARCHIVE");
-	const char *home = getenv("HOME");
+	struct stat status;
 
 	if (result >= 0)
 		return result;
+	/* (the caches gone first, if the player asked for it at the last run) */
+	if (caches_request_path(path, sizeof(path)) && !stat(path, &status))
+	{
+		host_logf(HOST_LOG_INFO, "metal: the caches cleared, as Settings asked: %llu KB",
+			caches_bytes(1) / 1024ULL);
+		remove(path);
+	}
 	atomic_store(&presentation.edr_potential, float_bits(1.0f));
 	atomic_store(&presentation.edr_current, float_bits(1.0f));
 	atomic_store(&presentation.hdr_paper_white_nits, 0);
@@ -1864,12 +2235,7 @@ int host_metal_initialize(void)
 	if (edr && atof(edr) > 0.0)
 		host_metal_hdr_override((float)atof(edr));
 	memset(&options, 0, sizeof(options));
-	if (!archive && home)
-	{
-		snprintf(path, sizeof(path), "%s/Library/Caches/OpenH1/metal_pipelines.bin", home);
-		archive = path;
-	}
-	options.archive_path = archive && *archive ? archive : NULL;
+	options.archive_path = metal_archive_path(path, sizeof(path));
 #if TARGET_OS_SIMULATOR
 	/* (the iOS simulator's GPU has no binary archives: Metal stops the
 	process at the first pipeline made with one) */
@@ -2031,7 +2397,10 @@ int host_metal_window_open(uint32_t window)
 	presentation.layer = (__bridge CAMetalLayer *)SDL_Metal_GetLayer(presentation.view);
 	presentation.layer.device = xgpu_metal_device();
 	presentation.layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-	presentation.layer.framebufferOnly = YES;
+	layer_space_set(NO);
+	/* (read back for HALO_LOADING_CAPTURE_DIR's pictures of the screen:
+	loading_screen_capture) */
+	presentation.layer.framebufferOnly = !getenv("HALO_LOADING_CAPTURE_DIR");
 	/* (the presentation writes every pixel, alpha 1: the window server
 	need not draw what is behind the window, nor blend the window over it) */
 	presentation.layer.opaque = YES;
@@ -2100,15 +2469,15 @@ int host_metal_window_open(uint32_t window)
 	if (!presentation.edr_pipeline)
 		host_logf(HOST_LOG_WARN, "metal: no HDR presentation (%s): the window stays SDR",
 			error ? error.localizedDescription.UTF8String : "its functions");
-	/* display.gamma: the presentation into an SDR layer with its curve
-	(tools/vulkan_post_shaders.py's GLSL: xgpu_metal_post_shaders.h) */
+	/* display.gamma and the dither: the presentation into an SDR layer by
+	the frame's last pass (xgpu_hdr.c's GLSL: xgpu_metal_post_shaders.h) */
 	error = nil;
 	descriptor = xgpu_metal_present_descriptor();
 	descriptor.vertexFunction = post_function(XGPU_METAL_POST_VERTEX);
-	descriptor.fragmentFunction = post_function(XGPU_METAL_POST_GAMMA);
-	presentation.gamma_pipeline = descriptor.vertexFunction && descriptor.fragmentFunction ?
+	descriptor.fragmentFunction = post_function(XGPU_METAL_POST_HDR_ENCODE);
+	presentation.sdr_pipeline = descriptor.vertexFunction && descriptor.fragmentFunction ?
 		[xgpu_metal_device() newRenderPipelineStateWithDescriptor:descriptor error:&error] : nil;
-	if (!presentation.gamma_pipeline)
+	if (!presentation.sdr_pipeline)
 		host_logf(HOST_LOG_WARN, "metal: no display.gamma (%s): the frame is shown as drawn",
 			error ? error.localizedDescription.UTF8String : "its functions");
 	display_hdr_read();
@@ -2128,6 +2497,7 @@ int host_metal_window_open(uint32_t window)
 				(void)note;
 				window_visibility_read();
 			}];
+		window_hide_test_start();
 	}
 #endif
 	sampler = [MTLSamplerDescriptor new];

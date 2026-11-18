@@ -80,14 +80,16 @@ def main():
 
     worst = 0.0
     for case in scene["cases"]:
-        inputs = {"u": {U_WORLD_AO: [case["owner"], case["reference"], 0.0, 0.0]}, "world_ao": block,
-                  "xWorldPosition": case["point"], "xWorldNormal": case["normal"] + [1.0]}
-        colour = spirv_run.run(modules[case["lightmap"]], inputs, sample)
-        difference = abs(colour[0] - case["occlusion"])
-        if difference > worst:
-            worst = difference
-            if difference > tolerance:
-                print(f"at {case}: {colour[0]}")
+        # (and a model's as a two-sided shader's cards: its uniforms' world_ao.w 1)
+        for cards in (0, 1) if not case["lightmap"] else (0,):
+            inputs = {"u": {U_WORLD_AO: [case["owner"], case["reference"], 0.0, float(cards)]}, "world_ao": block,
+                      "xWorldPosition": case["point"], "xWorldNormal": case["normal"] + [1.0]}
+            colour = spirv_run.run(modules[case["lightmap"]], inputs, sample)
+            difference = abs(colour[0] - case["cards" if cards else "occlusion"])
+            if difference > worst:
+                worst = difference
+                if difference > tolerance:
+                    print(f"at {case}{' as cards' if cards else ''}: {colour[0]}")
     print(f"{len(scene['cases'])} points, largest difference {worst:.3g}; {scene['field_shaded']} the field shades")
     return 1 if worst > tolerance else 0
 

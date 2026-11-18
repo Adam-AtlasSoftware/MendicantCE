@@ -37,6 +37,7 @@ the system's zlib.
 
 #ifdef HALO_LINUX_PLATFORM_LAYER
 #include "platform.h"
+#include "loading_screen.h"
 #include "../../third_party/zlib/zlib_prefixed.h"
 #else
 #include <zlib.h>
@@ -436,13 +437,62 @@ void map_unpack_stop(short slot)
 		map_unpack.jobs[slot].stop = 1;
 }
 
+/* (the time a copy is waited for before the loading screen covers the wait:
+a game started before its map's copy was done stopped with nothing on the
+screen for 0.7 s, on an M1 Max, the stall detector's) */
+#define MAP_UNPACK_SCREEN_AFTER_NS 100000000ll
+
 int map_unpack_take(short slot)
 {
 	int succeeded = 0;
+#ifdef HALO_LINUX_PLATFORM_LAYER
+	struct timespec started, now;
+	int shown = 0;
+#endif
 
 	if (slot < 0 || slot >= MAP_UNPACK_SLOTS)
 		return 0;
+#ifdef HALO_LINUX_PLATFORM_LAYER
+	/* a copy not yet done: waited for under the loading screen, its
+	progress the copy's, once the wait has gone on long enough to be seen */
+	clock_gettime(CLOCK_MONOTONIC, &started);
+	pthread_mutex_lock(&map_unpack.lock);
+	while (map_unpack.jobs[slot].state == _map_unpack_queued || map_unpack.jobs[slot].state == _map_unpack_running)
+	{
+		struct timespec until;
+		float progress = map_unpack.jobs[slot].progress;
+
+		clock_gettime(CLOCK_MONOTONIC, &now);
+		if ((now.tv_sec - started.tv_sec) * 1000000000ll + (now.tv_nsec - started.tv_nsec) >= MAP_UNPACK_SCREEN_AFTER_NS)
+		{
+			pthread_mutex_unlock(&map_unpack.lock);
+			if (!shown)
+				halo_loading_screen_begin(TRUE);
+			shown = 1;
+			halo_loading_screen_progress(progress, NULL);
+			pthread_mutex_lock(&map_unpack.lock);
+		}
+		/* (the condition's clock is the real time's) */
+		clock_gettime(CLOCK_REALTIME, &until);
+		until.tv_nsec += 30000000l;
+		if (until.tv_nsec >= 1000000000l)
+		{
+			until.tv_sec++;
+			until.tv_nsec -= 1000000000l;
+		}
+		pthread_cond_timedwait(&map_unpack.finished, &map_unpack.lock, &until);
+	}
+	pthread_mutex_unlock(&map_unpack.lock);
+	if (shown)
+	{
+		platform_log("map cache: the game waited %.1f s for the copy of the map it starts",
+			(double)((now.tv_sec - started.tv_sec) * 1000000000ll + (now.tv_nsec - started.tv_nsec)) / 1e9);
+		halo_loading_screen_progress(1.0f, NULL);
+		halo_loading_screen_end();
+	}
+#else
 	map_unpack_wait(slot);
+#endif
 	pthread_mutex_lock(&map_unpack.lock);
 	if (map_unpack.jobs[slot].state == _map_unpack_done)
 	{

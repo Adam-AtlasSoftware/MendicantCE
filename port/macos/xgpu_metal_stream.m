@@ -50,6 +50,7 @@ by the functions under "the interface's values".
 #include "xgpu_metal_stream.h"
 #include "xgpu_metal_textures.h"
 #define XGPU_HDR_REFERENCE
+#include "xgpu_dynamic_lights_world.h"
 #include "xgpu_hdr.h"
 
 #include <math.h>
@@ -142,8 +143,13 @@ static struct
 	uint32_t halo_vertex, halo_pixel;
 	BOOL halo_failed;
 	uint32_t lights_none[2];
-	/* their world (none: lights_world_none's header of no nodes) */
+	/* their world (none: lights_world_none's header of no nodes), as the
+	GPU has it (xgpu_dynamic_lights_world.h), and the cells as the stream's
+	changes leave them, with the lights the world is walked for (made each
+	frame) */
 	uint32_t lights_world, lights_world_none;
+	struct xgpu_dynamic_lights_world lights_world_made;
+	unsigned char *lights_cells;
 } stream;
 
 /* display.ambient_occlusion "world" found once a pixel (xgpu_stream.h's
@@ -280,7 +286,8 @@ static void stream_target_create(void *context, const struct xgpu_stream_target_
 	memset(&description, 0, sizeof(description));
 	description.type = record->layers > 1 ? XGPU_METAL_TEXTURE_2D_ARRAY : XGPU_METAL_TEXTURE_2D;
 	description.format = record->depth ? XGPU_METAL_FORMAT_D24S8 :
-		record->format == 3 /* XGPU_FORMAT_RGBA16F */ ? XGPU_METAL_FORMAT_RGBA16F : XGPU_METAL_FORMAT_BGRA8;
+		record->format == 3 /* XGPU_FORMAT_RGBA16F */ ? XGPU_METAL_FORMAT_RGBA16F :
+		record->format == 5 /* XGPU_FORMAT_RGBA16 */ ? XGPU_METAL_FORMAT_RGBA16 : XGPU_METAL_FORMAT_BGRA8;
 	description.usage = XGPU_METAL_USAGE_SAMPLED | XGPU_METAL_USAGE_TARGET;
 	description.width = (uint16_t)record->width;
 	description.height = (uint16_t)record->height;
@@ -415,6 +422,30 @@ static int read_half_floats(struct stream_target *entry, uint32_t layer, unsigne
 	return read;
 }
 
+/* display.output_depth's 16-bit channels as BGRA8's, each rounded */
+static int read_deep(struct stream_target *entry, uint32_t layer, unsigned char *bgra)
+{
+	uint32_t width = entry->description.width, height = entry->description.height;
+	uint16_t *channels = malloc((size_t)width * height * 8);
+	size_t pixel;
+	int read;
+
+	if (!channels)
+		return 0;
+	read = xgpu_metal_read_pixels(entry->texture, 0, layer, 0, 0, width, height, channels, width * 8);
+	for (pixel = 0; read && pixel < (size_t)width * height; pixel++)
+	{
+		int channel;
+
+		/* (BGRA: blue, green, red, alpha) */
+		for (channel = 0; channel < 4; channel++)
+			bgra[pixel * 4 + (channel == 3 ? 3 : 2 - channel)] =
+				(unsigned char)((channels[pixel * 4 + channel] * 255u + 32767u) / 65535u);
+	}
+	free(channels);
+	return read;
+}
+
 static int stream_read_target(void *context, const struct xgpu_stream_read_target *record)
 {
 	struct stream_target *entry = target_get(record->target);
@@ -430,6 +461,8 @@ static int stream_read_target(void *context, const struct xgpu_stream_read_targe
 	if (entry->description.format == XGPU_METAL_FORMAT_RGBA16F)
 		return read_half_floats(entry, record->layer > 0 ? (uint32_t)record->layer : 0, host_pointer(record->pixels),
 			record->tone_map != 0);
+	if (entry->description.format == XGPU_METAL_FORMAT_RGBA16)
+		return read_deep(entry, record->layer > 0 ? (uint32_t)record->layer : 0, host_pointer(record->pixels));
 	return xgpu_metal_read_pixels(entry->texture, 0, record->layer > 0 ? (uint32_t)record->layer : 0, 0, 0, width, height,
 		host_pointer(record->pixels), width * 4);
 }
@@ -496,6 +529,27 @@ static void shot_half_floats(struct stream_target *entry, const char *path)
 
 /* a target's picture as a PNG (host_render_record.h's shots: a frame's back
 buffer as it is presented); its pixels' alpha is not written */
+unsigned char *xgpu_metal_stream_read(uint32_t target, uint32_t *width, uint32_t *height)
+{
+	struct stream_target *entry = target_get(target);
+	unsigned char *pixels;
+
+	if (!entry || (entry->description.format != XGPU_METAL_FORMAT_BGRA8 &&
+		entry->description.format != XGPU_METAL_FORMAT_RGBA16F && entry->description.format != XGPU_METAL_FORMAT_RGBA16))
+		return NULL;
+	*width = entry->description.width;
+	*height = entry->description.height;
+	pixels = malloc((size_t)*width * *height * 4);
+	if (pixels && !(entry->description.format == XGPU_METAL_FORMAT_RGBA16F ? read_half_floats(entry, 0, pixels, 0) :
+		entry->description.format == XGPU_METAL_FORMAT_RGBA16 ? read_deep(entry, 0, pixels) :
+		xgpu_metal_read_pixels(entry->texture, 0, 0, 0, 0, *width, *height, pixels, *width * 4)))
+	{
+		free(pixels);
+		pixels = NULL;
+	}
+	return pixels;
+}
+
 int xgpu_metal_stream_shot(uint32_t target, const char *path)
 {
 	struct stream_target *entry = target_get(target);
@@ -503,18 +557,10 @@ int xgpu_metal_stream_shot(uint32_t target, const char *path)
 	unsigned char *pixels;
 	int written = 0;
 
-	if (!entry || (entry->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		entry->description.format != XGPU_METAL_FORMAT_RGBA16F))
-		return 0;
-	width = entry->description.width;
-	height = entry->description.height;
-	pixels = malloc((size_t)width * height * 4);
-	if (!pixels)
-		return 0;
-	if (entry->description.format == XGPU_METAL_FORMAT_RGBA16F)
+	if (entry && entry->description.format == XGPU_METAL_FORMAT_RGBA16F)
 		shot_half_floats(entry, path);
-	if (entry->description.format == XGPU_METAL_FORMAT_RGBA16F ? read_half_floats(entry, 0, pixels, 0) :
-		xgpu_metal_read_pixels(entry->texture, 0, 0, 0, 0, width, height, pixels, width * 4))
+	pixels = xgpu_metal_stream_read(target, &width, &height);
+	if (pixels)
 	{
 		CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
 		CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, pixels, (size_t)width * height * 4, NULL);
@@ -579,7 +625,8 @@ sample an attachment of the pass): copied again once the target has been
 drawn into since */
 static uint32_t feedback_copy(struct stream_target *target)
 {
-	if (target->description.format != XGPU_METAL_FORMAT_BGRA8 && target->description.format != XGPU_METAL_FORMAT_RGBA16F)
+	if (target->description.format != XGPU_METAL_FORMAT_BGRA8 && target->description.format != XGPU_METAL_FORMAT_RGBA16F &&
+		target->description.format != XGPU_METAL_FORMAT_RGBA16)
 		return target->texture;
 	if (!stream.feedback || stream.feedback_description.width != target->description.width ||
 		stream.feedback_description.height != target->description.height ||
@@ -1155,27 +1202,65 @@ static int stream_dynamic_lights_prepare(void *context)
 	return stream.lights_none[0] && stream.lights_none[1];
 }
 
-static void stream_dynamic_lights_upload(void *context, const struct xgpu_stream_dynamic_lights_upload *record)
+/* the frame's cells (the bytes from offset, size of them: the stream's
+version 22's the whole, a change only those that changed) into the cells
+kept (the stream's changes applied, with the lights the world is walked
+for: xgpu.h), which the frame's draws read */
+static void dynamic_lights_cells(const struct xgpu_stream_dynamic_lights_block *record_block, uint32_t count,
+	uint32_t offset, uint32_t size, const unsigned char *cells)
 {
-	const void *cells = host_pointer(record->cells);
 	struct xgpu_metal_source block, copied;
 
-	(void)context;
-	if (!cells || record->size != XGPU_METAL_STREAM_DYNAMIC_LIGHT_CELLS_SIZE)
+	if (!stream.lights_cells)
+		stream.lights_cells = calloc(1, XGPU_METAL_STREAM_DYNAMIC_LIGHT_CELLS_SIZE);
+	if (stream.lights_cells)
+	{
+		if (size)
+			memcpy(stream.lights_cells + offset, cells, size);
+		xgpu_dynamic_lights_world_walked(&stream.lights_world_made, (const float (*)[4])record_block, count,
+			stream.lights_cells, (uint32_t *)(stream.lights_cells + XGPU_DYNAMIC_LIGHTS_WORLD_WALK_TEXEL * 16));
+		cells = stream.lights_cells;
+	}
+	else if (offset || size != XGPU_METAL_STREAM_DYNAMIC_LIGHT_CELLS_SIZE)
+	{
+		lights_none_bind();
 		return;
-	block = xgpu_metal_stream(&record->block, sizeof(record->block));
-	copied = xgpu_metal_stream(cells, record->size);
+	}
+	block = xgpu_metal_stream(record_block, sizeof(*record_block));
+	copied = xgpu_metal_stream(cells, XGPU_METAL_STREAM_DYNAMIC_LIGHT_CELLS_SIZE);
 	if (block.kind == XGPU_METAL_SOURCE_NONE || copied.kind == XGPU_METAL_SOURCE_NONE)
 		lights_none_bind();
 	else
 		xgpu_metal_set_dynamic_lights(block, copied);
 }
 
-/* the world (xgpu.h), into a buffer of its own made the first time with room
-for the most, written in the frame's order */
+static void stream_dynamic_lights_upload(void *context, const struct xgpu_stream_dynamic_lights_upload *record)
+{
+	const void *cells = host_pointer(record->cells);
+
+	(void)context;
+	if (!cells || record->size != XGPU_METAL_STREAM_DYNAMIC_LIGHT_CELLS_SIZE)
+		return;
+	dynamic_lights_cells(&record->block, record->count, 0, record->size, cells);
+}
+
+static void stream_dynamic_lights_change(void *context, const struct xgpu_stream_dynamic_lights_change *record)
+{
+	const void *cells = record->size ? host_pointer(record->cells) : NULL;
+
+	(void)context;
+	if (record->size && !cells)
+		return;
+	dynamic_lights_cells(&record->block, record->count, record->offset, record->size, cells);
+}
+
+/* the world (xgpu.h), as the GPU has it (xgpu_dynamic_lights_world.h), into
+a buffer of its own made the first time with room for the most, written in
+the frame's order */
 static void stream_dynamic_lights_world(void *context, const struct xgpu_stream_dynamic_lights_world *record)
 {
 	const void *texels = host_pointer(record->texels);
+	struct xgpu_dynamic_lights_world *made = &stream.lights_world_made;
 
 	(void)context;
 	if (!texels || !record->count || record->count > XGPU_METAL_STREAM_DYNAMIC_LIGHT_WORLD_TEXELS)
@@ -1184,7 +1269,15 @@ static void stream_dynamic_lights_world(void *context, const struct xgpu_stream_
 		stream.lights_world = xgpu_metal_buffer_create(XGPU_METAL_STREAM_DYNAMIC_LIGHT_WORLD_TEXELS * 16);
 	if (!stream.lights_world)
 		return;
-	xgpu_metal_buffer_write(stream.lights_world, 0, texels, record->count * 16, 1);
+	if (!xgpu_dynamic_lights_world_convert(made, (const uint32_t (*)[4])texels, record->count))
+		host_logf(HOST_LOG_WARN, "metal: the dynamic lights' world (%u texels) could not be made: its lights reach "
+			"every cluster", record->count);
+	else if (made->game_nodes)
+		host_logf(HOST_LOG_INFO, "metal: the dynamic lights' world: %u nodes, %u deep (the game's %u, %u deep)",
+			made->nodes, made->depth, made->game_nodes, made->game_depth);
+	if (!made->count)
+		return;
+	xgpu_metal_buffer_write(stream.lights_world, 0, made->texels, made->count * 16, 1);
 	xgpu_metal_set_dynamic_light_world((struct xgpu_metal_source){ XGPU_METAL_SOURCE_BUFFER, 0,
 		XGPU_METAL_STREAM_DYNAMIC_LIGHT_WORLD_TEXELS * 16, stream.lights_world });
 }
@@ -1247,7 +1340,10 @@ static void halo_depth_parameters(const struct xgpu_stream_dynamic_lights_halos 
 /* the glows of the frame's bolts' lights, into the 3D view, after its
 transparent geometry: added to what is there (not its alpha), into the
 target without its depth, which the shader reads (resolved, where it is
-multisampled); the macOS app draws no VR views (one layer) */
+multisampled), in the target's format (display.hdr's half floats as the
+SDR frame's bytes: their light goes on past white, an additive draw's, as
+docs/hdr.md has it and Vulkan draws it); the macOS app draws no VR views (one
+layer) */
 static void stream_dynamic_lights_halos(void *context, const struct xgpu_stream_dynamic_lights_halos *record)
 {
 	static const float corners[6][2] =
@@ -1265,7 +1361,8 @@ static void stream_dynamic_lights_halos(void *context, const struct xgpu_stream_
 	int halo, corner, multisampled;
 
 	(void)context;
-	if (!color || !depth || color->description.format != XGPU_METAL_FORMAT_BGRA8 ||
+	if (!color || !depth || (color->description.format != XGPU_METAL_FORMAT_BGRA8 &&
+		color->description.format != XGPU_METAL_FORMAT_RGBA16F && color->description.format != XGPU_METAL_FORMAT_RGBA16) ||
 		depth->description.format != XGPU_METAL_FORMAT_D24S8 || record->count <= 0 || record->layers > 1 ||
 		color->description.depth_or_layers > 1 || !halo_shaders())
 		return;
@@ -1284,7 +1381,7 @@ static void stream_dynamic_lights_halos(void *context, const struct xgpu_stream_
 	pipeline.blend_source = pipeline.blend_destination = XGPU_BLEND_ONE;
 	pipeline.blend_operation = XGPU_BLEND_ADD;
 	pipeline.color_mask = XGPU_WRITE_RED | XGPU_WRITE_GREEN | XGPU_WRITE_BLUE;
-	pipeline.color_format = XGPU_METAL_FORMAT_BGRA8;
+	pipeline.color_format = color->description.format;
 	pipeline.samples = (uint8_t)(multisampled ? color->description.samples : 1);
 	if (stream.preparing)
 	{
@@ -1368,7 +1465,8 @@ static void stream_anti_alias(void *context, const struct xgpu_stream_anti_alias
 
 	(void)context;
 	if (!target || (target->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		target->description.format != XGPU_METAL_FORMAT_RGBA16F) || target->description.samples > 1 ||
+		target->description.format != XGPU_METAL_FORMAT_RGBA16F && target->description.format != XGPU_METAL_FORMAT_RGBA16) ||
+		target->description.samples > 1 ||
 		target->description.depth_or_layers > 1)
 		return;
 	if (stream.preparing)
@@ -1398,7 +1496,8 @@ static void stream_panini(void *context, const struct xgpu_stream_panini *record
 
 	(void)context;
 	if (!target || (target->description.format != XGPU_METAL_FORMAT_BGRA8 &&
-		target->description.format != XGPU_METAL_FORMAT_RGBA16F) || target->description.depth_or_layers > 1)
+		target->description.format != XGPU_METAL_FORMAT_RGBA16F && target->description.format != XGPU_METAL_FORMAT_RGBA16) ||
+		target->description.depth_or_layers > 1)
 		return;
 	if (stream.preparing)
 	{
@@ -1429,6 +1528,27 @@ static void stream_hdr(void *context, const struct xgpu_stream_hdr *record)
 	made as HDR is chosen, not in the middle of a frame) */
 	if (record->active)
 		(void)xgpu_metal_post_prepare_hdr(XGPU_METAL_FORMAT_D24S8, 0);
+}
+
+/* display.hdr_gamut: the encoding's gamut */
+static void stream_hdr_gamut(void *context, uint32_t value)
+{
+	(void)context;
+	host_metal_hdr_gamut((int)value);
+}
+
+/* display.hdr_peak_nits: the encoding's peak */
+static void stream_hdr_peak_nits(void *context, uint32_t value)
+{
+	(void)context;
+	host_metal_hdr_peak_nits((int)value);
+}
+
+/* display.hdr_sdr_curve: the encoding's SDR curve */
+static void stream_hdr_sdr_curve(void *context, uint32_t curve)
+{
+	(void)context;
+	host_metal_hdr_sdr_curve((int)curve);
 }
 
 /* display.gamma: the presentation curves an SDR frame by it */
@@ -1465,9 +1585,10 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	host_metal_hdr_frame(&frame);
 	hdr[0] = (float)frame.mode;
 	hdr[1] = frame.peak;
-	/* (the view's light over the UI's white) */
+	/* (the view's light over the UI's white; the display's full-frame
+	peak, 0 none) */
 	hdr[2] = frame.ui;
-	hdr[3] = 0.0f;
+	hdr[3] = frame.full_frame;
 	target->written++;
 	kind = xgpu_metal_pass_kind(XGPU_METAL_PASS_TONE_MAP);
 	xgpu_metal_post_tone_map(target->texture, target->description.width, target->description.height,
@@ -1848,6 +1969,8 @@ static void stream_frame_end(void *context)
 	xgpu_metal_frame_end(target_texture(stream.back_buffer));
 	stream.back_buffer = 0;
 	xgpu_metal_textures_frame_end();
+	/* (the GPU's time so far, for the guest: a report's) */
+	host_render_stream_gpu_time(xgpu_metal_gpu_busy_nanoseconds());
 	/* (each stage's texture looked for at least once a frame, so that the
 	cache sees it used and keeps it: the guest sends the stages only when
 	they change, and a frame of draws with the same ones sends none) */
@@ -1908,6 +2031,10 @@ static void stream_initialize(void *context, struct xgpu_stream_capabilities *ca
 	/* (display.hdr: the half floats, the draws' tags blended in their
 	shaders, reading the pixels they draw over, the tone map in place) */
 	capabilities->hdr = 1;
+	/* (display.output_depth: RGBA16Unorm, which every Apple GPU draws into,
+	blends and filters; dithered to the 8-bit layer by the presentation) */
+	capabilities->deep_sdr = 1;
+	snprintf(capabilities->device, sizeof(capabilities->device), "%s", metal.device);
 }
 
 const struct host_render_backend *xgpu_metal_stream_backend(void)
@@ -1960,6 +2087,7 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.loading_caption = host_metal_loading_caption;
 		backend.dynamic_lights_prepare = stream_dynamic_lights_prepare;
 		backend.dynamic_lights_upload = stream_dynamic_lights_upload;
+		backend.dynamic_lights_change = stream_dynamic_lights_change;
 		backend.dynamic_lights_halos = stream_dynamic_lights_halos;
 		backend.dynamic_lights_world = stream_dynamic_lights_world;
 		backend.anti_aliasing_prepare = stream_anti_aliasing_prepare;
@@ -1967,6 +2095,9 @@ const struct host_render_backend *xgpu_metal_stream_backend(void)
 		backend.hdr = stream_hdr;
 		backend.tone_map = stream_tone_map;
 		backend.gamma = stream_gamma;
+		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
+		backend.hdr_peak_nits = stream_hdr_peak_nits;
+		backend.hdr_gamut = stream_hdr_gamut;
 		backend.category = stream_category;
 		backend.panini = stream_panini;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the

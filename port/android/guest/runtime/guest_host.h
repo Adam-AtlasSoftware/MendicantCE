@@ -25,6 +25,14 @@ long long host_syscall(long long number, long long a, long long b, long long c,
 
 /* Android log priorities (android/log.h) */
 void host_log(int priority, const char *text);
+/* the host's last lines, whole ones, into buffer (ended by a 0); returns
+their length (Save Report's host.log: port/linux/src/report.c) */
+unsigned int host_log_recent(char *buffer, unsigned int size);
+/* the file the host writes a crash to, with the log kept in memory after it
+(report.c's ring of log_size bytes, *log_written written in all):
+port/android/host/host_common.c */
+void host_crash_record(const char *path, const char *log, unsigned int log_size,
+	const unsigned long long *log_written);
 void host_abort(const char *reason) __attribute__((noreturn));
 void host_exit(int code) __attribute__((noreturn));
 /* the host's errno on this thread, after a call to a host function */
@@ -68,12 +76,23 @@ unsigned int host_sdl_create_window(const char *title, int width, int height, lo
 void host_sdl_window_size_in_pixels(unsigned int window, int *width, int *height);
 int host_sdl_set_relative_mouse(unsigned int window, int enabled);
 int host_sdl_poll_event(void *event);
+/* the keys SDL holds now (keys[scancode]: bit 0; bit 1, the system has
+had it up a while though SDL holds it), and its mouse buttons (low 16 bits,
+SDL_BUTTON_MASK; high 16, the system has had them up a while): host_sdl.c */
+unsigned int host_sdl_input_held(unsigned char *keys, int count);
 int host_sdl_set_clipboard_text(const char *text);
 void host_sdl_get_clipboard_text(char *buffer, unsigned int size);
 int host_sdl_open_url(const char *url);
+/* SDL_GetPreferredLocales: the system's languages, the most wanted first,
+as "fr_FR de en_US" (a language, then "_" and its place where it has one) */
+void host_sdl_preferred_locales(char *buffer, unsigned int size);
 /* the keyboard's keys by name (the controls' bindings, xinput_sdl.c) */
 void host_sdl_scancode_name(int scancode, char *buffer, unsigned int size);
 int host_sdl_scancode_from_name(const char *name);
+/* SDL_GetKeyFromScancode: the key the keyboard's layout gives a scancode
+with the modifiers (Shift, Caps Lock, AltGr), or a key event's (key_event:
+none applied) */
+int host_sdl_key_from_scancode(int scancode, int modifiers, int key_event);
 int host_sdl_show_toast(const char *message, int duration, int gravity, int x, int y);
 /* SDL_GetPowerInfo: the SDL_PowerState, and the seconds and percent of
 battery left (-1 unknown) */
@@ -97,6 +116,9 @@ whether the gamepad is Steam Input's virtual one (gyro aiming) */
 int host_sdl_gamepad_has_sensor(unsigned int gamepad, int type);
 int host_sdl_set_gamepad_sensor_enabled(unsigned int gamepad, int type, int enabled);
 int host_sdl_gamepad_steam(unsigned int gamepad);
+/* the gamepad's SDL GUID as its 32 hex digits (a controller layout's key,
+port/linux/src/controller_layouts.c); empty for none */
+void host_sdl_gamepad_guid(unsigned int gamepad, char *buffer, unsigned int size);
 /* callback: void (*)(void *userdata, unsigned int stream, int additional, int total),
 called on the audio thread */
 unsigned int host_sdl_open_audio_stream(unsigned int device, const void *spec, unsigned int callback, unsigned int userdata);
@@ -120,6 +142,15 @@ headphones, 0 speakers, -1 not known; kept current by a thread of the
 host's, so asking costs nothing */
 int host_audio_headphones(void);
 
+/* ---------- the renderer's caches (port/linux/vulkan/host_vulkan.c,
+port/macos/host_metal.m)
+
+The host's caches that Settings' CLEAR CACHES clears (game_caches.c): the
+GPU's pipelines and the ASTC textures. Their kilobytes; what 1 asks for them
+to be cleared at the next start, before the renderer reads them, 2 no
+longer */
+unsigned int host_caches(int what);
+
 /* ---------- the renderer's command stream (port/linux/src/xgpu_stream.h,
 port/android/host/host_render_stream.h): the ring at the guest address
 ring opened (0, or -1: the host has no renderer for it); its records to
@@ -131,6 +162,11 @@ void host_render_stream_wait(unsigned int position);
 void host_render_stream_close(void);
 
 /* ---------- Android (android_imports.list) */
+
+/* MCC tag address space (host_mcc_memory.c), independent of the guest pools.
+Reserve returns the address or negative errno; release returns zero or negative errno. */
+long long host_mcc_memory_reserve(unsigned int address, unsigned int size);
+int host_mcc_memory_release(unsigned int address, unsigned int size);
 
 /* the storage directories the port uses, copied into buffer */
 void host_android_path(int which, char *buffer, unsigned int size);
@@ -165,6 +201,9 @@ int host_touch_picture_top(void);
 /* the game control on each of the 16 controller buttons (touch_game.c),
 for the overlay's labels */
 void host_touch_bindings(const int *controls);
+/* the overlay's devices: 1, a touchscreen; 2, a game controller; 0 until it
+has looked */
+int host_touch_devices(void);
 
 /* ---------- HTTPS (host_https.c): the server browser's master servers, a
 dedicated server's publishing to them */
