@@ -2130,6 +2130,11 @@ enum
 	(xgpu_vulkan_rt.c) to the path at reference_file and held; spare[1] the
 	request's generation (a new one starts the sum again) */
 	XGPU_RT_FLAG_REFERENCE = 8,
+	/* port: display.lighting "pathtraced" (PRISM v4 M3), the mode off: the
+	moving objects' draws of the G-buffer pass captured and their
+	acceleration structures built (xgpu_vulkan_rt.c's
+	xgpu_vulkan_rt_objects_end) for the path tracer, nothing else traced */
+	XGPU_RT_FLAG_OBJECTS = 16,
 };
 #define XGPU_RT_REFERENCE_BOUNCES 32
 /* the reference file's path: a NUL-terminated UTF-8 string of at most this
@@ -2309,6 +2314,9 @@ enum
 	XGPU_SCENE_INSTANCE_SHIELD = 4,
 	XGPU_SCENE_INSTANCE_CAMOUFLAGE = 8,
 	XGPU_SCENE_INSTANCE_CASTS_SHADOW = 16,
+	/* port (PRISM v4 M3): the object is in the bake's static scenery (and so
+	in the scene the bake and the path tracer trace): display.lighting
+	"pathtraced" leaves it out of its moving objects */
 	XGPU_SCENE_INSTANCE_IN_TLAS = 32,
 	/* first seen this frame: no last frame's matrices, no motion */
 	XGPU_SCENE_INSTANCE_NO_HISTORY = 64,

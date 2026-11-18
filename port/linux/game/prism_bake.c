@@ -44,6 +44,7 @@ the settings. Nothing crosses the network.
 #include "models/model_animation_definitions.h"
 #include "models/model_definitions.h"
 #include "objects/object_definitions.h"
+#include "objects/objects.h"
 #include "physics/collision_model_definitions.h"
 #include "rasterizer/rasterizer_model_types.h"
 #include "shaders/shader_definitions.h"
@@ -1438,4 +1439,84 @@ void prism_bake_map_unloaded(
 	void)
 {
 	reach_reset();
+}
+
+/* port: whether an object is one the bake's static scenery holds (a
+placement of scenery, a control or a light fixture that scenery_static
+takes, the object at its placement and of its definition), for the path
+tracer's moving objects (prism_deferred.c's SCENE_INSTANCE flags): each
+object's answer kept by its datum index until the scenario changes */
+#define OBJECT_STATIC_KEPT 2048
+boolean prism_bake_object_static(
+	long object_index)
+{
+	static long kept_index[OBJECT_STATIC_KEPT];
+	static char kept_answer[OBJECT_STATIC_KEPT];
+	static void const *kept_scenario;
+	struct scenario *scenario = global_scenario_get();
+	struct object_datum *object = object_try_and_get_and_verify_type(object_index, _object_mask_all);
+	struct tag_block const *placements, *palette;
+	long size, index, slot;
+	boolean found = FALSE;
+
+	if (!object || !scenario)
+	{
+		return FALSE;
+	}
+	if (kept_scenario != scenario)
+	{
+		memset(kept_index, 0xff, sizeof(kept_index));
+		kept_scenario = scenario;
+	}
+	slot = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) % OBJECT_STATIC_KEPT;
+	if (kept_index[slot] == object_index)
+	{
+		return kept_answer[slot] != 0;
+	}
+	switch (object->object.type)
+	{
+	case _object_type_scenery:
+		placements = &scenario->scenery;
+		palette = &scenario->scenery_palette;
+		size = 0x48;
+		break;
+	case _object_type_control:
+		placements = &scenario->controls;
+		palette = &scenario->control_palette;
+		size = 0x40;
+		break;
+	case _object_type_light_fixture:
+		placements = &scenario->light_fixtures;
+		palette = &scenario->light_fixtures_palette;
+		size = 0x58;
+		break;
+	default:
+		placements = palette = NULL;
+		size = 0;
+		break;
+	}
+	for (index = 0; placements && placements->address && palette->address && index < placements->count && !found;
+		index++)
+	{
+		struct scenario_object_datum const *placement = (struct scenario_object_datum const *)
+			((byte const *)placements->address + index * size);
+		struct scenario_object_palette_entry const *entry;
+		real dx = placement->position.x - object->object.position.x;
+		real dy = placement->position.y - object->object.position.y;
+		real dz = placement->position.z - object->object.position.z;
+
+		if (placement->palette_entry_index < 0 || placement->palette_entry_index >= palette->count ||
+			dx * dx + dy * dy + dz * dz > 1.0e-4f)
+		{
+			continue;
+		}
+		entry = TAG_BLOCK_GET_ELEMENT(palette, placement->palette_entry_index, struct scenario_object_palette_entry);
+		if (entry->reference.index == object->definition_index && scenery_static(palette, placement) != NONE)
+		{
+			found = TRUE;
+		}
+	}
+	kept_index[slot] = object_index;
+	kept_answer[slot] = (char)found;
+	return found;
 }

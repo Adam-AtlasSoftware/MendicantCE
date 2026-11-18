@@ -152,6 +152,7 @@ enum
 	PRISM_RT_FLAG_STOCK_MODELS = 2,
 	PRISM_RT_FLAG_LIGHT = 4,
 	PRISM_RT_FLAG_REFERENCE = 8,
+	PRISM_RT_FLAG_OBJECTS = 16,
 	/* debug.pt_reference: its frames at most, its path's bytes
 	(XGPU_RT_REFERENCE_PATH) */
 	PRISM_RT_REFERENCE_FRAMES_MOST = 1 << 20,
@@ -1772,7 +1773,10 @@ void prism_rt_frame_begin(void)
 	frame.fraction = render_interpolation_fraction();
 	frame.generation = (unsigned int)prism_rt.generation;
 	frame.flags = (prism_rt.cache ? 0 : PRISM_RT_FLAG_NO_CACHE) | (prism_rt.objects == 2 ? PRISM_RT_FLAG_STOCK_MODELS : 0) |
-		(light_keyed() ? PRISM_RT_FLAG_LIGHT : 0);
+		(light_keyed() ? PRISM_RT_FLAG_LIGHT : 0) |
+		/* (port: display.lighting "pathtraced": the moving objects traced,
+		the G-buffer pass's draws of them) */
+		(raster_scene() && prism_deferred_pathtraced() ? PRISM_RT_FLAG_OBJECTS : 0);
 	reference_frame(&frame);
 	frame.settings[0] = PRISM_RT_SUN_STRENGTH;
 	frame.settings[1] = PRISM_RT_MODEL_STRENGTH;

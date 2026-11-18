@@ -505,6 +505,9 @@ static struct
 	uint32_t pass_number;
 	float motion[XGPU_SPIRV_GBUFFER_UNIFORMS - 2][4];
 	int motion_history;
+	/* port: display.lighting "pathtraced": this pass's object draws
+	captured for the path tracer (xgpu_vulkan_rt_objects_only) */
+	int objects;
 } gbuffer;
 
 static double preparation_start(void)
@@ -3941,8 +3944,11 @@ world's light, a model's) captured as it is drawn: its vertices as the CPU
 has them (the stock layout's position, float x y z at the first
 attribute's place; its nodes and weight at 28 and 30 past it where the
 layout has them) and the constants it is drawn with; an alpha-tested one
-passed over */
-static void prepass_rt_capture(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin)
+passed over. port: display.lighting "pathtraced" (PRISM v4 M3): the
+G-buffer pass's object draws too (object: its world-light test not made, in
+window, the G-buffer passes' count, not the pre-passes') */
+static void prepass_rt_capture(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin,
+	int object, uint32_t window)
 {
 	uint8_t occlusion = twin->pixel_program.ambient_occlusion;
 	int light = XGPU_AMBIENT_OCCLUSION_LIGHT_OF(occlusion);
@@ -3956,7 +3962,7 @@ static void prepass_rt_capture(const struct draw_input *input, const struct xgpu
 	/* (the occluders too: an object lighting itself, the Elites' armour,
 	casts its shadow as any other; the first-person weapon among them is
 	left out by its place, xgpu_vulkan_rt_window_end) */
-	if (!xgpu_vulkan_rt_active() || (occlusion != XGPU_STREAM_WORLD_AO_OCCLUDER &&
+	if (!xgpu_vulkan_rt_active() || (!object && occlusion != XGPU_STREAM_WORLD_AO_OCCLUDER &&
 		(!(occlusion & XGPU_AMBIENT_OCCLUSION_WORLD) ||
 		(light != XGPU_AMBIENT_OCCLUSION_LIGHT_MODEL && light != XGPU_AMBIENT_OCCLUSION_LIGHT_VERTEX))))
 		return;
@@ -3999,7 +4005,7 @@ then, drawn opaque) */
 		return;
 	}
 	memset(&draw, 0, sizeof(draw));
-	draw.occluder = occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
+	draw.occluder = !object && occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
 	draw.serial = xgpu_vulkan_serial();
 	/* (its base map's mean colour: the traced hits' albedo; a cutout's
 	share of texels drawn) */
@@ -4012,7 +4018,7 @@ then, drawn opaque) */
 	if (!xgpu_vulkan_rt_stock_models())
 	{
 		struct xgpu_vulkan_meshes_rt_piece pieces[XGPU_VULKAN_MESHES_RT_PIECES];
-		int count = xgpu_vulkan_meshes_rt_pieces(prepass.window, pieces, XGPU_VULKAN_MESHES_RT_PIECES), piece;
+		int count = xgpu_vulkan_meshes_rt_pieces(window, pieces, XGPU_VULKAN_MESHES_RT_PIECES), piece;
 		uint32_t triangles = 0;
 		float origin[3];
 
@@ -4177,7 +4183,7 @@ static void prepass_draw(const struct draw_input *input)
 	prepass.drawing = NULL;
 	/* (display.prism_rt: an object's, captured as drawn) */
 	if (!stream.preparing)
-		prepass_rt_capture(input, &twin);
+		prepass_rt_capture(input, &twin, 0, prepass.window);
 	stream.definition = definition;
 	stream.pipeline = pipeline;
 	stream.pipeline_id = id;
@@ -4249,6 +4255,17 @@ static void gbuffer_draw(const struct draw_input *input)
 	(void)draw_pipeline(input, 0);
 	gbuffer.drawing = NULL;
 	gbuffer.drawn = 1;
+	/* (port: display.lighting "pathtraced": an object's draw captured for
+	the path tracer's objects, as drawn: every one but the first-person
+	view's, which would stand in front of the eye in the world's rays) */
+	if (gbuffer.instance && !(gbuffer.flags & XGPU_GBUFFER_FLAG_FIRST_PERSON) && gbuffer.objects &&
+		!(gbuffer.instances && gbuffer.instance <= GBUFFER_INSTANCES &&
+		gbuffer.instances[gbuffer.instance].pass == gbuffer.pass_number &&
+		(gbuffer.instances[gbuffer.instance].flags & XGPU_SCENE_INSTANCE_IN_TLAS)))
+	{
+		stream.definition = definition;
+		prepass_rt_capture(input, definition, 1, gbuffer.pass_number | 0x80000000u);
+	}
 	stream.definition = definition;
 	stream.pipeline = pipeline;
 	stream.pipeline_id = id;
@@ -4908,6 +4925,17 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		{
 			if (gbuffer.ready)
 				xgpu_vulkan_gpu_time_mark(1);
+			/* (port: "pathtraced": the objects' structures built, at the
+			window's eye) */
+			if (gbuffer.ready && gbuffer.objects)
+			{
+				float eye[3] = { 0.0f, 0.0f, 0.0f };
+
+				if (gbuffer.view_known)
+					memcpy(eye, gbuffer.view.now[0], sizeof(eye));
+				(void)xgpu_vulkan_rt_objects_end(eye);
+			}
+			gbuffer.objects = 0;
 			gbuffer.active = gbuffer.ready = 0;
 			stream.uniforms_dirty = 1;
 			xgpu_vulkan_set_second_target(NULL);
@@ -4933,6 +4961,10 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.color = stream.color;
 		gbuffer.ready = 1;
 		gbuffer.drawn = 0;
+		/* (port: "pathtraced": the objects' capture opened) */
+		gbuffer.objects = xgpu_vulkan_rt_objects_only();
+		if (gbuffer.objects)
+			xgpu_vulkan_rt_window_begin();
 		gbuffer.material = gbuffer.instance = gbuffer.flags = 0;
 		memset(gbuffer.uniform_key, 0, sizeof(gbuffer.uniform_key));
 		stream.uniforms_dirty = 1;
@@ -5028,6 +5060,7 @@ static void stream_frame_end(void *context)
 	deferred.phase = 0;
 	deferred.hold = 0;
 	gbuffer.active = gbuffer.ready = 0;
+	gbuffer.objects = 0;
 	gbuffer.drawn = 0;
 	world_make_some();
 	prepass.twins_made = 0;

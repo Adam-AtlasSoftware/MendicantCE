@@ -129,6 +129,9 @@ enum
 /* GBUFFER_DRAW's instance of the first-person weapon (xgpu_stream.h's
 XGPU_GBUFFER_INSTANCE_FIRST_PERSON) */
 #define INSTANCE_FIRST_PERSON 0xffffUL
+/* SCENE_INSTANCE's flags: xgpu_stream.h's XGPU_SCENE_INSTANCE_IN_TLAS (port:
+the object in the bake's static scenery, which the path tracer has) */
+#define INSTANCE_IN_TLAS 32UL
 
 /* the shader tags' fields the material reads, by their offsets in the tag
 (struct shader: radiosity power at 0x04, its colour at 0x08, its tint at
@@ -516,7 +519,11 @@ static void instance_send(
 	history = kept && prism_deferred.instance_passes[absolute] + 1 == prism_deferred.pass_number &&
 		prism_deferred.instance_handles[absolute] == object_index &&
 		prism_deferred.instance_node_counts[absolute] == node_count;
-	xgpu_backend_scene_instance(absolute + 1, 0, 0, now, history ? kept : NULL, (unsigned long)node_count);
+	/* (port: an object the bake's static scenery holds marked, which the
+	path tracer's moving objects leave out: xgpu_stream.h's
+	XGPU_SCENE_INSTANCE_IN_TLAS) */
+	xgpu_backend_scene_instance(absolute + 1, prism_deferred_pathtraced() && prism_bake_object_static(object_index) ?
+		INSTANCE_IN_TLAS : 0, 0, now, history ? kept : NULL, (unsigned long)node_count);
 	if (!kept)
 	{
 		kept = malloc(INSTANCE_NODES * 12 * sizeof(float));

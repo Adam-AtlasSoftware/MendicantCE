@@ -174,7 +174,7 @@ struct pt_job
 {
 	VkDeviceAddress pages, charts, vpages, table, tiles, indirect, sun, masks;
 	VkDeviceAddress bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
-	VkDeviceAddress sums, stats, meter, counters, tree, lamps_out, unused[2];
+	VkDeviceAddress sums, stats, meter, counters, tree, lamps_out, objects, object_table;
 	float camera[4][4];
 	float last_camera[4][4];
 	int32_t corners[4];
@@ -1208,6 +1208,18 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		{
 			job->tree = pt.tree.address;
 			job->extra[3] = (float)pt.tree_nodes;
+		}
+	}
+	/* (the moving objects: the G-buffer pass's object draws, their
+	structures built at its end, xgpu_vulkan_rt.c; HALO_PT_OBJECTS=0 none) */
+	{
+		uint64_t structure, table;
+		uint32_t count;
+
+		if (xgpu_vulkan_rt_objects(&structure, &table, &count))
+		{
+			job->objects = structure;
+			job->object_table = table;
 		}
 	}
 	memcpy(job->camera, view->now, sizeof(job->camera));

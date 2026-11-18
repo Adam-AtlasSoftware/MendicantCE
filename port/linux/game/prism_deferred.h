@@ -28,6 +28,11 @@ boolean prism_deferred_raster(void);
 /* display.lighting "pathtraced" (PRISM Path Traced, M3: every CE light off,
 the path tracer's light, xgpu_vulkan_pt.c) */
 boolean prism_deferred_pathtraced(void);
+/* port: whether an object is one the bake's static scenery holds
+(prism_bake.c's scenery_static: a placement of scenery, a control or a light
+fixture, where it was placed), which the path tracer's moving objects leave
+out (xgpu_stream.h's XGPU_SCENE_INSTANCE_IN_TLAS) */
+boolean prism_bake_object_static(long object_index);
 /* the window's draws from now on to a phase's target (render_window) */
 void prism_deferred_phase(short phase);
 /* the G-buffer pass (render_window's walk 1, render_gbuffer_pass): begun

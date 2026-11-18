@@ -48,7 +48,7 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
 {
     uvec2 pages, charts, vpages, table, tiles, indirect, sun, masks;
     uvec2 bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
-    uvec2 sums, stats, meter, counters, tree, lamps_out, unused2[2];
+    uvec2 sums, stats, meter, counters, tree, lamps_out, objects, object_table;
     vec4 camera[4];
     vec4 last_camera[4];
     ivec4 corners;
@@ -580,6 +580,73 @@ vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
     if (axis.w < 1.5)
         cone = smoothstep(axis.w, mix(axis.w, 1.0, 0.2), dot(-l, axis.xyz));
     return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * (1.0 - d2 / (r * r)));
+}
+
+/* ---------- the moving objects (port: the G-buffer pass's object draws of
+this frame, every one but the first-person view's, skinned as drawn and
+built by xgpu_vulkan_rt.c's entries: job.objects their top level, instances
+mask 4, a cutout's 8 (taken by its share of texels drawn); job.object_table
+a row of four words an object, its custom index - 1: its triangle soup's
+address (3 vec3 a triangle), its albedo (RGBA8, its base map's mean), its
+coverage). Every visibility test of BAKE_COMMON's the path tracer makes
+(blocked, sky_blocked: tools/vulkan_pt_shaders.py wraps them) takes them;
+the sun's ray, a bounce's hit and the reference's paths below too. */
+const uint OBJECT_HIT = 0xfffffffeu;
+float sun_ray(vec3 o, out float blocker);
+const float OBJECT_NEAR = 0.01;
+float object_coverage(uint custom)
+{
+    return custom >= 1u ? uintBitsToFloat(Uints(job.object_table).v[(custom - 1u) * 4u + 3u]) : 1.0;
+}
+bool objects_blocked(vec3 o, vec3 d, float t_max)
+{
+    if (job.objects == uvec2(0u) || t_max <= OBJECT_NEAR)
+        return false;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), gl_RayFlagsTerminateOnFirstHitEXT, 12u, o,
+        OBJECT_NEAR, d, t_max);
+    while (rayQueryProceedEXT(q))
+    {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+            rnd() < object_coverage(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)))
+            rayQueryConfirmIntersectionEXT(q);
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionNoneEXT;
+}
+/* the nearest object along the ray within t_max: its distance (negative
+none), its face's normal toward the ray and its albedo */
+float objects_hit(vec3 o, vec3 d, float t_max, out vec3 nh, out vec3 albedo)
+{
+    nh = vec3(0.0);
+    albedo = vec3(0.0);
+    if (job.objects == uvec2(0u) || t_max <= OBJECT_NEAR)
+        return -1.0;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), 0u, 12u, o, OBJECT_NEAR, d, t_max);
+    while (rayQueryProceedEXT(q))
+    {
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
+            rnd() < object_coverage(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)))
+            rayQueryConfirmIntersectionEXT(q);
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT)
+        return -1.0;
+    uint row = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true)) - 1u;
+    uint primitive = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
+    Uints table = Uints(job.object_table);
+    Floats soup = Floats(uvec2(table.v[row * 4u], table.v[row * 4u + 1u]));
+    uint at = primitive * 9u;
+    vec3 a0 = vec3(soup.v[at], soup.v[at + 1u], soup.v[at + 2u]);
+    vec3 a1 = vec3(soup.v[at + 3u], soup.v[at + 4u], soup.v[at + 5u]);
+    vec3 a2 = vec3(soup.v[at + 6u], soup.v[at + 7u], soup.v[at + 8u]);
+    vec3 ne = cross(a1 - a0, a2 - a0);
+    nh = dot(ne, ne) > 1.0e-20 ? normalize(ne) : -d;
+    if (dot(nh, d) > 0.0)
+        nh = -nh;
+    uint packed = table.v[row * 4u + 2u];
+    /* (no mean known: 0.45, as the old tracer's grey) */
+    albedo = (packed >> 24) != 0u ? unpackUnorm4x8(packed).rgb : vec3(0.45);
+    return rayQueryGetIntersectionTEXT(q, true);
 }
 
 /* the units rig's floor of light at a pixel (prism-v4-m2's rule, the bake's
@@ -1199,6 +1266,23 @@ vec3 hit_light_n(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance
     vec2 b;
     hit_distance = -1.0;
     float th = hit(o, d, t_max, nh, t, b);
+    /* (a moving object nearer: lit by the irradiance volume and the sun's
+    ray from its point) */
+    {
+        vec3 no, ao;
+        float ho = objects_hit(o, d, th < 0.0 ? t_max : th, no, ao);
+        if (ho >= 0.0)
+        {
+            hit_distance = ho;
+            nh = no;
+            vec3 h = o + d * ho, p = h + no * 0.05;
+            vec4 v;
+            vec3 total = volume_at(p, no, v) ? max(v.rgb - floor_of_volume(p), vec3(0.0)) : vec3(0.0);
+            float c = dot(no, s.sun.xyz), blocker;
+            vec3 sunlight = s.sun.w > 0.0 && c > 0.0 ? s.rig[0].rgb * c * sun_ray(h + no * 0.02, blocker) : vec3(0.0);
+            return ao * (total + sunlight);
+        }
+    }
     if (th < 0.0)
         return sky_along(d, domes);
     hit_distance = th;
@@ -1396,9 +1480,8 @@ sky_blocked tests it (prism-v4-m2 61370f51f: Tool's rule, as far as the sun's
 test distance, sun_reach, and a one-sided face met from its back letting it
 through, up to 4 of them): 1 seen, 0 blocked, and where blocked the distance
 to the blocker (the penumbra's width for the filter) */
-float sun_ray(vec3 o, out float blocker)
+float sun_ray_structure(vec3 o, vec3 d, out float blocker)
 {
-    vec3 d = cone_dir(s.sun.xyz, cos(0.5 * s.rig[0].w));
     float reach = sun_reach(), travelled = 0.0;
     blocker = 0.0;
     for (int k = 0; k < 4; k++)
@@ -1422,6 +1505,20 @@ float sun_ray(vec3 o, out float blocker)
     }
     blocker = travelled;
     return 0.0;
+}
+/* ... and the moving objects' (the nearer blocker's distance kept) */
+float sun_ray(vec3 o, out float blocker)
+{
+    vec3 d = cone_dir(s.sun.xyz, cos(0.5 * s.rig[0].w));
+    float seen = sun_ray_structure(o, d, blocker);
+    vec3 no, ao;
+    float ho = objects_hit(o, d, seen > 0.5 ? sun_reach() : blocker, no, ao);
+    if (ho >= 0.0)
+    {
+        blocker = ho;
+        return 0.0;
+    }
+    return seen;
 }
 
 /* the lamps' light at a path's hit (the bake's lamps_ris for a texel's
@@ -1544,25 +1641,40 @@ vec3 lamp_met(uint t, vec3 d)
     return vec3(material_value(m, 4u), material_value(m, 5u), material_value(m, 6u)) * s.rig[11].x;
 }
 
+/* the nearest hit, the structure's or a moving object's (t OBJECT_HIT, its
+albedo in object_albedo) */
+float scene_hit(vec3 o, vec3 d, float t_max, out vec3 nh, out uint t, out vec2 b, out vec3 object_albedo)
+{
+    float th = hit(o, d, t_max, nh, t, b);
+    vec3 no;
+    float ho = objects_hit(o, d, th < 0.0 ? t_max : th, no, object_albedo);
+    if (ho < 0.0)
+        return th;
+    nh = no;
+    t = OBJECT_HIT;
+    return ho;
+}
+
 vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first, bool lamps_first)
 {
-    vec3 nh;
+    vec3 nh, object_albedo;
     uint t;
     vec2 b;
-    float th = hit(o, d, 300.0, nh, t, b);
+    float th = scene_hit(o, d, 300.0, nh, t, b, object_albedo);
     if (th < 0.0)
         return sky_along(d, domes_first);
     if (dot(nh, nh) <= 0.0)
         return vec3(0.0);
     vec3 h = o + d * th;
-    vec3 throughput = vec3(1.0), light = lamps_first ? lamp_met(t, d) : vec3(0.0);
+    vec3 throughput = vec3(1.0), light = lamps_first && t != OBJECT_HIT ? lamp_met(t, d) : vec3(0.0);
     for (int bounce = 0; bounce < bounces && dot(nh, nh) > 0.0; bounce++)
     {
-        light += throughput * glow_of(t);
+        if (t != OBJECT_HIT)
+            light += throughput * glow_of(t);
         vec3 oh = h + nh * 0.03;
         vec3 lh;
         vec3 ls = sun_at(oh, nh) + hit_lamps(h, nh, oh, 4) + fixtures_ris(h, nh, oh, lh) + domes_mis_at(oh, nh);
-        throughput *= albedo_of(t);
+        throughput *= t == OBJECT_HIT ? object_albedo : albedo_of(t);
         light += throughput * ls;
         if (bounce == bounces - 1)
             break;
@@ -1575,7 +1687,7 @@ vec3 reference_path(vec3 o, vec3 d, int bounces, bool domes_first, bool lamps_fi
         }
         vec3 wi = cosine_dir(nh);
         vec3 n_from = nh;
-        float t2 = hit(oh, wi, 300.0, nh, t, b);
+        float t2 = scene_hit(oh, wi, 300.0, nh, t, b, object_albedo);
         if (t2 < 0.0)
         {
             light += throughput * (sky_along(wi, false) + domes_missed(wi, n_from));
@@ -1699,7 +1811,19 @@ void main()
             traced = 1.0;
         }
         else
+        {
             v_sun = bake_sun;
+            /* (the moving objects' shadow over the mask, the sun's centre) */
+            seed_for(pixel, frame, 1u);
+            vec3 no, ao;
+            float ho = v_sun > 0.0 ? objects_hit(o, s.sun.xyz, sun_reach(), no, ao) : -1.0;
+            if (ho >= 0.0)
+            {
+                v_sun = 0.0;
+                blocker = ho;
+                traced = 1.0;
+            }
+        }
     }
     imageStore(sun_raw, pixel, vec4(direct_on ? v_sun : 0.0, blocker, traced, 0.0));
 

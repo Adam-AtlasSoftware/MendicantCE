@@ -48,7 +48,31 @@ def bake_common() -> str:
     for name in ("bake_common", "exposure_common"):
         if name not in found:
             raise SystemExit(f"{BAKE}: no {name.upper()}")
-    return found["bake_common"] + found["exposure_common"]
+    return objects_traced(found["bake_common"]) + found["exposure_common"]
+
+
+# the moving objects (PRISM v4 M3, xgpu_vulkan_rt.c's objects for "pathtraced"): BAKE_COMMON's visibility tests
+# renamed to the structure's alone and wrapped, so that every test the path tracer makes through them (its lamps',
+# fixtures', sun's and domes', the bake's estimators it shares) sees the frame's objects too (objects_blocked,
+# xgpu_vulkan_pt.glsl); the baker's own text is not changed
+VISIBILITY = (
+    ("bool blocked(vec3 o, vec3 d, float t_max)\n{", "blocked", "t_max"),
+    ("bool sky_blocked(vec3 o, vec3 d, float reach)\n{", "sky_blocked", "reach"),
+)
+
+
+def objects_traced(common: str) -> str:
+    head = "bool objects_blocked(vec3 o, vec3 d, float t_max);\n"
+    for signature, name, last in VISIBILITY:
+        if common.count(signature) != 1:
+            raise SystemExit(f"{BAKE}: BAKE_COMMON's {name} is not where it was")
+        renamed = signature.replace(f"bool {name}(", f"bool {name}_structure(")
+        wrapper = (f"{renamed.split(chr(10))[0]};\n"
+                   f"bool {name}(vec3 o, vec3 d, float {last})\n"
+                   f"{{\n    return {name}_structure(o, d, {last}) || objects_blocked(o, d, {last});\n}}\n")
+        common = common.replace(signature, head + wrapper + renamed)
+        head = ""
+    return common
 
 
 def sources() -> dict[str, str]:

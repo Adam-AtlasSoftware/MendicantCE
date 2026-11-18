@@ -391,6 +391,13 @@ static struct
 	/* the frame's settings (RT_FRAME) and whether one came this frame */
 	struct xgpu_stream_rt_frame frame;
 	int frame_active, frame_received;
+	/* port: display.lighting "pathtraced"'s objects alone this frame (the
+	mode off), and what was built for it: the top level's address, the
+	table's, the objects' count, the frame they are of */
+	int objects_only;
+	VkDeviceAddress scene_address, objects_structure, objects_table;
+	uint32_t objects_count;
+	uint64_t objects_frame;
 	/* the structure: the set being received (its triangles, their
 	attributes, the materials, the alpha maps) and the one traced: its
 	opaque triangles' structure and its alpha-tested ones' (traced with
@@ -1033,6 +1040,11 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 	rt.frame = *record;
 	rt.frame_received = 1;
 	rt.frame_active = record->mode != XGPU_RT_OFF;
+	/* (port: "pathtraced"'s objects, HALO_PT_OBJECTS=0 none) */
+	rt.objects_only = !rt.frame_active && (record->flags & XGPU_RT_FLAG_OBJECTS) &&
+		!(getenv("HALO_PT_OBJECTS") && !strcmp(getenv("HALO_PT_OBJECTS"), "0"));
+	if (rt.objects_only)
+		rt.frame_active = 1;
 	rt.slot_ready = 0;
 	if (rt.frame_active && slot_take())
 		rt.slot_ready = 1;
@@ -2474,6 +2486,7 @@ static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct r
 	scratch = slot_scratch(slot, sizes.buildScratchSize);
 	if (!info.dstAccelerationStructure || !scratch)
 		return VK_NULL_HANDLE;
+	rt.scene_address = address;
 	info.scratchData.deviceAddress = scratch;
 	memset(&range, 0, sizeof(range));
 	range.primitiveCount = count;
@@ -3384,6 +3397,72 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	return 1;
 }
 
+/* ---------- port: display.lighting "pathtraced"'s objects (PRISM v4 M3)
+
+The G-buffer pass's object draws captured as world AO's pre-pass's are (the
+stream's gbuffer_draw), skinned and built by the same entries, kept from
+frame to frame, and one top level built after the pass for the path tracer
+(xgpu_vulkan_pt.c), which traces its object instances. Nothing else of this
+file's runs: no trace, no resolve. */
+
+int xgpu_vulkan_rt_objects_only(void)
+{
+	return xgpu_vulkan_rt_active() && rt.objects_only;
+}
+
+int xgpu_vulkan_rt_objects_end(const float eye[3])
+{
+	struct rt_slot *slot = &rt.slots[rt.slot];
+	VkCommandBuffer commands;
+	VkDeviceAddress table;
+	uint32_t first, count;
+
+	if (!rt.capture.open || !xgpu_vulkan_rt_objects_only())
+	{
+		rt.capture.open = 0;
+		return 0;
+	}
+	rt.capture.open = 0;
+	commands = xgpu_vulkan_compute_commands();
+	if (!commands)
+		return 0;
+	first = slot->instances_used;
+	count = objects_record(commands, slot, eye, &table);
+	rt.eye[0] = eye[0];
+	rt.eye[1] = eye[1];
+	rt.eye[2] = eye[2];
+	rt.eye_known = 1;
+	if (!count || !scene_build(commands, slot, first, count))
+		return 0;
+	barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_SHADER_READ_BIT);
+	slot->serial = xgpu_vulkan_serial();
+	rt.objects_structure = rt.scene_address;
+	rt.objects_table = table;
+	rt.objects_count = count;
+	rt.objects_frame = rt.object_frame;
+	if (!rt.logged_pt)
+	{
+		rt.logged_pt = 1;
+		host_logf(HOST_LOG_INFO, "prism pt: objects traced: first frame %u instances, %u triangles", count,
+			rt.capture.triangle_count);
+	}
+	return 1;
+}
+
+int xgpu_vulkan_rt_objects(uint64_t *structure, uint64_t *table, uint32_t *count)
+{
+	*structure = *table = 0;
+	*count = 0;
+	if (!xgpu_vulkan_rt_objects_only() || rt.objects_frame != rt.object_frame || !rt.objects_structure)
+		return 0;
+	*structure = rt.objects_structure;
+	*table = rt.objects_table;
+	*count = rt.objects_count;
+	return 1;
+}
+
 struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *inputs, uint32_t width,
 	uint32_t height, const struct xgpu_world_ao_pass *pass)
 {
@@ -3408,7 +3487,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 	int gi, pathtraced, reference = 0;
 	void *bytes;
 
-	if (!rt.capture.open || !xgpu_vulkan_rt_active() || !inputs)
+	if (!rt.capture.open || !xgpu_vulkan_rt_active() || !inputs || rt.objects_only)
 	{
 		rt.capture.open = 0;
 		return NULL;
