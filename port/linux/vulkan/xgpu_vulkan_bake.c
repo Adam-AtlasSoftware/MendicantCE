@@ -5027,7 +5027,7 @@ void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
 
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
-	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int *whole)
+	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int *whole)
 {
 	struct bake_state *b = bake.bake;
 	const struct xgpu_vulkan_image_description *description;
@@ -5165,8 +5165,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	vkUpdateDescriptorSets(bake.device.device, 6, writes, 0, NULL);
 	if (b->block.rig[1][3] > 1.001f)
 		flags |= 1u;
-	/* (the frame whole, but for the bake's views) */
-	if (!bake_view || bake_view >= XGPU_GBUFFER_VIEW_RASTER_ALBEDO)
+	/* (the frame whole, its own materials composing it (display.
+	prism_raster_composition "materials"), but for the bake's views; else
+	the light alone, CE's composition) */
+	if (materials && (!bake_view || bake_view >= XGPU_GBUFFER_VIEW_RASTER_ALBEDO))
 		flags |= 2u;
 	barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_RASTER]);
@@ -5190,7 +5192,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	if (!bake_view)
 		xgpu_vulkan_bake_exposure_step(commands);
 	if (whole)
-		*whole = !bake_view;
+		*whole = !bake_view && materials;
 	return bake.raster_light;
 }
 

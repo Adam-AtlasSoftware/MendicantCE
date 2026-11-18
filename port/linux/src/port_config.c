@@ -729,6 +729,16 @@ static const struct config_setting config_settings[] =
 		"yet), no ray tracing while playing; the bake (display.bake) needs a\n"
 		"graphics card with ray tracing. Read each frame. Vulkan only; no\n"
 		"anti-aliasing by multisampling." },
+	{ "display.prism_raster_composition", _config_string, "\"ce\"", "HALO_PRISM_RASTER_COMPOSITION",
+		_environment_value, _platform_desktop,
+		"PRISM Raster: what composes the frame from the baked light. \"ce\" the\n"
+		"game's own shaders: the baked light (exposed, held at white) takes CE's\n"
+		"light's place, its base colour and its specular and reflection\n"
+		"layers on it as CE draws them. \"materials\" PRISM's own materials:\n"
+		"the light split between diffuse and specular by each material's\n"
+		"roughness and metalness, the reflections from the bake's probes (until\n"
+		"PRISM's materials reach CE's shaders, darker than Classic where CE's\n"
+		"reflections and specular layers light a surface). Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"
@@ -4665,6 +4675,7 @@ static const struct
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
 	{ "display.lighting", { "ce", "ce_deferred", "raster", NULL }, "ce" },
+	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
 		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", NULL }, "off" },

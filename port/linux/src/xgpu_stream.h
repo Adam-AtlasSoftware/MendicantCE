@@ -426,6 +426,10 @@ diffuse light by the albedo) */
 #define XGPU_GBUFFER_VIEW_RASTER_SPECULAR 18u
 #define XGPU_GBUFFER_VIEW_RASTER_DIFFUSE 19u
 #define XGPU_GBUFFER_PHASE_RASTER 0x10000u
+/* (with it: display.prism_raster_composition "materials", Raster's own
+materials compose the frame whole; else CE's compose Raster's light: it
+goes into the light target, CE's base and additions with it) */
+#define XGPU_GBUFFER_PHASE_RASTER_MATERIALS 0x20000u
 #define XGPU_GBUFFER_PHASE_VIEW_MASK 0xff00u
 /* the second target's word 2: the motion's history bit and the page's
 shift (GBUFFER_BEGIN) */

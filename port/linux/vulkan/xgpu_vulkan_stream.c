@@ -4856,6 +4856,9 @@ struct raster_context
 	struct xgpu_vulkan_image *words, *extras;
 	const struct xgpu_stream_scene_view *view;
 	uint32_t bake_view;
+	/* display.prism_raster_composition "materials": Raster's own materials
+	compose the frame whole (else CE's compose Raster's light) */
+	int materials;
 };
 
 static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
@@ -4864,7 +4867,7 @@ static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light,
 	struct raster_context *raster = (struct raster_context *)context;
 
 	return xgpu_vulkan_bake_raster(light, base, additions, raster->words, raster->extras, raster->view, raster->bake_view,
-		whole);
+		raster->materials, whole);
 }
 
 static void stream_prism_bake(void *context, const struct xgpu_stream_prism_bake *record, const void *data)
@@ -4976,6 +4979,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			context.view = gbuffer.view_known ? &gbuffer.view : NULL;
 			context.bake_view = raster && view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT &&
 				view <= (int)XGPU_GBUFFER_VIEW_RASTER_DIFFUSE ? (uint32_t)view : 0;
+			context.materials = (value & XGPU_GBUFFER_PHASE_RASTER_MATERIALS) != 0;
 			if (context.bake_view)
 				view = 2;
 			else if (view >= (int)XGPU_GBUFFER_VIEW_BAKE_LIGHT)
