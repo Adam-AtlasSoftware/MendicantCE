@@ -33,7 +33,7 @@ base colour multiplies it) and its specular light `S`:
 
 | Term | Light | `quality` | `performance` | The reference |
 | --- | --- | --- | --- | --- |
-| Sun | The sky's sun, direct | A ray to a point of its disc within 60 world units of the eye and on every object pixel; past 60 the baked sun mask (the level's pixels). `D` += sun × cos × v, `S` += GGX × the sun × v | The same | A ray to its disc at every pixel |
+| Sun | The sky's sun, direct | A ray to a point of its disc at every pixel (since round 3: the mask's texels missed thin sunlit edges far off, round 2's G3). `D` += sun × cos × v, `S` += GGX × the sun × v | A ray within 60 world units of the eye and on every object pixel; past 60 the baked sun mask (the level's pixels) | A ray to its disc at every pixel |
 | Domes | The sky's other lights, direct | One direction of each one's cone, its shadow traced (`domes_at`): `D` | The same | The same |
 | Lamps | The emitting triangles (light cards, lamp surfaces), direct | ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S`; on a glossy pixel (roughness under 0.3 with its reflection traced) `D` alone, the lamps' `S` taken by the reflection's GGX ray meeting a lamp's face (`lamp_met`), as the reference splits them | The same | Resampled importance over the same 8 candidates, each one's shadow traced and its visibility in its target (`lights_ris_seen`), no reservoir reused |
 | Fixtures | The scenario's light fixtures, direct | In the same reservoir (all of them, or 8 by count) | The same | The same (16) |
@@ -201,7 +201,7 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   penumbra; a lit pixel is never filtered, so a shadow beside it cannot darken it (in G2's moves of round 1, before
   this rule, the foreground's sunlight lost up to a third where the variance of a moving camera's short histories
   let the filter spread the rocks' shadows) (the blocker's distance by the disc's
-  angle over the pixel's footprint). Pixels past 60 world units read the baked mask, which has no noise. The
+  angle over the pixel's footprint). In "performance" pixels past 60 world units read the baked mask, which has no noise. The
   FidelityFX Shadows denoiser was not vendored: this filter does its work here (its tile classification, temporal
   accumulation and penumbra-sized spatial passes) in the same frame as the other signals.
 

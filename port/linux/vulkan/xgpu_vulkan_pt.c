@@ -1258,11 +1258,14 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		(view->now[0][2] - view->last[0][2]) * (view->now[0][2] - view->last[0][2]));
 	/* (the exposure: the frame's, metered in the frame, not in the views) */
 	exposure_settings(job->exposure);
-	/* the settings: the sun's ray within 60 world units (the baked mask
-	beyond, design section 3.8), the reflections traced below a roughness
-	of 0.35, the firefly clamp at 4 times the brightest neighbour, the
-	luminance's edge stop at 4 standard deviations */
-	job->settings[0] = 60.0f;
+	/* the settings: the sun's ray within 60 world units in "performance"
+	(the baked mask beyond, design section 3.8), at every distance in
+	"quality" (the mask's texels miss thin lit edges far off: round 2's G3,
+	the overhang's sunlit rims and the far spire dark where R lights them),
+	the reflections traced below a roughness of 0.35, the firefly clamp at 4
+	times the brightest neighbour, the luminance's edge stop at 4 standard
+	deviations */
+	job->settings[0] = (flags & FLAG_PERFORMANCE) ? 60.0f : 1.0e6f;
 	job->settings[1] = 0.35f;
 	job->settings[2] = 4.0f;
 	job->settings[3] = 4.0f;
