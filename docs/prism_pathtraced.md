@@ -118,12 +118,19 @@ found safe:
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
   frames. A dynamic light's sample is not reused (their order changes from frame to frame). There is no spatial
   reuse: in `prism-pt` it spread a pick's choice over patches.
-- **The reservoir is kept as it is.** The kept sample's shadow is traced for the light it gives, and the reservoir is
-  kept for the next frame with its weight and confidence whatever that shadow: the target is unshadowed and the same
-  for every reservoir combined, so their confidences weigh like estimates. Round 1 first kept a hidden sample's
-  reservoir at weight 0 with its confidence counted: a pixel that sees a lamp in few frames then took about a ninth
-  of that light while its camera was still (G5's first pose: a pillar lit in R, dark in the held frame, lit in the
-  moves). Dropping its confidence instead brightens the light as it is reused (`prism-pt`'s finding).
+- **The target holds the shadow.** The initial reservoir is resampled by the unshadowed light (its candidates' shadows
+  are not traced); its kept sample's shadow is then traced, and the last frame's sample's from this pixel, and the two
+  are combined by generalized resampled importance (Lin et al. 2022) with the shadowed light at this pixel as the
+  target of both: the targets alike, the generalized balance heuristic is each one's share of the confidences, and the
+  light is unbiased. The kept sample's shadow is known, so its light is given with no further ray; the reservoir is
+  kept with the weight of that target (an empty one, both hidden, a valid estimate of nought at its confidence). Two
+  shadow rays a pixel where there is a last reservoir, one where there is none. Round 2 combined by the unshadowed
+  target and traced the kept sample's shadow after: in a room of many lamps most of a pixel's picks were hidden, so
+  its reservoir held a hidden lamp most frames and a seen one in a few, each frame's light nought or several times its
+  mean (G4's and G5's speckled walls, darkened further by the firefly hold). `tools/test_prism_pt.py` models a still
+  pixel of 40 lamps, 6 seen: both unbiased, the shadowed target's frame-to-frame spread a fifth of the unshadowed
+  one's. (Round 1's first attempt, a hidden sample's weight set to nought after a choice made by the unshadowed target
+  with its confidence counted, is not this: it took a ninth of a sparsely seen light at G5's first pose.)
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
 
 ## ReSTIR GI
@@ -155,7 +162,10 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   where its guide (the last frame's: instance, normal, distance) is this surface's: the same instance, the normal
   within 25 degrees, and on the level its point on this pixel's plane (the last frame's camera; an object's distance
   within 5%). So no history is taken across an edge, nor through an opening onto the surface behind it (a10's door
-  windows). A slow history (up to 32 frames; the specular's shorter on glossy surfaces) and a fast one (4) of the
+  windows). A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
+  the lobe's width (alpha, the roughness squared) over twice the parallax, the angle the eye turned about the point
+  since the last frame, as ReLAX's specular accumulation, and 4 frames for a mirror under a moving eye, the whole 32
+  for a still one) and a fast one (4) of the
   diffuse and specular light; the fast one holds the slow one (its luminance within the fast mean ± 2 standard
   deviations of that mean, the deviation the samples' spread the slow moments know over the fast count, the slow
   history's length cut to 4 where it is held); the luminance's moments give the variance; once the history has 16
