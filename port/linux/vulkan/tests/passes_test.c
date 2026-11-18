@@ -1169,6 +1169,83 @@ static void panini_post_test(void)
 	reset();
 }
 
+/* display.lighting's v4 passes over the G-buffer (xgpu_vulkan_post_fog,
+xgpu_vulkan_post_decal): the fog screen's density into the alpha alone, over
+the window's view alone (its viewport and scissor the view's corners inside
+the target: a split screen's other window untouched), nothing where the view
+has no pixel of the target; a decal whose bitmap is not a 2D texture (a cube
+map's) refused before anything is recorded */
+static void deferred_post_test(void)
+{
+	static struct xgpu_vulkan_image target, words, extras, cube;
+	static const int32_t right[4] = { 32, 0, 64, 48 }, beyond[4] = { -8, -4, 70, 52 }, outside[4] = { 70, 0, 80, 48 };
+	struct xgpu_stream_scene_view view;
+	struct xgpu_stream_scene_fog fog;
+	struct xgpu_stream_scene_decal decal;
+	uint32_t index;
+
+	post_reset();
+	post_image(&target, 1, XGPU_VULKAN_FORMAT_BGRA8, 64, 48);
+	post_image(&words, 3, XGPU_VULKAN_FORMAT_RGBA32_UINT, 64, 48);
+	post_image(&extras, 4, XGPU_VULKAN_FORMAT_RGBA32_UINT, 64, 48);
+	post_image(&cube, 5, XGPU_VULKAN_FORMAT_BGRA8, 16, 16);
+	cube.description.type = XGPU_VULKAN_IMAGE_CUBE;
+	cube.description.depth_or_layers = 6;
+	memset(&post, 0, sizeof(post));
+	post.vertex = (VkShaderModule)(uintptr_t)1;
+	for (index = 0; index < XGPU_VULKAN_POST_PROGRAM_COUNT; index++)
+		post.pixel[index] = (VkShaderModule)(uintptr_t)(2 + index);
+	post.sampler = (VkSampler)(uintptr_t)5;
+	post.nearest = (VkSampler)(uintptr_t)6;
+	post.levels = (VkSampler)(uintptr_t)7;
+	post_pipelines = 0;
+	memset(&view, 0, sizeof(view));
+	view.now[1][1] = view.now[2][0] = view.now[3][2] = 1.0f;
+	memcpy(view.corners, right, sizeof(view.corners));
+	memset(&fog, 0, sizeof(fog));
+	fog.flags = XGPU_SCENE_FOG_FLAG_SCREEN | XGPU_SCENE_FOG_FLAG_SCREEN_LEVEL;
+
+	/* the right half of a split screen: its density, there alone */
+	assert(xgpu_vulkan_post_fog(&target, &words, &extras, &view, &fog));
+	assert(!strcmp(post_events, "BlD"));
+	assert(post_pipelines == 1 && post_masks[0] == 8 && vk.color == &target);
+	assert(post_viewports[0].x == 32.0f && post_viewports[0].y == 0.0f);
+	assert(post_viewports[0].width == 32.0f && post_viewports[0].height == 48.0f);
+	assert(post_scissors[0].offset.x == 32 && post_scissors[0].offset.y == 0);
+	assert(post_scissors[0].extent.width == 32 && post_scissors[0].extent.height == 48);
+	assert(post_sampled[0][2].imageView == extras.sampled && post_sampled[0][3].imageView == words.sampled);
+
+	/* corners past the target: the target's own; none of it: nothing */
+	post_reset();
+	memcpy(view.corners, beyond, sizeof(view.corners));
+	assert(xgpu_vulkan_post_fog(&target, &words, &extras, &view, &fog));
+	assert(post_draws == 1 && post_viewports[0].x == 0.0f && post_viewports[0].y == 0.0f);
+	assert(post_viewports[0].width == 64.0f && post_viewports[0].height == 48.0f);
+	assert(post_scissors[0].extent.width == 64 && post_scissors[0].extent.height == 48);
+	post_reset();
+	memcpy(view.corners, outside, sizeof(view.corners));
+	assert(xgpu_vulkan_post_fog(&target, &words, &extras, &view, &fog) && !post_events[0]);
+
+	/* a cube map's decal: none */
+	post_reset();
+	memcpy(view.corners, right, sizeof(view.corners));
+	memset(&decal, 0, sizeof(decal));
+	decal.axes[0][0] = decal.axes[1][1] = decal.axes[2][2] = 1.0f;
+	decal.centre[1] = 4.0f;
+	decal.rectangle[2] = decal.rectangle[3] = 1.0f;
+	assert(!xgpu_vulkan_post_decal(&target, &cube, &words, &extras, &view, &decal) && !post_events[0]);
+
+	free(target.attachments);
+	free(words.attachments);
+	free(extras.attachments);
+	free(cube.attachments);
+	target.attachments = words.attachments = extras.attachments = cube.attachments = NULL;
+	memset(&post, 0, sizeof(post));
+	recording.descriptor_pools = NULL;
+	recording.descriptor_pool_count = 0;
+	reset();
+}
+
 /* ---------- clears of some of the colour's channels */
 
 /* what the clears record, in order: B a pass begun, A attachments cleared,
@@ -3700,6 +3777,7 @@ int main(void)
 	texture_sets_test();
 	post_test();
 	panini_post_test();
+	deferred_post_test();
 	masked_clear_test();
 	window_test();
 	rotate_test();

@@ -642,9 +642,21 @@ int xgpu_vulkan_post_fog(struct xgpu_vulkan_image *target, struct xgpu_vulkan_im
 	uniforms->fog_screen[1] = fog->screen[1] > fog->screen[0] ? fog->screen[1] : fog->screen[0] + 1.0e-6f;
 	uniforms->fog_screen[2] = fog->screen[2];
 	draw.constants = draw.uniforms;
+	/* (over the window's view alone, as CE's fog pass and its fog screen's
+	clear: another window's pixels of a split screen are not touched) */
 	memset(&dynamic, 0, sizeof(dynamic));
-	dynamic.viewport[2] = dynamic.scissor[2] = (int32_t)description->width;
-	dynamic.viewport[3] = dynamic.scissor[3] = (int32_t)description->height;
+	for (axis = 0; axis < 2; axis++)
+	{
+		int32_t size = (int32_t)(axis ? description->height : description->width);
+		int32_t from = view->corners[axis] < 0 ? 0 : view->corners[axis] > size ? size : view->corners[axis];
+		int32_t to = view->corners[axis + 2] < from ? from : view->corners[axis + 2] > size ? size :
+			view->corners[axis + 2];
+
+		dynamic.viewport[axis] = dynamic.scissor[axis] = from;
+		dynamic.viewport[axis + 2] = dynamic.scissor[axis + 2] = to - from;
+	}
+	if (dynamic.viewport[2] <= 0 || dynamic.viewport[3] <= 0)
+		return 1;
 	dynamic.depth_range[1] = 1.0f;
 	draw.dynamic = &dynamic;
 	draw.topology = XGPU_VULKAN_TOPOLOGY_TRIANGLES;

@@ -475,8 +475,9 @@ struct gbuffer_material
 static struct
 {
 	/* in the pass (its draws skipped, or drawn where ready: its targets
-	made), and drawn for the frame */
-	int active, ready, drawn;
+	made), and drawn for the frame; begun (its targets cleared for the colour
+	target) in the frame, whether or not anything was drawn into them */
+	int active, ready, drawn, begun;
 	/* the colour target it was drawn for (the window's) */
 	uint32_t color;
 	struct xgpu_vulkan_image *words, *depth;
@@ -5075,6 +5076,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.color = stream.color;
 		gbuffer.ready = 1;
 		gbuffer.drawn = 0;
+		gbuffer.begun = 1;
 		gbuffer.material = gbuffer.instance = gbuffer.flags = 0;
 		memset(gbuffer.uniform_key, 0, sizeof(gbuffer.uniform_key));
 		stream.uniforms_dirty = 1;
@@ -5156,13 +5158,15 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 
 /* SCENE_FOG (display.lighting's v4 modes): the window's fog, or its fog
 screen's density, a pass over its G-buffer (xgpu_vulkan_post_fog) where it
-was drawn for this colour target; none after a view (debug.gbuffer_view) */
+was begun for this colour target, drawn into or not (a view of the sky
+alone: no pixel fogged, the density 0 everywhere, as CE's fog screen clears
+it); none after a view (debug.gbuffer_view) */
 static void stream_scene_fog(void *context, const struct xgpu_stream_scene_fog *record)
 {
 	struct stream_target *color = target_get(stream.color);
 
 	(void)context;
-	if (!color || stream.preparing || deferred.hold || !gbuffer.view_known || !gbuffer.drawn ||
+	if (!color || stream.preparing || deferred.hold || !gbuffer.view_known || !gbuffer.begun ||
 		gbuffer.color != stream.color || gbuffer.width != color->width || gbuffer.height != color->height ||
 		color->depth || color->layers > 1 || (stream.samples && color->multisampled))
 		return;
@@ -5207,7 +5211,7 @@ static void stream_frame_end(void *context)
 	deferred.phase = 0;
 	deferred.hold = 0;
 	gbuffer.active = gbuffer.ready = 0;
-	gbuffer.drawn = 0;
+	gbuffer.drawn = gbuffer.begun = 0;
 	world_make_some();
 	prepass.twins_made = 0;
 	shadow.twins_made = 0;
