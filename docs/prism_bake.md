@@ -64,9 +64,10 @@ does. The units are Tool's radiosity's, as far as the shipped pages and the publ
 | A light card or lamp surface (radiosity power) | its radiance (the patch's radiosity, shot once) | colour × power |
 | A light fixture (intensity) | the irradiance it gives a surface facing it a world unit away | colour × intensity / d² |
 
-Raster's frame holds its light at white as the page held it (a colour past white divided by its brightest channel, its
-hue kept), after the exposure and before the base (below). The bake's light and R's are not held: the gates compare them
-as they are.
+Raster's frame rolls its light past white off by its tone curve (`"filmic"` by default), after the exposure and before
+the base; under the `"ce"` curve it holds it at white as the page held it (a colour past white divided by its brightest
+channel, its hue kept; "Raster's exposure" below). The bake's light and R's are neither: the gates compare them as they
+are.
 
 What the units rest on (November 2026):
 
@@ -259,15 +260,16 @@ another key is not resumed: the BSP is baked again (into `.new`) and replaces it
 | `debug.bake_exit` | `true`, `false` | Bake in the foreground and quit once done: the measurements' runs |
 | `debug.gbuffer_view` | `"bake_light"`, `"bake_sun"`, `"bake_texels"`, `"bake_volume"`, `"bake_total"` | Raster's views |
 | `display.prism_raster_composition` | `"ce"`, `"materials"` | CE's shaders compose Raster's light (default), or PRISM's own materials |
-| `display.prism_raster_objects` | `"classic"`, `"volume"` | Objects never lit under Classic (default), or the volume's light alone |
-| `display.prism_exposure`, `_range`, `_speed`, `_bias`, `display.prism_tone_curve` | as the path tracer's | Raster's exposure and tone curve |
+| `display.prism_raster_objects` | `"volume"`, `"classic"` | Objects by the volume's light (default), or never lit under Classic |
+| `display.prism_exposure`, `_range`, `_speed`, `_bias`, `display.prism_tone_curve` | as the path tracer's | Raster's exposure and tone curve (its style's: `"auto"` and `"filmic"`) |
 
 The bake's diagnostics (environment variables): `HALO_BAKE_TERMS` leaves terms out (1 the domes, 2 the lamps, 4 the
 glows, 8 the paths past the first hit, 16 the fixtures, 32 the grid, 64 the lamps' spherical sampling; a texel's 128
 indirect light, 256 own lamps' direct light; 512 every lamp of the cell's lists in the draft too, 1024 the resampled
 pick past it), `HALO_BAKE_SEED` another seed (two bakes' noise against each other), `HALO_BAKE_GATHER` the final
 gather, `HALO_BAKE_EMITTERS_PASS` the level's emitting faces neither blocking nor reflecting, `HALO_PRISM_ALBEDO`
-`stored` the base maps' stored mean.
+`stored` the base maps' stored mean; `HALO_RASTER_EXPOSURE_LOG` logs Raster's exposure and its meter's medians each
+frame.
 
 Settings > Mods > PRISM LIGHTING has Lighting (Classic or PRISM Raster), Bake (While Playing, When Asked, Never), Bake
 Quality, Rebake Lightmaps and Progress on Screen. The bake needs ray queries; a GPU without them draws Raster with CE's
@@ -300,47 +302,74 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
   (GGX, Smith's visibility, Schlick's Fresnel) by the same visibility as its diffuse light.
 
 **What composes the frame** (`display.prism_raster_composition`): by default (`"ce"`) CE's own shaders, until PRISM's
-materials reach theirs: the diffuse light (exposed, held at white, below) goes into CE's light target in its light's
+materials reach theirs: the diffuse light (exposed, through the tone curve, below) goes into CE's light target in its light's
 place (the level's glow folded in as CE's lightmap pass folds it; an object's base colour, the G-buffer's, and glow
 with it), and the resolve draws CE's base colour times it and CE's additions (its reflections, specular lightmaps and
 specular lights) over it, as Classic's frame is drawn; the meter then takes both frames with the same base and
 additions. `"materials"` (for the materials milestone) composes the frame whole from PRISM's own materials, as follows.
 
-With `"materials"` the pixel is base × (1 − the specular's share) × the diffuse light held at white + the specular
-light + its self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
-it), the exposure on both lights (below), and the resolve draws it as it is: CE's specular, reflection and
-object-lighting layers are not added. The diffuse light (the level's and the objects', the sun's in it) is held at white
-as CE's page held its light: a colour past white is divided by its brightest channel (its hue kept), after the exposure
-and before the base, so a sunlit wall whites out as Classic's does, and a sunlit object beside it with it. Where the
+With `"materials"` the pixel is base × (1 − the specular's share) × the diffuse light + the specular light + its
+self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
+it), the exposure on both lights and the tone curve over the whole (below), and the resolve draws it as it is: CE's
+specular, reflection and object-lighting layers are not added. Under the `"ce"` curve the diffuse light (the level's
+and the objects', the sun's in it) is held at white as CE's page held its light (a colour past white divided by its
+brightest channel, its hue kept), after the exposure and before the base, so a sunlit wall whites out as Classic's
+does, and a sunlit object beside it with it. Where the
 bake has nothing (a tile not baked yet, an object outside both cascades, the sky), the pixel is CE's own (light × base +
 additions). `debug.gbuffer_view` `raster_albedo`, `raster_specular` and `raster_diffuse` show the parts; the views and R
-are before the exposure and the hold.
+are before the exposure and the curve.
 
 ### Raster's exposure
 
 `display.prism_exposure` (and its `_range`, `_speed` and `_bias`) and `display.prism_tone_curve` reach Raster's frame
-from the path tracer's settings; Raster's `"style"` is `"ce"`: the frame's middle as bright as Classic's, so that a level
-the units leave a stop off (an interior's lamps against its page, a map whose Tool settings differ) reads as Classic's.
+from the path tracer's settings. Raster's `"style"` is an eye's and a film's: `"auto"` and `"filmic"` (November 2026:
+the lighting is to look path traced, a place darker than Classic where its light is darker; `"ce"` and `"ce"`, the
+frame's middle as bright as Classic's and the light held at white, are the other choice).
 
 - **The meter** (`xgpu_vulkan_bake_glsl.inc`'s `EXPOSURE_COMMON`): in the frame whole, a lit pixel in 16 (every 4th
   each way) adds two luminances to two histograms (log2 from −12 to 4, a quarter of a stop a bin, in one buffer,
-  `xgpu_vulkan_bake_meter`): Raster's frame there before the exposure (the bake's light by the material, the specular
-  light, the glow) and Classic's (CE's light target by its base, its additions added). "As bright as Classic" is the
-  frame's: metering the lights alone (the bake's against CE's light target) left Raster's frame darker than Classic's
-  where its materials take less than CE's base and additions give (c40's chamber 0.06 against 0.11 at the median).
-- **The step** (`exposure_source`, one invocation after the frame's pass, `xgpu_vulkan_bake_exposure_step`): `"ce"`
-  aims Raster's frame's median at Classic's, within the range (1.5 stops by default), plus the bias; `"auto"` at a
-  middle grey (0.18, −2 to +5 stops); `"fixed"` none. It moves toward its aim at the speed (2 stops a second by the
-  host's clock), at once the first time, keeps the exposure for the next frame, and empties the histograms. A frame
-  with no lit pixel keeps the exposure it had.
-- **The exposure** multiplies the diffuse and the specular light before the hold at white; the glow is CE's and stays.
-  **The tone curve** then: `"ce"` as it is (the display clips it), `"filmic"` (and `"local"` here) CE's light up to 0.6
-  of white and past it rolled toward white by its brightest channel, `"aces"` Narkowicz's fit.
+  `xgpu_vulkan_bake_meter`): Raster's frame there before the exposure and the curve (with CE's composition the baked
+  light by CE's base, CE's additions added; with `"materials"` the bake's light by the material, the specular light,
+  the glow) and Classic's (CE's light target by its base, its additions added).
+- **The step** (`exposure_source`, one invocation after the frame's pass, `xgpu_vulkan_bake_exposure_step`):
+  - `"auto"` moves toward a key, 0.30 (b30's sunlit beach then comes out as bright as Classic's), by half the stops
+    between the key and the frame's median where the frame is brighter and a quarter where it is darker, at most the
+    range up (1.5 stops) and two thirds of it down (1 stop), plus the bias. An eye takes in bright light more than dim:
+    a dark place stays darker than a bright one, a night a night.
+  - `"ce"` aims the frame's median at Classic's, within the range.
+  - `"fixed"` applies none.
+  - It moves toward its aim at the speed (2 stops a second by the host's clock), at once the first time, keeps the
+    exposure for the next frame, and empties the histograms. A frame with no lit pixel keeps the exposure it had.
+- **The exposure** multiplies the light (with `"materials"` the diffuse and the specular light); the glow is CE's and
+  stays. **The tone curve** then: under `"ce"` the light is held at white (a colour past white divided by its
+  brightest channel, its hue kept) before CE's base multiplies it, as CE's page held its light; under any other curve
+  the light goes to the curve unclamped, so the sun past white rolls off instead of sitting flat at white:
+  `"filmic"` (and `"local"` here) the light as it is up to 0.6 of white and past it rolled toward white by its
+  brightest channel, `"aces"` Narkowicz's fit. With CE's composition the curve is over the light, before the base;
+  CE's additions (its reflections and specular layers), added after, are not rolled off. With `"materials"` it is over
+  the frame whole.
 
-Raster's lit value is last linear and unclamped in `raster_source`'s `result` before the hold (`light_`, the exposure
-applied) and in `bake.raster_light` (RGBA16F) before the resolve draws it into the frame's target
-(`xgpu_vulkan_post.c`'s `DEFERRED_RESOLVE`, view 2: the light as it is); the composite to come takes the same meter
-(`meter_add`) and step.
+Why a quarter up (draft bakes, the linear albedo; `HALO_RASTER_EXPOSURE_LOG`, the frames at 1280×720, 30 frames a second,
+4 s a pose; the medians of the level's and the objects' pixels). The frame's median before the exposure, at G2, G3, G6
+and G7's poses, against Classic's at the same pixels:
+
+| Scene | Raster before the exposure | Classic | `"auto"`, half both ways: its exposure, the frame's median | Classic's frame | `"auto"` as chosen: its exposure |
+| --- | --- | --- | --- | --- | --- |
+| b30 G2, the sunlit beach | 0.55, 0.39, 0.65 | 0.32, 0.27, 0.32 | −0.43, −0.18, −0.56 stops: 0.39, 0.32, 0.36 | 0.38, 0.28, 0.32 | the same |
+| b30 G3, the shade under the cliff | 0.10 | 0.11 to 0.14 | +0.82: 0.19 | 0.14 to 0.16 | +0.41 |
+| c40 G6, the canyon at night | 0.19, 0.14, 0.14 | 0.16, 0.11, 0.11 | +0.32, +0.57, +0.57: 0.23, 0.19, 0.18 | 0.15, 0.11, 0.11 | +0.16, +0.28, +0.28 |
+| c40 G7, the chamber's lamps | 0.16, 0.14, 0.16 | 0.10, 0.08, 0.10 | +0.44, +0.57, +0.44: 0.17, 0.17, 0.18 | 0.11, 0.10, 0.09 | +0.22, +0.28, +0.22 |
+
+The sunlit beach's light is over Classic's before any exposure (the sun past the page's white), and half the stops
+down bring it to Classic's frame. c40's canyon and chamber are already 1.2 to 1.7 times Classic's light in their own
+(the bake over the page there: Tool's short bounce, "What remains"), and half the stops up put them 0.3 to 0.8 stops
+over Classic's frames: the night washed toward dusk. A quarter up holds them near their own light.
+
+Raster's lit value is last linear and unclamped in `raster_source`'s `light_`, the exposure applied, before the hold
+or the tone curve; `bake.raster_light` (RGBA16F) holds it after them (with `"materials"`, the frame whole after the
+curve) until the resolve draws it into the frame's target (`xgpu_vulkan_post.c`'s `DEFERRED_RESOLVE`: with CE's
+composition its light × CE's base + CE's additions, with `"materials"` view 2, the frame as it is). The composite to
+come takes the same meter (`meter_add`) and step.
 
 ## Measurements
 
@@ -360,13 +389,14 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
   draft bakes): a10 0.42 to 0.47, c40's chamber 0.63 to 0.75, b30 0.86 to 1.01 (G2) and 0.89 to 0.91 (G3). The
   specular's share is taken from the diffuse (a metal's most), and CE's additions (its reflection cube maps, specular
   lightmaps and specular lights) are not drawn: a debt of the materials milestone, which `"ce"` leaves out.
-- **Objects are never lit under Classic** (`display.prism_raster_objects`, `"classic"` the default with CE's
-  composition): an object's pixel lit by the volume under the light CE gives that pixel (CE's light target there, the
-  object's lit colour) is raised to it, its colour kept; over it, the volume's. What the game shows stays seen: the
-  Chief in c40's chamber comes out at Classic's 0.122 (the volume alone 0.022 to 0.024). The volume there holds 0.26 to
-  0.27 (the light's unit, bluish), 0.4 of the lightmap's light on the floor under him (0.65): his sides face the walls,
-  the lamps are above. CE lights him at about 1.36 (his Classic colour over his base colour), four times its own floor
-  light there (0.31): CE's object lighting is generous, not the volume wrong. `"volume"` takes the volume alone.
+- **Objects by the volume** (`display.prism_raster_objects` `"volume"`, the default since the lighting is to look
+  path traced): an object is lit by the volume's light alone, and so darker than Classic draws it where CE's object
+  lighting is generous: the Chief in c40's chamber at 0.022 to 0.024 against Classic's 0.122. The volume there holds
+  0.26 to 0.27 (the light's unit, bluish), 0.4 of the lightmap's light on the floor under him (0.65): his sides face the
+  walls, the lamps are above. CE lights him at about 1.36 (his Classic colour over his base colour), four times its own
+  floor light there (0.31): CE's object lighting is generous, not the volume wrong. `"classic"`, the other choice:
+  an object's pixel lit by the volume under the light CE gives that pixel (CE's light target there, the object's lit
+  colour) is raised to it, its colour kept, so what the game shows stays seen.
 - Objects in the sun come out 15 to 30% brighter beside the sunlit ground than Classic draws them (Raster over Classic
   at G2's poses: sunlit objects 1.14 to 1.33, the sunlit level 0.88 to 1.16; in the shade alike, 0.90 to 1.04): the
   volume's light and the traced sun against CE's object lighting.
@@ -379,29 +409,6 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
   page are Tool's short bounce, which the rig does not copy; the exposure carries the level in the frame. Ruled out on
   the way: the target's bump term, the emitting faces' blocking (letting them pass makes a10 brighter), the sky's floor
   in indoor clusters. A whole-BSP comparison in lightmap space is where it would be looked at again.
-- PRISM's own materials (`"materials"`) leave the frame darker than Classic's at equal light: Raster's frame (the
-  exposure fixed) over Classic's, over the bake's light over CE's light target (the frames' and the lights' medians,
-  draft bakes): a10 0.42 to 0.47, c40's chamber 0.63 to 0.75, b30 0.86 to 1.01 (G2) and 0.89 to 0.91 (G3). The
-  specular's share is taken from the diffuse (a metal's most), and CE's additions (its reflection cube maps, specular
-  lightmaps and specular lights) are not drawn: a debt of the materials milestone, which `"ce"` leaves out.
-- **Objects are never lit under Classic** (`display.prism_raster_objects`, `"classic"` the default with CE's
-  composition): an object's pixel lit by the volume under the light CE gives that pixel (CE's light target there, the
-  object's lit colour) is raised to it, its colour kept; over it, the volume's. What the game shows stays seen: the
-  Chief in c40's chamber comes out at Classic's 0.122 (the volume alone 0.022 to 0.024). The volume there holds 0.26 to
-  0.27 (the light's unit, bluish), 0.4 of the lightmap's light on the floor under him (0.65): his sides face the walls,
-  the lamps are above. CE lights him at about 1.36 (his Classic colour over his base colour), four times its own floor
-  light there (0.31): CE's object lighting is generous, not the volume wrong. `"volume"` takes the volume alone.
-- Objects in the sun come out 15 to 30% brighter beside the sunlit ground than Classic draws them (Raster over Classic
-  at G2's poses: sunlit objects 1.14 to 1.33, the sunlit level 0.88 to 1.16; in the shade alike, 0.90 to 1.04): the
-  volume's light and the traced sun against CE's object lighting.
-- **The bake against CE's raw page** (the lightmap pass without the bump's incident radiosity,
-  `rasterizer_lightmaps_incident_radiosity 0`: 0 to 11% over CE's light target), the bake's light over the page's at the
-  median (draft bakes, November 2026): a10's cryo bay 1.67, the wall behind p1's windows 0.64, p2's corner 0.88; c40's
-  chamber 1.5 to 1.6; c40's canyon (G6, the moon in) 1.6 to 1.7; b30's beach 1.1 to 1.5 sunlit and 1.2 to 1.3 in the
-  shade. Ruled out: the target's bump term, the emitting faces' blocking (letting them pass makes a10 brighter), the
-  sky's floor in indoor clusters. Left open: the lamp-lit rooms over the page with nothing left to blame; the exposure
-  carries the level in the frame. A comparison in lightmap space (CE's page texels against the bake's, the whole BSP)
-  is where it would be looked at again.
 - The sun's half-lit band (partial shadows, low cosines) comes out over CE's light (CE/bake 0.5 to 0.8 at G2 and G3):
   Tool's sun is sixteen directions spread over its disc, on the vertices, so its shadows' edges are softer and coarser
   than the bake's traced disc: a place where the bake is meant to differ.

@@ -732,20 +732,20 @@ static const struct config_setting config_settings[] =
 	{ "display.prism_raster_composition", _config_string, "\"ce\"", "HALO_PRISM_RASTER_COMPOSITION",
 		_environment_value, _platform_desktop,
 		"PRISM Raster: what composes the frame from the baked light. \"ce\" the\n"
-		"game's own shaders: the baked light (exposed, held at white) takes CE's\n"
-		"light's place, its base colour and its specular and reflection\n"
-		"layers on it as CE draws them. \"materials\" PRISM's own materials:\n"
+		"game's own shaders: the baked light (exposed, through the tone curve)\n"
+		"takes CE's light's place, its base colour and its specular and\n"
+		"reflection layers on it as CE draws them. \"materials\" PRISM's own materials:\n"
 		"the light split between diffuse and specular by each material's\n"
 		"roughness and metalness, the reflections from the bake's probes (until\n"
 		"PRISM's materials reach CE's shaders, darker than Classic where CE's\n"
 		"reflections and specular layers light a surface). Read each frame." },
-	{ "display.prism_raster_objects", _config_string, "\"classic\"", "HALO_PRISM_RASTER_OBJECTS", _environment_value,
+	{ "display.prism_raster_objects", _config_string, "\"volume\"", "HALO_PRISM_RASTER_OBJECTS", _environment_value,
 		_platform_desktop,
 		"PRISM Raster, with CE's composition: how the objects (characters,\n"
-		"vehicles, weapons, scenery) are lit. \"classic\" by the baked\n"
-		"irradiance volume, but never darker than Classic lights them (what\n"
-		"the game shows stays seen). \"volume\" by the volume alone. Read each\n"
-		"frame." },
+		"vehicles, weapons, scenery) are lit. \"volume\" by the baked\n"
+		"irradiance volume, the light where they are. \"classic\" by the\n"
+		"volume, but never darker than Classic lights them (what the game\n"
+		"shows stays seen). Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"
@@ -909,27 +909,35 @@ static const struct config_setting config_settings[] =
 		"PRISM's exposure (path tracing and PRISM Raster): \"fixed\" CE's;\n"
 		"\"ce\" follows the traced or baked light so that the frame's middle\n"
 		"stays as bright as CE's (within display.prism_exposure_range); \"auto\"\n"
-		"adapts freely, as an eye does; \"style\" the style's (faithful fixed,\n"
-		"remix ce; PRISM Raster ce)." },
+		"adapts as an eye does (PRISM Raster's: toward a sunlit frame's level,\n"
+		"half way from a brighter frame, a quarter from a darker one, at most\n"
+		"the range up and two thirds of it down, so a dark place stays darker\n"
+		"than a bright one); \"style\" the style's (faithful fixed, remix ce;\n"
+		"PRISM Raster auto)." },
 	{ "display.prism_exposure_range", _config_real, "1.5", "HALO_PRISM_EXPOSURE_RANGE", _environment_value,
 		_platform_desktop,
-		"PRISM path tracing, exposure \"ce\": how far it may move from CE's, in\n"
-		"stops (0 to 6)." },
+		"PRISM path tracing and PRISM Raster, exposure \"ce\": how far it may\n"
+		"move from CE's, in stops (0 to 6); PRISM Raster's \"auto\": how far up\n"
+		"(two thirds of it down)." },
 	{ "display.prism_exposure_speed", _config_real, "2.0", "HALO_PRISM_EXPOSURE_SPEED", _environment_value,
 		_platform_desktop,
-		"PRISM path tracing: how fast the exposure adapts, in stops a second." },
+		"PRISM path tracing and PRISM Raster: how fast the exposure adapts, in\n"
+		"stops a second." },
 	{ "display.prism_exposure_bias", _config_real, "0.0", "HALO_PRISM_EXPOSURE_BIAS", _environment_value,
 		_platform_desktop,
-		"PRISM path tracing: stops added to the adapted exposure (-4 to 4)." },
+		"PRISM path tracing and PRISM Raster: stops added to the adapted\n"
+		"exposure (-4 to 4)." },
 	{ "display.prism_tone_curve", _config_string, "\"style\"", "HALO_PRISM_TONE_CURVE", _environment_value,
 		_platform_desktop,
 		"PRISM path tracing and PRISM Raster: how the light past white is\n"
-		"drawn: \"ce\" clipped,\n"
-		"as CE did; \"filmic\" rolled off gently (CE's darker tones kept);\n"
-		"\"aces\" the film industry's curve; \"local\" each region's light\n"
-		"compressed about its own level, so that a dark room beside a sunlit\n"
-		"doorway stays readable; \"style\" the style's (faithful ce, remix\n"
-		"local)." },
+		"drawn: \"ce\" clipped, as CE did (PRISM Raster: the light held at\n"
+		"white, its hue kept); \"filmic\" rolled off gently (CE's darker tones\n"
+		"kept); \"aces\" the film industry's curve; \"local\" each region's\n"
+		"light compressed about its own level, so that a dark room beside a\n"
+		"sunlit doorway stays readable (PRISM Raster: as filmic); with PRISM\n"
+		"Raster's CE composition the curve is over the light, before CE's\n"
+		"base colour; \"style\" the style's (faithful ce, remix local, PRISM\n"
+		"Raster filmic)." },
 	{ "display.structure_culling", _config_integer, STRUCTURE_CULLING_DEFAULT, "HALO_STRUCTURE_CULLING", _environment_value,
 		_platform_all,
 		"Which tests skip the level's triangles the camera cannot see, as bits\n"
@@ -4683,7 +4691,7 @@ static const struct
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
 	{ "display.lighting", { "ce", "ce_deferred", "raster", NULL }, "ce" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
-	{ "display.prism_raster_objects", { "classic", "volume", NULL }, "classic" },
+	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
 		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", NULL }, "off" },

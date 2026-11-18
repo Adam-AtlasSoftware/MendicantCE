@@ -1763,7 +1763,7 @@ lit light after it (tone_curved: display.prism_tone_curve's). */
 	"    uint histogram[128];\n" \
 	"    float exposure;\n" \
 	"    uint made;\n" \
-	"    uint pad[2];\n" \
+	"    float lit_median, ce_median;\n" \
 	"};\n" \
 	"uint meter_bin(float l) { return uint(clamp((log2(max(l, 1.0e-6)) + 12.0) * 4.0, 0.0, 63.0)); }\n" \
 	"/* a pixel's two luminances counted (the lit frame's, Classic's) */\n" \
@@ -1799,10 +1799,16 @@ lit light after it (tone_curved: display.prism_tone_curve's). */
 /* the exposure step, a single invocation after the frame's pass: the push
 constants' scene the meter's address; parameters.x display.prism_exposure (0
 fixed, 1 "ce": the lit frame's median pinned to Classic's over the same
-pixels, within the range; 2 "auto": to a middle grey, 0.18, EV -2 to 5 about
-it); values: the range (stops), the speed (stops a second),
-the bias (stops, added) and the seconds since the last step. Moved toward
-its aim at the speed, at once the first time; the histograms emptied */
+pixels, within the range; 2 "auto", as an eye: a share of the stops
+between the lit frame's median and AUTO_KEY (b30's sunlit beach comes out
+as bright as Classic's), AUTO_DOWN of them where the frame is brighter than
+the key and AUTO_UP where it is darker (an eye takes in bright light more
+than dim: a dark place stays darker than a bright one, a night a night), at
+most the range up and two thirds of it down); values: the range (stops),
+the speed (stops a second), the bias (stops, added) and the seconds since
+the last step. Moved toward its aim at the speed, at once the first time;
+the medians kept (log2, 99 none: the diagnostic log's), the histograms
+emptied */
 static const char exposure_source[] =
 	BAKE_COMMON
 	EXPOSURE_COMMON
@@ -1831,9 +1837,11 @@ static const char exposure_source[] =
 	"    float lit = median_of(m, 0u), ce = median_of(m, 64u);\n"
 	"    float aim = 0.0;\n"
 	"    bool measured = false;\n"
+	"    const float AUTO_KEY = 0.30, AUTO_DOWN = 0.5, AUTO_UP = 0.25;\n"
 	"    if (mode == 2u && lit < 90.0)\n"
 	"    {\n"
-	"        aim = clamp(log2(0.18) - lit, -2.0, 5.0) + bias;\n"
+	"        float stops = log2(AUTO_KEY) - lit;\n"
+	"        aim = clamp(stops * (stops < 0.0 ? AUTO_DOWN : AUTO_UP), -range * (2.0 / 3.0), range) + bias;\n"
 	"        measured = true;\n"
 	"    }\n"
 	"    else if (mode == 1u && lit < 90.0 && ce < 90.0)\n"
@@ -1852,6 +1860,8 @@ static const char exposure_source[] =
 	"    float step_ = speed * seconds;\n"
 	"    m.exposure = now + clamp(aim - now, -step_, step_);\n"
 	"    m.made = 1u;\n"
+	"    m.lit_median = lit;\n"
+	"    m.ce_median = ce;\n"
 	"    for (uint i = 0u; i < 128u; i++)\n"
 	"        m.histogram[i] = 0u;\n"
 	"}\n";
@@ -2312,6 +2322,7 @@ static const char raster_source[] =
 	"        vec3 diffuse = max(lit + sunlight, vec3(0.0));\n"
 	"        bool metered = view == 0u && job.exposure.z > 0.5 && (job.meter.x != 0u || job.meter.y != 0u);\n"
 	"        float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;\n"
+	"        int curve = int(job.exposure.y + 0.5);\n"
 	"        vec3 encoded = gamma > 1.001 ? pow(diffuse, vec3(1.0 / gamma)) : diffuse;\n"
 	"        if (whole)\n"
 	"        {\n"
@@ -2359,10 +2370,11 @@ static const char raster_source[] =
 	"                specular += min(distribution * visibility, 64.0) * fresnel * facing * v * 3.14159265 * s.rig[0].rgb;\n"
 	"            }\n"
 	"            vec3 kd = albedo * (1.0 - spec_share);\n"
-	"            /* (the exposure on the light, then held at white as CE's page\n"
-	"            held its light (a colour past white by its brightest channel, its\n"
-	"            hue kept), before the base; the glow as CE's; then the tone\n"
-	"            curve) */\n"
+	"            /* (the exposure on the light; under the \"ce\" curve held at white\n"
+	"            as CE's page held its light (a colour past white by its\n"
+	"            brightest channel, its hue kept), before the base; the glow as\n"
+	"            CE's; then the tone curve, under any other curve over the light\n"
+	"            unclamped) */\n"
 	"            vec3 glow = instance == 0u ? emissive * base.rgb : emissive;\n"
 	"            /* (the exposure's meter: a lit pixel in 16 (every 4th each way),\n"
 	"            this frame before the exposure against Classic's at the pixel, CE's\n"
@@ -2372,11 +2384,11 @@ static const char raster_source[] =
 	"                meter_add(job.meter, luma(kd * (encoded + dynamic) + specular + glow), luma(classic));\n"
 	"            vec3 light_ = (encoded + dynamic) * exposure;\n"
 	"            float brightest = max(light_.r, max(light_.g, light_.b));\n"
-	"            if (view == 0u && brightest > 1.0)\n"
+	"            if (view == 0u && curve == 0 && brightest > 1.0)\n"
 	"                light_ /= brightest;\n"
 	"            result = kd * light_ + specular * exposure + glow;\n"
 	"            if (view == 0u)\n"
-	"                result = tone_curved(result, int(job.exposure.y + 0.5));\n"
+	"                result = tone_curved(result, curve);\n"
 	"            raster_parts[0] = albedo;\n"
 	"            raster_parts[1] = specular;\n"
 	"            raster_parts[2] = kd * (encoded + dynamic);\n"
@@ -2385,14 +2397,19 @@ static const char raster_source[] =
 	"        {\n"
 	"            /* (CE's composition (display.prism_raster_composition \"ce\"): the\n"
 	"            light into CE's light target, which the resolve multiplies by CE's\n"
-	"            base and adds CE's additions to; the exposure on it and held at\n"
-	"            white as in the frame whole; the level's glow folded in as CE's\n"
-	"            lightmap pass folds it, an object's base colour (the G-buffer's, its\n"
-	"            combiners with white light) and glow as its combiners give them) */\n"
+	"            base and adds CE's additions to; the exposure on it, then under\n"
+	"            the \"ce\" curve held at white as in the frame whole, under any\n"
+	"            other the curve over the light unclamped (the sun past white\n"
+	"            rolled off, not flat: CE's additions, added after, are not); the\n"
+	"            level's glow folded in as CE's lightmap pass folds it, an object's\n"
+	"            base colour (the G-buffer's, its combiners with white light) and\n"
+	"            glow as its combiners give them) */\n"
 	"            vec3 light_ = (encoded + dynamic) * (view == 0u ? exposure : 1.0);\n"
 	"            float brightest = max(light_.r, max(light_.g, light_.b));\n"
-	"            if (view == 0u && brightest > 1.0)\n"
+	"            if (view == 0u && curve == 0 && brightest > 1.0)\n"
 	"                light_ /= brightest;\n"
+	"            else if (view == 0u && curve != 0)\n"
+	"                light_ = tone_curved(light_, curve);\n"
 	"            result = light_ + (instance == 0u ? emissive : vec3(0.0));\n"
 	"            if (instance != 0u)\n"
 	"            {\n"
