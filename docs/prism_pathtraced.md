@@ -223,11 +223,12 @@ does their means every 600 frames.
 - **Moving objects in the trace.** The traced scene is the bake's: the level and the static scenery. The moving
   objects (vehicles, doors and other devices, weapons on the ground, bodies) are lit, but cast no traced shadow, are
   not hit by rays and do not occlude the bake's light; the reference has the same scene, so the gates compare like
-  with like. The design (section 8.1) keeps `prism-pt`'s GPU object capture, skinning and per-draw acceleration
-  structures as the scene's instance manager; they live in `xgpu_vulkan_rt.c` and are fed by world AO's pre-pass,
-  which this mode does not draw. Feeding them from the G-buffer pass's object draws (an RT_FRAME mode that builds the
-  objects' structure and traces nothing) is the short way; a new instance manager the long one. The first touches the
-  frozen RT backend's file (not its modes), so it waits for a decision.
+  with like (the G scenes, with the AI erased, hold few). The old modes' object capture (`xgpu_vulkan_rt.c`, fed by
+  world AO's pre-pass) stays frozen and unused (D3). The plan: an instance manager in the path tracer's own files,
+  fed by the G-buffer pass's object draws (a capture variant of their vertex shaders writing world positions to a
+  buffer, as the G-buffer twin already computes world normals), a bottom-level structure a draw built once and
+  refitted as it moves (far ones first dropped under a budget, as `prism-pt` did), a top-level structure of the
+  bake's static ones and the objects', the objects' materials for a hit's shading, and the reference tracing the same.
 - **ReSTIR's spatial reuse** (left out on purpose, above) and the unbiased (ray-traced) reuse's correction.
 - **ReSTIR GI's spatial reuse** (its temporal reuse is in), the dynamic objects' occlusion of the baked light
   (`performance`'s short AO rays), traced-light upscaling and the async queue (M5, M6).
