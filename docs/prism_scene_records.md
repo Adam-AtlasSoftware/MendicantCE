@@ -77,7 +77,11 @@ in its own order, each its world matrix by its default pose's inverse, `models.c
 as its `SCENE_INSTANCE` node moved (last frame's world matrix by this frame's inverse). The two clip positions go to
 the pixel shader, whose motion is their difference: a skinned limb moves as its own nodes and weights move it, not as
 the part's first node. A model of more nodes than the constants hold (44: a Custom Edition map's, skinned a part's own
-nodes at a time) moves as its root. The first-person weapon has none on the screen.
+nodes at a time) moves as its root. The first-person weapon has none on the screen: its second run takes its draw's
+own constants. A part a replacement mesh draws (`display.prism_models`) is drawn as the mesh's pieces, whose vertices
+are skinned in the world already and whose constants have node 0's matrix the identity; their last frame's constants
+are that identity moved as the instance's root node moved (and the projection the pass before's), so a replacement
+mesh moves as its object's root, rigidly: last frame's skinning of its vertices is not kept.
 
 M2 adds `PRISM_BAKE` (92), sent with `display.lighting` `"raster"` (`port/linux/game/prism_bake.c`): each frame the
 in-game baker's control (the map and BSP, `display.bake`, `display.bake_quality`, the rebakes asked for, the bake
@@ -96,20 +100,26 @@ target of one sample), the fog and the decals are screen passes over the G-buffe
   and the camera and gives it the fog CE gives its surface there: the level's as CE's fog pass drew it (the density
   tables' curves: the atmosphere's a ramp, the plane's `(1 - cos(pi x)) / 2` along the view and under the plane,
   as its 16-texel tables are sampled), an object's as its draws' combiners had it (their vertex programs' curves),
-  blended as CE's fog pass blends. The level is not drawn again for its fog, and the opaque objects' draws have no fog
-  of their own (`rasterizer_xbox_models.c`: no fog constants, the planar fog's vertex program its lights' alike but
-  for the fog, no true atmospheric fog); the sky's models keep theirs, an object's blended parts (shader_model's
-  alpha-blended decal, which the G-buffer has not) theirs, and the transparent geometry its own. With
-  `XGPU_SCENE_FOG_FLAG_SCREEN`, in the fog screen's place for its second pass (`rasterizer_xbox_environment_fog.c`),
-  the fog screen's density (its near and far distances, its near density over its far, whether the level's and the
+  blended as CE's fog pass blends, over the window's view alone (a split screen's other window untouched). The level
+  is not drawn again for its fog, and the opaque objects' draws before the pass have no fog of their own
+  (`rasterizer_xbox_models.c`: no fog constants, the planar fog's vertex program its lights' alike but for the fog, no
+  true atmospheric fog; `render.h`'s `render_prism_deferred_fog_pending`, which `render_window` clears as it sends the
+  record); the sky's models keep theirs, an object's blended parts (shader_model's alpha-blended decal, which the
+  G-buffer has not) theirs, every model drawn after the pass (a partly cloaked unit's, drawn with the transparent
+  geometry; the game engine's after the objects, King of the Hill's hill) theirs, and the transparent geometry its
+  own. With `XGPU_SCENE_FOG_FLAG_SCREEN`, in the fog screen's place for its second pass
+  (`rasterizer_xbox_environment_fog.c`), the fog screen's density (its near and far distances, its near density over its far, whether the level's and the
   objects' pixels take it) written into the colour target's alpha, which the fog screen's layers then blend by as
   CE's do: the fog screen draws neither the level nor its queued models (the a30 rocks' "shell" of M0: nothing draws
-  the stock rock for the fog any more).
+  the stock rock for the fog any more). Where the window drew nothing into the G-buffer (a view of the sky alone) the
+  density is 0 everywhere in it, as CE's fog screen's clear leaves it.
 - `SCENE_DECAL` (`port/linux/game/prism_deferred.c`, `rasterizer_xbox_decals.c`): in each decal's draw's place (the
   primary, secondary and light layers), the decal projected by its box: its
   projection's basis and extent as `decals.c` made it (kept in a table of the port's by the decal's datum, never in
   the game's state), its radius out of the surface, its bitmap's texture and sprite, CE's framebuffer blend function,
-  its colour and intensity. The host (`xgpu_vulkan_post_decal`) draws it over the rectangle of the screen its box
+  its colour and intensity; its bitmap the 2D texture its draw's stage asks for (a decal definition naming a cube map
+  or a volume, which a map may, is drawn by CE, with CE's default texture, and the host refuses such an image for
+  the projection's 2D sampler). The host (`xgpu_vulkan_post_decal`) draws it over the rectangle of the screen its box
   covers, into the target the window's draws go to then (the base colour's in the base phase, else the light), on the
   level's pixels inside the box whose surface faces the decal's way (the G-buffer's normal within 75 degrees), as CE's
   decal draws blend: their combiners' colour of the texel and the decal's colour and intensity, the pipeline's blend
