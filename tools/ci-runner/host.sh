@@ -52,8 +52,8 @@ busy() {  # busy <name>: whether the runner is running a job
   return 1
 }
 
-playing() {  # whether a game plays: the installed GOAT H1, a Steam game, or one in gamemode
-  pgrep -f "^$HOME/Applications/OpenH1/bin/openh1" > /dev/null ||
+playing() {  # whether a game plays: the installed GOAT H1 (or its beta, OpenH1-Beta), a Steam game, or one in gamemode
+  pgrep -f "^$HOME/Applications/OpenH1[^/]*/bin/openh1" > /dev/null ||
     pgrep -f 'SteamLaunch AppId=' > /dev/null ||
     { command -v gamemoded > /dev/null && gamemoded -s 2>/dev/null | grep -q 'is active'; }
 }

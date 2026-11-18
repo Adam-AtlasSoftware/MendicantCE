@@ -109,7 +109,7 @@ jobs:
     # (on our machines' plan runners, tools/ci-runner, which builds never
     # hold, when the Pick the runner step's rule allows it: the same rule,
     # which runs-on cannot take from a step)
-    runs-on: ${{ (vars.SELF_HOSTED != 'off' && contains(fromJSON('["startupfoundry","g0atbutt","erincena"]'), github.actor) && contains(fromJSON('["startupfoundry","g0atbutt","erincena"]'), github.triggering_actor) && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master'))) && fromJSON('["self-hosted","goath1-plan"]') || 'ubuntu-24.04' }}
+    runs-on: ${{ (vars.SELF_HOSTED != 'off' && contains(fromJSON('["startupfoundry","g0atbutt","erincena"]'), github.actor) && contains(fromJSON('["startupfoundry","g0atbutt","erincena"]'), github.triggering_actor) && ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'))) && fromJSON('["self-hosted","goath1-plan"]') || 'ubuntu-24.04' }}
     timeout-minutes: 5
     outputs:
       runner: ${{ steps.free.outputs.runner }}
@@ -134,7 +134,9 @@ jobs:
     steps:
       # The Linux x86-64 jobs' runner (changes, linux-x86_64, tests): our own
       # machines (tools/ci-runner, warm caches, no queue) only for a pull
-      # request from this repository or a push to master, by a trusted
+      # request from this repository, a push to master or a run started by
+      # hand on master (a release's: its tests and Linux x86-64 build here,
+      # the platforms our machines cannot build on GitHub's), by a trusted
       # account; anything else, a fork's pull request above all, GitHub's.
       # Our machines never run an untrusted account's code. (The repository
       # variable SELF_HOSTED=off sends everything to GitHub's.)
@@ -155,7 +157,7 @@ jobs:
           case " $TRUSTED " in *" $ACTOR "*) case " $TRUSTED " in *" $TRIGGERING_ACTOR "*)
             case "$EVENT:$REF" in
               pull_request:*) [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" = "$REPO" ] && own=true ;;
-              push:refs/heads/master) own=true ;;
+              push:refs/heads/master|workflow_dispatch:refs/heads/master) own=true ;;
             esac ;; esac ;; esac
           [ "$SWITCH" != off ] || own=false
           if [ "$HERE" = self-hosted ] && [ "$own" != true ]; then
