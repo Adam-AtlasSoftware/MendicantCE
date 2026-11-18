@@ -1401,11 +1401,23 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		REFERENCE_MEASURE frames, its sums copied for the file once it
 		stops; its means drawn */
 		int adding = !pt.ref_stopped && pt.ref_count < pt.ref_frames;
+		/* (HALO_PT_REFERENCE_LIVE=1, a diagnosis: the light pass's own
+		estimate summed in R's place, its reservoirs reused from frame to
+		frame as the live frames reuse them, no denoiser) */
+		static int live = -1;
 
+		if (live < 0)
+			live = getenv("HALO_PT_REFERENCE_LIVE") ? atoi(getenv("HALO_PT_REFERENCE_LIVE")) != 0 : 0;
 		if (adding)
 		{
 			pt.ref_count++;
-			dispatch(commands, PASS_REFERENCE, scene, slot_buffer->address, pt.ref_count, 0, 0, 0, groups_x, groups_y);
+			if (live)
+			{
+				dispatch(commands, PASS_LIGHT, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
+				barrier(commands);
+			}
+			dispatch(commands, PASS_REFERENCE, scene, slot_buffer->address, pt.ref_count, live ? 1u : 0u, 0, 0,
+				groups_x, groups_y);
 			if (pt.ref_count >= pt.ref_frames)
 				pt.ref_stopped = 1;
 		}
@@ -1445,7 +1457,9 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		stamp(commands, time_slot, TIMED);
 		if (job->exposure[2] > 0.5f)
 			xgpu_vulkan_bake_exposure_step(commands);
-		pt.history_valid = 0;
+		pt.history_valid = live && adding;
+		if (live && adding)
+			pt.parity ^= 1u;
 	}
 	else
 	{

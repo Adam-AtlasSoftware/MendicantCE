@@ -1935,6 +1935,9 @@ void main()
     reflections (G5's second pose); by the ray alone a semi-glossy wall's
     pool of a small lamp's light is met by few rays (G4's second pose)) */
     bool glossy = g.roughness <= job.settings.y && indirect_on;
+    /* (the reflection ray's length, for the specular history's virtual
+    motion: 0 where none is traced, far where it leaves the level) */
+    float spec_hit = 0.0;
     if (direct_on)
     {
         /* the domes, the lamps, the fixtures, the dynamic lights */
@@ -1981,6 +1984,7 @@ void main()
             if (dot(weight, weight) > 0.0)
             {
                 vec3 met = hit_light(o, r, 300.0, true, hd);
+                spec_hit = hd > 0.0 ? hd : 1000.0;
                 if (glossy && direct_on && hit_light_triangle != 0xffffffffu && hd > 0.0)
                 {
                     vec3 lamp = lamp_met(hit_light_triangle, r);
@@ -2025,6 +2029,12 @@ void main()
     imageStore(noisy_specular, pixel, vec4(demodulated, luma(demodulated)));
     imageStore(clean_diffuse, pixel, vec4(clean_d, 0.0));
     imageStore(clean_specular, pixel, vec4(clean_s, 0.0));
+    if (spec_hit > 0.0)
+    {
+        uvec4 guide = guide_of(g);
+        guide.w = (guide.w & 0xffffu) | (packHalf2x16(vec2(0.0, min(spec_hit, 60000.0))) & 0xffff0000u);
+        imageStore(guide_now, pixel, guide);
+    }
 }
 
 //@pass temporal
@@ -2168,6 +2178,68 @@ bool reproject(ivec2 pixel, Surface g, out vec4 d, out vec4 sp, out vec4 mo, out
     }
     return true;
 }
+/* the specular's history by its virtual motion (ReLAX's, after Zhdan's
+talks on NVIDIA's denoisers, from their published descriptions): a
+reflection moves with the reflected point's image behind the surface (the
+point along the eye's ray past the surface by the reflection's length,
+exact for a plane mirror), not with the surface, so a glossy floor's
+history taken by the surface's motion smears the reflection along the
+move (round 3's G4 and G5 floors streaking toward the point the eye moved
+to). The reflection's length the mean of this pixel's and its 3 x 3
+neighbours' rays on the same surface (the guide's w, the light pass's);
+the last frame's place of the image found as the surface's is, its 2 x 2
+taps each this surface's (a plane's image falls on the plane), bilinear.
+amount: the share the virtual motion takes, 1 for a mirror, none past a
+roughness of 0.45 (a wide lobe's reflection moves with the surface); 0
+where no ray was traced. False where the image's place holds no history
+of this surface (the caller then shortens the specular's) */
+bool specular_virtual(ivec2 pixel, Surface g, out vec4 sp, out vec4 ms, out float amount)
+{
+    sp = vec4(0.0);
+    ms = vec4(0.0);
+    amount = 0.0;
+    if (g.instance != 0u)
+        return false;
+    uint here = imageLoad(guide_now, pixel).x;
+    float sum = 0.0, count = 0.0;
+    for (int k = 0; k < 9; k++)
+    {
+        ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
+        if (!inside(q))
+            continue;
+        uvec4 gq = imageLoad(guide_now, q);
+        float h = unpackHalf2x16(gq.w).y;
+        if (gq.x != here || !(h > 0.0))
+            continue;
+        sum += h;
+        count += 1.0;
+    }
+    if (count < 1.0)
+        return false;
+    amount = 1.0 - smoothstep(0.1, 0.45, g.roughness);
+    if (amount <= 0.0)
+        return false;
+    vec3 image = g.point - g.eye * (sum / count);
+    vec2 at = last_pixel(image, vec2(pixel), g.motion, true);
+    ivec2 a = ivec2(floor(at));
+    vec2 f = at - vec2(a);
+    float tolerance = 0.02 + 0.004 * g.distance, weights = 0.0;
+    for (int k = 0; k < 4; k++)
+    {
+        ivec2 o = ivec2(k & 1, k >> 1);
+        float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+        if (w <= 1.0e-4 || !history_tap(a + o, g, tolerance))
+            continue;
+        sp += w * imageLoad(spec_last, a + o);
+        ms += w * imageLoad(spec_moments_last, a + o);
+        weights += w;
+    }
+    if (weights < 0.5)
+        return false;
+    sp /= weights;
+    ms /= weights;
+    return true;
+}
 void main()
 {
     s = Scene(push.scene);
@@ -2194,6 +2266,21 @@ void main()
     vec4 hd, hs, hm, hms, hsun;
     float length_d;
     bool history = reproject(pixel, g, hd, hs, hm, hms, hsun, length_d);
+    if (history)
+    {
+        /* (the specular's history by the reflection's image where it moves
+        with it; where the image's place holds none, the surface's kept
+        short, in proportion) */
+        vec4 vs, vms;
+        float amount;
+        if (specular_virtual(pixel, g, vs, vms, amount))
+        {
+            hs = vec4(mix(hs.rgb, vs.rgb, amount), mix(hs.a, min(hs.a, vs.a), amount));
+            hms = mix(hms, vms, amount);
+        }
+        else if (amount > 0.0)
+            hs.a = mix(hs.a, min(hs.a, 2.0), amount);
+    }
     /* (the counters, a level pixel in 16 that looks for its history: its
     last frame's place in the view, the distance the last frame saw there its
     point's in the last frame's camera (within 2%: the place is its own
@@ -2844,7 +2931,11 @@ each frame, summed (Welford's running mean, so
 that a long sum keeps its precision) into job.sums: per pixel the diffuse
 light's mean (3), the specular light's (3), and the mean and the sum of
 squared deviations of the frame's luminance there (its noise:
-reference_stats). parameters.x this frame's number in the sum (1 on) */
+reference_stats). parameters.x this frame's number in the sum (1 on).
+parameters.y 1 (HALO_PT_REFERENCE_LIVE, a diagnosis): the light pass's own
+estimate summed instead (its light as traced, ReSTIR's reuse kept, no
+denoiser), so that its mean against R's says what the live estimator holds
+apart from what the denoiser does */
 void main()
 {
     s = Scene(push.scene);
@@ -2869,7 +2960,7 @@ void main()
     vec3 o = g.point + g.normal * offset;
     vec3 share = specular_share(g);
     vec3 kd = g.albedo * (1.0 - share);
-    uint paths = max(uint(job.extra.y), 1u);
+    uint paths = push.parameters.y == 1u ? 0u : max(uint(job.extra.y), 1u);
     vec3 ld_sum = vec3(0.0), ls_sum = vec3(0.0);
     /* (the frame's luminance, and its parts': the light the pixel takes
     directly (the floor, the sun, the domes, the lamps, fixtures and dynamic
@@ -2948,6 +3039,19 @@ void main()
         y_sum += y;
         y2_sum += y * y;
         parts_sum += vec3(y_direct, luma(kd * bounce), luma(reflection));
+    }
+    if (paths == 0u)
+    {
+        /* (the live estimate: the light pass's parts as composite takes them
+        with the denoiser off) */
+        vec3 sd, ss;
+        sun_parts(g, sd, ss);
+        float v = imageLoad(sun_raw, pixel).x;
+        ld_sum = imageLoad(clean_diffuse, pixel).rgb + imageLoad(noisy_diffuse, pixel).rgb + sd * v;
+        ls_sum = imageLoad(clean_specular, pixel).rgb + imageLoad(noisy_specular, pixel).rgb * share + ss * v;
+        y_sum = luma(kd * ld_sum + ls_sum);
+        parts_sum = vec3(y_sum, 0.0, 0.0);
+        paths = 1u;
     }
     /* (this frame's paths as one sample of their mean: Welford's update of
     the running means and of the luminance's squared deviations) */

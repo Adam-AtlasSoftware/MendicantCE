@@ -678,3 +678,31 @@ def test_the_anti_firefly_holds_a_lone_pixel_and_keeps_a_gradient_and_an_edge():
     instances[:, 6:] = 1
     edge = np.where(instances == 1, 10.0, 0.1)
     assert np.allclose(model.anti_firefly(edge, instances), edge)
+
+
+def test_specular_virtual_point_is_a_plane_mirrors_image():
+    """for a plane mirror the reflection's image (the point past the surface along the eye's ray by the reflection's
+    length) is the reflected point mirrored through the plane, wherever the eye stands: so a last frame's camera
+    sees the reflection at the image's place, and the history found there is the reflection's"""
+    rng = np.random.default_rng(7)
+    normal = np.array([0.0, 0.0, 1.0])
+    for _ in range(50):
+        camera = rng.uniform(-5, 5, 3)
+        camera[2] = rng.uniform(0.5, 4.0)
+        point = np.array([rng.uniform(-3, 3), rng.uniform(-3, 3), 0.0])
+        eye = (camera - point) / np.linalg.norm(camera - point)
+        r = 2.0 * np.dot(eye, normal) * normal - eye
+        hit_distance = rng.uniform(0.5, 20.0)
+        reflected = point + r * hit_distance
+        mirrored = reflected * np.array([1.0, 1.0, -1.0])
+        assert np.allclose(model.specular_virtual_point(point, eye, hit_distance), mirrored)
+
+
+def test_specular_virtual_amount_mirror_to_rough():
+    assert model.specular_virtual_amount(0.0) == 1.0
+    assert model.specular_virtual_amount(0.1) == 1.0
+    assert model.specular_virtual_amount(0.45) == 0.0
+    assert 0.0 < model.specular_virtual_amount(0.3) < 1.0
+    text = GLSL.read_text()
+    assert "amount = 1.0 - smoothstep(0.1, 0.45, g.roughness);" in text
+    assert "vec3 image = g.point - g.eye * (sum / count);" in text

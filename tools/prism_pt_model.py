@@ -570,3 +570,15 @@ def visibility_step(history, v, neighbourhood, most=32.0, most_fast=4.0):
         slow = min(max(slow, fast - 2.0 * sv - 0.1), fast + 2.0 * sv + 0.1)
         n = min(n, most_fast * 2.0)
     return (slow, fast, m2, n)
+
+
+def specular_virtual_point(point, eye, hit_distance):
+    """the temporal pass's reflection image (specular_virtual): the point along the eye's ray past the surface by the
+    reflection's length; eye the unit vector from the point to the eye"""
+    return np.asarray(point, float) - np.asarray(eye, float) * hit_distance
+
+
+def specular_virtual_amount(roughness):
+    """the share of the specular's history taken by the virtual motion: 1 - smoothstep(0.1, 0.45, roughness)"""
+    x = min(max((roughness - 0.1) / 0.35, 0.0), 1.0)
+    return 1.0 - x * x * (3.0 - 2.0 * x)
