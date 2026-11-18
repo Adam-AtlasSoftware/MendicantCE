@@ -354,6 +354,9 @@ def check(ctx, packs, quiet=False):
         for module, pip in (("scipy", "scipy"), ("xatlas", "xatlas")):
             if not importable(module):
                 problems.append(f"python: no {module} (pip install {pip})")
+        if importable("xatlas") and not xatlas_new_enough():
+            problems.append("python: xatlas is older than 0.0.11, which the level remodels' lightmap atlas needs "
+                            "(pip install -U xatlas)")
     if "torch" in uses:
         for module, pip in (("torch", "torch (pytorch.org says which build suits your graphics card)"),
                             ("spandrel", "spandrel")):
@@ -405,6 +408,12 @@ def importable(module):
         return True
     except ImportError:
         return False
+
+
+def xatlas_new_enough():
+    """xatlas 0.0.11 or newer: the atlas step (wg3_pwg.atlas) reads each chart's vertices back, which 0.0.9 cannot"""
+    import xatlas
+    return all(hasattr(xatlas.Atlas, m) for m in ("get_mesh_vertex_assignment", "get_mesh_chart_count"))
 
 
 def blender_version(blender):

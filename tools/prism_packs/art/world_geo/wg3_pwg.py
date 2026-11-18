@@ -597,6 +597,17 @@ def far_deviation(level, differs):
 # ---------------------------------------------------------------- the atlas
 
 
+def need_xatlas():
+    """xatlas there and new enough (0.0.11: 0.0.9 has no Atlas.get_mesh_vertex_assignment nor get_mesh_chart_count,
+    which atlas() reads each chart's vertices back with), else exit saying so (prism_packs.py's check asks the same)"""
+    try:
+        import xatlas
+    except ImportError:
+        raise SystemExit("no xatlas (pip install xatlas)")
+    if not all(hasattr(xatlas.Atlas, m) for m in ("get_mesh_vertex_assignment", "get_mesh_chart_count")):
+        raise SystemExit("xatlas is older than 0.0.11, which the lightmap atlas needs (pip install -U xatlas)")
+
+
 def atlas(level, density=ATLAS_DENSITY, page=ATLAS_PAGE, padding=ATLAS_PADDING):
     """xatlas over each part's near triangles, packed together: per part (chart (ntc), uv (ntc, 3, 2) in eighths of
     a texel), each chart's page, and the pages' count and size"""

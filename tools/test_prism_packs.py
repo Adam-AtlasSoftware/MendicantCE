@@ -110,6 +110,36 @@ def test_a_fetch_asks_first(tmp_path):
     assert not any(tmp_path.iterdir())
 
 
+def test_an_xatlas_too_old_for_the_atlas_is_reported(tmp_path, monkeypatch):
+    # (0.0.9 has the rest of the module but not the two calls wg3_pwg.atlas reads each chart's vertices back with)
+    import types
+
+    class Context:
+        levels = ["a10"]
+        extractor = blender = invader = game = None
+        upscalers = tmp_path
+
+        def maps_dir(self):
+            return tmp_path / "maps"
+
+        def map_names(self):
+            return []
+
+    old = types.ModuleType("xatlas")
+    old.Atlas = type("Atlas", (), {"add_mesh": None, "generate": None})
+    monkeypatch.setitem(sys.modules, "xatlas", old)
+    assert not prism_packs.xatlas_new_enough()
+    problems = prism_packs.check(Context(), ["world"], quiet=True)
+    assert any("xatlas is older than 0.0.11" in p for p in problems)
+    new = types.ModuleType("xatlas")
+    new.Atlas = type("Atlas", (), {"get_mesh_vertex_assignment": None, "get_mesh_chart_count": None})
+    monkeypatch.setitem(sys.modules, "xatlas", new)
+    assert prism_packs.xatlas_new_enough()
+    assert not any(p.startswith(("python: no xatlas", "python: xatlas"))
+                   for p in prism_packs.check(Context(), ["world"], quiet=True))
+    assert "xatlas>=0.0.11" in (PACKS / "requirements.txt").read_text().split()
+
+
 def test_recipe_paths_are_filled_in(tmp_path, monkeypatch):
     monkeypatch.setenv("PRISM_PACKS_WORK", str(tmp_path))
     sys.path.insert(0, str(PACKS / "art"))

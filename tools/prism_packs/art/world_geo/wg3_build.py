@@ -45,6 +45,8 @@ def surface_name(level, s):
 
 def main():
     gltf, src, dst, report_path = sys.argv[1:5]
+    # (the atlas's xatlas asked for first: a missing or old one stops the step before the checks' work, not after)
+    v3.need_xatlas()
     _, mats = wg.load_bsp(gltf)
     f = v3.read(src)
     report = dict(src=src, version_in=f["version"])
