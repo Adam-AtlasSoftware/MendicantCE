@@ -26,7 +26,7 @@ def test_shaders_are_their_glsl():
 
 def test_the_glsl_has_every_pass_and_shares_the_bakes_scene():
     text = GLSL.read_text()
-    for name in ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats", "lamps"):
+    for name in ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats", "lamps", "cache"):
         assert f"//@pass {name}\n" in text
     # (the bake's own functions, not copies: the scene traced and the bake made by one estimator)
     for used in ("lamp_pick(", "lamp_direction(", "lamp_visible(", "domes_at(", "fixture_light(", "fixtures_ris(",
@@ -726,3 +726,37 @@ def test_preblur_spreads_a_lucky_sample_and_keeps_the_light():
     text = GLSL.read_text()
     assert "const int PREBLUR_TAPS = 12;" in text and "const float PREBLUR_RADIUS = 6.0;" in text
     assert "float a = float(k) * 2.3999632 + turn;" in text
+
+
+def _tree_cone(a, b):
+    """xgpu_vulkan_pt.c's tree_cone: the smallest cone (axis, cosine of its half angle) holding two cones"""
+    (axis_a, cos_a), (axis_b, cos_b) = a, b
+    ta, tb = np.arccos(np.clip(cos_a, -1, 1)), np.arccos(np.clip(cos_b, -1, 1))
+    if ta < tb:
+        axis_a, axis_b, ta, tb = axis_b, axis_a, tb, ta
+    dot = float(np.dot(axis_a, axis_b))
+    td = np.arccos(np.clip(dot, -1, 1))
+    if min(td + tb, np.pi) <= ta:
+        return axis_a, np.cos(ta)
+    to = 0.5 * (ta + td + tb)
+    if to >= np.pi or td < 1e-6:
+        return axis_a, -1.0 if to >= np.pi else np.cos(to)
+    tr = to - ta
+    ortho = axis_b - dot * axis_a
+    ortho = ortho / np.linalg.norm(ortho)
+    axis = axis_a * np.cos(tr) + ortho * np.sin(tr)
+    return axis / np.linalg.norm(axis), np.cos(to)
+
+
+def test_the_light_trees_cone_holds_both_childrens_normals():
+    rng = np.random.default_rng(5)
+    for _ in range(2000):
+        cones = []
+        for _ in range(2):
+            v = rng.normal(size=3)
+            cones.append((v / np.linalg.norm(v), float(np.cos(rng.uniform(0, 1.5)))))
+        axis, cos_o = _tree_cone(*cones)
+        # (every direction of each child's cone is inside the merged one: its axis and its rim's farthest point)
+        for child_axis, child_cos in cones:
+            gap = np.arccos(np.clip(np.dot(axis, child_axis), -1, 1)) + np.arccos(child_cos)
+            assert gap <= np.arccos(np.clip(cos_o, -1, 1)) + 1e-4

@@ -78,6 +78,18 @@ between its noise's measures, the fewest it sums, the gates' frames' width
 copy holds at most, a node's floats */
 #define LAMPS_MOST 65536u
 #define TREE_NODE_FLOATS 16u
+/* the radiance cache: its cells (a power of two) and each one's words
+(xgpu_vulkan_pt.glsl's CACHE_WORDS), whether it is on by default, and the
+indirect light's clamp by default (0 none) */
+#define CACHE_CELLS (1u << 19)
+#define CACHE_WORDS 12u
+#define CACHE_DEFAULT 0
+/* ReSTIR DI's initial candidates taken from the light tree (of 8) */
+#define TREE_CANDIDATES_DEFAULT 1
+/* whether the tree's importance takes its nodes' emitter cones (round 6:
+1.5 ms of the RTX 3070 Ti's light pass at G4, 1080p) */
+#define TREE_CONES_DEFAULT 0
+#define INDIRECT_CLAMP_DEFAULT 0.0f
 /* the passes timed, the timestamps a frame (a begin and each pass's end),
 the frames' slots of them */
 #define TIMED 5u
@@ -94,6 +106,7 @@ enum
 	PASS_REFERENCE,
 	PASS_REFERENCE_STATS,
 	PASS_LAMPS,
+	PASS_CACHE,
 	PASSES
 };
 
@@ -175,6 +188,8 @@ struct pt_job
 	VkDeviceAddress pages, charts, vpages, table, tiles, indirect, sun, masks;
 	VkDeviceAddress bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
 	VkDeviceAddress sums, stats, meter, counters, tree, lamps_out, objects, object_table;
+	/* the radiance cache (its cells; 0 off), a word kept for the alignment */
+	VkDeviceAddress cache, unused;
 	float camera[4][4];
 	float last_camera[4][4];
 	int32_t corners[4];
@@ -189,6 +204,10 @@ struct pt_job
 	/* display.prism_exposure (0 fixed, 1 ce, 2 auto), display.prism_tone_curve
 	(0 ce, 1 filmic, 2 aces, 3 local), 1 where the frame meters */
 	float exposure[4];
+	/* the indirect light's clamp (a bounce's luminance, 0 none), the radiance
+	cache's cell at a unit's distance, the samples a cell needs before it is
+	read, the most it keeps */
+	float cache_settings[4];
 };
 
 struct pt_push
@@ -261,6 +280,11 @@ static struct
 	submission, the scene's generation it is of), the tree (its nodes) and
 	the generation it was built for */
 	struct pt_buffer lamps_readback, tree;
+	/* the radiance cache's cells (made once; emptied for each bake's scene
+	generation) */
+	struct pt_buffer cache;
+	uint32_t cache_generation;
+	int cache_made;
 	uint64_t lamps_serial;
 	uint32_t lamps_generation, tree_generation, tree_nodes;
 	int tree_failed;
@@ -468,6 +492,7 @@ static int make(void)
 		!pipeline_make(PASS_COMPOSITE, xgpu_vulkan_pt_composite_words, xgpu_vulkan_pt_composite_count) ||
 		!pipeline_make(PASS_REFERENCE, xgpu_vulkan_pt_reference_words, xgpu_vulkan_pt_reference_count) ||
 		!pipeline_make(PASS_LAMPS, xgpu_vulkan_pt_lamps_words, xgpu_vulkan_pt_lamps_count) ||
+		!pipeline_make(PASS_CACHE, xgpu_vulkan_pt_cache_words, xgpu_vulkan_pt_cache_count) ||
 		!pipeline_make(PASS_REFERENCE_STATS, xgpu_vulkan_pt_reference_stats_words,
 		xgpu_vulkan_pt_reference_stats_count))
 	{
@@ -871,6 +896,53 @@ static void float_bits(float *to, uint32_t value)
 
 /* the node over order[first .. first + count) (lamps' indices), its parent's
 index (the root's its own, unused); its index */
+/* a node's cone of its emitters' normals (Conty Estevez and Kulla 2018's
+orientation bounds): the smallest cone holding its children's two, its axis
+at 11 to 13 and its half angle's cosine at 15 (a leaf's: its normal, 1) */
+static void tree_cone(float *node, const float *a, const float *b)
+{
+	float theta_a = acosf(fminf(fmaxf(a[15], -1.0f), 1.0f)), theta_b = acosf(fminf(fmaxf(b[15], -1.0f), 1.0f));
+	float axis[3], d, theta_d, theta_o, theta_r, length, ortho[3], dot_ab;
+	int k;
+
+	if (theta_a < theta_b)
+	{
+		const float *t = a;
+		float tt = theta_a;
+
+		a = b;
+		b = t;
+		theta_a = theta_b;
+		theta_b = tt;
+	}
+	dot_ab = a[11] * b[11] + a[12] * b[12] + a[13] * b[13];
+	theta_d = acosf(fminf(fmaxf(dot_ab, -1.0f), 1.0f));
+	if (fminf(theta_d + theta_b, 3.14159265f) <= theta_a)
+	{
+		memcpy(node + 11, a + 11, 3 * sizeof(float));
+		node[15] = a[15];
+		return;
+	}
+	theta_o = 0.5f * (theta_a + theta_d + theta_b);
+	if (theta_o >= 3.14159265f || theta_d < 1.0e-6f)
+	{
+		memcpy(node + 11, a + 11, 3 * sizeof(float));
+		node[15] = theta_o >= 3.14159265f ? -1.0f : cosf(theta_o);
+		return;
+	}
+	/* (a's axis turned toward b's by theta_o less theta_a) */
+	theta_r = theta_o - theta_a;
+	for (k = 0; k < 3; k++)
+		ortho[k] = b[11 + k] - dot_ab * a[11 + k];
+	length = sqrtf(ortho[0] * ortho[0] + ortho[1] * ortho[1] + ortho[2] * ortho[2]);
+	for (k = 0; k < 3; k++)
+		axis[k] = a[11 + k] * cosf(theta_r) + (length > 0.0f ? ortho[k] / length : 0.0f) * sinf(theta_r);
+	d = sqrtf(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+	for (k = 0; k < 3; k++)
+		node[11 + k] = d > 0.0f ? axis[k] / d : a[11 + k];
+	node[15] = cosf(theta_o);
+}
+
 static uint32_t tree_node(float *nodes, uint32_t *node_count, uint32_t *order, uint32_t first, uint32_t count,
 	uint32_t parent)
 {
@@ -932,6 +1004,8 @@ static uint32_t tree_node(float *nodes, uint32_t *node_count, uint32_t *order, u
 		float_bits(node + 10, order[first]);
 		memcpy(node + 11, n, sizeof(n));
 		node[14] = n[0] * lamp[0] + n[1] * lamp[1] + n[2] * lamp[2];
+		/* (its emitters' cone: the triangle's normal, no spread) */
+		node[15] = 1.0f;
 		return index;
 	}
 	for (axis = 0; axis < 3; axis++)
@@ -947,6 +1021,7 @@ static uint32_t tree_node(float *nodes, uint32_t *node_count, uint32_t *order, u
 	node = nodes + (size_t)index * TREE_NODE_FLOATS;
 	float_bits(node + 7, left);
 	float_bits(node + 8, right);
+	tree_cone(node, nodes + (size_t)left * TREE_NODE_FLOATS, nodes + (size_t)right * TREE_NODE_FLOATS);
 	return index;
 }
 
@@ -1218,7 +1293,58 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		{
 			job->tree = pt.tree.address;
 			job->extra[3] = (float)pt.tree_nodes;
+			/* (ReSTIR DI's candidates from the tree, of its 8:
+			HALO_PT_TREE_CANDIDATES, the rest the grid's) */
+			{
+				static int from_tree = -1, cones = -1;
+
+				if (from_tree < 0)
+					from_tree = getenv("HALO_PT_TREE_CANDIDATES") ?
+						atoi(getenv("HALO_PT_TREE_CANDIDATES")) : TREE_CANDIDATES_DEFAULT;
+				if (cones < 0)
+					cones = getenv("HALO_PT_TREE_CONES") ? atoi(getenv("HALO_PT_TREE_CONES")) != 0 : TREE_CONES_DEFAULT;
+				/* (16 more where the nodes' emitter cones bound the importance) */
+				job->volume[3] = (float)(from_tree < 1 ? 1 : from_tree > 8 ? 8 : from_tree) + (cones ? 16.0f : 0.0f);
+			}
 		}
+	}
+	/* (the radiance cache (HALO_PT_CACHE=0 none): a world-space hash grid of
+	the diffuse bounce's light at its hits, which the bounce reads where a
+	cell has its samples; the live frames only, never the reference; and the
+	indirect light's clamp, HALO_PT_INDIRECT_CLAMP, a bounce's luminance in
+	the bake's unit (0: none)) */
+	{
+		static int cache_on = -1;
+		static float clamp = -1.0f, cell = 0.03f, least = 8.0f, most = 256.0f;
+
+		if (cache_on < 0)
+		{
+			cache_on = getenv("HALO_PT_CACHE") ? atoi(getenv("HALO_PT_CACHE")) != 0 : CACHE_DEFAULT;
+			clamp = getenv("HALO_PT_INDIRECT_CLAMP") ? (float)atof(getenv("HALO_PT_INDIRECT_CLAMP")) :
+				INDIRECT_CLAMP_DEFAULT;
+			if (getenv("HALO_PT_CACHE_CELL"))
+				cell = (float)atof(getenv("HALO_PT_CACHE_CELL"));
+			if (getenv("HALO_PT_CACHE_LEAST"))
+				least = (float)atof(getenv("HALO_PT_CACHE_LEAST"));
+			if (getenv("HALO_PT_CACHE_MOST"))
+				most = (float)atof(getenv("HALO_PT_CACHE_MOST"));
+		}
+		job->cache_settings[0] = clamp > 0.0f ? clamp : 0.0f;
+		job->cache_settings[1] = cell;
+		job->cache_settings[2] = least;
+		job->cache_settings[3] = most;
+		if (cache_on && !reference && !pt.cache_made)
+		{
+			pt.cache_made = 1;
+			if (!buffer_make((VkDeviceSize)CACHE_CELLS * CACHE_WORDS * 4, 0, &pt.cache))
+				host_logf(HOST_LOG_WARN, "prism pt: no memory for the radiance cache: none");
+			else
+				host_logf(HOST_LOG_INFO, "prism pt: the radiance cache: %u cells (%u MB)", CACHE_CELLS,
+					(unsigned)((size_t)CACHE_CELLS * CACHE_WORDS * 4 >> 20));
+			pt.cache_generation = ~lookup.generation;
+		}
+		if (cache_on && !reference && pt.cache.buffer)
+			job->cache = pt.cache.address;
 	}
 	/* (the moving objects: the G-buffer pass's object draws, their
 	structures built at its end, xgpu_vulkan_rt.c; HALO_PT_OBJECTS=0 none) */
@@ -1479,7 +1605,20 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		/* the light; the denoiser (temporal, fix, atrous: the one call site
 		of the denoise step, where the plugins' denoise entry points go);
 		the frame */
+		if (job->cache && pt.cache_generation != lookup.generation)
+		{
+			/* (a new scene's cache: emptied) */
+			vkCmdFillBuffer(commands, pt.cache.buffer, 0, VK_WHOLE_SIZE, 0);
+			pt.cache_generation = lookup.generation;
+			barrier(commands);
+		}
 		dispatch(commands, PASS_LIGHT, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
+		if (job->cache)
+		{
+			/* (the cache's cells take this frame's samples) */
+			barrier(commands);
+			dispatch(commands, PASS_CACHE, scene, slot_buffer->address, CACHE_CELLS, 0, 0, 0, CACHE_CELLS / 256u, 1);
+		}
 		stamp(commands, time_slot, 1);
 		barrier(commands);
 		if (!denoiser_off)
@@ -1563,7 +1702,7 @@ void xgpu_vulkan_pt_shutdown(void)
 		&pt.reservoir_info[1], &pt.gi_point[0], &pt.gi_point[1], &pt.gi_data[0], &pt.gi_data[1],
 	};
 	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
-		&pt.tree };
+		&pt.tree, &pt.cache };
 
 	if (!pt.made)
 		return;
