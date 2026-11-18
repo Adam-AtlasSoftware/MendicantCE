@@ -291,6 +291,13 @@ void host_render_stream_call(void (*function)(void *argument), void *argument);
 statistics, for the host's logs (read as they are, racing with their
 writers) */
 const struct xgpu_stream_ring *host_render_stream_ring(void);
+/* (render thread) the display holds the render thread from now (1), or no
+longer (0): a call that waits for the display's pacing (a FIFO swapchain's
+vkAcquireNextImageKHR or vkQueuePresentKHR). That time is no work of the
+thread's (the ring's render_microseconds leave it out), and a guest's wait
+for the render thread or the GPU meanwhile is the display's pacing
+(paced_microseconds: a report's) */
+void host_render_stream_display_blocking(int blocking);
 /* the backend's GPU time on the frames so far, in nanoseconds (a running
 total; at a frame's end, on the render thread): written into the ring for
 the guest (gpu_microseconds: a report's) */

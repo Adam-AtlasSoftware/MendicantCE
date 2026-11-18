@@ -44,6 +44,10 @@ static void draw_times_collect(void) {}
 static struct { int pending; uint64_t serial; } pass_times;
 static void pass_times_frame_end(void) {}
 static void pass_times_collect(void) {}
+/* (the pass's owner, named for the pass times: xgpu_vulkan_stream.c's) */
+#define PASS_OWNER_MSAA_RESOLVE "MSAA RESOLVE"
+#define PASS_OWNER_FINAL "FINAL PASS"
+static void xgpu_vulkan_pass_owner(const char *owner) { (void)owner; }
 /* (the replay's cost timing: off here) */
 static void timing_frame_end(void) {}
 static void xgpu_vulkan_gpu_time_end(void) { assert(0); }

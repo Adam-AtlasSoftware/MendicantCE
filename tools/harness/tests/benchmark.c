@@ -16,6 +16,7 @@ takes the code.
 #include <stdint.h>
 
 #define REPORT_HITCH_MS 50
+#define REPORT_STALL_MS 100
 #define REPORT_GPU_UNKNOWN 0xFFFFFFFFu
 #define TICKS_PER_SECOND 30
 
@@ -63,10 +64,11 @@ int main(int argc, char **argv)
 		CHECK(near(measure.seconds, 10.46), "%f seconds", measure.seconds);
 		CHECK(near(measure.average_ms, 10.46), "average %f ms", measure.average_ms);
 		CHECK(near(measure.average_fps, 1000.0 / 10.46), "average %f fps", measure.average_fps);
-		/* the slowest 10 frames: 100 ms and nine of 40 */
-		CHECK(near(measure.low_1_fps, 1000.0 / 46.0), "1%% low %f fps", measure.low_1_fps);
-		/* the slowest frame alone */
-		CHECK(near(measure.low_01_fps, 10.0), "0.1%% low %f fps", measure.low_01_fps);
+		/* the slowest 9 of the 999 frames but the stall of 100 ms (Save
+		Report's, report_low_fps): the nine of 40 */
+		CHECK(near(measure.low_1_fps, 25.0), "1%% low %f fps", measure.low_1_fps);
+		/* the slowest frame alone, but the stall */
+		CHECK(near(measure.low_01_fps, 25.0), "0.1%% low %f fps", measure.low_01_fps);
 		CHECK(near(measure.p50_ms, 10.0), "p50 %f", measure.p50_ms);
 		/* (sorted: 980 of 10 ms, then 10 of 20 (980-989), 9 of 40, one of 100;
 		p95 at 949, p99 at 989) */

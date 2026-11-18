@@ -129,10 +129,13 @@ port/android/host/host_stall.c) */
 #define REPORT_LONGEST 8
 /* a frame's GPU time not measured (the backend gives none) */
 #define REPORT_GPU_UNKNOWN 0xFFFFFFFFu
-/* the share of the frames' time (percent) the game waits for vsync or the
-frame cap for them to be what holds the frames back, unless a part is busy
-for REPORT_BUSY_PERCENT of it (it would hold them back without them) */
-#define REPORT_PACED_PERCENT 20
+/* a frame held back by vsync or the frame cap: one the game waited for
+them on, for REPORT_PACED_FRAME_PERCENT of its time or more (it would have
+been shorter without them); they hold the frames back if they held
+REPORT_PACED_FRAMES_PERCENT of the frames or more, unless a part is busy
+for REPORT_BUSY_PERCENT of the time (it would hold them back without them) */
+#define REPORT_PACED_FRAME_PERCENT 2
+#define REPORT_PACED_FRAMES_PERCENT 50
 #define REPORT_BUSY_PERCENT 95
 /* the fewest frames of GPU time a verdict is given on */
 #define REPORT_GPU_FEWEST 30
@@ -599,12 +602,19 @@ static int report_compare_micros(const void *a, const void *b)
 }
 
 /* the frame rate of the slowest share (per mille) of the frames sorted: their
-mean time's */
+mean time's. The stalls (REPORT_STALL_MS or more: a load, a hitch of a
+second) are left out, unless all are: counted and listed on their own, one
+would else take a 1% low of minutes from 80 fps to 60 */
 static double report_low_fps(const uint32_t *sorted, unsigned long count, unsigned long per_mille)
 {
-	unsigned long slowest = count * per_mille / 1000, index;
+	unsigned long slowest, index, kept = count;
 	double total = 0;
 
+	while (kept && sorted[kept - 1] >= REPORT_STALL_MS * 1000)
+		kept--;
+	if (kept)
+		count = kept;
+	slowest = count * per_mille / 1000;
 	if (slowest < 1)
 		slowest = 1;
 	for (index = count - slowest; index < count; index++)
@@ -796,9 +806,13 @@ renderer and the display, and of those the display's pacing and
 display.max_fps's). Each part's share of the time: the GPU's, its time
 over the measured frames' time; the game's (its thread on the CPU), a
 frame's time less its waits; the renderer's thread's, its time; the
-pacing's, its waits; each over all the frames' time. The verdict: limited
-by vsync or the frame cap if the pacing is REPORT_PACED_PERCENT of the
-time or more and no part is busy for REPORT_BUSY_PERCENT of it; else the
+pacing's, its waits; each over all the frames' time. A frame the game
+waited for the pacing on (REPORT_PACED_FRAME_PERCENT of its time) was held
+back by it: without it the frame would have been shorter, however busy the
+parts were (with vsync's FIFO the game, the renderer's thread and the GPU
+take their turns, and none is busy all the frame). The verdict: limited by
+vsync or the frame cap if REPORT_PACED_FRAMES_PERCENT of the frames were so
+held and no part is busy for REPORT_BUSY_PERCENT of the time; else the
 busiest of the GPU, the game and the renderer's thread (GPU-bound,
 CPU-bound: the game, or the renderer's thread). No verdict on fewer than
 REPORT_GPU_FEWEST measured frames. */
@@ -806,9 +820,9 @@ void report_gpu_summary(const uint32_t *micros, const struct report_frame_work *
 	char *text, size_t size)
 {
 	uint32_t *sorted;
-	unsigned long index, measured = 0;
+	unsigned long index, measured = 0, paced_frames = 0;
 	double total = 0, measured_total = 0, gpu_total = 0, game_total = 0, render_total = 0, paced_total = 0,
-		gpu_share, game_share, render_share, paced_share, busiest;
+		gpu_share, game_share, render_share, paced_share, paced_frames_share, busiest;
 	size_t used = 0;
 	const char *verdict;
 
@@ -824,10 +838,13 @@ void report_gpu_summary(const uint32_t *micros, const struct report_frame_work *
 	for (index = 0; index < count; index++)
 	{
 		uint32_t waited = work[index].waited < micros[index] ? work[index].waited : micros[index];
+		uint32_t paced = work[index].paced < waited ? work[index].paced : waited;
 
 		total += micros[index];
 		game_total += micros[index] - waited;
-		paced_total += work[index].paced < waited ? work[index].paced : waited;
+		paced_total += paced;
+		if (paced && (uint64_t)paced * 100 >= (uint64_t)micros[index] * REPORT_PACED_FRAME_PERCENT)
+			paced_frames++;
 		render_total += work[index].render < micros[index] ? work[index].render : micros[index];
 		if (work[index].gpu == REPORT_GPU_UNKNOWN)
 			continue;
@@ -850,9 +867,10 @@ void report_gpu_summary(const uint32_t *micros, const struct report_frame_work *
 	game_share = 100.0 * game_total / total;
 	render_share = 100.0 * render_total / total;
 	paced_share = 100.0 * paced_total / total;
+	paced_frames_share = 100.0 * (double)paced_frames / (double)count;
 	busiest = gpu_share > game_share ? gpu_share : game_share;
 	busiest = busiest > render_share ? busiest : render_share;
-	if (paced_share >= REPORT_PACED_PERCENT && busiest < REPORT_BUSY_PERCENT)
+	if (paced_frames_share >= REPORT_PACED_FRAMES_PERCENT && busiest < REPORT_BUSY_PERCENT)
 		verdict = "limited by vsync or the frame cap";
 	else if (gpu_share >= busiest)
 		verdict = "GPU-bound";
@@ -864,7 +882,8 @@ void report_gpu_summary(const uint32_t *micros, const struct report_frame_work *
 		sorted[(measured - 1) * 99 / 100] / 1000.0);
 	REPORT_PRINT("Busy: the GPU %.0f%%, the game %.0f%%, the renderer's thread %.0f%% of the time\n", gpu_share,
 		game_share, render_share);
-	REPORT_PRINT("Waiting for vsync or the frame cap: %.0f%% of the time\n", paced_share);
+	REPORT_PRINT("Waiting for vsync or the frame cap: %.0f%% of the time, on %.0f%% of the frames\n",
+		paced_share, paced_frames_share);
 	REPORT_PRINT("Verdict: %s\n", verdict);
 #undef REPORT_PRINT
 	free(sorted);
@@ -1732,7 +1751,8 @@ static char *report_text(const char *name, int crash)
 	REPORT_PRINT("```\n");
 	if (crash)
 		return text;
-	REPORT_PRINT("\n## Frame times\n\nThe last %d seconds, loading screens included\n\n```\n", REPORT_SECONDS);
+	REPORT_PRINT("\n## Frame times\n\nThe last %d seconds, loading screens included (the lows leave out the frames "
+		"of %d ms or more)\n\n```\n", REPORT_SECONDS, REPORT_STALL_MS);
 	count = report_frames.count < REPORT_FRAMES ? report_frames.count : REPORT_FRAMES;
 	first = report_frames.count - count;
 	while (count && report_frames.at_ms[first & (REPORT_FRAMES - 1)] + REPORT_SECONDS * 1000u < now_ms)

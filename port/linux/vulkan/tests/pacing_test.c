@@ -52,6 +52,11 @@ void host_render_stream_frames_ahead(int frames)
 	(void)frames;
 }
 
+void host_render_stream_display_blocking(int blocking)
+{
+	(void)blocking;
+}
+
 void host_render_stream_frames_taken_reset(void)
 {
 }

@@ -1154,6 +1154,12 @@ static struct
 	the display's pacing (the ring's render_microseconds and
 	paced_microseconds: a report's) */
 	uint64_t render_nanoseconds, paced_nanoseconds;
+	/* the render thread's time held by the display so far, and since when
+	it is (0: it is not; host_render_stream_display_blocking), under their
+	own lock: the guest reads them as it waits; and the time so far as the
+	guest's wait began (guest_wait) */
+	pthread_mutex_t blocked_lock;
+	uint64_t blocked_nanoseconds, blocked_since, guest_blocked;
 	/* (the render thread's: the GPU's time so far, and at the last frame's
 	performance hint) */
 	uint64_t gpu_nanoseconds, gpu_reported;
@@ -1199,6 +1205,7 @@ static struct
 } render =
 {
 	.lock = PTHREAD_MUTEX_INITIALIZER,
+	.blocked_lock = PTHREAD_MUTEX_INITIALIZER,
 	.work = PTHREAD_COND_INITIALIZER,
 	.done = PTHREAD_COND_INITIALIZER,
 };
@@ -1209,6 +1216,32 @@ static uint64_t monotonic_nanoseconds(void)
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	return (uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec;
+}
+
+void host_render_stream_display_blocking(int blocking)
+{
+	uint64_t now = monotonic_nanoseconds();
+
+	pthread_mutex_lock(&render.blocked_lock);
+	if (blocking && !render.blocked_since)
+		render.blocked_since = now;
+	else if (!blocking && render.blocked_since)
+	{
+		render.blocked_nanoseconds += now - render.blocked_since;
+		render.blocked_since = 0;
+	}
+	pthread_mutex_unlock(&render.blocked_lock);
+}
+
+/* the render thread's time held by the display so far, to now */
+static uint64_t display_blocked(void)
+{
+	uint64_t blocked;
+
+	pthread_mutex_lock(&render.blocked_lock);
+	blocked = render.blocked_nanoseconds + (render.blocked_since ? monotonic_nanoseconds() - render.blocked_since : 0);
+	pthread_mutex_unlock(&render.blocked_lock);
+	return blocked;
 }
 
 void host_render_stream_set_backend(const struct host_render_backend *backend)
@@ -1374,10 +1407,11 @@ static void *render_thread(void *argument)
 		{
 			uint32_t from = render.decoded, to = render.committed, reached;
 			int frame_ended;
-			uint64_t played;
+			uint64_t played, blocked;
 
 			pthread_mutex_unlock(&render.lock);
 			played = monotonic_nanoseconds();
+			blocked = display_blocked();
 			if (!render.frame_started)
 				render.frame_started = played;
 			atomic_store(&render_playing, 1);
@@ -1389,7 +1423,10 @@ static void *render_thread(void *argument)
 			autorelease_pop(pool);
 			pool = autorelease_push();
 #endif
-			render.render_nanoseconds += monotonic_nanoseconds() - played;
+			/* (less the time the display held it: no work, its pacing) */
+			blocked = display_blocked() - blocked;
+			played = monotonic_nanoseconds() - played;
+			render.render_nanoseconds += played > blocked ? played - blocked : 0;
 			__atomic_store_n(&render.ring->render_microseconds, (uint32_t)(render.render_nanoseconds / 1000u),
 				__ATOMIC_RELEASE);
 			frame_ended = render.decoder->frame_ended;
@@ -1856,6 +1893,7 @@ static void guest_wait(uint64_t *start)
 	if (!*start)
 	{
 		*start = monotonic_nanoseconds();
+		render.guest_blocked = display_blocked();
 		render.ring->waits++;
 	}
 	/* (read by the render thread's loading picture without the lock) */
@@ -1869,6 +1907,21 @@ static void guest_waited(uint64_t start)
 {
 	if (start)
 		render.ring->wait_nanoseconds += (uint32_t)(monotonic_nanoseconds() - start);
+}
+
+/* (render.lock held) the guest's wait from start (0: none) for the render
+thread or the GPU: the part of it the display held the render thread for,
+its pacing (a FIFO swapchain's image or present), counted as the pacing's */
+static void guest_paced(uint64_t start)
+{
+	uint64_t waited, blocked;
+
+	if (!start)
+		return;
+	waited = monotonic_nanoseconds() - start;
+	blocked = display_blocked() - render.guest_blocked;
+	render.paced_nanoseconds += blocked < waited ? blocked : waited;
+	__atomic_store_n(&render.ring->paced_microseconds, (uint32_t)(render.paced_nanoseconds / 1000u), __ATOMIC_RELEASE);
 }
 
 void host_render_stream_submit(uint32_t flags)
@@ -1899,6 +1952,7 @@ void host_render_stream_submit(uint32_t flags)
 		else
 			break;
 	}
+	guest_paced(start);
 	if (flags & XGPU_STREAM_SUBMIT_FRAME)
 	{
 		/* (the time paced counted apart as well: a report's) */
@@ -1925,6 +1979,7 @@ void host_render_stream_wait(uint32_t position)
 	pthread_mutex_lock(&render.lock);
 	while (!ring->error && (int32_t)(ring->released - position) < 0)
 		guest_wait(&start);
+	guest_paced(start);
 	guest_waited(start);
 	pthread_mutex_unlock(&render.lock);
 }
