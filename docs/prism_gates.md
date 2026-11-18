@@ -628,7 +628,7 @@ for the frame shown. The references were kept from round 2 where the scene, mate
 | G3 | 0f8e17b5a | 0.0319 / 0.0331 / 0.089 / 1.12 | 0.0315 / 0.0361 / 0.094 / 1.13 | fail |
 | G4 | 6d3ab4aee | 0.1909 / 0.0827 / 0.121 / 1.42 | 0.2856 / 0.1135 / 0.146 / 1.59 | fail |
 | G5 | 6d3ab4aee | 0.1456 / 0.0788 / 0.137 / 1.03 | 0.1849 / 0.0806 / 0.144 / 1.04 | fail |
-| G6 | b98c73af4 | 0.0254 / 0.0288 / 0.073 / 0.93 | 0.0269 / 0.0384 / 0.097 / 0.95 | fail |
+| G6 | 6d3ab4aee | 0.0258 / 0.0296 / 0.074 / 0.93 | 0.0274 / 0.0388 / 0.098 / 0.96 | fail |
 | G7 | 33f4cdec9 | 0.0297 / 0.0390 / 0.061 / 1.32 | 0.0336 / 0.0411 / 0.064 / 1.32 | fail |
 
 The held frames moved much nearer R in the lamp-lit interiors (each still frame against R, the mean absolute
