@@ -2586,6 +2586,33 @@ void main()
     float dist = uintBitsToFloat(gc.z);
     float roughness = unpackUnorm2x16(gc.w).x;
     vec3 pc = job.camera[0].xyz + dist * ray_of(job.camera, job.corners, vec2(pixel));
+    /* (the first step's anti-firefly, for the frame shown alone: a pixel
+    brighter than twice the brightest of its eight neighbours on the same
+    surface is held to that, as ReLAX's anti-firefly holds a pixel to its
+    neighbourhood. The histories keep the light whole (the temporal pass's
+    hold is loose since its moments are the samples as traced), so a sample
+    of a light few rays find adds its share to them; here its single bright
+    pixel is not shown nor spread by the steps after (round 3's G7 walls, a
+    glitter of single pixels in the still frame)) */
+    if (step_ == 0u)
+    {
+        float most_d = 0.0, most_s = 0.0;
+        bool any_ = false;
+        for (int k = 0; k < 9; k++)
+        {
+            ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
+            if (k == 4 || !inside(q) || imageLoad(guide_now, q).x != gc.x)
+                continue;
+            most_d = max(most_d, luma(load_d(q, from_b).rgb));
+            most_s = max(most_s, luma(load_s(q, from_b).rgb));
+            any_ = true;
+        }
+        float l0 = luma(dc.rgb), l1 = luma(sc.rgb);
+        if (any_ && l0 > 2.0 * most_d + 1.0e-4)
+            dc.rgb *= (2.0 * most_d + 1.0e-4) / l0;
+        if (any_ && l1 > 2.0 * most_s + 1.0e-4)
+            sc.rgb *= (2.0 * most_s + 1.0e-4) / l1;
+    }
     float lc = luma(dc.rgb), lsc = luma(sc.rgb);
     /* (the luminance's edge stop by the variance prefiltered over the pixel's
     cross on the same surface (half the pixel's, an eighth each neighbour's),

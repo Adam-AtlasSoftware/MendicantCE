@@ -663,3 +663,18 @@ def test_the_firefly_hold_keeps_a_light_few_frames_see_and_still_holds_a_lone_fi
     steady[30] = np.full(4, 1000.0)
     after = model.held_history(steady)[30]
     assert after.max() < 1.5, after
+
+
+def test_the_anti_firefly_holds_a_lone_pixel_and_keeps_a_gradient_and_an_edge():
+    ramp = np.tile(np.linspace(0.1, 1.0, 12), (8, 1))
+    same = np.zeros((8, 12), int)
+    assert np.allclose(model.anti_firefly(ramp, same), ramp)
+    spot = ramp.copy()
+    spot[4, 6] = 50.0
+    held = model.anti_firefly(spot, same)
+    assert held[4, 6] < 2.0 * ramp.max() + 1e-3
+    # (a bright surface beside a dark one, another instance: not held to the dark one)
+    instances = np.zeros((8, 12), int)
+    instances[:, 6:] = 1
+    edge = np.where(instances == 1, 10.0, 0.1)
+    assert np.allclose(model.anti_firefly(edge, instances), edge)

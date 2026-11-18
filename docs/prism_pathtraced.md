@@ -190,7 +190,10 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   the neighbours on the same surface (instance, normal, plane), weighed by their history's length, and written into
   the history; the variance from the neighbourhood's own spread where the moments do not have it yet (as SVGF takes
   it; round 1's 4 / n times it let the a-trous steps blur a moving camera's noise into smears).
-- **atrous**: five steps of the a-trous filter (a 3 × 3 kernel, 1/4 1/2 1/4 each way, at strides 1 to 16: the reach
+- **atrous**: the first step holds a pixel brighter than twice the brightest of its eight neighbours on the same
+  surface to that (ReLAX's anti-firefly), for the frame shown only: the histories keep the light whole, and a sample
+  of a light few rays find adds its share to them without showing as a single bright pixel (round 3's G7 walls).
+  Then five steps of the a-trous filter (a 3 × 3 kernel, 1/4 1/2 1/4 each way, at strides 1 to 16: the reach
   of SVGF's five 5 × 5 steps with a third of their taps), each tap weighed by its
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
   against the pixel's by the variance (the diffuse's prefiltered over the pixel's cross, as SVGF prefilters it); the

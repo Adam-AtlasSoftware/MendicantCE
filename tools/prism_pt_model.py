@@ -23,6 +23,7 @@ can check them without a GPU:
   specular_most      the temporal pass's longest specular history, by the gloss and the eye's parallax at the point
   catmull_rom, resample_row  the temporal pass's history resampling (Catmull-Rom held to its 2 x 2's range, or bilinear)
   temporal_step      the temporal pass's slow and fast histories, the moments, the fast one's hold
+  anti_firefly       the first a-trous step's hold of a pixel to twice its eight neighbours' brightest (shown only)
   atrous_step        an a-trous step's weights: the 3 x 3 kernel, the plane, the normal, the instance, the luminance
 """
 import numpy as np
@@ -241,6 +242,24 @@ def temporal_step(history, sample, most=32.0, most_fast=4.0, gamma=2.0):
         slow = min(max(slow, lo), hi)
         n = min(n, most_fast)
     return {"slow": slow, "n": n, "m1": m1, "m2": m2, "fast": fast, "fast_m2": fast_m2}
+
+
+def anti_firefly(values, instances):
+    """the first a-trous step's hold: each pixel's value held to twice the brightest of its eight neighbours of the
+    same instance (a 2-D array of luminances; the edges' pixels by the neighbours they have)"""
+    out = values.copy()
+    h, w = values.shape
+    for y in range(h):
+        for x in range(w):
+            most, any_ = 0.0, False
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    qy, qx = y + dy, x + dx
+                    if (dy or dx) and 0 <= qy < h and 0 <= qx < w and instances[qy, qx] == instances[y, x]:
+                        most, any_ = max(most, values[qy, qx]), True
+            if any_ and values[y, x] > 2.0 * most + 1.0e-4:
+                out[y, x] = 2.0 * most + 1.0e-4
+    return out
 
 
 def atrous_weight(dx, dy, plane, plane_scale, normal_dot, same_instance, luminance_delta, sigma):
