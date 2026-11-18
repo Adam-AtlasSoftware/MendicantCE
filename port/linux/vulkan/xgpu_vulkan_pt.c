@@ -1195,7 +1195,17 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->reflection_data = lookup.reflection_data;
 	job->sums = pt.sums.address;
 	job->stats = pt.stats.address;
-	job->counters = slot_buffer->address + JOB_COUNTERS_OFFSET;
+	/* (the reprojection's counters: only for the diagnostics' file, their
+	atomics a sixteenth of the pixels' on one address cost the temporal
+	pass several milliseconds) */
+	{
+		static int counted = -1;
+
+		if (counted < 0)
+			counted = getenv("HALO_PT_DEBUG_FILE") && getenv("HALO_PT_DEBUG_FILE")[0];
+		if (counted)
+			job->counters = slot_buffer->address + JOB_COUNTERS_OFFSET;
+	}
 	/* (the light tree, where it is built for this scene: the reference's
 	lamps and ReSTIR DI's candidates take it beside the grid;
 	HALO_PT_LAMP_TREE=0, the live frames the grid alone) */
