@@ -60,7 +60,7 @@ the base map, so the bake's light goes into Raster's frame as CE's lightmap does
 | The sun (the sky's narrowest light) | the irradiance it gives a surface facing it | colour × power / pi |
 | The domes (the sky's other lights) | the same | colour × power / pi |
 | The sky's ambient (its outdoor ambient radiosity) | CE's floor of light, unoccluded, at every point | colour × power × pi, added to every texel and probe (not passed on by the bounces; the sky beyond the level then gives no more) |
-| A light card or lamp surface (radiosity power) | its radiance | colour × power × 2 |
+| A light card or lamp surface (radiosity power) | its radiance | colour × power |
 | A light fixture (intensity) | the irradiance it gives a surface facing it a world unit away | colour × intensity / d² |
 
 The sun's and the fixtures' are their definitions. The sky's and the cards' factors were measured against CE's own
@@ -68,12 +68,35 @@ pages: each kind of light baked alone at 1 (`debug.prism_rig_scales`), its light
 `bake_total`) fitted to CE's light target there (`ce_deferred`'s light, the level's pixels). The sun came out at 0.84
 to 0.92 (b30's G2 and G3: 1 kept). The sky traced as a radiance from the open sky needed 5.9 on b30's open beach and
 7.9 under its overhang, and c40's canyon, CE's light there blue and even, more still: CE's outdoor ambient behaves as an
-unoccluded floor, which b30's poses put at 3.1 to 4.1 times its colour by power (pi kept). The cards' exposure came out
-at 1.3 to 2.3 times their power over a10's and c40's poses (2 kept), but not alike over their surfaces: CE's light on
-a10's typical surface is three to fifteen times the bake's at 1, on c40's interior's 1.5 times (see "What remains"). The sky the rig takes is the BSP's own (the one most of its clusters
-have), whatever the window sees, so that a bake's rig is the same wherever its camera was. The sky's indoor ambient
-(CE's floor of light in its indoor clusters) is not a light of the rig: an interior lit only by its cards, a10's, stays
-darker than Classic away from its lamps (its typical surface at a third to a fifth of CE's light).
+unoccluded floor, which b30's poses put at 3.1 to 4.1 times its colour by power (pi kept). The cards first came out at
+1.3 to 2.3 times their power on a10's and c40's poses, but that was the bake's own bias (its lamps then sampled from
+the cells' seen lists alone, a10's bake at 0.4 to 0.9 of R's light: see the estimator); unbiased, a card's power is its
+radiance. The sky the rig takes is the BSP's own (the one most of its clusters
+have), whatever the window sees, so that a bake's rig is the same wherever its camera was.
+
+**The bounces' albedo.** In the light's units a surface's albedo is its base map's mean **as stored** (the byte over
+255, no curve; its detail maps' factors as CE's frame applies them; 0.03 to 0.85), the reflectance CE's frame shows (its
+light times the stored texel), and so the one the light the rig is measured against bounced: the bake's, R's and the
+drawn objects' alike (`prism_rt_albedo_stored`; the fitted rig keeps the mean made linear it was fitted with;
+`HALO_PRISM_ALBEDO` `stored` or `linear` overrides it, a diagnostic). Made linear (a byte to the power 2.2) instead,
+a10's light came out far darker than CE's away from its lamps. Measured on G5's three poses, CE's light target against
+the bake's whole light, every level pixel (luminance, the pixels at either image's white left out; a10's BSP 0 at
+`ultra`, the lamps' double count fixed):
+
+- **The shape.** Each bake at its own best single scale, the rms of log2(CE / bake) is 0.76, 0.83 and 0.86 (p0, p1,
+  p2) with the stored mean against 1.28, 1.17 and 1.17 made linear: the stored mean has CE's flatter light at every
+  pose, the cryo bay included.
+- **The level** decides neither way, and no single unit of the cards fits both kinds of place under either rule.
+  Where lamps light a place directly the linear bake is at CE's level and the stored one over it: the cryo bay
+  (the bands of CE's light that hold 71% of p0) 1.08 to 1.20 times CE's light against 2.2; the corridor lit through
+  p1's windows 0.94 to 1.05 against 1.14 to 1.27; c40's chamber, the sky's floor left out, 0.9 to 1.3 against 1.5 to
+  2.0. Where no lamp is near, the linear bake is at 0.14 to 0.43 of CE's light and the stored one at 0.5 to 1.1 (1.7 in
+  p2's darkest third).
+
+The cards' unit stays 1: the level a place is off by is one factor, the exposure's (Raster's exposure below). The ceiling
+matters little (0.95 for 0.85 moves the light 1 to 4%). The units' first check against CE left out the pixels whose
+base view is white (base 0.98 and over), 70% of a10's p1, the light walls where the gap was widest; a10's skies have no
+indoor ambient (0 by 0), so the gap was not that floor's.
 
 ## The estimator
 
@@ -86,17 +109,20 @@ converged against the same estimator converged:
   bounce by a cosine-distributed path (the sky where it leaves the level; at each hit its glow and its albedo by the
   sun's and a lamp's light there, and the next bounce).
 - **The lamps** (the emitting triangles: light cards, lamp surfaces) are picked from the **light-importance grid**: the
-  level's surfaces cut into cells of 2 world units, each listing the 64 lamp triangles whose light reaches the cell's
-  points most with their shadows traced (weighed on the GPU from the 128 strongest by power and distance within 48
-  world units, 8 points of the cell's surfaces and 4 points of each lamp), and a point's lamp is picked from its cell's
-  list by those weights; a cell whose points no candidate's light reached samples none. This leaves out the light of
-  lamps outside a cell's list (beyond its reach, hidden from all its points, or weaker than its 64th): a small bias,
-  which the gate against R bounds, against what a fallback by power over the whole level costs. Measured on b30's
-  first BSP, such a fallback (85% of the picks from the list, 15% by power) made the lamps the bake's whole cost: a
-  lamp seen at all, picked with a probability of its share of every lamp's power, is a firefly a hundred times its
-  texel's mean, which the stopping rule then waits out (200 seconds of `max` finished 24 of its first tiles with the
-  lamps sampled so, 17,100 with no lamps at all). A lamp's point is sampled by the solid angle its triangle subtends
-  where it subtends a fair one (Arvo's spherical triangle sampling, as PBRT has it: no 1/d² spike beside a lamp), else
+  level's surfaces cut into cells of 2 world units, each with two lists of up to 64 lamp triangles: the *seen*, whose
+  light reaches the cell's points most with their shadows traced (weighed on the GPU from the 128 strongest by power
+  and distance within 48 world units, 8 points of the cell's surfaces and 4 points of each lamp), and the *near*, the
+  strongest of those 128 by their unshadowed light at the cell's middle. A point's lamp is picked from the seen by
+  70% of the picks, from the near by 25% (95% where the cell saw none), and by power over the whole level by the
+  rest, its probability the three's mixture: every lamp can be picked, so the bake's lamps are R's, unbiased. The
+  near and the power share are the defensive part: a lamp the cell's few points did not see that the point does is
+  picked with a fair probability (its near weight), and a far one with its share of the level's power, where its
+  light is small. The first round had the seen alone (a cell whose points saw no lamp sampled none): on a10 the bake's
+  light came out at 0.4 to 0.9 of R's (a third of its cells saw no lamp), and the light cards' unit was fitted at 2 to
+  make up for it. Against a bake whose every pick is by power (`HALO_BAKE_TERMS` 32, unbiased and noisier) the
+  mixture's light agrees to 0.3 to 10% on a10's poses at `high`. A lamp's point is sampled by the solid angle its
+  triangle subtends where it subtends a fair one (Arvo's spherical triangle sampling, as PBRT has it: no 1/d² spike
+  beside a lamp), else
   by its area. Each lamp sample is resampled (RIS, as the path tracer's ReSTIR DI takes its candidates): 8 candidate
   points (4 at a path's hits), one kept by its unshadowed light there over its candidates' density, its shadow traced,
   its light by the candidates' mean weight: unbiased, and far less noisy for its one ray where the cell's lamps light
@@ -117,6 +143,14 @@ a texel whose mean is under 1/1000 of middle grey after 4096 samples is black; a
 more than 1% (`prism_bake_converge.h`'s rule: a texel that has just met its first firefly is not stopped by a variance
 that has not yet seen the tail). At `max` there is no sample budget. The quicker tiers stop at 64 (`draft`), 512
 (`high`) and 2048 (`ultra`) samples whatever the noise.
+
+**`max`'s noise floor (D4 amended, 2026-11-17).** At `max` the error is measured against the larger of the texel's own
+mean and a tenth of middle grey (0.018): a texel stops once the standard error of its mean luminance is at most
+0.01 × max(mean, 0.1 × middle grey), and the firefly rule likewise (no sample moves the mean by more than 1% of that).
+The other rules are M0's (at least 64 samples; black below 1/1000 of middle grey after 4096). `debug.bake_noise_floor`
+(0.1) sets the share of middle grey; 0 is the literal rule (`prism_bake_converge.h`'s `error_floor`, which the tests
+keep at 0). The quicker tiers keep the literal rule under their sample caps. The log counts the texels the floor
+stopped (converged with their light below it).
 
 **The tail.** Once the texels still running are too few to fill the GPU (fewer than 32,768), each one's samples are
 spread over 2 to 16 invocations side by side in a subgroup (`lanes_of`): each lane takes whole batches of 64 of its own
@@ -139,7 +173,7 @@ Each a list of jobs (`prism_bake_cache.h`'s ids), in this order:
 | The lightmap | A tile each: a batch of 4096 tiles on the GPU at a time, each texel's samples added between frames until it stops (the running texels packed into whole groups each frame, so that a batch whose texels are mostly done still fills the GPU); a finished tile written, drawn and replaced in the batch by the next | Per texel: the light less the sun's (RGB9E5), the direction (`k`, `a0`: RGBA8), the indirect light alone (RGB9E5, for M3's path tracer), the sun's visibility, the state and samples |
 | The sun mask | A tile each where the tile's texels facing the sun are neither all lit nor all dark: its 64 × 64 points (4 times the texels' density) found on its triangles again, each traced to the sun's disc (16 directions, stratified, up to 256 while they disagree) | A byte a point; a uniform tile is a state alone (dark, lit) |
 | The irradiance volume | Two cascades: 64 probes a brick (a world unit, 0.25 apart) where the player stands (the walk's floors and the two world units of air above them), and 64 a coarse brick (8 world units, 2 apart) over every reachable brick and the 12 world units of air above the floors (tree tops, the far side of a canyon: every object Raster draws has light); a batch of 262144 probes at a time | Per probe: SH L1 of the light from every direction (RGB, half floats), the sun's visibility, whether it is inside the level |
-| The reflection probes | One each 8-world-unit cell of the walk's floors, a world unit above them (b30's first BSP: TBD; a10's: 25); a batch of 8 at a time | A box (how far each of its six axes reaches, 1 to 64 world units) and a cube of four levels (32, 16, 8 and 4 texels a side), each level GGX-prefiltered at its roughness ((level / 3)^2: each texel the light the bake's estimator sees along the lobe's directions about it, weighed by their cosines; 16, 64 or 256 samples a texel by the quality), RGB9E5 |
+| The reflection probes | One each 8-world-unit cell of the walk's floors, a world unit above them (b30's first BSP: 923; a30's: 2,185; a10's: 25); a batch of 8 at a time | A box (how far each of its six axes reaches, 1 to 64 world units) and a cube of four levels (32, 16, 8 and 4 texels a side), each level GGX-prefiltered at its roughness ((level / 3)^2: each texel the light the bake's estimator sees along the lobe's directions about it, weighed by their cosines; 16, 64 or 256 samples a texel by the quality), RGB9E5 |
 | The footprints | One job: each switchable fixture's tiles within its reach (section 2.4's relight) | The light's id, its tiles |
 
 ## The bake file
@@ -212,9 +246,9 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 ## What remains
 
 - `max`: path guiding or a light cache between texels, or an error floor nearer the eye's (Adam's decision).
-- The light cards' unit: one factor does not fit a10 and c40 alike (a10's interior, lit by its cards alone, stays two to
-  ten times darker than Classic away from its lamps; c40's, with the ambient floor, 1.2 to 1.7 times brighter). Whether
-  CE's radiosity power is a card's total rather than its radiance (a small card then brighter) is the next question.
+- R where lamps light a scene: at 4096 frames it is not converged (its median relative error 27 to 38% at G4,
+  `docs/prism_gates.md`), and it comes out below the bake's light at a10 (0.6 to 0.9 of it on average, far darker at a
+  tenth of its pixels): the bake against R there measures R's noise as much as the bake.
 - The sky's indoor ambient (CE's floor in its indoor clusters) is not taken (a10's and c40's skies have none, or the
   outdoor's).
 - The moving objects' sun shadows are CE's own projected ones (on the level) and none on the objects; traced ones from

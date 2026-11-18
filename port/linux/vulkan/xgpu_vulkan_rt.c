@@ -1052,6 +1052,11 @@ int xgpu_vulkan_rt_scene(uint32_t *generation, const float **materials, uint32_t
 	return rt.made && rt.static_triangles > 0;
 }
 
+int xgpu_vulkan_rt_albedo_stored(void)
+{
+	return rt.frame.rig[62] >= 0.5f;
+}
+
 int xgpu_vulkan_rt_active(void)
 {
 	return rt.made && rt.frame_active && rt.slot_ready;

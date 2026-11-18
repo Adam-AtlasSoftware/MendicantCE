@@ -127,8 +127,9 @@ struct entry
 	uint32_t cutout_generation;
 	float coverage;
 	/* (display.prism_rt) its first level's mean colour, linear (a byte to
-	the power 2.2), as of that generation (0 not looked at); 0 none */
-	float mean[3];
+	the power 2.2) and as stored (the byte over 255), as of that generation
+	(0 not looked at); 0 none */
+	float mean[3], mean_stored[3];
 	uint32_t mean_generation;
 	uint8_t mean_known;
 };
@@ -844,7 +845,7 @@ float xgpu_vulkan_textures_coverage(const struct xgpu_stream_texture_stage *stag
 /* display.prism_rt: a stage's Xbox texture's mean colour (its first level
 no larger than 64 a side, linear), read once a generation: 1, or 0 where
 it cannot be read (an image, a cube, unreadable) */
-int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, float mean[3])
+int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, float mean[3], int stored)
 {
 	static float linear[256];
 	const struct xgpu_texture_description *description;
@@ -853,14 +854,14 @@ int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, flo
 	struct entry *entry;
 	DWORD *texels;
 	uint32_t width, height, index, level = 0;
-	double sum[3] = { 0.0, 0.0, 0.0 };
+	double sum[3] = { 0.0, 0.0, 0.0 }, sum_stored[3] = { 0.0, 0.0, 0.0 };
 
 	if (stage->source != XGPU_SOURCE_TEXTURE || !stage->resource || !(entry = xbox_entry_current(stage, &palette)) ||
 		!entry->generation)
 		return 0;
 	if (entry->mean_generation == entry->generation)
 	{
-		memcpy(mean, entry->mean, sizeof(entry->mean));
+		memcpy(mean, stored ? entry->mean_stored : entry->mean, sizeof(entry->mean));
 		return entry->mean_known;
 	}
 	entry->mean_generation = entry->generation;
@@ -889,11 +890,17 @@ int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, flo
 		sum[0] += linear[(texels[index] >> 16) & 0xffu];
 		sum[1] += linear[(texels[index] >> 8) & 0xffu];
 		sum[2] += linear[texels[index] & 0xffu];
+		sum_stored[0] += (double)((texels[index] >> 16) & 0xffu);
+		sum_stored[1] += (double)((texels[index] >> 8) & 0xffu);
+		sum_stored[2] += (double)(texels[index] & 0xffu);
 	}
 	for (index = 0; index < 3; index++)
+	{
 		entry->mean[index] = (float)(sum[index] / (double)(width * height));
+		entry->mean_stored[index] = (float)(sum_stored[index] / (255.0 * (double)(width * height)));
+	}
 	entry->mean_known = 1;
-	memcpy(mean, entry->mean, sizeof(entry->mean));
+	memcpy(mean, stored ? entry->mean_stored : entry->mean, sizeof(entry->mean));
 	return 1;
 }
 

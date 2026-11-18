@@ -4002,7 +4002,7 @@ then, drawn opaque) */
 	draw.serial = xgpu_vulkan_serial();
 	/* (its base map's mean colour: the traced hits' albedo; a cutout's
 	share of texels drawn) */
-	draw.has_albedo = xgpu_vulkan_textures_mean(&stream.stages[0].stage, draw.albedo);
+	draw.has_albedo = xgpu_vulkan_textures_mean(&stream.stages[0].stage, draw.albedo, xgpu_vulkan_rt_albedo_stored());
 	draw.coverage = coverage;
 	draw.owner = (int)floorf(stream.uniforms.world_ao[0] + 0.5f);
 	/* (a part a replacement mesh draws, display.prism_models: its pieces as

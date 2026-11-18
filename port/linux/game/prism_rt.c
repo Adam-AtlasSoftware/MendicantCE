@@ -779,10 +779,29 @@ static float rig_emitter_scale(long shader_tag, float rgb[3])
 
 /* ---------- the materials */
 
-/* a bitmap's first texture's mean colour (linear) and alpha; FALSE where
-it cannot be read. Its texels are loaded as a draw loads them, and waited
-for (world_sdf.c's sdf_bitmap_coverage) */
-static int bitmap_mean(long bitmap_tag, float mean[4])
+/* port: the bounces' albedo. In the light's units (the rig "units": PRISM
+v4's) a base map's mean as stored, the byte over 255 with no curve: the
+reflectance CE's frame shows (its light times the stored texel), and so the
+one the light the rig is measured against (CE's lightmaps) bounced. Made
+linear (a byte to the power 2.2) the light where no lamp is near came out at
+0.14 to 0.43 of CE's (docs/prism_bake.md, "The light's units"). Else (the
+fitted rig, PRISM RT's) made linear, as it was fitted. HALO_PRISM_ALBEDO
+"stored" or "linear" overrides the rule (a diagnostic) */
+int prism_rt_albedo_stored(void)
+{
+	char const *value = getenv("HALO_PRISM_ALBEDO");
+
+	if (value && !strcmp(value, "stored"))
+		return TRUE;
+	if (value && !strcmp(value, "linear"))
+		return FALSE;
+	return prism_rt.rig_mode == 1 || (prism_rt.rig_mode == 0 && prism_deferred_raster());
+}
+
+/* a bitmap's first texture's mean colour (linear, or as stored where stored
+is nonzero) and alpha; FALSE where it cannot be read. Its texels are loaded
+as a draw loads them, and waited for (world_sdf.c's sdf_bitmap_coverage) */
+static int bitmap_mean_as(long bitmap_tag, float mean[4], int stored)
 {
 	struct bitmap_group *group;
 	struct bitmap_data const *bitmap;
@@ -797,8 +816,13 @@ static int bitmap_mean(long bitmap_tag, float mean[4])
 	bitmap = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, 0, struct bitmap_data);
 	if (!header || !bitmap->base_address)
 		return FALSE;
-	return xgpu_texture_mean_color((unsigned int)header[3], (unsigned int)header[4],
-		(unsigned char const *)bitmap->base_address, 64, mean);
+	return xgpu_texture_mean_color_as((unsigned int)header[3], (unsigned int)header[4],
+		(unsigned char const *)bitmap->base_address, 64, mean, stored);
+}
+
+static int bitmap_mean(long bitmap_tag, float mean[4])
+{
+	return bitmap_mean_as(bitmap_tag, mean, 0);
 }
 
 /* ... its alpha map (at most PRISM_RT_ALPHA_SIDE a side) added to the
@@ -852,14 +876,16 @@ static float detail_factor(long bitmap_tag, short function)
 {
 	float mean[4], d, factor;
 
-	if (bitmap_tag == NONE || !bitmap_mean(bitmap_tag, mean))
+	if (bitmap_tag == NONE || !bitmap_mean_as(bitmap_tag, mean, prism_rt_albedo_stored()))
 		return 1.0f;
-	/* (back to the display's value for CE's own sum, then linear again) */
+	/* (back to the display's value for CE's own sum, then linear again; as
+	stored, the display's value itself) */
 	d = (mean[0] * 0.2126f + mean[1] * 0.7152f + mean[2] * 0.0722f);
-	d = d > 0.0f ? (float)pow(d, 1.0 / 2.2) : 0.0f;
+	if (!prism_rt_albedo_stored())
+		d = d > 0.0f ? (float)pow(d, 1.0 / 2.2) : 0.0f;
 	factor = function == 1 ? d : function == 2 ? 1.0f + 2.0f * (d - 0.5f) : 2.0f * d;
 	factor = PIN(factor, 0.25f, 2.0f);
-	return (float)pow(factor, 2.2);
+	return prism_rt_albedo_stored() ? factor : (float)pow(factor, 2.2);
 }
 
 /* the shader's material made (once a set: by its tag) and its index;
@@ -922,7 +948,7 @@ static long material_of(long shader_tag, int *kind)
 		long glow_map = ((struct tag_reference const *)(bytes + 0x254))->index;
 		float mean[4], factor;
 
-		if (bitmap_mean(base_map, mean))
+		if (bitmap_mean_as(base_map, mean, prism_rt_albedo_stored()))
 		{
 			factor = detail_factor(detail_map, detail_function) * detail_factor(micro_map, micro_function);
 			record[0] = PIN(mean[0] * factor, PRISM_RT_ALBEDO_LEAST, PRISM_RT_ALBEDO_MOST);
@@ -1491,7 +1517,10 @@ they are) */
 	fixtures are CE's lightmap's, not lights), and 1 there) */
 	rig[60] = scales->units ? scales->fixture : 0.0f;
 	rig[61] = scales->units ? 1.0f : 0.0f;
-	rig[62] = rig[63] = 0.0f;
+	/* (rig[62]: 1 where the bounces' albedo is the base maps' stored mean,
+	prism_rt_albedo_stored: the host's drawn objects' alike) */
+	rig[62] = prism_rt_albedo_stored() ? 1.0f : 0.0f;
+	rig[63] = 0.0f;
 	settings[PRISM_RT_SETTING_DYNAMIC_SHADOWS] = remix ? 1.0f : 0.6f;
 }
 

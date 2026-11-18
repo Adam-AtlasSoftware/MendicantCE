@@ -38,7 +38,7 @@ texels change: 1 yes, 0 no, -1 not known */
 int xgpu_vulkan_textures_cutout(const struct xgpu_stream_texture_stage *stage);
 /* display.prism_rt: a stage's Xbox texture's mean colour (linear), for the
 traced hits' albedo: 1, or 0 where it cannot be read */
-int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, float mean[3]);
+int xgpu_vulkan_textures_mean(const struct xgpu_stream_texture_stage *stage, float mean[3], int stored);
 /* ... and the share of a cutout's texels drawn (1 where not known) */
 float xgpu_vulkan_textures_coverage(const struct xgpu_stream_texture_stage *stage);
 

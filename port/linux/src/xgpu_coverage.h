@@ -25,6 +25,10 @@ its red, green and blue made linear (a byte to the power 2.2) and its alpha
 (0 to 1) as it is; 0 where it cannot be read */
 int xgpu_texture_mean_color(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
 	unsigned long largest, float mean[4]);
+/* ... its red, green and blue as stored (the byte over 255, no curve: the
+values CE's frame multiplies its light by) where stored is nonzero */
+int xgpu_texture_mean_color_as(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
+	unsigned long largest, float mean[4], int stored);
 /* ... and its alpha, a byte a texel at that level, into alpha (room for
 largest x largest), its size in *width and *height; 0 where it cannot be
 read */

@@ -612,6 +612,12 @@ static DWORD *texture_level_decoded(unsigned int format_word, unsigned int size_
 int xgpu_texture_mean_color(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
 	unsigned long largest, float mean[4])
 {
+	return xgpu_texture_mean_color_as(format_word, size_word, texels, largest, mean, 0);
+}
+
+int xgpu_texture_mean_color_as(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
+	unsigned long largest, float mean[4], int stored)
+{
 	/* (each byte's value made linear: (v / 255) to the power 2.2, by a
 	table of whole steps made once) */
 	static float linear[256];
@@ -644,9 +650,18 @@ int xgpu_texture_mean_color(unsigned int format_word, unsigned int size_word, co
 	{
 		DWORD word = decoded[texel];
 
-		sum[0] += linear[(word >> 16) & 0xFFu];
-		sum[1] += linear[(word >> 8) & 0xFFu];
-		sum[2] += linear[word & 0xFFu];
+		if (stored)
+		{
+			sum[0] += (double)((word >> 16) & 0xFFu) / 255.0;
+			sum[1] += (double)((word >> 8) & 0xFFu) / 255.0;
+			sum[2] += (double)(word & 0xFFu) / 255.0;
+		}
+		else
+		{
+			sum[0] += linear[(word >> 16) & 0xFFu];
+			sum[1] += linear[(word >> 8) & 0xFFu];
+			sum[2] += linear[word & 0xFFu];
+		}
 		sum[3] += (double)((word >> 24) & 0xFFu) / 255.0;
 	}
 	free(decoded);
