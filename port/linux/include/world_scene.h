@@ -85,6 +85,19 @@ struct world_scene_instance
 	unsigned long frame;
 };
 
+/* a light's flags (world_scene_light's; one definition for every reader:
+PRISM v4's SCENE_LIGHTS once read the fixture's bit as the dynamic one, and
+sent no dynamic light at all) */
+enum
+{
+	/* a light fixture of the scenario's, placed in the structure (its light
+	is in the lightmaps; no reach is known: radius 0) */
+	WORLD_SCENE_LIGHT_FIXTURE = 1 << 0,
+	/* a dynamic light, as the rasterizer took it the frame before (the last
+	window's) */
+	WORLD_SCENE_LIGHT_DYNAMIC = 1 << 1,
+};
+
 /* a light of the world light list (world space, linear colour) */
 struct world_scene_light
 {
@@ -94,6 +107,12 @@ struct world_scene_light
 	float position[3], radius;
 	float direction[3], cone_cosine;
 	float color[3], intensity;
+	/* a spot's inner cone's cosine (CE's falloff angle: its light whole
+	inside it, to none at cone_cosine), cone_cosine where none is given */
+	float cone_inner_cosine;
+	/* the share of its light its projected texture lets through (CE's gel
+	map: the flashlight's), 1 for none (world_scene.c: WORLD_SCENE_GEL) */
+	float gel;
 };
 
 /* ---------- prototypes (port/linux/game/world_scene.c) */

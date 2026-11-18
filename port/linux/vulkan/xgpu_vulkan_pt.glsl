@@ -601,13 +601,25 @@ vec3 reflection_at(vec3 p, vec3 r, float roughness, out float found)
 /* ---------- the lights at a surface
 
 The dynamic lights (SCENE_LIGHTS' dynamic class: the flashlight, plasma,
-muzzle flashes): 12 floats each (the place and reach, the colour by its
-intensity, the spot's axis and its cone's cosine, 2 a point light), CE's
-falloff 1 - d^2/r^2, as Raster has them; their shadows traced. */
-vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
+muzzle flashes, grenades, explosions, the vehicles' and weapons' lights):
+DYNAMIC_FLOATS each (the place and reach r, the colour by its intensity, a
+spot's inner cone's cosine (2 none), its axis and outer cone's cosine (2 a
+point light)), job.volume.z of them, then the recent ones (job.volume.w,
+the temporal pass's: xgpu_vulkan_pt.c's recent_lights_take). A point
+light's inverse square, windowed to none at its reach ((1 - (d/r)^4)^2, as
+Karis 2013), held within 0.4 r (CE's reach is a light's whole sphere of
+light, not its size: nearer, a wall at a flashlight's mouth went to 6 times
+CE's light and white), its intensity 0.3 r^2 x the colour: the one whose
+light over the sphere of radius r is what CE's 1 - d^2/r^2 gives (2/15 r^3
+x 4 pi), so a light's whole light is CE's, more than CE's near it (1.9 x at
+its middle, alike at 0.6 r) and less far off (tools/test_prism_pt.py). A
+spot's cone is CE's (rasterizer_set_model_lighting_point_light's): whole
+inside the inner cone, to none at the outer, linear in the cosine. Their
+shadows traced (light_seen). */
+const uint DYNAMIC_FLOATS = 12u;
+vec3 dynamic_light_at(uint at, vec3 p, out vec3 l, out float d)
 {
     Floats f = Floats(job.lights);
-    uint at = i * 12u;
     vec3 to = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]) - p;
     float r = f.v[at + 3u], d2 = dot(to, to);
     d = sqrt(d2);
@@ -617,8 +629,18 @@ vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
     float cone = 1.0;
     vec4 axis = vec4(f.v[at + 8u], f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]);
     if (axis.w < 1.5)
-        cone = smoothstep(axis.w, mix(axis.w, 1.0, 0.2), dot(-l, axis.xyz));
-    return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * (1.0 - d2 / (r * r)));
+    {
+        float c = dot(-l, axis.xyz), inner = f.v[at + 7u];
+        cone = inner < 1.5 && inner > axis.w + 1.0e-4 ? clamp((c - axis.w) / (inner - axis.w), 0.0, 1.0) :
+            smoothstep(axis.w, mix(axis.w, 1.0, 0.05), c);
+    }
+    float x2 = d2 / (r * r);
+    float window = 1.0 - x2 * x2;
+    return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * window * window * 0.3 / max(x2, 0.16));
+}
+vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
+{
+    return dynamic_light_at(i * DYNAMIC_FLOATS, p, l, d);
 }
 
 /* ---------- the moving objects (port: the G-buffer pass's object draws of
@@ -968,8 +990,15 @@ not the same thing: there the weight is set after a choice made by the
 unshadowed target, which takes a ninth of a sparse light (round 1's G5);
 here the choice itself is by the shadowed target, and an empty reservoir is
 a valid estimate of 0 at its confidence) */
+/* (a dynamic light's shadow by the level to its place, by the moving
+objects to DYNAMIC_OWNER short of it: a light is often on or in the object
+it belongs to (a vehicle's lamp, a weapon's glow, an elite's), which does
+not shadow it) */
+const float DYNAMIC_OWNER = 0.15;
 bool light_seen(vec3 o, int kind, vec3 l, float d)
 {
+    if (kind == KIND_DYNAMIC)
+        return !blocked_structure(o, l, max(d - 0.05, 0.0)) && !objects_blocked(o, l, d - DYNAMIC_OWNER);
     return kind == KIND_LAMP ? lamp_visible(o, l, d) : !blocked(o, l, max(d - 0.05, 0.0));
 }
 /* one of the last frame's reservoirs (at pixel q) offered to this pixel's:
@@ -1030,7 +1059,7 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     uint index;
     vec3 y;
     float target_own, sum;
-    lights_initial(g, int(job.extra.x), 8, 4, kind, index, y, target_own, sum);
+    lights_initial(g, int(job.extra.x), 8, 0, kind, index, y, target_own, sum);
     /* (the initial sample's shadow: hidden, its weight in the shadowed
     target 0; seen, its light kept for the shading) */
     vec3 kept_d = vec3(0.0), kept_s = vec3(0.0);
@@ -1089,6 +1118,53 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     }
     imageStore(reservoir_point_now, pixel, vec4(y, big_w));
     imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
+}
+
+/* the dynamic lights at the pixel, apart from ReSTIR DI's reservoir:
+resampled importance over 4 of them (all where there are 4 or fewer) by
+their unshadowed diffuse and specular light, the kept one's shadow traced.
+Apart, since the last frame's reservoirs never hold one (their order
+changes from frame to frame) and the reuse's confidences (the canonical
+reservoir's 1 of up to 9) took the rest of a dynamic light's weight: a
+flashlight came in over many frames at a ninth of itself */
+void dynamic_direct(Surface g, vec3 o, out vec3 diffuse, out vec3 specular)
+{
+    diffuse = vec3(0.0);
+    specular = vec3(0.0);
+    uint n = uint(job.volume.z);
+    if (n == 0u || job.lights == uvec2(0u))
+        return;
+    uint candidates = min(n, 4u);
+    float sum = 0.0, target_kept = 0.0, d_kept = 0.0;
+    vec3 kept_d = vec3(0.0), kept_s = vec3(0.0), l_kept = vec3(0.0);
+    for (uint c = 0u; c < candidates; c++)
+    {
+        uint i = n <= 4u ? c : min(uint(rnd() * float(n)), n - 1u);
+        vec3 l;
+        float d;
+        vec3 e = dynamic_light(i, g.point, l, d);
+        float nl = dot(g.normal, l);
+        if (nl <= 0.0 || dot(e, e) <= 0.0)
+            continue;
+        vec3 dif = e * nl, spe = ggx(g, l) * e * PI;
+        float target = luma(dif) + luma(spe);
+        float w = target * (float(n) / float(candidates));
+        if (!(w > 0.0) || isinf(w))
+            continue;
+        sum += w;
+        if (rnd() * sum <= w)
+        {
+            target_kept = target;
+            kept_d = dif;
+            kept_s = spe;
+            l_kept = l;
+            d_kept = d;
+        }
+    }
+    if (target_kept <= 0.0 || !light_seen(o, KIND_DYNAMIC, l_kept, d_kept))
+        return;
+    diffuse = kept_d * (sum / target_kept);
+    specular = kept_s * (sum / target_kept);
 }
 
 /* ---------- the lamps by a light tree as well as the grid (the live
@@ -1332,7 +1408,7 @@ void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int d
             float d;
             vec3 e = dynamic_light(i, p, l, d);
             float nl = dot(g.normal, l);
-            if (nl <= 0.0 || dot(e, e) <= 0.0 || blocked(o, l, max(d - 0.05, 0.0)))
+            if (nl <= 0.0 || dot(e, e) <= 0.0 || !light_seen(o, KIND_DYNAMIC, l, d))
                 continue;
             vec3 dif = e * nl;
             vec3 spe = ggx(g, l) * e * PI;
@@ -1973,6 +2049,10 @@ void main()
         lamps_mis = false;
         noisy_d += ld;
         noisy_s += ls;
+        seed_for(pixel, frame, 9u);
+        dynamic_direct(g, o, ld, ls);
+        noisy_d += ld;
+        noisy_s += ls;
         /* the sky's floor (the units' rig: unoccluded, as the bake adds it;
         the indoor one in an indoor cluster) */
         clean_d += floor_light(g);
@@ -2061,6 +2141,30 @@ void main()
 
 //@pass temporal
 layout(local_size_x = 8, local_size_y = 8) in;
+/* the dynamic lights' change at a surface: their unshadowed diffuse light
+there this frame and the recent ones' (job.volume.z and .w of them, the
+recent ones after LIGHTS_MOST: each where it was last frame, its colour the
+most the history may still hold of it), the change's share of the light the
+history holds besides theirs (0 none, 1 all of it). A light switched off
+or fading keeps cutting the history until what it may hold of it is gone (a
+flashlight's spot was a ring on the wall for 200 frames after it) */
+const uint LIGHTS_MOST = 64u;
+const float DYNAMIC_RESET = 0.1;
+float dynamic_change(Surface g, float history_luma)
+{
+    uint now_n = uint(job.volume.z), last_n = uint(job.volume.w);
+    if (job.lights == uvec2(0u) || now_n + last_n == 0u)
+        return 0.0;
+    float a = 0.0, b = 0.0;
+    vec3 l;
+    float d;
+    for (uint i = 0u; i < now_n; i++)
+        a += luma(dynamic_light_at(i * DYNAMIC_FLOATS, g.point, l, d)) * max(dot(g.normal, l), 0.0);
+    for (uint i = 0u; i < last_n; i++)
+        b += luma(dynamic_light_at((LIGHTS_MOST + i) * DYNAMIC_FLOATS, g.point, l, d)) * max(dot(g.normal, l), 0.0);
+    float change = abs(a - b);
+    return change / max(max(a, b) + max(history_luma - b, 0.0), 1.0e-4);
+}
 /* the last frame's histories at a pixel of this frame: the motion's point
 there, its 2 x 2 taps each kept where its guide is the surface's (the same
 instance, the normal within 25 degrees, the plane through it near the
@@ -2288,6 +2392,9 @@ void main()
     vec4 sr = imageLoad(sun_raw, pixel);
     vec4 hd, hs, hm, hms, hsun;
     float length_d;
+    /* (the share of the history the dynamic lights' change leaves: below
+    DYNAMIC_RESET, none) */
+    float dynamic_keep = 1.0;
     bool history = reproject(pixel, g, hd, hs, hm, hms, hsun, length_d);
     if (history)
     {
@@ -2303,6 +2410,18 @@ void main()
         }
         else if (amount > 0.0)
             hs.a = mix(hs.a, min(hs.a, 2.0), amount);
+        /* (the histories cut by the dynamic lights' change here: a light
+        switched on (the flashlight, a muzzle flash, a bolt going by) is
+        whole in its first frame, not a firefly held to the history nor a
+        32nd of itself, and one switched off or moved on leaves no trail;
+        its share of the light 1, the frame's own alone) */
+        float cut = dynamic_change(g, hm.x);
+        if (cut > 0.02)
+        {
+            dynamic_keep = (1.0 - min(2.0 * cut, 1.0)) * (1.0 - min(2.0 * cut, 1.0));
+            length_d = min(length_d, job.denoise.x * dynamic_keep);
+            hs.a = min(hs.a, job.denoise.x * dynamic_keep);
+        }
     }
     /* (the counters, a level pixel in 16 that looks for its history: its
     last frame's place in the view, the distance the last frame saw there its
@@ -2451,6 +2570,27 @@ void main()
             slow_s = vec3(c);
         n_s = min(n_s, most_fast);
     }
+    /* (a history the dynamic lights' change left none of: the frame's own
+    pre-blurred light alone, its histories and moments begun again at it, as
+    long as the fix pass's wide gather wants (a flash's light over a level
+    of sparse bright samples gathered from 25 pixels about was blocks), its
+    variance the neighbours' (the fix pass's, unknown here)) */
+    bool dynamic_reset = history && dynamic_keep < DYNAMIC_RESET;
+    if (dynamic_reset)
+    {
+        slow_d = cd;
+        slow_s = cs;
+        m1 = ld;
+        m2 = ld * ld;
+        fast_d = ld;
+        fast_m2 = ld * ld;
+        fast_s = ls;
+        fast_m2s = ls * ls;
+        m1s = ls;
+        m2s = ls * ls;
+        n_d = 4.0;
+        n_s = 4.0;
+    }
     imageStore(diff_now, pixel, vec4(slow_d, n_d));
     imageStore(spec_now, pixel, vec4(slow_s, n_s));
     imageStore(moments_now, pixel, vec4(m1, m2, fast_d, fast_m2));
@@ -2458,7 +2598,7 @@ void main()
     /* (the variance for the spatial filter: the moments' once the history
     has a few frames; else unknown (the fix pass and the filter take it from
     the neighbours)) */
-    float var_d = n_d >= 4.0 ? variance : -1.0;
+    float var_d = n_d >= 4.0 && !dynamic_reset ? variance : -1.0;
     imageStore(diff_a, pixel, vec4(slow_d, var_d));
     imageStore(spec_a, pixel, vec4(slow_s, n_s));
 
