@@ -78,7 +78,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 14u
+#define BAKE_VERSION 15u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -146,7 +146,7 @@ invocations the running texels are spread to fill */
 /* the fixtures the bake takes at most */
 #define FIXTURES_MOST 4096u
 /* the bounces (the reference's: XGPU_RT_REFERENCE_BOUNCES) */
-#define BOUNCES 8
+#define BOUNCES 32
 /* the black floor: 1/1000 of middle grey (D4, docs/prism_gates.md) */
 #define BLACK_FLOOR (0.18f * 1.0e-3f)
 
@@ -370,6 +370,10 @@ struct bake_state
 	struct bake_scene_block block;
 	/* the raster lookup's */
 	struct bake_buffer pages, charts, vpages, table, pool, sun, masks, bricks, probes, raster_job;
+	/* the final gather's: each kept triangle's atlas triangle (+1; 0 none), and
+	the cache's block (the virtual pages, the tile table, the pool, the atlas
+	triangles, that map) the lightmap's and the volume's passes read */
+	struct bake_buffer plan_atlas, cache_block;
 	uint32_t mask_capacity, mask_count, physical_count, brick_entries, coarse_entries;
 	struct bake_buffer bricks_coarse;
 	uint32_t *table_host, *sun_host;
@@ -1712,7 +1716,7 @@ static void bake_free(struct bake_state *b)
 		&b->reflection_data, &b->reflection_table, &b->probes, &b->raster_job, &b->ranges, &b->triangles, &b->texels,
 		&b->accumulators, &b->states, &b->running, &b->tile_origins, &b->job, &b->cell_points, &b->cell_candidates,
 		&b->cell_weights, &b->mask_ranges, &b->mask_out, &b->probe_points, &b->probe_accumulators, &b->probe_states,
-		&b->probe_statistics, &b->compact_list, &b->compact_args,
+		&b->probe_statistics, &b->compact_list, &b->compact_args, &b->plan_atlas, &b->cache_block,
 	};
 
 	if (!b)
@@ -2154,13 +2158,27 @@ static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const
 opaque, then the alpha-tested, each its info), their structures, the
 materials, alpha maps and lamps, the scene's block; the raster lookup's
 tables; the batch's buffers */
+/* HALO_BAKE_EMITTERS_PASS (a diagnostic): the level's emitting faces (a
+material with a lamp's light) neither block nor reflect, as Tool's
+radiosity's emitters "block nothing"; their light is the lamps' still */
+static int emitter_passes(const float *materials, uint32_t traced, uint32_t material_count)
+{
+	static int pass = -1;
+
+	if (pass < 0)
+		pass = getenv("HALO_BAKE_EMITTERS_PASS") != NULL;
+	return pass && materials && traced < material_count &&
+		((int)materials[(size_t)traced * XGPU_STREAM_RT_MATERIAL_FLOATS + XGPU_RT_MATERIAL_FLAGS] &
+		XGPU_RT_MATERIAL_FLAG_LIGHT);
+}
+
 static int bake_upload(struct bake_state *b)
 {
 	VkCommandBuffer commands = xgpu_vulkan_compute_commands();
 	struct bake_plan *plan = &b->plan;
 	const float *materials = (const float *)b->materials.mapped;
 	float *vertices = NULL, *tridata = NULL;
-	uint32_t *info = NULL, *pages = NULL, *vpages = NULL, index, opaque = 0, tested = 0, at[4];
+	uint32_t *info = NULL, *pages = NULL, *vpages = NULL, *plan_atlas = NULL, index, opaque = 0, tested = 0, at[4];
 	uint32_t triangles, scenery_materials = 0;
 	VkDeviceAddress opaque_address = 0, tested_address = 0, addresses[4] = { 0, 0, 0, 0 };
 	void *host_materials = b->materials.mapped, *host_alpha = b->alpha.mapped;
@@ -2173,6 +2191,9 @@ static int bake_upload(struct bake_state *b)
 	{
 		const uint32_t *a = plan->attributes + (size_t)index * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS;
 		uint32_t traced = a[XGPU_SCENE_ATTRIBUTE_TRACED];
+
+		if (emitter_passes(materials, traced, b->material_count))
+			continue;
 		int tests = (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] & 0xffu) == XGPU_RT_TRIANGLE_ALPHA_TESTED && alpha_bytes &&
 			traced < b->material_count && ((int)materials[(size_t)traced * XGPU_STREAM_RT_MATERIAL_FLOATS +
 			XGPU_RT_MATERIAL_FLAGS] & XGPU_RT_MATERIAL_FLAG_ALPHA_TESTED);
@@ -2251,6 +2272,9 @@ static int bake_upload(struct bake_state *b)
 	{
 		const uint32_t *a = plan->attributes + (size_t)index * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS;
 		uint32_t traced = a[XGPU_SCENE_ATTRIBUTE_TRACED];
+
+		if (emitter_passes(materials, traced, b->material_count))
+			continue;
 		uint32_t level = (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] >> XGPU_SCENE_LEVEL_SHIFT) & 3u;
 		int tests = (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] & 0xffu) == XGPU_RT_TRIANGLE_ALPHA_TESTED && alpha_bytes &&
 			traced < b->material_count && ((int)materials[(size_t)traced * XGPU_STREAM_RT_MATERIAL_FLOATS +
@@ -2319,6 +2343,7 @@ static int bake_upload(struct bake_state *b)
 	pages = (uint32_t *)calloc((size_t)plan->page_count + 1, 16);
 	vpages = (uint32_t *)calloc((size_t)plan->vpage_count + 1, 32);
 	tridata = (float *)malloc(((size_t)plan->atlas.triangle_count + 1) * 64);
+	plan_atlas = (uint32_t *)calloc((size_t)plan->triangle_count + 1, 4);
 	b->table_host = (uint32_t *)calloc((size_t)plan->table_words + 1, 4);
 	b->sun_host = (uint32_t *)calloc((size_t)plan->table_words + 1, 4);
 	if (!pages || !vpages || !tridata || !b->table_host || !b->sun_host)
@@ -2338,7 +2363,8 @@ static int bake_upload(struct bake_state *b)
 		vpages[index * 8 + 4] = plan->vpages[index].table_first;
 	}
 	/* (each atlas triangle: its corners in its virtual page's texels, its
-	world corners, its flags: 1 a remodel's, 2 in an indoor cluster) */
+	world corners, its flags: 1 a remodel's, 2 in an indoor cluster, from bit
+	8 its virtual page + 1 (0 none): the final gather's) */
 	for (index = 0; index < (uint32_t)plan->atlas.triangle_count; index++)
 	{
 		int32_t chart = plan->atlas.triangle_charts[index];
@@ -2355,7 +2381,11 @@ static int bake_upload(struct bake_state *b)
 		if (plan->attributes[(size_t)scene_index * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS + XGPU_SCENE_ATTRIBUTE_KIND_PAGE] &
 			XGPU_SCENE_INDOOR)
 			flags |= 2u;
+		if (chart >= 0 && plan->atlas.charts[chart].virtual_page >= 0)
+			flags |= ((uint32_t)plan->atlas.charts[chart].virtual_page + 1u) << 8;
 		memcpy(to + 15, &flags, 4);
+		if (plan_atlas && scene_index < plan->triangle_count)
+			plan_atlas[scene_index] = index + 1u;
 	}
 	b->mask_capacity = plan->tile_count / 4 + 64;
 	if (!buffer_filled(commands, pages, (VkDeviceSize)plan->page_count * 16 + 16, &b->pages, 0) ||
@@ -2366,8 +2396,23 @@ static int bake_upload(struct bake_state *b)
 		!buffer_make((VkDeviceSize)plan->tile_count * RASTER_TILE_WORDS * 4 + 64, 0, 0, &b->pool) ||
 		!buffer_filled(commands, NULL, (VkDeviceSize)b->mask_capacity * MASK_TEXELS + 64, &b->masks, 0) ||
 		!buffer_filled(commands, tridata, (VkDeviceSize)plan->atlas.triangle_count * 64 + 64, &b->triangles, 0) ||
-		!buffer_filled(commands, plan->tile_triangles, (VkDeviceSize)plan->tile_triangle_count * 4 + 16, &b->ranges, 0))
+		!buffer_filled(commands, plan->tile_triangles, (VkDeviceSize)plan->tile_triangle_count * 4 + 16, &b->ranges, 0) ||
+		!plan_atlas || !buffer_filled(commands, plan_atlas, (VkDeviceSize)plan->triangle_count * 4 + 16, &b->plan_atlas, 0))
 		goto done;
+	/* (the final gather's cache block: the addresses the lightmap's and the
+	volume's passes read the bake's own light through) */
+	{
+		VkDeviceAddress cache[8];
+
+		memset(cache, 0, sizeof(cache));
+		cache[0] = b->vpages.address;
+		cache[1] = b->table.address;
+		cache[2] = b->pool.address;
+		cache[3] = b->triangles.address;
+		cache[4] = b->plan_atlas.address;
+		if (!buffer_filled(commands, cache, sizeof(cache), &b->cache_block, 0))
+			goto done;
+	}
 	/* the batch's: the texels' records, accumulators, states, running counts,
 	the setup's entries and the job blocks */
 	if (!buffer_make((VkDeviceSize)BATCH_TILES * TILE_TEXELS * 32, 0, 0, &b->texels) ||
@@ -2399,6 +2444,7 @@ done:
 	free(pages);
 	free(vpages);
 	free(tridata);
+	free(plan_atlas);
 	return ok;
 }
 
@@ -2858,7 +2904,7 @@ static void run_compacted(VkCommandBuffer commands, int pipeline, struct bake_st
 	cjob = job_block(commands, b, 7, compact, 3);
 	addresses[at] = b->compact_list.address;
 	addresses[at + 1] = b->compact_args.address;
-	job = job_block(commands, b, slot, addresses, at + 2);
+	job = job_block(commands, b, slot, addresses, 8);
 	if (!cjob || !job)
 		return;
 	vkCmdUpdateBuffer(commands, b->compact_args.buffer, 0, sizeof(reset), reset);
@@ -2893,6 +2939,21 @@ static VkDeviceAddress job_block(VkCommandBuffer commands, struct bake_state *b,
 	if (!upload(commands, &b->job, (VkDeviceSize)slot * 64, words, sizeof(words)))
 		return 0;
 	return b->job.address + (VkDeviceSize)slot * 64;
+}
+
+/* the final gather's cache block for the lightmap's and the volume's
+passes (docs/prism_bake.md, "The estimator"): the bake's own light, read
+where a bounce's path meets the level, once the draft has given every tile
+its first light (every bounce in it); 0 while it drafts. Off unless
+HALO_BAKE_GATHER (a diagnostic: it comes out a few percent over the paths
+in dark texels, not yet explained) */
+static VkDeviceAddress gather_cache(struct bake_state *b)
+{
+	static int on = -1;
+
+	if (on < 0)
+		on = getenv("HALO_BAKE_GATHER") != NULL && getenv("HALO_BAKE_NO_GATHER") == NULL;
+	return !on || b->drafting || !b->cache_block.buffer ? 0 : b->cache_block.address;
 }
 
 /* the samples a texel or probe stops at whatever its noise (the quicker
@@ -3239,6 +3300,9 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 	addresses[1] = b->accumulators.address;
 	addresses[2] = b->states.address;
 	addresses[3] = b->running.address;
+	addresses[6] = gather_cache(b);
+	/* (every lamp of the cell's lists at a texel, past the draft) */
+	addresses[7] = b->drafting ? 0 : 1;
 	run_compacted(commands, PIPELINE_LIGHTMAP, b, b->states.address, BATCH_TILES * TILE_TEXELS, addresses, 4, 2,
 		bake.samples, 64, b->frame, threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES,
 		lanes_of(b));
@@ -3548,6 +3612,7 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 		addresses[2] = b->probe_states.address;
 		addresses[3] = b->probe_statistics.address;
 		addresses[4] = b->probe_states.address + (VkDeviceSize)VOLUME_BATCH * 4;
+		addresses[7] = gather_cache(b);
 		count = b->probes_batched - b->probes_done;
 		run_compacted(commands, PIPELINE_VOLUME, b, b->probe_states.address, count, addresses, 5, 5, bake.samples, 64,
 			b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b), (float)BOUNCES, 1u);

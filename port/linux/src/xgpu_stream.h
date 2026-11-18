@@ -2103,7 +2103,7 @@ enum
 	request's generation (a new one starts the sum again) */
 	XGPU_RT_FLAG_REFERENCE = 8,
 };
-#define XGPU_RT_REFERENCE_BOUNCES 8
+#define XGPU_RT_REFERENCE_BOUNCES 32
 /* the reference file's path: a NUL-terminated UTF-8 string of at most this
 many bytes, its NUL included, in guest memory the guest keeps */
 #define XGPU_RT_REFERENCE_PATH 512u

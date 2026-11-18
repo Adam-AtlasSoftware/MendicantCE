@@ -139,8 +139,8 @@ indoor ambient (0 by 0), so the gap was not that floor's.
 
 ## The estimator
 
-The bake's light is the path tracer's reference's (`debug.pt_reference`: no reuse, no cache, no probes, up to 8 bounces,
-Russian roulette past the second), on the same scene, materials and rig, so the gate against R compares one estimator
+The bake's light is the path tracer's reference's (`debug.pt_reference`: no reuse, no cache, no probes, up to 32 bounces,
+Russian roulette past the second; 8 cut a room with walls of albedo 0.85 short), on the same scene, materials and rig, so the gate against R compares one estimator
 converged against the same estimator converged:
 
 - **The light at a point, less the sun's** (the rig's linear units: a white surface's radiance, the irradiance over pi),
@@ -179,6 +179,19 @@ converged against the same estimator converged:
   geometry), and CE's page has the moon on its floor: with the rule, 43 to 50% of G6's level pixels see the moon (none
   before), in the page's colour, though the bake there is now 1.6 to 1.7 times the page's light. b30 does not change
   (G2's and G3's sunlit and shaded pixels against the page within 2%). R takes the same rule.
+- **Every lamp of the cell's lists** (`lamps_all`): past the draft, a texel takes each sample the light of every lamp
+  in its cell's two lists (a point of each by solid angle or area, its own shadow traced) and the level's other lamps
+  by one pick by power, counted only where the picked lamp is in neither list; the draft and the paths' hits keep the
+  resampled pick. Unbiased (a10 at `high`, texel by texel: the whole BSP's light equal to the pick's to 0.1%, the
+  median texel to 0.1%); at `ultra` on a10 the texels' light-weighted noise between two seeds is 8.4% against 11.8%
+  (rms 22.0% against 25.6%, median 5.6% against 7.8%), for about twice the direct light's cost (219 s against 110 s).
+- **The final gather** (`path_gathered`, a diagnostic, off unless `HALO_BAKE_GATHER`): past the draft, a bounce's ray
+  that meets the level takes the bake's own light there (the hit's texels in the tiles' pool, bilinear, at the hit's
+  normal, less the floor of light) by the hit's albedo, plus the sun's there and the hit's glow, in place of the hit's
+  lamp pick and the paths past it; a hit with no texel takes the path. It comes out over the paths, 0.4 to 0.6% over a
+  whole BSP and about 3% at the median texel, more in dark texels (a10 at `high`), and R sides with the paths; the
+  suspects are the cache's neighbour-filled texels inside the level and its bilinear reads at a chart's edge. Its noise
+  gain alone was small (11.8% to 10.9%).
 
 **When a texel stops (D4).** Each texel's samples are added until the relative standard error of its mean luminance is
 at most 1% (`docs/prism_gates.md`: the standard error itself, not a confidence interval), with at least 64 samples.
@@ -244,7 +257,17 @@ another key is not resumed: the BSP is baked again (into `.new`) and replaces it
 | `display.bake_budget` | 0.25 to 200 ms | The GPU time a frame may give a background bake (30 in the menus, 60 with `debug.bake_exit`) |
 | `display.bake_indicator` | `true`, `false` | The progress at the screen's top left |
 | `debug.bake_exit` | `true`, `false` | Bake in the foreground and quit once done: the measurements' runs |
-| `debug.gbuffer_view` | `"bake_light"`, `"bake_sun"`, `"bake_texels"`, `"bake_volume"` | Raster's views |
+| `debug.gbuffer_view` | `"bake_light"`, `"bake_sun"`, `"bake_texels"`, `"bake_volume"`, `"bake_total"` | Raster's views |
+| `display.prism_raster_composition` | `"ce"`, `"materials"` | CE's shaders compose Raster's light (default), or PRISM's own materials |
+| `display.prism_raster_objects` | `"classic"`, `"volume"` | Objects never lit under Classic (default), or the volume's light alone |
+| `display.prism_exposure`, `_range`, `_speed`, `_bias`, `display.prism_tone_curve` | as the path tracer's | Raster's exposure and tone curve |
+
+The bake's diagnostics (environment variables): `HALO_BAKE_TERMS` leaves terms out (1 the domes, 2 the lamps, 4 the
+glows, 8 the paths past the first hit, 16 the fixtures, 32 the grid, 64 the lamps' spherical sampling; a texel's 128
+indirect light, 256 own lamps' direct light; 512 every lamp of the cell's lists in the draft too, 1024 the resampled
+pick past it), `HALO_BAKE_SEED` another seed (two bakes' noise against each other), `HALO_BAKE_GATHER` the final
+gather, `HALO_BAKE_EMITTERS_PASS` the level's emitting faces neither blocking nor reflecting, `HALO_PRISM_ALBEDO`
+`stored` the base maps' stored mean.
 
 Settings > Mods > PRISM LIGHTING has Lighting (Classic or PRISM Raster), Bake (While Playing, When Asked, Never), Bake
 Quality, Rebake Lightmaps and Progress on Screen. The bake needs ray queries; a GPU without them draws Raster with CE's
@@ -347,6 +370,38 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 - Objects in the sun come out 15 to 30% brighter beside the sunlit ground than Classic draws them (Raster over Classic
   at G2's poses: sunlit objects 1.14 to 1.33, the sunlit level 0.88 to 1.16; in the shade alike, 0.90 to 1.04): the
   volume's light and the traced sun against CE's object lighting.
+- **The bake against CE's raw page** (the lightmap pass without the bump's incident radiosity,
+  `rasterizer_lightmaps_incident_radiosity 0`: 0 to 11% over CE's light target): the table under "The bounces'
+  albedo" (the linear column). Tool's pages hold far less bounce than a converged solve: c40's moonlit snow is the moon
+  at colour × power × cos and the flat ambient alone (0.33 to 0.39 against 0.36), where the bake has its bounce too
+  (0.55 to 0.60), and in the moon's shade the page is half the bake's light; 28% of a10's texels in its own pages are
+  black, with no floor (the darkest values fall away from 0 smoothly). So the lamp-lit rooms and the canyon over the
+  page are Tool's short bounce, which the rig does not copy; the exposure carries the level in the frame. Ruled out on
+  the way: the target's bump term, the emitting faces' blocking (letting them pass makes a10 brighter), the sky's floor
+  in indoor clusters. A whole-BSP comparison in lightmap space is where it would be looked at again.
+- PRISM's own materials (`"materials"`) leave the frame darker than Classic's at equal light: Raster's frame (the
+  exposure fixed) over Classic's, over the bake's light over CE's light target (the frames' and the lights' medians,
+  draft bakes): a10 0.42 to 0.47, c40's chamber 0.63 to 0.75, b30 0.86 to 1.01 (G2) and 0.89 to 0.91 (G3). The
+  specular's share is taken from the diffuse (a metal's most), and CE's additions (its reflection cube maps, specular
+  lightmaps and specular lights) are not drawn: a debt of the materials milestone, which `"ce"` leaves out.
+- **Objects are never lit under Classic** (`display.prism_raster_objects`, `"classic"` the default with CE's
+  composition): an object's pixel lit by the volume under the light CE gives that pixel (CE's light target there, the
+  object's lit colour) is raised to it, its colour kept; over it, the volume's. What the game shows stays seen: the
+  Chief in c40's chamber comes out at Classic's 0.122 (the volume alone 0.022 to 0.024). The volume there holds 0.26 to
+  0.27 (the light's unit, bluish), 0.4 of the lightmap's light on the floor under him (0.65): his sides face the walls,
+  the lamps are above. CE lights him at about 1.36 (his Classic colour over his base colour), four times its own floor
+  light there (0.31): CE's object lighting is generous, not the volume wrong. `"volume"` takes the volume alone.
+- Objects in the sun come out 15 to 30% brighter beside the sunlit ground than Classic draws them (Raster over Classic
+  at G2's poses: sunlit objects 1.14 to 1.33, the sunlit level 0.88 to 1.16; in the shade alike, 0.90 to 1.04): the
+  volume's light and the traced sun against CE's object lighting.
+- **The bake against CE's raw page** (the lightmap pass without the bump's incident radiosity,
+  `rasterizer_lightmaps_incident_radiosity 0`: 0 to 11% over CE's light target), the bake's light over the page's at the
+  median (draft bakes, November 2026): a10's cryo bay 1.67, the wall behind p1's windows 0.64, p2's corner 0.88; c40's
+  chamber 1.5 to 1.6; c40's canyon (G6, the moon in) 1.6 to 1.7; b30's beach 1.1 to 1.5 sunlit and 1.2 to 1.3 in the
+  shade. Ruled out: the target's bump term, the emitting faces' blocking (letting them pass makes a10 brighter), the
+  sky's floor in indoor clusters. Left open: the lamp-lit rooms over the page with nothing left to blame; the exposure
+  carries the level in the frame. A comparison in lightmap space (CE's page texels against the bake's, the whole BSP)
+  is where it would be looked at again.
 - The sun's half-lit band (partial shadows, low cosines) comes out over CE's light (CE/bake 0.5 to 0.8 at G2 and G3):
   Tool's sun is sixteen directions spread over its disc, on the vertices, so its shadows' edges are softer and coarser
   than the bake's traced disc: a place where the bake is meant to differ.
