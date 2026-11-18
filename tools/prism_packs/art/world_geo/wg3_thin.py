@@ -8,7 +8,8 @@ environment (wu; 1 wu = 3.048 m; angles in degrees; light as a share of the corn
   WG3_NEAR_TOL_METAL (0.003), WG3_NEAR_ANGLE_METAL (2.5), WG3_NEAR_LIGHT_METAL (0.05): the "metal" kind
   WG3_FAR_TOL (0.15), WG3_FAR_TOL_METAL (0.05: smooth and metal), WG3_FAR_ANGLE (90: off), WG3_FAR_LIGHT (100: off)
   WG3_FAR_SCALE (1.0: each part's far distance scaled), WG3_ONLY (a comma list of shaders' last words to thin; all)
-  WG3_SKIP_TIERS ("2": tiers kept whole, 0 rock and ground, 1 smooth, 2 metal), WG3_JOBS (8: processes), WG3_KEEP_POINTS (an .npz from wg3_fix.py: surfaces near them kept)
+  WG3_SKIP_TIERS ("2": tiers kept whole, 0 rock and ground, 1 smooth, 2 metal), WG3_JOBS (8: processes; one where the
+  system cannot fork, as on Windows), WG3_KEEP_POINTS (an .npz from wg3_fix.py: surfaces near them kept)
 
 Why. wg2_seal.py made every edge two surfaces share the same vertices on both sides, and wg2_far2.py's far levels
 keep each surface's whole boundary loop so near and far meet edge to edge. Both are right and both cost: the sealed
@@ -37,13 +38,13 @@ lightmap coordinates, normal and baked light are exactly what they were):
      dropped). A corner whose position has several rows in a surface (a bevel's split normals) takes, in each new
      triangle, the row whose normal is nearest the triangle's.
 
-Checked by wg3_fix.py (every mode the engine draws: no open edge the input lacks) and the game's debug.crack_view.
+Checked by wg3_fix.py (near, far and the two mixed modes: no open edge the input lacks) and the game's
+debug.crack_view.
 Everything it reads and writes is derived from the player's map: local only.
 """
 import json
 import math
 import os
-import struct
 import sys
 import time
 
@@ -280,6 +281,18 @@ def do_chunk(chunk):
     return [(i, do_surface(i)) for i in chunk]
 
 
+def chunk_results(chunks):
+    """each chunk's surfaces thinned (do_chunk): in JOBS processes forked from this one, which read W as it stands; in
+    this process where the system cannot fork (Windows: a spawned worker would be Blender started again) or JOBS is 1.
+    The results are kept by surface, so the file is the same either way."""
+    import multiprocessing as mp
+    if JOBS > 1 and "fork" in mp.get_all_start_methods():
+        with mp.get_context("fork").Pool(JOBS) as pool:
+            yield from pool.imap_unordered(do_chunk, chunks)
+    else:
+        yield from map(do_chunk, chunks)
+
+
 def do_surface(i):
     """a surface's thinned near and far triangles (rows of its part; far None when it is the near), or None"""
     parts, gid, offs, gpos, surf, removed = (W[k] for k in ("parts", "gid", "offs", "gpos", "surf", "removed"))
@@ -502,19 +515,17 @@ def main():
         W.update(parts=parts, gid=gid, offs=offs, gpos=gpos, surf=surf, removed=removed)
         todo = [i for i, r in enumerate(surf) if r["loop"] is not None]
         chunks = [todo[k:k + 200] for k in range(0, len(todo), 200)]
-        import multiprocessing as mp
-        with mp.get_context("fork").Pool(JOBS) as pool:
-            for res in pool.imap_unordered(do_chunk, chunks):
-                for i, out in res:
-                    if out is None:
-                        failed.append(i)
-                        continue
-                    Rn, Rf, n_in = out
-                    near_out[i] = Rn
-                    far_out[i] = Rf
-                    tn_in += n_in
-                    tn_near += len(Rn)
-                    tn_far += len(Rf if Rf is not None else Rn)
+        for res in chunk_results(chunks):
+            for i, out in res:
+                if out is None:
+                    failed.append(i)
+                    continue
+                Rn, Rf, n_in = out
+                near_out[i] = Rn
+                far_out[i] = Rf
+                tn_in += n_in
+                tn_near += len(Rn)
+                tn_far += len(Rf if Rf is not None else Rn)
         report["rounds"].append(dict(round=rnd, dropped_boundary=int(removed.sum()), failed=len(failed),
                                      near_in=tn_in, near_out=tn_near, far_out=tn_far))
         log("round", rnd, "failed", len(failed), "near", tn_in, "->", tn_near, "far", tn_far)

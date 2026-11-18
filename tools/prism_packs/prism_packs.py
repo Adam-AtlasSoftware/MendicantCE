@@ -31,7 +31,8 @@ Options:
   --vulkan-gpu <n>      the graphics card the Vulkan upscaler runs on, by number (default: its own choice)
   --torch <device>      the PyTorch device of the upscalers (default: cuda, else cpu)
   --lightmap-samples N  the rebaked lightmaps' final samples a texel (default: 1024)
-  --threads N           the processor threads Blender and the level remodels' steps use (default: all)
+  --threads N           the processor threads Blender and the level remodels' steps use (default: all; the
+                        remodels' thinning at most 8)
 
 Everything these tools make is made from your copy of the game: it stays on your computer. Do not share,
 upload or publish the packs, the work folder or anything in them. docs/prism_packs.md (GUIDE.md beside this
@@ -211,9 +212,10 @@ class Context:
     def python(self, script, *args, what="", check=True, extra=None):
         return self.run([PYTHON, "-B", "-I", ART / script, *args], what=what, check=check, extra=extra)
 
-    def threads(self):
-        """the processor threads a step may use (--threads; 0: all)"""
-        return self.a.threads or os.cpu_count() or 1
+    def processes(self):
+        """the processes a step that forks may use: --threads, else as many as the processor has threads up to 8 (the
+        art pipeline's measured default: each adds its own working memory on a large part)"""
+        return self.a.threads or min(os.cpu_count() or 1, 8)
 
     def blender_run(self, script, *args, what="", extra=None):
         # (no bytecode beside the art scripts: Blender's Python reads no PYTHON* variable)
@@ -1207,12 +1209,16 @@ def step_world(ctx):
                 for attempt in range(3):
                     ctx.blender_run("world_geo/wg3_thin.py", gltf, w / f"{name}.far.pwg", w / f"{name}.thin.pwg",
                                     w / f"{name}.thin.json", what=f"{level} {name}: thinned",
-                                    extra={"WG3_KEEP_POINTS": str(keep), "WG3_JOBS": str(ctx.threads())})
-                    if not ctx.python("world_geo/wg3_fix.py", gltf, w / f"{name}.far.pwg", w / f"{name}.thin.pwg",
-                                      keep, w / f"{name}.fix.txt", what=f"{level} {name}: no edge opened",
-                                      check=False):
+                                    extra={"WG3_KEEP_POINTS": str(keep), "WG3_JOBS": str(ctx.processes())})
+                    status = ctx.python("world_geo/wg3_fix.py", gltf, w / f"{name}.far.pwg", w / f"{name}.thin.pwg",
+                                        keep, w / f"{name}.fix.txt", what=f"{level} {name}: no edge opened",
+                                        check=False)
+                    if status == 0:
                         fixed = True
                         break
+                    if status != 3:
+                        # (3 is "edges opened: thin again"; anything else is the check failing, not the thinning)
+                        raise Failure(f"{level} {name}: wg3_fix.py failed (exit {status})")
                 if not fixed:
                     print(f"    {level} {name}: the thinning still opens edges; kept unthinned", flush=True)
                     shutil.copyfile(w / f"{name}.far.pwg", w / f"{name}.thin.pwg")
