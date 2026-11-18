@@ -515,6 +515,8 @@ pixel, the first round's limit, to fit a hold):
 | G5 a10 | 6b0a63968 | 0.040, 0.192, 0.374 | 0.126 / 0.115 / 1.23 / 0.125 | 0.134 / 0.113 / 1.23 / 0.125 | fail: R not converged |
 | G5 a10 | ae9a51c4f | 0.040, 0.191, 0.373 | 0.134 / 0.117 / 1.24 / 0.128 | 0.145 / 0.114 / 1.25 / 0.128 | fail: R not converged |
 | G2 b30 sunny | ae9a51c4f | 0.046, 0.035, 0.068 | 0.0062 / 0.0126 / 0.86 / 0.102 | 0.0062 / 0.0128 / 0.86 / 0.103 | fail on FLIP alone |
+| G2 b30 sunny | 6fa9b5e80 (moves only) | the same R | 0.0062 / 0.0126 / 0.86 / 0.103 | 0.0062 / 0.0128 / 0.86 / 0.103 | fail on FLIP alone |
+| G3 b30 shade | ae9a51c4f | 0.228, 0.093, 0.054 | 0.0082 / 0.0191 / 0.80 / 0.055 | 0.0082 / 0.0193 / 0.80 / 0.058 | fail on blotch |
 
 - **G2.** R is converged where it matters (each pixel's relative standard error a median of 0.3 to 0.4%; its
   estimated relative MSE, linear, is a few pixels'). The path tracer's frame held 300 frames at each probe pose
@@ -524,6 +526,15 @@ pixel, the first round's limit, to fit a hold):
   camera moved, the a-trous steps spreading the rocks' shadows where a moving camera's short histories gave the
   visibility a variance everywhere. 6fa9b5e80 filters the visibility only in penumbrae; its moves are taken again
   below.
+- **G2 again** (6fa9b5e80: the sun's visibility filtered only in penumbrae): the same figures to the fourth place, so
+  the filter was not the cause. The views along the move (`pt_sun`) showed the visibility falling in patches the shape
+  of the ground's triangles: its history came from the wrong place, found along the motion vector and checked by a
+  plane test that a wrong place on the same flat ground passes. 9dcc8df37 finds a level pixel's history by projecting
+  its point into the last frame's camera.
+- **G3.** R nearly converged (each pixel's relative standard error a median of 0.5 to 0.6%). At the first pose the
+  path tracer's held still is at blotch 0.0144 against R and the light as traced in the moves at 0.0164, quality and
+  performance alike: a difference under the trees that is not the bounce (not found yet), the moves' history fault on
+  top. The other two poses pass every measure.
 - **G5.** R does not converge in a hold: after 1536 frames each pixel's relative standard error is a median of 11
   to 17% (a10's corridors are lit by bounces from lamp-lit places, and its lamps are seen through gaps), the frame's
   estimated relative MSE 0.04 to 0.37 linear, 0.03 to 0.31 in the 8-bit frame's terms, falling as one over the
