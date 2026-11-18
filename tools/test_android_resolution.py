@@ -63,6 +63,14 @@ static void bink_import_update(void) {}
 static void hdr_read(void) {}
 static void picture_position_send(void) {}
 static void gamma_send(void) {}
+static void output_depth_read(void) {}
+static void hdr_sdr_curve_send(void) {}
+static void hdr_peak_nits_send(void) {}
+static void hdr_gamut_send(void) {}
+static void pass_times_send(void) {}
+static void sharp_upscale_send(void) {}
+/* (display.render_scale: none on Android's test) */
+static float render_scale_wanted(void) { return 1.0f; }
 static unsigned long screen_settings_taken;
 static unsigned long config_changes(void) { return 0; }
 static long shadow_scale_choose(void) { return 1; }

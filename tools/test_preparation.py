@@ -103,6 +103,8 @@ static int scenes, fades, chanting, follows = -1, captions, preparing;
 static void halo_loading_scene(void) { assert(scenes == epochs); scenes++; }
 /* (the menus' pictures being prepared: menu_pictures_render.c) */
 static int menu_pictures_preparing(void) { return preparing; }
+/* (the speedrun state block's loading flag: speedrun_state.c) */
+static void speedrun_state_loading(void) {}
 static void halo_loading_fade_begin(void) { fades++; }
 static void xgpu_backend_loading_progress(float progress) { (void)progress; }
 static void xgpu_backend_loading(int phase) { if (phase == 1) epochs++; }
@@ -282,6 +284,8 @@ static struct {
     struct surface *render_target, *depth_stencil;
     void *textures[4];
 } device;
+/* (the draw's inputs: the sky being drawn, d3d8_device.c's draw_inputs) */
+static struct { uint32_t sky; } inputs;
 static int consumed, checkpointed;
 static void xgpu_backend_consume(void) { consumed++; }
 /* (the settings a draw is journaled under alike: none here) */
