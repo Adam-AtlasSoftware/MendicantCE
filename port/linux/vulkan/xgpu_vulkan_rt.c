@@ -474,7 +474,7 @@ static struct
 	double milliseconds, milliseconds_most;
 	uint64_t timed_frames;
 	int statistics;
-	int logged_first, logged_gi;
+	int logged_first, logged_gi, logged_raster;
 	/* port: the last traced window's eye (display.prism_rt_objects "auto":
 	the replacement meshes traced within RT_REPLACEMENT_REACH of it) */
 	float eye[3];
@@ -486,6 +486,14 @@ static struct
 	float owner_now[64][3], owner_last[64][3];
 	uint8_t owner_now_seen[64], owner_last_seen[64];
 	uint64_t stock_stand_ins, far_left;
+	/* port: PRISM Raster's objects (RT_FRAME's XGPU_RT_FLAG_RASTER_OBJECTS,
+	mode off): the G-buffer pass's objects captured and their structure
+	built with nothing traced here; the frame's top level (its address, the
+	objects' table, the slot and the frame it was built in: 0 none) */
+	int objects_only;
+	VkDeviceAddress raster_structure, raster_table;
+	uint32_t raster_slot;
+	uint64_t raster_frame;
 } rt;
 
 /* the monotonic clock, in seconds (the exposure's adaptation) */
@@ -1041,11 +1049,13 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 	rt.frame = *record;
 	rt.frame_received = 1;
 	rt.frame_active = record->mode != XGPU_RT_OFF;
+	/* (port: PRISM Raster's objects alone: a slot for their structure) */
+	rt.objects_only = !rt.frame_active && (record->flags & XGPU_RT_FLAG_RASTER_OBJECTS) != 0;
 	rt.slot_ready = 0;
-	if (rt.frame_active && slot_take())
+	if ((rt.frame_active || rt.objects_only) && slot_take())
 		rt.slot_ready = 1;
 	if (!rt.slot_ready)
-		rt.frame_active = 0;
+		rt.frame_active = rt.objects_only = 0;
 }
 
 int xgpu_vulkan_rt_scene(uint32_t *generation, const float **materials, uint32_t *material_count,
@@ -1070,9 +1080,19 @@ int xgpu_vulkan_rt_active(void)
 	return rt.made && rt.frame_active && rt.slot_ready;
 }
 
+int xgpu_vulkan_rt_objects_only(void)
+{
+	return rt.made && rt.objects_only && rt.slot_ready;
+}
+
+int xgpu_vulkan_rt_capturing(void)
+{
+	return rt.capture.open;
+}
+
 int xgpu_vulkan_rt_alpha_traced(void)
 {
-	return xgpu_vulkan_rt_active() && rt.frame.rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_ALPHA] >= 0.5f;
+	return (xgpu_vulkan_rt_active() || xgpu_vulkan_rt_objects_only()) && rt.frame.rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_ALPHA] >= 0.5f;
 }
 
 int xgpu_vulkan_rt_stock_models(void)
@@ -2178,7 +2198,9 @@ static VkDeviceSize capture_offsets(VkDeviceSize jobs, VkDeviceSize *groups, VkD
 	return *map + (VkDeviceSize)RT_WINDOW_DRAWS * 4;
 }
 
-void xgpu_vulkan_rt_window_begin(void)
+/* a window's capture begun where wanted (traced: the pre-pass's; PRISM
+Raster's objects alone: the G-buffer pass's) */
+static void capture_begin(int wanted)
 {
 	struct rt_slot *slot = &rt.slots[rt.slot];
 	struct rt_capture *capture = &rt.capture;
@@ -2191,7 +2213,7 @@ void xgpu_vulkan_rt_window_begin(void)
 	memset(rt.owner_now_seen, 0, sizeof(rt.owner_now_seen));
 	capture->job_count = capture->job_groups = capture->job_triangles = 0;
 	capture->jobs = NULL;
-	if (!xgpu_vulkan_rt_active() || !rt.entries)
+	if (!wanted || !rt.entries)
 		return;
 	/* (the slot's geometry left after the windows before: the jobs, then
 	the workgroups' table, then the instances' table and the entries the
@@ -2207,6 +2229,16 @@ void xgpu_vulkan_rt_window_begin(void)
 	}
 	capture->serial = xgpu_vulkan_serial();
 	capture->open = 1;
+}
+
+void xgpu_vulkan_rt_window_begin(void)
+{
+	capture_begin(xgpu_vulkan_rt_active());
+}
+
+void xgpu_vulkan_rt_objects_begin(void)
+{
+	capture_begin(xgpu_vulkan_rt_objects_only());
 }
 
 void xgpu_vulkan_rt_skipped(void)
@@ -2460,7 +2492,7 @@ static VkDeviceAddress slot_scratch(struct rt_slot *slot, VkDeviceSize size)
 /* the window's top-level structure: of the count instances objects_record
 wrote from the slot's first unused (identity: all are in the world) */
 static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct rt_slot *slot, uint32_t first,
-	uint32_t count)
+	uint32_t count, VkDeviceAddress *structure_address)
 {
 	VkAccelerationStructureGeometryKHR geometry;
 	VkAccelerationStructureBuildGeometryInfoKHR info;
@@ -2503,6 +2535,8 @@ static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct r
 	memset(&range, 0, sizeof(range));
 	range.primitiveCount = count;
 	vkCmdBuildAccelerationStructuresKHR(commands, 1, &info, &ranges);
+	if (structure_address)
+		*structure_address = address;
 	return info.dstAccelerationStructure;
 }
 
@@ -3784,7 +3818,7 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 		rt.eye[1] = pass->camera[0][1];
 		rt.eye[2] = pass->camera[0][2];
 		rt.eye_known = 1;
-		scene = scene_build(commands, slot, first, count);
+		scene = scene_build(commands, slot, first, count, NULL);
 		if (!scene)
 			return NULL;
 	}
@@ -3951,6 +3985,76 @@ static struct xgpu_vulkan_image *curve_image(struct xgpu_vulkan_image *image, ui
 		image = NULL;
 	}
 	return image_storage(image, format, width, height);
+}
+
+/* ---------- port: PRISM Raster's objects
+
+display.lighting "raster" with display.prism_raster_object_shadows "traced"
+(RT_FRAME's XGPU_RT_FLAG_RASTER_OBJECTS, its mode off): the G-buffer pass's
+object draws captured as the pre-pass's are (xgpu_vulkan_stream.c's
+gbuffer_draw), and at the pass's end the objects recorded and the frame's top
+level built by the path tracer's own objects_record and scene_build, nothing
+traced here; Raster's resolve (xgpu_vulkan_bake.c's raster job, its
+objects_blocked) traces the moving objects' sun shadows against it, the
+level's instances masked out there (it reads masks 4 and 8, the objects'). */
+void xgpu_vulkan_rt_objects_end(const float eye[3])
+{
+	struct rt_slot *slot = &rt.slots[rt.slot];
+	VkCommandBuffer commands;
+	VkDeviceAddress table = 0, address = 0;
+	uint32_t first, count;
+
+	if (!rt.capture.open || !xgpu_vulkan_rt_objects_only())
+		return;
+	rt.capture.open = 0;
+	if (!eye)
+		return;
+	commands = xgpu_vulkan_compute_commands();
+	if (rt.queries && !slot->timed)
+	{
+		vkCmdResetQueryPool(commands, rt.queries, rt.slot * 2, 2);
+		vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, rt.queries, rt.slot * 2);
+	}
+	first = slot->instances_used;
+	count = objects_record(commands, slot, eye, &table);
+	rt.eye[0] = eye[0];
+	rt.eye[1] = eye[1];
+	rt.eye[2] = eye[2];
+	rt.eye_known = 1;
+	if (!scene_build(commands, slot, first, count, &address))
+		return;
+	barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+		VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_SHADER_READ_BIT);
+	if (rt.queries && !slot->timed)
+	{
+		vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, rt.queries, rt.slot * 2 + 1);
+		slot->timed = 1;
+	}
+	slot->serial = xgpu_vulkan_serial();
+	rt.raster_structure = address;
+	rt.raster_table = table;
+	rt.raster_slot = rt.slot;
+	rt.raster_frame = rt.object_frame;
+	statistics_frame();
+	if (!rt.logged_raster)
+	{
+		rt.logged_raster = 1;
+		host_logf(HOST_LOG_INFO, "prism rt: PRISM Raster's objects: first structure, %u instances, objects %u triangles "
+			"of %u draws", count, rt.capture.triangle_count, rt.capture.draw_count);
+	}
+}
+
+int xgpu_vulkan_rt_objects(VkDeviceAddress *structure, VkDeviceAddress *table)
+{
+	*structure = *table = 0;
+	if (!xgpu_vulkan_rt_objects_only() || !rt.raster_structure || rt.raster_frame != rt.object_frame)
+		return 0;
+	/* (its slot kept until the submission that traces it is done) */
+	rt.slots[rt.raster_slot].serial = xgpu_vulkan_serial();
+	*structure = rt.raster_structure;
+	*table = rt.raster_table;
+	return 1;
 }
 
 int xgpu_vulkan_rt_tone_curve(struct xgpu_vulkan_image *view, const int32_t corners[4])

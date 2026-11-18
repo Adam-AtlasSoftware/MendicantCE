@@ -5319,6 +5319,12 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		job.more[3] = REFLECTION_SIDE;
 	}
 	job.lights = dynamic ? b->raster_job.address + RASTER_LIGHTS_OFFSET : 0;
+	/* (port: the frame's moving objects' structure, display.prism_raster_
+	object_shadows "traced": their sun shadows traced against it in the frame
+	whole, CE's projected ones on the level left out; none in the bake's
+	views) */
+	if (!bake_view)
+		(void)xgpu_vulkan_rt_objects(&job.objects, &job.object_table);
 	/* (the exposure: metered and applied in the frame whole, not in the bake's
 	views, the gates' measures) */
 	{
