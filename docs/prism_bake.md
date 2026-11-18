@@ -242,6 +242,55 @@ batches' are put together (Chan's merge, by subgroup shuffles) before the texel'
 rule is asked. The samples and the rule are the ones a single invocation would have taken; the darkest texels, which
 the rule keeps longest, take them in a fraction of the frames. `HALO_BAKE_NO_SPREAD` turns it off.
 
+**The noise** (`prism_bake_filter.h`). The tiers under `max` stop on a sample budget, not on their noise: a10's texels at
+`ultra` kept a grain between two seeds (26.6% rms per texel, 9.8% light-weighted, 5.8% at the median), the mottling on
+c40's chamber walls and a10's, which the auto exposure lifts. Two steps between the samples and the file:
+
+- **The robust mean.** A texel's batches of 64 are dealt to 8 groups in turn (batch b to group b mod 8), and the
+  lightmap pass keeps each group's sum of the samples' luminance beside the statistics (28 floats a texel). Where the
+  groups disagree badly, the texel's level is the groups' median, a median of means, and its noise the median's: its
+  mean over the median by more than three of the median's standard errors (the groups' spread by their median absolute
+  deviation), and its largest sample alone a quarter or more of that excess (a firefly, not a skewed but well-sampled
+  light). Each group's mean tends to the texel's light as its samples grow, so the median does too: unbiased in the
+  limit. The level steers the filter's weights; the texel's light itself is not scaled. Scaling it to the median (the
+  first version) took the level of a10's and b30's second BSP down 0.9% in all, but half the light of b30's interior
+  walls (G4's poses 1 and 2, their light view's mean 0.43 to 0.57 of before) and a fifth of a10's darkest corners: there
+  the light comes by rare paths to small bright lamps, light the texel's neighbours should have had too. Taken as the
+  filter's level, such a texel's neighbours read it as their equal and take its light in, so the light is spread, not
+  lost (15% of a10's lit texels and 6% of b30's second BSP's are taken to their medians). Not in the draft's
+  checkpoints; at `max` alike (a converged texel's groups agree).
+- **The filter in chart space**, past the lightmap step, on a thread beside the mask and volume steps: three passes
+  of an a-trous filter (3 x 3 taps of 1/4, 1/2, 1/4, their spacing 1, 2, 4 texels) over each virtual page, a texel
+  averaged with its neighbours on the same chart (its atlas triangle's: the setup pass keeps it in the record's last
+  word) whose faces turn less than 26 degrees from its own (a cosine of 0.9; the weight falls as the square of the
+  turn's share of that) and whose level differs from its own by little against the two texels' measured noise: a weight
+  exp(-d^2 / (2 x 3^2 x (v1 + v2))), d the levels' difference, v each texel's variance of its level (the 1% rule's: its
+  stratified batches' means', or the median's where the robust mean took it), the levels and variances carried through
+  the passes. An edge the samples resolve (a lamp's pool, a shadow) stays; a difference the noise explains is averaged.
+  The three passes reach 7 texels, under a tile, so each tile is filtered from a window of its 3 x 3 tiles' texels,
+  the same result whatever tile a texel is in (no seams; the tests check it). The light, the indirect light and the
+  direction's moment are filtered alike, a weighted mean (the level kept: 1.000 to 1.001 of before); the sun's
+  visibility, the state and the samples stay as baked, and the empty texels are filled again from the filtered ones.
+  `max`, which runs to its noise floor, takes one pass (the mildest). The tile as baked and the filter's words of its
+  texels (the normal, the chart, the variance, the robust mean's factor: `ATLX`) are in the log, so a bake resumed runs
+  the filter again from them; each filtered tile is written (`ATLF`) and drawn as it comes, and the finished file holds
+  the filtered tiles as the tiles' results. It takes 2.4 to 2.6 s of one CPU core for a10's 8.9 M texels, 8 s for b30's
+  second BSP's 21.4 M and 58 s for c40's third's 40.7 M, beside the GPU's steps: the bakes' times did not grow (a10 61 s
+  against 69, b30 392 s against 423 to 430, c40 1006 s against 1058, 3070 Ti).
+
+Two bakes from two seeds (`HALO_BAKE_SEED` 1 and 2) at `ultra`, texel by texel (each lit texel's luminance, the
+difference over the pair's mean; light-weighted: the root of its square weighted by the light; the share of texels
+one bake has at twice the other's light; the level: the texels' light summed against the bake before, 3070 Ti):
+
+| BSP, `ultra` | Before: rms, light-weighted, median, at 2x | The filter alone | The filter on the robust levels | The level |
+| --- | --- | --- | --- | --- |
+| a10's first | 26.6%, 9.8%, 5.8%, 3.7% | 17.4%, 8.2%, 2.6%, 1.5% | 12.2%, 4.7%, 2.6%, 0.52% | 1.001 |
+| b30's second | 13.5%, 10.3%, 3.2%, 0.76% | 9.3%, 8.4%, 0.8%, 0.48% | 4.4%, 4.4%, 0.8%, 0.05% | 1.000 |
+
+(The before is `prism-v4-m2` 036f858b1's. The robust mean alone changes no texel's light. The filter alone is the
+filter replayed on the bake's log with each texel's level its plain mean. A fourth pass took nothing more; a weight of
+5 standard errors in place of 3, 4.5% light-weighted on a10.)
+
 A texel whose first rays meet mostly one-sided faces' backs is inside the level (the stock world's overlapping
 geometry); it and a texel no triangle holds take their light from their valid neighbours.
 
@@ -268,7 +317,9 @@ and the file renamed over `bsp<n>.pbk`. Its key (the header) holds what the bake
 name, the BSP, a hash of the level's triangles and attributes as the bake read them, the surfaces' tiers, the materials
 and alpha maps, the rig (with the port's words past its settings: the indoor floor, the fixtures' scale, the units and
 the sky's kind, the albedo's rule, the sun's test distance) and the lamps, the reach's bricks, the baker's version, the
-quality and the threshold. A file of
+quality and the threshold. While the bake runs a tile's result is as baked, with the filter's words of its texels
+(`ATLX`) after it and its filtered texels (`ATLF`) once the filter has run; the finished file keeps the filtered texels
+as the tile's result and drops both. A file of
 another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done (with `display.bake` `"off"`,
 or `"ask"` and not asked, nothing is made or baked: a whole bake of the key is drawn, else an unfinished log of it as
 far as it goes).
@@ -312,7 +363,9 @@ glows, 8 the paths past the first hit, 16 the fixtures, 32 the grid, 64 the lamp
 indirect light, 256 own lamps' direct light; 512 every lamp of the cell's lists in the draft too, 1024 the resampled
 pick past it), `HALO_BAKE_SEED` another seed (two bakes' noise against each other), `HALO_BAKE_GATHER` the final
 gather, `HALO_BAKE_EMITTERS_PASS` the level's emitting faces neither blocking nor reflecting, `HALO_PRISM_ALBEDO`
-`stored` the base maps' stored mean; `HALO_RASTER_EXPOSURE_LOG` logs Raster's exposure and its meter's medians each
+`stored` the base maps' stored mean; `HALO_BAKE_NO_ROBUST` and `HALO_BAKE_NO_FILTER` leave the noise's steps out,
+`HALO_BAKE_FILTER_PASSES` sets the filter's passes (0 to 4), `HALO_BAKE_KEEP_LOG` keeps the finished bake's log beside
+it (`bsp<n>.pbk.log`: the tiles as baked and the filter's words); `HALO_RASTER_EXPOSURE_LOG` logs Raster's exposure and its meter's medians each
 frame.
 
 Settings > Mods > PRISM LIGHTING has Lighting (Classic or PRISM Raster), Bake (While Playing, When Asked, Never), Bake
@@ -456,6 +509,10 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 ## What remains
 
 - `max`: path guiding or a light cache between texels, or an error floor nearer the eye's (Adam's decision).
+- The bake against R on equal scenes (`bake_flip`, 0.05) still fails after the noise's steps: a10 G5 0.0818 to 0.0716,
+  c40 G7 0.0623 to 0.0584 (high, the structure alone, seed 1; 3070 Ti, R's frames of `v4_m2_runs/r2/eq/refs`). What is
+  left is not the bake's grain: at G5's first pose the light alone is at 0.18 against R, the bake's pillar and floor
+  darker than R's, and R's own speckle (unconverged where lamps light the scene) in every pose.
 - R where lamps light a scene: at 4096 frames it is not converged (its median relative error 27 to 38% at G4,
   `docs/prism_gates.md`), and it comes out below the bake's light at a10 (0.6 to 0.9 of it on average, far darker at a
   tenth of its pixels): the bake against R there measures R's noise as much as the bake.

@@ -988,7 +988,7 @@ world corners, its flags: 16 floats), at its middle: the triangle that
 holds it, or the nearest within a texel and a half (the ring the bilinear
 read and the gutter take), its point and face normal. Written: the texel's
 record (8 floats: its point, its normal, its flags as a uint: 1 a point, 2
-on a triangle, 4 a remodel's; 0), its state (0 running, 4 none), its
+on a triangle, 4 a remodel's; its atlas triangle + 1 as a uint, 0 none), its state (0 running, 4 none), its
 accumulators zeroed and its slot's count of running texels counted. The job
 block: [0] the entries (8 words), [1] the tiles' lists, [2] the triangles,
 [3] the records, [4] the states, [5] the accumulators, [6] the running
@@ -1016,7 +1016,7 @@ static const char setup_source[] =
 	"    Floats t = Floats(j.triangles);\n"
 	"    float best = 1.0e30;\n"
 	"    vec3 point = vec3(0.0), normal = vec3(0.0, 0.0, 1.0);\n"
-	"    uint flags = 0u;\n"
+	"    uint flags = 0u, kept = 0u;\n"
 	"    float reach = 1.5 * step_;\n"
 	"    for (uint k = 0u; k < count; k++)\n"
 	"    {\n"
@@ -1065,6 +1065,7 @@ static const char setup_source[] =
 	"        point = bc.x * w0 + bc.y * w1 + bc.z * w2;\n"
 	"        vec3 n = cross(w1 - w0, w2 - w0);\n"
 	"        normal = dot(n, n) > 1.0e-24 ? normalize(n) : vec3(0.0, 0.0, 1.0);\n"
+	"        kept = list.v[first + k] + 1u;\n"
 	"        flags = 1u | (distance == 0.0 ? 2u : 0u) | ((floatBitsToUint(t.v[b + 15u]) & 1u) != 0u ? 4u : 0u) |\n"
 	"            ((floatBitsToUint(t.v[b + 15u]) & 2u) != 0u ? 8u : 0u);\n"
 	"        if (distance == 0.0)\n"
@@ -1079,13 +1080,13 @@ static const char setup_source[] =
 	"    o.v[index * 8u + 4u] = normal.y;\n"
 	"    o.v[index * 8u + 5u] = normal.z;\n"
 	"    o.v[index * 8u + 6u] = uintBitsToFloat(flags);\n"
-	"    o.v[index * 8u + 7u] = 0.0;\n"
+	"    o.v[index * 8u + 7u] = uintBitsToFloat(kept);\n"
 	"    Uints(j.states).v[index] = flags != 0u ? 0u : 4u;\n"
 	"    if (j.accumulators != uvec2(0u))\n"
 	"    {\n"
 	"        Floats ac = Floats(j.accumulators);\n"
-	"        for (uint k = 0u; k < 20u; k++)\n"
-	"            ac.v[index * 20u + k] = 0.0;\n"
+	"        for (uint k = 0u; k < 28u; k++)\n"
+	"            ac.v[index * 28u + k] = 0.0;\n"
 	"        if (flags != 0u)\n"
 	"            atomicAdd(Uints(j.running).v[slot], 1u);\n"
 	"    }\n"
@@ -1098,10 +1099,11 @@ statistics merged and the stopping rule asked; a texel that stops takes
 one from its tile's count of running texels. A texel whose first rays meet
 mostly one-sided faces' backs is inside the level (state 3), its light
 found from its neighbours afterwards. The job block: [0] the texels'
-records, [1] the accumulators (16 floats a texel: the direct light's mean
+records, [1] the accumulators (28 floats a texel: the direct light's mean
 RGB, the indirect's, the moment's mean, the sun's visibility's mean, the
 backfaces' share, then the statistics: count and hits as uints, mean, m2,
-maximum), [2] the states, [3] the tiles' running counts; parameters.x the
+maximum; the running batch's sum, the batches' count, mean and m2; the 8
+groups' sums of luminance), [2] the states, [3] the tiles' running counts; parameters.x the
 texels, y the samples, z the least samples (64), w the frame (the seeds');
 values: x the threshold, y the black floor, z the samples at which a texel
 stops whatever its error (0: none; the draft's), w the bounces */
@@ -1144,7 +1146,7 @@ static const char lightmap_source[] =
 	"    vec3 n = vec3(tx.v[index * 8u + 3u], tx.v[index * 8u + 4u], tx.v[index * 8u + 5u]);\n"
 	"    uint flags = floatBitsToUint(tx.v[index * 8u + 6u]);\n"
 	"    Floats ac = Floats(j.accumulators);\n"
-	"    uint base = index * 20u;\n"
+	"    uint base = index * 28u;\n"
 	"    uint count = floatBitsToUint(ac.v[base + 11u]);\n"
 	"    float batch_sum = ac.v[base + 16u], batch_mean = ac.v[base + 18u], batch_m2 = ac.v[base + 19u];\n"
 	"    uint batches = floatBitsToUint(ac.v[base + 17u]);\n"
@@ -1156,6 +1158,9 @@ static const char lightmap_source[] =
 	"    float sun = 0.0, back = 0.0;\n"
 	"    uint bc = 0u, bh = 0u;\n"
 	"    float bmean = 0.0, bm2 = 0.0, bmost = 0.0;\n"
+	"    /* (the groups' sums of the samples' luminance: batch b in group b mod 8,\n"
+	"    for the robust mean, prism_bake_filter.h) */\n"
+	"    float groups[8] = float[8](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);\n"
 	"    /* (the lane's samples: alone, the dispatch's; spread, lane 0 the rest of\n"
 	"    the texel's batch begun and its share, each other lane its share of\n"
 	"    whole batches after; none for a texel not begun, whose first lane turns\n"
@@ -1207,6 +1212,7 @@ static const char lightmap_source[] =
 	"        back += backface ? 1.0 : 0.0;\n"
 	"        float x = luma(dl + il);\n"
 	"        batch_add(batch_sum, first + k, batches, batch_mean, batch_m2, x);\n"
+	"        groups[((first + k) >> 6u) & 7u] += x;\n"
 	"        bc++;\n"
 	"        bh += x != 0.0 ? 1u : 0u;\n"
 	"        float delta = x - bmean;\n"
@@ -1226,6 +1232,8 @@ static const char lightmap_source[] =
 	"            back += subgroupShuffleXor(back, off);\n"
 	"            bh += subgroupShuffleXor(bh, off);\n"
 	"            bmost = max(bmost, subgroupShuffleXor(bmost, off));\n"
+	"            for (uint g = 0u; g < 8u; g++)\n"
+	"                groups[g] += subgroupShuffleXor(groups[g], off);\n"
 	"            float n2 = subgroupShuffleXor(fbc, off), mean2 = subgroupShuffleXor(bmean, off);\n"
 	"            float m22 = subgroupShuffleXor(bm2, off);\n"
 	"            merge(fbc, bmean, bm2, n2, mean2, m22);\n"
@@ -1259,6 +1267,8 @@ static const char lightmap_source[] =
 	"    ac.v[base + 17u] = uintBitsToFloat(batches);\n"
 	"    ac.v[base + 18u] = batch_mean;\n"
 	"    ac.v[base + 19u] = batch_m2;\n"
+	"    for (uint g = 0u; g < 8u; g++)\n"
+	"        ac.v[base + 20u + g] += groups[g];\n"
 	"    /* (inside the level: most of its first rays met backs) */\n"
 	"    if (count >= 32u && ac.v[base + 10u] > 0.4)\n"
 	"        state = 3u;\n"
