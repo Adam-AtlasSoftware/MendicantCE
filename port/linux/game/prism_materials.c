@@ -34,7 +34,7 @@ a shader one of PRISM's format 2, its maps are drawn instead:
 	}
 
 A mod's is materials\<the shader tag's path>.material.json in its folder
-(the mod tier), a pack's (prism_packs.py's materials step, made on the
+(the mod tier), a pack's (prism_packs.py's v4_materials step, made on the
 player's machine from the player's maps) materials\<path>.pack.json (the
 pack tier); where a shader has both, the mod's is drawn, and where a mod
 gives the shader display.prism_materials' material (format 1, mod_pbr.c) and
@@ -84,6 +84,10 @@ char *tag_get_name(long tag_index);
 char const *config_string(char const *name);
 unsigned long config_changes(void);
 int config_boolean(char const *name);
+/* (port/linux/src/d3d8_device.c) nonzero where the renderer draws
+materials: the textures' set has their images' bindings, which a pack's
+uber-shader samples */
+int d3d8_materials_drawn(void);
 /* the platform layer's renderer's (port/linux/src/xgpu_backend.h, which the
 game's units do not include: keep the two the same) */
 void xgpu_backend_scene_material_maps(unsigned long material, unsigned long tier, unsigned long model,
@@ -192,6 +196,7 @@ static struct
 	/* display.material_packs in a deferred mode (as read: config_changes
 	+ 1), and as the materials were last read */
 	unsigned long settings_read;
+	boolean setting;
 	boolean wanted;
 	boolean read_wanted;
 	struct material *materials;
@@ -291,12 +296,16 @@ static void materials_dispose(
 static void settings_read(
 	void)
 {
-	if (prism_materials_globals.settings_read == config_changes() + 1)
+	if (prism_materials_globals.settings_read != config_changes() + 1)
 	{
-		return;
+		prism_materials_globals.settings_read = config_changes() + 1;
+		prism_materials_globals.setting = prism_deferred_wanted() && config_boolean("display.material_packs");
 	}
-	prism_materials_globals.settings_read = config_changes() + 1;
-	prism_materials_globals.wanted = prism_deferred_wanted() && config_boolean("display.material_packs");
+	/* (only where the renderer draws materials: without the textures' set's
+	material bindings, a device without block compression or with
+	HALO_MATERIALS_OFF, no pack's images are queued and no maps sent, every
+	shader at the automatic tier) */
+	prism_materials_globals.wanted = prism_materials_globals.setting && d3d8_materials_drawn();
 
 	return;
 }
@@ -990,7 +999,12 @@ void prism_materials_textures_answered(
 			material->ids[image] = ids && texture != NONE && texture < count ? ids[texture] : 0;
 		}
 	}
-	prism_materials_globals.generation++;
+	/* (no materials read, none to send again: with the packs off, a later
+	store record sends no maps) */
+	if (prism_materials_globals.material_count)
+	{
+		prism_materials_globals.generation++;
+	}
 
 	return;
 }
@@ -1071,6 +1085,7 @@ void prism_materials_describe(
 	}
 	console_printf(FALSE, "materials (%s): %ld environment and model shaders, %ld from packs, %ld from mods, %ld at "
 		"the automatic tier (each in the log)", prism_materials_globals.wanted ? "on" :
+		prism_materials_globals.setting ? "off: the renderer draws no materials" :
 		"off: display.lighting \"ce\" or display.material_packs false", counts[0] + counts[1] + counts[2], counts[1],
 		counts[2], counts[0]);
 

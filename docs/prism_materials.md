@@ -114,8 +114,12 @@ maps. Once CE's diffuse texture pass is drawn into the base target, before the d
 or mod's material take its colour in the base target's place (`xgpu_vulkan_post_albedo_over`): the decals (dirt,
 scorch marks, bullet holes) lie over it as over CE's, and the resolve, its views and PRISM Raster's light read it as
 they read CE's. An object's base colour is in the G-buffer's first word, as before. The albedo target is written by a
-pack's twins alone, its write mask not the other targets', so it needs the device's `independentBlend`; where that is
-missing, the materials are drawn at the automatic tier.
+pack's twins alone, its write mask not the other targets', so it needs the device's `independentBlend`; and the
+uber-shaders sample the textures' set's material bindings (12 to 17 of set 1), which the set has only where the device
+draws `display.prism_materials`' materials (block-compressed images, 24 samplers and images a stage, 32 samplers a set,
+`HALO_MATERIALS_OFF` unset). Where either is missing, the materials are drawn at the automatic tier: the guest reads no
+pack or mod material and queues none of their images where the renderer draws no materials, and the host binds no
+albedo target, so no pack's twin is made.
 
 The images are streamed as `display.prism_materials`' are: each is usable once its levels from 256 texels down are
 resident, the uber-shader drawing the automatic tier's values and CE's bump map until then.

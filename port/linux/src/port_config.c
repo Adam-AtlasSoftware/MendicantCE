@@ -733,11 +733,12 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"PRISM v4's materials from packs and mods (docs/prism_materials.md), with\n"
 		"display.lighting \"ce_deferred\" or \"raster\": where the material pack\n"
-		"(made on this machine by prism_packs.py's materials step) or a mod gives a\n"
-		"shader a material, the G-buffer draws its maps (its colour with CE's\n"
-		"painted light taken out, its bump, roughness and metal) in place of the\n"
-		"one made from CE's shader as the map loads; false: every shader's made\n"
-		"from CE's. Read each frame." },
+		"(made on this machine by prism_packs.py's v4_materials step) or a mod\n"
+		"gives a shader a material, the G-buffer draws its maps (its colour with\n"
+		"CE's painted light taken out, its bump, roughness and metal) in place of\n"
+		"the one made from CE's shader as the map loads; false: every shader's\n"
+		"made from CE's. Needs a graphics card that draws display.prism_materials'\n"
+		"materials. Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"

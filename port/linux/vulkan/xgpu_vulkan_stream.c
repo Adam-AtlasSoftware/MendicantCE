@@ -4404,11 +4404,15 @@ static void gbuffer_draw(const struct draw_input *input)
 		gbuffer.definitions[id] = twin;
 		memset(&gbuffer.entries[id * 4], 0, 4 * sizeof(*gbuffer.entries));
 	}
-	if (entry->state == XGPU_STREAM_PIPELINE_FAILED)
+	/* (a pack's twin whose shaders failed: drawn by CE's twin, at the
+	automatic tier, not missing from the G-buffer) */
+	if (entry->state == XGPU_STREAM_PIPELINE_FAILED && gbuffer.pack)
 	{
 		gbuffer.pack = 0;
-		return;
+		entry = &gbuffer.entries[id * 4 + (gbuffer.kind == XGPU_SPIRV_GBUFFER_LEVEL)];
 	}
+	if (entry->state == XGPU_STREAM_PIPELINE_FAILED)
+		return;
 	stream.definition = &gbuffer.definitions[id];
 	/* (the uniforms made again where the material, its tier or the
 	instance changed, or the motion's move or cameras) */
@@ -5104,9 +5108,12 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.drawn = 0;
 		/* (the albedo target, where a material has maps: cleared to 0, no
 		pack's albedo; only a pack's twins write it, so its write mask is
-		not the words': where the device lets each target have its own) */
+		not the words': where the device lets each target have its own; and
+		a pack's uber-shader samples the textures' set's material bindings,
+		which the set has only where the device draws materials) */
 		gbuffer.albedo_drawn = 0;
 		gbuffer.albedo_bound = gbuffer.pack_materials && stream.capabilities.independent_blend &&
+			stream.capabilities.materials &&
 			(gbuffer.albedo = prepass_image(gbuffer.albedo, XGPU_VULKAN_FORMAT_RGBA8, color->width, color->height)) != NULL;
 		gbuffer.material = gbuffer.instance = gbuffer.flags = 0;
 		memset(gbuffer.uniform_key, 0, sizeof(gbuffer.uniform_key));
