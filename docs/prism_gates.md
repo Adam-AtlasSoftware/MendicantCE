@@ -137,7 +137,7 @@ references at 4096 frames; "Measurements" below):
 | flip, V1 and V2 | ≤ 0.15 | *initial*: V1 and V2 are not frozen yet |
 | trail | ≤ 4 frames | *initial*: V1 is not frozen yet |
 | harness fault (sky) | > 0.8 of a reference's pixels | the frozen poses' references show no surface at 0 to 0.3 of their pixels |
-| a reference's own noise | its frame's estimated relMSE ≤ 0.001 | a tenth of the error threshold (below) |
+| a reference's own noise | its frame's estimated relMSE ≤ 0.001, as the gates' frames measure the error (M3 round 2: the drawn values, none of a clipped pixel's, the 960 × 540 frames' share) | a tenth of the error threshold (below) |
 | the bake's noise (D4) | a texel's relative standard error ≤ 0.01 | below |
 
 **A reference's own noise.** R is the gate's truth only where its own noise is well under what the gate measures.

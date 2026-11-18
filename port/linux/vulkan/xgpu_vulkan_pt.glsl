@@ -2058,7 +2058,20 @@ void main()
     float roughness = unpackUnorm2x16(gc.w).x;
     vec3 pc = job.camera[0].xyz + dist * ray_of(job.camera, job.corners, vec2(pixel));
     float lc = luma(dc.rgb), lsc = luma(sc.rgb);
-    float sigma_d = job.settings.w * sqrt(max(dc.a, 0.0)) + 1.0e-4;
+    /* (the luminance's edge stop by the variance prefiltered over the pixel's
+    cross on the same surface (half the pixel's, an eighth each neighbour's),
+    as SVGF prefilters it: one pixel's estimate alone is noisy, and a step
+    whose stops vary from pixel to pixel leaves blotches) */
+    float var_cross = 0.5 * max(dc.a, 0.0), var_w = 0.5;
+    for (int k = 0; k < 4; k++)
+    {
+        ivec2 q = pixel + ivec2(k == 0 ? 1 : k == 1 ? -1 : 0, k == 2 ? 1 : k == 3 ? -1 : 0);
+        if (!inside(q) || imageLoad(guide_now, q).x != gc.x)
+            continue;
+        var_cross += 0.125 * max(load_d(q, from_b).a, 0.0);
+        var_w += 0.125;
+    }
+    float sigma_d = job.settings.w * sqrt(var_cross / var_w) + 1.0e-4;
     float sigma_s = job.settings.w * sqrt(max(sc.a, 0.0)) + 1.0e-4;
     /* (the specular's reach: none on a mirror, the diffuse's when rough;
     a signal with no variance left is passed on) */
