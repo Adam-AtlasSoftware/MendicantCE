@@ -1400,12 +1400,17 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	/* (ReSTIR DI's spatiotemporal reuse: the last frame's reservoirs at that
 	many points about the place, besides its own; HALO_PT_RESTIR_SPATIAL) */
 	{
-		static int spatial = -1;
+		static int spatial = -1, traced_z = -1;
 
 		if (spatial < 0)
 			spatial = getenv("HALO_PT_RESTIR_SPATIAL") ? atoi(getenv("HALO_PT_RESTIR_SPATIAL")) : 0;
-		spatial = spatial < 0 ? 0 : spatial > 8 ? 8 : spatial;
-		job->settings[2] = (float)spatial;
+		spatial = spatial < 0 ? 0 : spatial > 4 ? 4 : spatial;
+		if (traced_z < 0)
+			traced_z = getenv("HALO_PT_RESTIR_Z") ? atoi(getenv("HALO_PT_RESTIR_Z")) != 0 : 1;
+		/* (16 more: the neighbours' confidences by the kept sample's support
+		traced from each, HALO_PT_RESTIR_Z=1; else by their own sample's
+		light here) */
+		job->settings[2] = (float)spatial + (traced_z && spatial ? 16.0f : 0.0f);
 	}
 	job->settings[3] = 4.0f;
 	/* the histories: the slow one at most 32 frames, the fast 4, the fast
@@ -1425,7 +1430,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	/* the lamps' candidates a pixel; the reference's paths a pixel a frame;
 	ReSTIR DI's temporal reuse, its reservoirs' confidence at most 8 frames
 	(HALO_PT_RESTIR 0: none, each pixel's own candidates alone) */
-	job->extra[0] = 8.0f;
+	{
+		/* (HALO_PT_CANDIDATES: the live frames' lamp candidates a pixel, 1 to
+		8; the reference keeps 8) */
+		static int candidates = -1;
+
+		if (candidates < 0)
+			candidates = getenv("HALO_PT_CANDIDATES") ? atoi(getenv("HALO_PT_CANDIDATES")) : 8;
+		candidates = candidates < 1 ? 1 : candidates > 8 ? 8 : candidates;
+		job->extra[0] = reference ? 8.0f : (float)candidates;
+	}
 	job->extra[1] = (float)(pt.ref_paths ? pt.ref_paths : 1u);
 	{
 		static int restir = -1;

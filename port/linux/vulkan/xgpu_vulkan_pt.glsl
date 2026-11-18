@@ -984,9 +984,13 @@ plane, an object's distance), its sample's target evaluated here and its
 shadow traced where it would weigh, its confidence capped at denoise_m
 frames; kept by its weight (the generalized RIS's step, both targets this
 pixel's) */
+/* (restir_reuse's last call: whether the reservoir's sample lit this pixel,
+in front of it and seen) */
+bool reuse_valid = false;
 void restir_reuse(ivec2 q, Surface g, vec3 o, inout int kind, inout uint index, inout vec3 y, inout float target_kept,
     inout vec3 kept_d, inout vec3 kept_s, inout float w_total, inout float m_total)
 {
+    reuse_valid = false;
     if (!inside(q))
         return;
     uvec4 gl = imageLoad(guide_last, q);
@@ -1014,6 +1018,7 @@ void restir_reuse(ivec2 q, Surface g, vec3 o, inout int kind, inout uint index, 
         /* (its shadow traced only where it would weigh) */
         if (w_last > 0.0 && !isinf(w_last) && light_seen(o, k_last, l, d))
         {
+            reuse_valid = true;
             w_total += w_last;
             if (rnd() * w_total <= w_last)
             {
@@ -1077,12 +1082,69 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
         that one pixel's candidates found is offered to its neighbours, so a
         light few candidates reach (a semi-glossy wall's highlight of a lamp
         the grid's lists rank low) is not one pixel's luck) */
-        int spatial = int(job.settings.z);
+        /* (job.settings.z: the neighbours, 16 more where their confidence
+        is counted by the kept sample's support traced from them) */
+        bool traced_z = job.settings.z >= 16.0;
+        int spatial = min(int(mod(job.settings.z, 16.0)), 4);
+        vec3 n_points[4], n_normals[4];
+        float n_m[4];
+        bool n_kept[4];
         for (int k = 0; k < spatial; k++)
         {
             float a = 6.2831853 * rnd(), r = 2.0 + 14.0 * sqrt(rnd());
             ivec2 qs = ivec2(floor(at_last + r * vec2(cos(a), sin(a)) + 0.5));
-            restir_reuse(qs, g, o, kind, index, y, target_kept, kept_d, kept_s, w_total, m_total);
+            /* (a neighbour's confidence counted below, only where the kept
+            sample could have been its: its m_total apart) */
+            float m_k = 0.0, w_before = w_total;
+            vec3 y_before = y;
+            restir_reuse(qs, g, o, kind, index, y, target_kept, kept_d, kept_s, w_total, m_k);
+            n_m[k] = m_k;
+            /* (whether this neighbour's sample is the one kept so far: its
+            support there known, no ray) */
+            n_kept[k] = w_total > w_before && y != y_before;
+            for (int j = 0; j < k; j++)
+                n_kept[j] = n_kept[j] && !n_kept[k];
+            /* (untraced: a neighbour counts where its own sample lit this
+            pixel, the shadow restir_reuse traced; a slight brightening where
+            the kept sample lights a neighbour whose own did not light here) */
+            if (!traced_z)
+            {
+                if (reuse_valid)
+                    m_total += m_k;
+                n_m[k] = 0.0;
+            }
+            n_points[k] = vec3(0.0);
+            n_normals[k] = vec3(0.0);
+            if (m_k > 0.0)
+            {
+                uvec4 gq = imageLoad(guide_last, qs);
+                n_points[k] = last_point(qs, uintBitsToFloat(gq.z));
+                n_normals[k] = unfold(unpackSnorm2x16(gq.y));
+            }
+        }
+        /* (the spatial neighbours' confidences by the kept sample's support
+        there (Bitterli et al. 2020's Z, the unbiased normalisation): a
+        neighbour counts only where the kept sample lights its point (in
+        front of it, seen from it), else 1/M took the light of every pixel
+        whose neighbours see lamps it does not: round 4's spatial reuse,
+        G4's floor in motion a third darker than R) */
+        for (int k = 0; k < spatial; k++)
+        {
+            if (n_m[k] <= 0.0 || kind == KIND_NONE)
+                continue;
+            if (n_kept[k])
+            {
+                m_total += n_m[k];
+                continue;
+            }
+            Surface gk = g;
+            gk.point = n_points[k];
+            gk.normal = n_normals[k];
+            vec3 dif, spe, l;
+            float d;
+            if (sample_light(gk, kind, index, y, dif, spe, l, d) && luma(dif) + luma(spe) > 0.0 &&
+                light_seen(gk.point + gk.normal * (0.01 + 0.0005 * g.distance), kind, l, d))
+                m_total += n_m[k];
         }
     }
     /* (W: the weights' sum over the kept target, by the confidences' sum:
