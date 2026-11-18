@@ -73,7 +73,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_queries(VkDevice device, const VkQu
 {
 	(void)device;
 	(void)allocator;
-	assert(info->queryType == VK_QUERY_TYPE_TIMESTAMP && info->queryCount == GPU_TIME_FRAMES * 2);
+	assert(info->queryType == VK_QUERY_TYPE_TIMESTAMP && info->queryCount == GPU_TIME_FRAMES * GPU_TIME_QUERIES);
 	creates++;
 	if (create_result == VK_SUCCESS)
 		*pool = (VkQueryPool)(uintptr_t)1;
@@ -83,8 +83,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_queries(VkDevice device, const VkQu
 static VKAPI_ATTR void VKAPI_CALL reset_queries(VkDevice device, VkQueryPool pool, uint32_t first, uint32_t count)
 {
 	(void)device;
-	assert(pool == vk.gpu_time_pool && count == 2 && !(first & 1));
-	assert(!vk.gpu_times[first / 2].used);
+	/* (a frame's GPU_TIME_QUERIES: its start and end, the split, the marked
+	interval's two) */
+	assert(pool == vk.gpu_time_pool && count == GPU_TIME_QUERIES && !(first % GPU_TIME_QUERIES));
+	assert(!vk.gpu_times[first / GPU_TIME_QUERIES].used);
 	resets++;
 }
 
@@ -92,8 +94,10 @@ static VKAPI_ATTR void VKAPI_CALL timestamp(VkCommandBuffer commands, VkPipeline
 	VkQueryPool pool, uint32_t query)
 {
 	assert(pool == vk.gpu_time_pool);
-	assert(stage == ((query & 1) ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT));
-	assert(commands == ((query & 1) ? vk.slot->main : vk.slot->early));
+	/* (only the frame's start and end here: no split, no marks) */
+	assert(query % GPU_TIME_QUERIES < 2);
+	assert(stage == ((query % GPU_TIME_QUERIES) ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT));
+	assert(commands == ((query % GPU_TIME_QUERIES) ? vk.slot->main : vk.slot->early));
 	assert(!vk.pass_active);
 	writes++;
 }
@@ -112,10 +116,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL query_results(VkDevice device, VkQueryPool
 	uint64_t (*values)[2] = data;
 
 	(void)device;
-	assert(pool == vk.gpu_time_pool && count == 2 && !(first & 1));
+	assert(pool == vk.gpu_time_pool && count == 2 && !(first % GPU_TIME_QUERIES));
 	assert(size == 4 * sizeof(uint64_t) && stride == 2 * sizeof(uint64_t));
 	assert(flags == (VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT));
-	assert(vk.gpu_times[first / 2].serial <= completed);
+	assert(vk.gpu_times[first / GPU_TIME_QUERIES].serial <= completed);
 	reads++;
 	values[0][0] = start_value;
 	values[1][0] = end_value;
