@@ -104,6 +104,18 @@ void prism_lightmaps_map_unloaded(void) { }
 int prism_rt_mode(void) { return 0; }
 void prism_rt_frame_begin(void) { }
 void prism_rt_map_unloaded(void) { }
+/* (PRISM v4's hooks: port/linux/game/prism_deferred.c, prism_scene_static.c,
+prism_scene_lights.c and prism_bake.c, not under test) */
+void prism_deferred_object(long object_index) { (void)object_index; }
+void prism_deferred_lightmap(void const *lightmap_bitmap) { (void)lightmap_bitmap; }
+void prism_deferred_first_person(int drawing) { (void)drawing; }
+void prism_deferred_map_unloaded(void) { }
+void prism_scene_static_frame(void) { }
+void prism_scene_static_map_unloaded(void) { }
+void prism_scene_lights_frame(void) { }
+void prism_scene_lights_map_unloaded(void) { }
+void prism_bake_frame(void) { }
+void prism_bake_map_unloaded(void) { }
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */
 static struct world_sdf_volume volume;
