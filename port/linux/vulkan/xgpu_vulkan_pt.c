@@ -1184,11 +1184,19 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->sums = pt.sums.address;
 	job->stats = pt.stats.address;
 	job->counters = slot_buffer->address + JOB_COUNTERS_OFFSET;
-	/* (the reference's light tree, where it is built for this scene) */
-	if (pt.tree_nodes && pt.tree_generation == lookup.generation && pt.tree.buffer)
+	/* (the light tree, where it is built for this scene: the reference's
+	lamps and ReSTIR DI's candidates take it beside the grid;
+	HALO_PT_LAMP_TREE=0, the live frames the grid alone) */
 	{
-		job->tree = pt.tree.address;
-		job->extra[3] = (float)pt.tree_nodes;
+		static int lamp_tree = -1;
+
+		if (lamp_tree < 0)
+			lamp_tree = getenv("HALO_PT_LAMP_TREE") ? atoi(getenv("HALO_PT_LAMP_TREE")) != 0 : 1;
+		if (pt.tree_nodes && pt.tree_generation == lookup.generation && pt.tree.buffer && (lamp_tree || reference))
+		{
+			job->tree = pt.tree.address;
+			job->extra[3] = (float)pt.tree_nodes;
+		}
 	}
 	memcpy(job->camera, view->now, sizeof(job->camera));
 	memcpy(job->last_camera, (view->flags & XGPU_SCENE_VIEW_HISTORY) ? view->last : view->now, sizeof(job->last_camera));
@@ -1326,6 +1334,17 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	barrier(commands);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pt.pipeline_layout, 0, 1, &set, 0, NULL);
 	stamp(commands, time_slot, 0);
+	/* (the light tree for this scene: the bake's lamps copied for the host to
+	build it, once a generation) */
+	if (!pt.tree_failed && !pt.lamps_serial && pt.tree_generation != lookup.generation &&
+		(pt.lamps_readback.buffer || buffer_make((VkDeviceSize)(LAMPS_MOST + 1) * 64, 1, &pt.lamps_readback)))
+	{
+		job->lamps_out = pt.lamps_readback.address;
+		dispatch(commands, PASS_LAMPS, scene, slot_buffer->address, LAMPS_MOST, 0, 0, 0, (LAMPS_MOST + 255) / 256, 1);
+		pt.lamps_serial = xgpu_vulkan_serial();
+		pt.lamps_generation = lookup.generation;
+		barrier(commands);
+	}
 	if (reference)
 	{
 		/* the reference: summed while it runs, its noise measured every
@@ -1333,17 +1352,6 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		stops; its means drawn */
 		int adding = !pt.ref_stopped && pt.ref_count < pt.ref_frames;
 
-		/* (the light tree for this scene: the bake's lamps copied for the host
-		to build it, once a generation) */
-		if (!pt.tree_failed && !pt.lamps_serial && pt.tree_generation != lookup.generation &&
-			(pt.lamps_readback.buffer || buffer_make((VkDeviceSize)(LAMPS_MOST + 1) * 64, 1, &pt.lamps_readback)))
-		{
-			job->lamps_out = pt.lamps_readback.address;
-			dispatch(commands, PASS_LAMPS, scene, slot_buffer->address, LAMPS_MOST, 0, 0, 0, (LAMPS_MOST + 255) / 256, 1);
-			pt.lamps_serial = xgpu_vulkan_serial();
-			pt.lamps_generation = lookup.generation;
-			barrier(commands);
-		}
 		if (adding)
 		{
 			pt.ref_count++;

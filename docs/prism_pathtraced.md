@@ -90,8 +90,17 @@ The lamps, fixtures and dynamic lights are sampled by ReSTIR DI (Bitterli et al.
 found safe:
 
 - **The initial candidates** come from the bake's light-importance grid (each cell's lamps by their light with shadows
-  traced, so hidden lamps are rarely picked), resampled by their unshadowed light at the pixel. Each kind of light is
-  its own domain, its candidates' weight over its count, so the initial reservoir is unbiased for any count.
+  traced, so hidden lamps are rarely picked) and from a light tree of the bake's lamps, half and half, each lamp's
+  probability the two's mean (one sample of a mixture), resampled by their unshadowed light at the pixel. Each kind of
+  light is its own domain, its candidates' weight over its count, so the initial reservoir is unbiased for any count.
+- **The light tree** (built on the host once a bake's scene generation, from a copy of its lamps: the pass `lamps`):
+  a binary tree split at the middle of its lamps' middles' widest axis; a node's importance at a point its lamps'
+  power (luminance by area) by the receiver's cosine bound over the cone to its bounding sphere, over the distance
+  squared (after Conty Estevez and Kulla 2018's, without the emitters' cone); a leaf's nought where the point is behind
+  its triangle. Every lamp that can light a point keeps a probability above nought. The grid knows which lamps a
+  cell's few points see; the tree knows which are near: a cell's lists can miss a lamp near one of its surfaces and
+  leave it to the level's power, one pick in thousands (round 1's a10: the references' dense fireflies, the live
+  frames' noise in motion). `HALO_PT_LAMP_TREE=0` gives the live frames the grid alone.
 - **Temporal reuse only.** The last frame's reservoir at the surface's place there (the G-buffer's motion), reused only
   where its guide is this surface's (the same instance, the normal, the plane: as the denoiser's history, so no sample
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
@@ -152,8 +161,9 @@ The denoise step has one call site in `xgpu_vulkan_pt_frame`: the plugins' denoi
 `debug.pt_reference N` in this mode (the request comes as with `display.prism_rt`, RT_FRAME's, `prism_rt.c`) traces at
 every pixel the same scene, materials and lights unbiased with no bake, no reuse and no denoiser (the table's last
 column). Its lamps are reached by next-event estimation alone: at the pixel and at every hit a lamp's point is
-resampled from 8 (4 at a hit) candidates of the grid's mixture, which can pick every lamp, by their unshadowed light
-there (at the pixel the GGX lobe's with the diffuse), and a ray that meets a lamp's triangle takes only its glow. That
+resampled from 8 (4 at a hit) candidates of the grid's and the light tree's mixture (above), which can pick every lamp,
+by their unshadowed light there (at the pixel the GGX lobe's with the diffuse), and a ray that meets a lamp's triangle
+takes only its glow. That
 is unbiased without weighing a lamp met by a sampled direction against its next-event estimate (multiple importance
 sampling): the surfaces a path meets are diffuse (the bake's albedo), where next-event estimation is the better
 sampler, and the pixel's glossy lobe is in the resampling's target. It `HALO_PT_REFERENCE_PATHS` paths a pixel a frame (1 by default; each path the diffuse lobe's or the specular's, picked

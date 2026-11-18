@@ -714,6 +714,9 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
     return false;
 }
 
+/* (below: a lamp from the grid's mixture or the light tree) */
+uint lamp_pick_mixed(vec3 p, vec3 n, out float probability);
+
 /* the initial reservoir: resampled importance over the candidates (as
 lights_ris: each kind its own domain, its candidates' weight over its
 count), no shadow ray: the kept sample, its target in its own measure and
@@ -734,7 +737,7 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
         for (int c = 0; c < lamp_count; c++)
         {
             float probability;
-            uint lamp = lamp_pick(p, probability);
+            uint lamp = lamp_pick_mixed(p, g.normal, probability);
             if (probability <= 0.0)
                 continue;
             uint at = lamp * 16u;
@@ -915,7 +918,8 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
 }
 
-/* ---------- the reference's lamps by a light tree as well as the grid
+/* ---------- the lamps by a light tree as well as the grid (the live
+frames' candidates and the reference's)
 
 job.tree: a binary tree of the bake's lamps, built on the host
 (xgpu_vulkan_pt.c's tree_node), job.extra.w its nodes; each node 16 floats:
@@ -929,13 +933,16 @@ from p to the node's bounding sphere) over the distance squared to its
 middle, never nearer than the sphere's radius; a leaf's nought where p is
 clearly behind its triangle. A lamp whose light can reach p (in front of
 it, above p's surface) has every ancestor's importance above nought, so its
-probability is too. The reference takes a lamp from the grid's mixture
-(lamp_pick) or from the tree, half and half, its probability the two's mean:
-one sample of a mixture, unbiased, and near the better of the two where the
-other misses a lamp. The grid's lists, made from a cell's few points, can
-miss a lamp near a surface of the cell and leave it to the level's power
-(one pick in thousands): round 1's references in a10's corridors were a dim
-wall under dense fireflies. */
+probability is too. A lamp is taken from the grid's mixture (lamp_pick) or
+from the tree, half and half, its probability the two's mean: one sample of
+a mixture, unbiased, and near the better of the two where the other misses a
+lamp. The grid's lists, made from a cell's few points, can miss a lamp near
+a surface of the cell and leave it to the level's power (one pick in
+thousands): round 1's references in a10's corridors were a dim wall under
+dense fireflies, and its moving frames there the noisiest (G5's flicker). The
+grid's lists know which lamps a cell's points see; the tree knows which are
+near: ReSTIR DI's initial candidates and the reference's both take the
+mixture (HALO_PT_LAMP_TREE=0: the grid alone in the live frames). */
 layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Tree
 {
     float v[];
@@ -1028,7 +1035,7 @@ float grid_probability(vec3 p, uint l)
         probability += share_near * list_probability(near_at, near, l);
     return probability;
 }
-uint reference_lamp_pick(vec3 p, vec3 n, out float probability)
+uint lamp_pick_mixed(vec3 p, vec3 n, out float probability)
 {
     if (!tree_on())
         return lamp_pick(p, probability);
@@ -1068,7 +1075,7 @@ void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int d
         for (int c = 0; c < lamp_count; c++)
         {
             float probability;
-            uint lamp = reference_lamp_pick(p, g.normal, probability);
+            uint lamp = lamp_pick_mixed(p, g.normal, probability);
             if (probability <= 0.0)
                 continue;
             uint at = lamp * 16u;
@@ -1299,7 +1306,7 @@ vec3 hit_lamps(vec3 p, vec3 n, vec3 o, int candidates)
     for (int c = 0; c < candidates; c++)
     {
         float probability;
-        uint lamp = reference_lamp_pick(p, n, probability);
+        uint lamp = lamp_pick_mixed(p, n, probability);
         if (probability <= 0.0)
             continue;
         uint at = lamp * 16u;
