@@ -1213,6 +1213,155 @@ layout(set = 0, binding = 8) uniform sampler2D lamp_last;
 layout(set = 0, binding = 9, rgba32f) uniform writeonly image2D lamp_now;
 """
 
+
+# the path tracer's copy of TRACE: its own edits (the sky lights' reach, the light's units' floor, a lamp
+# blocked by another lamp's surface), not the probes' and the trace pass's
+PATH_TRACE = TRACE
+for _old, _new in (
+        ("""}
+
+/* the sun's visibility from o (its disc, display.prism_sun_size: one ray
+toward a point of it) through mask */
+float sun_visible(vec3 o, uint mask)
+{
+    if (pass.sun.w <= 0.0)
+        return 0.0;
+    vec3 d = cone_dir(pass.sun.xyz, cos(0.5 * pass.rig[0].w));
+    return blocked(o, d, 2000.0, mask) ? 0.0 : 1.0;
+}
+
+""",
+         """}
+
+/* port: a sky light's rays (the sun's, a dome's) tested as Tool's radiosity
+tests them, the bake's alike: as far as the light's test distance (the
+rig's: rig[15].w the sun's, a dome's its colour's w; 0 the whole level),
+blocked by a face met from its front or a two-sided one, not by the
+level's one-sided backs */
+float sun_reach() { return pass.rig[15].w > 0.0 ? pass.rig[15].w : 2000.0; }
+float dome_reach(vec4 r) { return r.w > 0.0 ? r.w : 2000.0; }
+bool sky_blocked(vec3 o, vec3 d, float reach, uint mask)
+{
+    for (int k = 0; k < 4; k++)
+    {
+        vec3 nh;
+        uint custom, primitive;
+        float h = hit(o, d, reach, mask, nh, custom, primitive);
+        if (h < 0.0)
+            return false;
+        if (dot(nh, nh) > 0.0)
+            return true;
+        o += d * (h + 0.01);
+        reach -= h + 0.01;
+        if (reach <= 0.0)
+            return false;
+    }
+    return true;
+}
+/* the sun's visibility from o (its disc, display.prism_sun_size: one ray
+toward a point of it) through mask */
+float sun_visible(vec3 o, uint mask)
+{
+    if (pass.sun.w <= 0.0)
+        return 0.0;
+    vec3 d = cone_dir(pass.sun.xyz, cos(0.5 * pass.rig[0].w));
+    return sky_blocked(o, d, sun_reach(), mask) ? 0.0 : 1.0;
+}
+
+"""),
+        ("""        vec3 d = cone_dir(normalize(a.xyz), a.w);
+        float c = dot(n, d);
+        if (c > 0.0 && !blocked(o, d, 2000.0, 15u))
+            sum += r.rgb * c;
+    }
+    return sum;
+}
+
+/* the sky's light along a direction past the level: its radiance, and
+where the direction is in a dome's cone the dome's (its light facing it
+squarely, by pi over its solid angle) unless the domes were sampled as
+lights */
+vec3 sky_along(vec3 d, bool domes)
+{
+    vec3 l = pass.rig[1].rgb;
+    if (!domes)
+        return l;
+""",
+         """        vec3 d = cone_dir(normalize(a.xyz), a.w);
+        float c = dot(n, d);
+        if (c > 0.0 && !sky_blocked(o, d, dome_reach(r), 15u))
+            sum += r.rgb * c;
+    }
+    return sum;
+}
+
+/* the sky's light along a direction past the level: its radiance, and
+where the direction is in a dome's cone the dome's (its light facing it
+squarely, by pi over its solid angle) unless the domes were sampled as
+lights */
+/* port: the rig in the light's units (pass.rig[15].y, 1 or 2): with the
+sky a light (2) the sky's ambient is the open sky's radiance where a path
+leaves the level (sky_along), passed on by the bounces, and no floor;
+with Tool's fill (1) CE's floor of light, unoccluded, at every point seen
+(ambient()), not a radiance from the open sky nor passed on by the
+bounces (the bake's alike) */
+bool flat_floor() { return pass.rig[15].y > 0.5 && pass.rig[15].y < 1.5; }
+vec3 ambient() { return flat_floor() ? pass.rig[1].rgb : vec3(0.0); }
+/* port: ... and sky 0's indoor floor (rig[14].yzw) where the structure's
+surface the pixel shows (an object's: the surface below it) is in one of
+its indoor clusters, one with no sky (word 0's bit 18: xgpu_stream.h's
+XGPU_SCENE_INDOOR), as the bake's texels and probes have it: floor_here 0 */
+vec3 ambient_indoor() { return flat_floor() ? pass.rig[14].yzw : vec3(0.0); }
+float floor_here(vec3 eye, vec3 ray, float distance, vec3 origin, bool level)
+{
+    if (!flat_floor() || (pass.addresses3.x == 0u && pass.addresses3.y == 0u))
+        return 1.0;
+    vec3 nh;
+    uint custom, primitive;
+    float t = level ? hit(eye, ray, distance + 0.1, 3u, nh, custom, primitive) :
+        hit(origin, vec3(0.0, 0.0, -1.0), 64.0, 3u, nh, custom, primitive);
+    if (t < 0.0 || (custom != 0u && custom != ALPHA_CUSTOM))
+        return 1.0;
+    return (Uints(pass.addresses3.xy).v[structure_triangle(custom, primitive) * 8u] & 0x40000u) != 0u ? 0.0 : 1.0;
+}
+vec3 sky_along(vec3 d, bool domes)
+{
+    vec3 l = flat_floor() ? vec3(0.0) : pass.rig[1].rgb;
+    if (!domes)
+        return l;
+"""),
+        ("""bool lamp_visible(vec3 o, vec3 l, float d)
+{
+    /* (most rays meet nothing: the first hit's test settles them; only a
+    ray that meets something looks for the nearest) */
+    if (!blocked(o, l, max(d * 0.995 - 0.03, 0.0), 15u))
+        return true;
+    vec3 nh;
+    uint custom, primitive;
+    float t = hit(o, l, max(d * 0.995 - 0.03, 0.0), 15u, nh, custom, primitive);
+    if (t < 0.0)
+        return true;
+    if (custom != 0u && custom != ALPHA_CUSTOM)
+        return false;
+    uint m = material_of(structure_triangle(custom, primitive));
+    return m < pass.counts.w && (uint(material_value(m, 3u)) & 1u) != 0u;
+}
+
+""",
+         """bool lamp_visible(vec3 o, vec3 l, float d)
+{
+    /* (port: another lamp's surface before the point blocks it, as the
+    paths' bounces have it (lamps_at): its own light is its own pick's;
+    let through, it was counted twice; the bake's alike) */
+    return !blocked(o, l, max(d * 0.995 - 0.03, 0.0), 15u);
+}
+
+"""),
+):
+    assert PATH_TRACE.count(_old) == 1, _old
+    PATH_TRACE = PATH_TRACE.replace(_old, _new)
+
+
 PATH_BODY = """
 /* pass.pt: x bounces, y paths a pixel, z ReSTIR's candidates, w the lights;
 pass.pt2: x mood (0..1), y the dynamic lights' shadows' strength, z the
@@ -1294,12 +1443,55 @@ bool reservoir_add(inout Reservoir r, int light, float weight, float m)
     return false;
 }
 
+/* port: the light fixtures (the rig in the light's units: the bake's
+fixtures, xgpu_vulkan_bake_glsl.inc's fixtures_ris): addresses2's 16
+floats each, addresses2.z of them; one picked by its unshadowed light
+among all (16 or fewer) or 16 candidates, its shadow traced */
+vec3 fixtures_at(vec3 p, vec3 n, vec3 o)
+{
+    uint count = pass.addresses2.z;
+    if (count == 0u)
+        return vec3(0.0);
+    Floats f = Floats(pass.addresses2.xy);
+    uint candidates = min(count, 16u);
+    float sum = 0.0, kept_w = 0.0, kept_d = 0.0;
+    vec3 kept = vec3(0.0), kept_l = vec3(0.0, 0.0, 1.0);
+    for (uint c = 0u; c < candidates; c++)
+    {
+        uint i = count <= 16u ? c : min(uint(rnd() * float(count)), count - 1u);
+        uint at = i * 16u;
+        vec3 to = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]) - p;
+        float d2 = dot(to, to), d = sqrt(d2);
+        vec3 l = to / max(d, 1.0e-6);
+        float cs = dot(n, l) / 3.14159265;
+        if (cs <= 0.0 || d < 1.0e-4)
+            continue;
+        vec4 axis = vec4(f.v[at + 8u], f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]);
+        float cone = axis.w < 1.5 ? smoothstep(axis.w, max(f.v[at + 12u], axis.w + 1.0e-4), dot(-l, axis.xyz)) : 1.0;
+        vec3 e = vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cs * cone / (d2 + 0.01));
+        float w = luma(e);
+        if (!(w > 0.0) || isinf(w))
+            continue;
+        sum += w;
+        if (rnd() * sum <= w)
+        {
+            kept = e;
+            kept_w = w;
+            kept_l = l;
+            kept_d = d;
+        }
+    }
+    if (kept_w <= 0.0 || blocked(o, kept_l, max(kept_d - 0.05, 0.0), 15u))
+        return vec3(0.0);
+    return kept / kept_w * sum * (float(count) / float(candidates));
+}
+
 /* the light reaching a hit (the rig's: the sun, a lamp; the dynamic
 lights' apart, CE's units), its bounces past it to come from the path */
 void hit_light(vec3 h, vec3 nh, out vec3 ls, out vec3 ld)
 {
     vec3 o = h + nh * 0.03;
-    ls = sun_at(o, nh);
+    ls = sun_at(o, nh) + fixtures_at(h, nh, o);
     if (pass.counts.z > 0u)
         ls += lamps_at(h, nh, o, 1);
     ld = vec3(0.0);
@@ -1393,10 +1585,10 @@ void main()
         for (int r = 0; r < sun_rays; r++)
         {
             vec3 d = cone_dir(pass.sun.xyz, cos(0.5 * pass.rig[0].w));
-            if (!blocked(origin, d, 2000.0, 3u))
+            if (!sky_blocked(origin, d, sun_reach(), 3u))
             {
                 v_structure += 1.0;
-                v += blocked(origin, d, 2000.0, 12u) ? 0.0 : 1.0;
+                v += blocked(origin, d, sun_reach(), 12u) ? 0.0 : 1.0;
             }
         }
         v /= float(max(sun_rays, 1));
@@ -1522,6 +1714,8 @@ void main()
         lamp_store = vec4(float(y) + min(m, 63.0) * 262144.0, yb, weight);
     }
     imageStore(lamp_now, texel, lamp_store);
+    light += fixtures_at(p, n, origin) +
+        mix(ambient_indoor(), ambient(), floor_here(pass.camera[0].xyz, ray, distance, origin, level));
 
     /* the sky and the bounces, by paths */
     vec3 dynamic_bounce = vec3(0.0);
@@ -2588,7 +2782,7 @@ parts = [HEADER,
          source("probes", PROBES_HEAD, BASIC + TRACE + PROBES_BODY, 2),
          "\n",
          (HERE / "path_comment.txt").read_text(),
-         source("path", PATH_HEAD, BASIC + TRACE + PATH_BODY, 3),
+         source("path", PATH_HEAD, BASIC + PATH_TRACE + PATH_BODY, 3),
          "\n",
          source("accumulate", ACCUMULATE_HEAD, BASIC + ACCUMULATE_BODY, 3),
          "\n",
