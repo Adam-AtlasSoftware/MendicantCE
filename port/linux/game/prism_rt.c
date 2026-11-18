@@ -305,6 +305,9 @@ static struct
 	fixtures' factors on the units: the calibration's) */
 	int rig_mode, rig_read_units;
 	float rig_scales[4];
+	/* port: display.prism_sky_light (0 "sky", the sky's ambient a light, a
+	radiance where a path leaves the level; 1 "flat", Tool's fill) */
+	int sky_light;
 	/* the map's sun, from its sky as a window last saw it; its angular
 	diameter; the sky's other lights (domes): direction and cosine of the
 	half angle, radiance by colour and power */
@@ -373,6 +376,7 @@ static void settings_read(void)
 	static char const *const sizes[] = { "auto", "ce", "real", "soft", NULL };
 	static char const *const exposures[] = { "fixed", "ce", "auto", NULL };
 	static char const *const curves[] = { "ce", "filmic", "aces", "local", NULL };
+	static char const *const skies[] = { "sky", "flat", NULL };
 	char const *lightmaps;
 	char const *reference_file;
 	long mood, value;
@@ -449,6 +453,7 @@ static void settings_read(void)
 	prism_rt.exposure_bias = !(prism_rt.exposure_bias >= -4.0f) ? 0.0f : prism_rt.exposure_bias > 4.0f ? 4.0f :
 		prism_rt.exposure_bias;
 	prism_rt.tone_curve = word_index(config_string("display.prism_tone_curve"), curves, -1);
+	prism_rt.sky_light = word_index(config_string("display.prism_sky_light"), skies, 0);
 	lightmaps = config_string("display.prism_lightmaps");
 	prism_rt.rebaked = lightmaps && !strcmp(lightmaps, "rebaked");
 	value = config_integer("debug.pt_reference");
@@ -1578,7 +1583,12 @@ they are) */
 	/* (port: rig[15]: the fixtures' scale where the rig is in units (0: the
 	fixtures are CE's lightmap's, not lights), and 1 there) */
 	rig[60] = scales->units ? scales->fixture : 0.0f;
-	rig[61] = scales->units ? 1.0f : 0.0f;
+	/* (rig[61]: where the rig is in the light's units, 2 with the sky's
+	ambient a light (display.prism_sky_light "sky": the open sky's radiance,
+	its colour by its power, the rig's sky, seen where a path leaves the
+	level and passed on by the bounces; no flat fill outdoors or in), 1 with
+	Tool's flat fill ("flat"); 0 the fitted rig) */
+	rig[61] = scales->units ? (prism_rt.sky_light == 0 ? 2.0f : 1.0f) : 0.0f;
 	/* (rig[62]: 1 where the bounces' albedo is the base maps' stored mean,
 	prism_rt_albedo_stored: the host's drawn objects' alike) */
 	rig[62] = prism_rt_albedo_stored() ? 1.0f : 0.0f;

@@ -272,15 +272,21 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    }\n" \
 	"    return sum;\n" \
 	"}\n" \
-	"/* the rig in the light's units (s.rig[15].y): the sky's ambient is CE's\n" \
-	"flat floor of light, unoccluded, at every texel and probe: its outdoor\n" \
-	"values in the structure's clusters with a sky (ambient()), sky 0's indoor\n" \
-	"ones (s.rig[14].yzw: ambient_indoor()) in those with none (indoor(),\n" \
+	"/* the rig in the light's units (s.rig[15].y, 1 or 2). With the sky a\n" \
+	"light (2, display.prism_sky_light \"sky\": sky_light()) the sky's ambient\n" \
+	"is the open sky's radiance (its colour by its power, s.rig[1]: a point\n" \
+	"under the open sky gets it, one under cover less), seen where a path\n" \
+	"leaves the level (sky_along) and passed on by the bounces, and there is\n" \
+	"no floor. With Tool's fill (1, \"flat\") it is CE's flat floor of light,\n" \
+	"unoccluded, at every texel and probe: its outdoor values in the\n" \
+	"structure's clusters with a sky (ambient()), sky 0's indoor ones\n" \
+	"(s.rig[14].yzw: ambient_indoor()) in those with none (indoor(),\n" \
 	"floor_at()); not a radiance from the open sky, and not passed on by the\n" \
 	"bounces */\n" \
 	"bool units_rig() { return s.rig[15].y > 0.5; }\n" \
-	"vec3 ambient() { return units_rig() ? s.rig[1].rgb : vec3(0.0); }\n" \
-	"vec3 ambient_indoor() { return units_rig() ? s.rig[14].yzw : vec3(0.0); }\n" \
+	"bool sky_light() { return s.rig[15].y > 1.5; }\n" \
+	"vec3 ambient() { return units_rig() && !sky_light() ? s.rig[1].rgb : vec3(0.0); }\n" \
+	"vec3 ambient_indoor() { return units_rig() && !sky_light() ? s.rig[14].yzw : vec3(0.0); }\n" \
 	"/* 1 where a point in the air is in an outdoor cluster, 0 in an indoor\n" \
 	"one: the nearest of the structure's surfaces the six axes meet says which,\n" \
 	"by its triangle's flag (nothing met: outdoor) */\n" \
@@ -305,7 +311,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"}\n" \
 	"vec3 sky_along(vec3 d, bool domes)\n" \
 	"{\n" \
-	"    vec3 l = units_rig() ? vec3(0.0) : s.rig[1].rgb;\n" \
+	"    vec3 l = units_rig() && !sky_light() ? vec3(0.0) : s.rig[1].rgb;\n" \
 	"    if (!domes)\n" \
 	"        return l;\n" \
 	"    for (int i = 0; i < 4; i++)\n" \

@@ -78,7 +78,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 15u
+#define BAKE_VERSION 16u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -474,6 +474,9 @@ static struct
 	int16_t *bricks;
 	uint32_t brick_count, brick_total;
 	int reach_whole;
+	/* the reach's file (reach_file_path: <folder>/<map>/bsp<n>.reach, made
+	as its inputs end, the thread's to read and write) */
+	char reach_path[XGPU_BAKE_PATH + 200];
 	/* the static scenery's triangles (SCENERY_FLOATS each: corners, albedo,
 	coverage), the reach's inputs' */
 	float *scenery;
@@ -1775,6 +1778,7 @@ static struct bake_state *bake_begin(void)
 	float power = 0.0f;
 	char name[XGPU_BAKE_NAME];
 	int alpha_traced;
+	double entered = now_seconds();
 
 	if (!set || set->generation != bake.control.generation || !set->triangle_count)
 		return NULL;
@@ -1963,6 +1967,11 @@ static struct bake_state *bake_begin(void)
 	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, frame->rig, XGPU_RT_RIG_SETTINGS * sizeof(float));
 	hash = prism_bake_hash64(hash, &frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_EMISSIVE], 3 * sizeof(float));
 	hash = prism_bake_hash64(hash, frame->sun, sizeof(frame->sun));
+	/* (the port's rig words past the settings, rig[57] on: the indoor
+	floor, the fixtures' scale, the units and the sky's kind, the albedo's
+	rule, the sun's test distance; rig[56], the host's seconds, left out) */
+	hash = prism_bake_hash64(hash, &frame->rig[XGPU_RT_RIG_SETTINGS + XGPU_RT_SETTING_COUNT + 1],
+		(XGPU_STREAM_RT_RIG_FLOATS - XGPU_RT_RIG_SETTINGS - XGPU_RT_SETTING_COUNT - 1) * sizeof(float));
 	hash = prism_bake_hash64(hash, b->plan.lamps, (size_t)lamps * 16 * sizeof(float));
 	if (b->fixture_count)
 		hash = prism_bake_hash64(hash, b->fixtures, (size_t)b->fixture_count * 16 * sizeof(float));
@@ -2008,12 +2017,16 @@ static struct bake_state *bake_begin(void)
 		"(power %.2f), %u fixtures (of %u: those of no light left out), %u triangles of static scenery, %u bricks; %s",
 		b->map, (int)b->bsp, b->quality, kept, indoor, lamps, (double)power, b->fixture_count, b->fixtures_seen,
 		b->scenery_count, bake.brick_count, b->path);
+	if (getenv("HALO_RASTER_EXPOSURE_LOG"))
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: begun at %.3f s (%.3f s in its start)", b->map, (int)b->bsp,
+			now_seconds(), now_seconds() - entered);
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the rig: sun %.5f %.5f %.5f toward %.5f %.5f %.5f (%s, disc %.4f), sky "
-		"%.4f %.4f %.4f, gamma %.2f, emissive scale %.3f", b->map, (int)b->bsp, (double)b->block.rig[0][0],
+		"%.4f %.4f %.4f (%s), gamma %.2f, emissive scale %.3f", b->map, (int)b->bsp, (double)b->block.rig[0][0],
 		(double)b->block.rig[0][1], (double)b->block.rig[0][2], (double)b->block.sun[0], (double)b->block.sun[1],
 		(double)b->block.sun[2], b->block.sun[3] > 0.0f ? "present" : "none", (double)b->block.rig[0][3],
-		(double)b->block.rig[1][0], (double)b->block.rig[1][1], (double)b->block.rig[1][2], (double)b->block.rig[1][3],
-		(double)b->block.rig[11][0]);
+		(double)b->block.rig[1][0], (double)b->block.rig[1][1], (double)b->block.rig[1][2],
+		b->block.rig[15][1] > 1.5f ? "a light" : b->block.rig[15][1] > 0.5f ? "a flat fill" : "the fitted rig's",
+		(double)b->block.rig[1][3], (double)b->block.rig[11][0]);
 	return b;
 }
 
@@ -4063,7 +4076,8 @@ static void file_open(struct bake_state *b)
 	status = prism_bake_cache_open(&b->cache, b->path, &b->key, 0);
 	if (status == PRISM_BAKE_CACHE_CURRENT && b->cache.done)
 	{
-		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake is whole (%s): loaded", b->map, (int)b->bsp, b->path);
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake is whole (%s): loaded (at %.3f s)", b->map, (int)b->bsp,
+			b->path, now_seconds());
 		b->writing = 0;
 		b->complete = 1;
 		return;
@@ -4541,10 +4555,10 @@ static void bake_frame(void)
 			break;
 		}
 		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: planned in %.1f s: %u charts, %u virtual pages, %u tiles (%.1f M "
-			"texels), %u triangle lists' entries; %u grid cells; %u probes", b->map, (int)b->bsp, b->plan.seconds,
-			(uint32_t)b->plan.atlas.chart_count, b->plan.vpage_count, b->plan.tile_count,
+			"texels), %u triangle lists' entries; %u grid cells; %u probes (at %.3f s)", b->map, (int)b->bsp,
+			b->plan.seconds, (uint32_t)b->plan.atlas.chart_count, b->plan.vpage_count, b->plan.tile_count,
 			(double)b->plan.tile_count * TILE_TEXELS / 1.0e6, (uint32_t)b->plan.tile_triangle_count, b->plan.cell_count,
-			b->plan.probe_count);
+			b->plan.probe_count, now_seconds());
 		b->step = STEP_UPLOAD;
 		break;
 	case STEP_UPLOAD:
@@ -4759,6 +4773,74 @@ static int fighter_reached(struct prism_bake_reach const *reach, const float *fi
 	return 0;
 }
 
+/* the reach's file: what the walk found for one BSP's inputs (their
+hash), kept beside its bake so that a BSP drawn again (b30's beach after its
+structure, a session after) takes it at once: "PRCH", its version, the
+inputs' hash, the flight flag, the summary, the bricks and the tiers */
+#define REACH_FILE_VERSION 1u
+static int reach_file_read(uint64_t hash)
+{
+	FILE *f = bake.reach_path[0] ? fopen(bake.reach_path, "rb") : NULL;
+	uint32_t head[2], counts[2];
+	uint64_t stored;
+	int32_t flight;
+	uint32_t summary[8];
+	int16_t *bricks = NULL;
+	uint8_t *tiers = NULL;
+
+	if (!f)
+		return 0;
+	if (fread(head, 4, 2, f) != 2 || memcmp(head, "PRCH", 4) || head[1] != REACH_FILE_VERSION ||
+		fread(&stored, 8, 1, f) != 1 || stored != hash || fread(&flight, 4, 1, f) != 1 ||
+		fread(summary, 4, 8, f) != 8 || fread(counts, 4, 2, f) != 2 || counts[0] > (1u << 26) || counts[1] > (1u << 26))
+	{
+		fclose(f);
+		return 0;
+	}
+	bricks = (int16_t *)malloc(((size_t)counts[0] + 1) * 8);
+	tiers = (uint8_t *)malloc((size_t)counts[1] + 1);
+	if (!bricks || !tiers || fread(bricks, 8, counts[0], f) != counts[0] || fread(tiers, 1, counts[1], f) != counts[1])
+	{
+		free(bricks);
+		free(tiers);
+		fclose(f);
+		return 0;
+	}
+	fclose(f);
+	bake.bricks = bricks;
+	bake.brick_count = bake.brick_total = counts[0];
+	bake.tiers = tiers;
+	bake.tier_count = counts[1];
+	bake.reach_flight = flight;
+	memcpy(bake.reach_summary, summary, sizeof(summary));
+	return 1;
+}
+
+static void reach_file_write(uint64_t hash)
+{
+	char temporary[sizeof(bake.reach_path) + 8];
+	uint32_t head[2] = { 0, REACH_FILE_VERSION }, counts[2] = { bake.brick_count, bake.tier_count };
+	int32_t flight = bake.reach_flight;
+	FILE *f;
+	int ok;
+
+	if (!bake.reach_path[0] || !bake.bricks)
+		return;
+	memcpy(head, "PRCH", 4);
+	snprintf(temporary, sizeof(temporary), "%s.new", bake.reach_path);
+	f = fopen(temporary, "wb");
+	if (!f)
+		return;
+	ok = fwrite(head, 4, 2, f) == 2 && fwrite(&hash, 8, 1, f) == 1 && fwrite(&flight, 4, 1, f) == 1 &&
+		fwrite(bake.reach_summary, 4, 8, f) == 8 && fwrite(counts, 4, 2, f) == 2 &&
+		fwrite(bake.bricks, 8, counts[0], f) == counts[0] && (!counts[1] || fwrite(bake.tiers, 1, counts[1], f) == counts[1]);
+	ok = fclose(f) == 0 && ok;
+	if (ok)
+		rename(temporary, bake.reach_path);
+	else
+		remove(temporary);
+}
+
 static void *reach_thread(void *unused)
 {
 	struct reach_reader r;
@@ -4776,7 +4858,8 @@ static void *reach_thread(void *unused)
 	const float *bounds, *fighters, *water;
 	uint8_t *tiers = NULL, *surface_tiers = NULL;
 	size_t triangle_count = 0, slot, t;
-	int built = 0, failed = 1;
+	int built = 0, failed = 1, from_file = 0;
+	uint64_t input_hash = 0;
 	double started = now_seconds();
 
 	(void)unused;
@@ -4884,6 +4967,14 @@ static void *reach_thread(void *unused)
 		host_logf(HOST_LOG_WARN, "prism bake: bsp %d's reach's inputs do not read", (int)bake.reach_bsp);
 		goto done;
 	}
+	/* (the walk these inputs made before, from its file: none to make) */
+	input_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.reach_input, (size_t)bake.reach_words * 4);
+	if (reach_file_read(input_hash))
+	{
+		failed = 0;
+		from_file = 1;
+		goto done;
+	}
 	prism_bake_reach_defaults(&parameters);
 	memcpy(parameters.bounds, bounds, sizeof(parameters.bounds));
 	parameters.flight = 0;
@@ -4983,6 +5074,8 @@ static void *reach_thread(void *unused)
 		bake.tier_count = (uint32_t)surface_count;
 		surface_tiers = NULL;
 		failed = !bake.bricks;
+		if (!failed)
+			reach_file_write(input_hash);
 	}
 
 done:
@@ -4996,9 +5089,9 @@ done:
 	free(tiers);
 	free(surface_tiers);
 	if (!failed)
-		host_logf(HOST_LOG_INFO, "prism bake: bsp %d's reach (%.1f s): %u floors walked, %u body and %u camera cells, %u "
+		host_logf(HOST_LOG_INFO, "prism bake: bsp %d's reach (%.1f s%s): %u floors walked, %u body and %u camera cells, %u "
 			"flight cells (%s), %u of %u seeds used; %u triangles near, %u seen further; %u bricks", (int)bake.reach_bsp,
-			now_seconds() - started, bake.reach_summary[0], bake.reach_summary[1], bake.reach_summary[2],
+			now_seconds() - started, from_file ? ", from its file" : "", bake.reach_summary[0], bake.reach_summary[1], bake.reach_summary[2],
 			bake.reach_summary[3], bake.reach_flight ? "a fighter the player reaches" : "no fighter the player reaches",
 			bake.reach_summary[4], bake.reach_summary[5], bake.reach_summary[6], bake.reach_summary[7], bake.brick_count);
 	__atomic_store_n(&bake.reach_whole, failed ? -1 : 1, __ATOMIC_RELEASE);
@@ -5031,6 +5124,10 @@ void xgpu_vulkan_bake_record(const struct xgpu_stream_prism_bake *record, const 
 	case XGPU_BAKE_REACH_INPUT:
 		if (record->first == 0)
 		{
+			/* (the diagnostic log's clock: when a BSP's inputs begin) */
+			if (getenv("HALO_RASTER_EXPOSURE_LOG"))
+				host_logf(HOST_LOG_INFO, "prism bake: bsp %d's reach's inputs begun at %.3f s", (int)record->bsp_index,
+					now_seconds());
 			reach_wait();
 			free(bake.reach_input);
 			free(bake.tiers);
@@ -5056,6 +5153,20 @@ void xgpu_vulkan_bake_record(const struct xgpu_stream_prism_bake *record, const 
 		if (bake.reach_input && record->generation == bake.reach_generation && record->bsp_index == bake.reach_bsp &&
 			bake.reach_received == bake.reach_words && !bake.reach_running)
 		{
+			/* (the reach's file: beside the BSP's bake) */
+			{
+				const char *folder = bake.control.folder ? (const char *)host_pointer(bake.control.folder) : NULL;
+				char name[96], map[sizeof(bake.control.map_name) + 1], directory[sizeof(bake.reach_path)];
+
+				memcpy(map, bake.control.map_name, sizeof(bake.control.map_name));
+				map[sizeof(bake.control.map_name)] = 0;
+				name_clean(map, name, sizeof(name));
+				snprintf(directory, sizeof(directory), "%s/%s", folder && *folder ? folder : "prism_bake", name);
+				folder_make(directory);
+				snprintf(bake.reach_path, sizeof(bake.reach_path), "%s/bsp%d.reach", directory, (int)bake.reach_bsp);
+				if (!bake.control_known || !map[0])
+					bake.reach_path[0] = 0;
+			}
 			if (pthread_create(&bake.reach_thread, NULL, reach_thread, NULL) == 0)
 				bake.reach_running = 1;
 			else

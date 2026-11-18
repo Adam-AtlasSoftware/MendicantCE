@@ -885,6 +885,13 @@ static boolean scenery_copy(
 	palettes[2] = &scenario->control_palette;
 	placements[3] = &scenario->light_fixtures;
 	palettes[3] = &scenario->light_fixtures_palette;
+	/* (HALO_BAKE_NO_SCENERY, a diagnostic: none, the structure alone, as the
+	path tracer's reference traces it with HALO_RT_NO_OBJECTS, for the
+	bake's gate on equal scenes) */
+	if (getenv("HALO_BAKE_NO_SCENERY"))
+	{
+		return TRUE;
+	}
 	for (kind = 0; kind < 4; kind++)
 	{
 		if (kind == 1)

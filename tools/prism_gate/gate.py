@@ -186,7 +186,7 @@ def bake_rig(log_text):
     CE's encoding"""
     import re
     match = re.search(r"the rig: sun ([-\d.e]+) ([-\d.e]+) ([-\d.e]+) toward ([-\d.e]+) ([-\d.e]+) ([-\d.e]+) "
-                      r"\((present|none), disc [-\d.e]+\), sky [-\d.e]+ [-\d.e]+ [-\d.e]+, gamma ([-\d.e]+)",
+                      r"\((present|none), disc [-\d.e]+\), sky [-\d.e]+ [-\d.e]+ [-\d.e]+(?: \([^)]*\))?, gamma ([-\d.e]+)",
                       log_text)
     if not match:
         raise SystemExit("no rig in the capture's log")

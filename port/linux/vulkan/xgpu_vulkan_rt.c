@@ -425,6 +425,11 @@ static struct
 	/* port: the lamps' grid (lamp_grid_build), its corner, cell and cells
 	a side; none where its cells are 0 */
 	struct rt_buffer static_lamp_grid;
+	/* port: the lamp grid left for the first traced window (made on the
+	frame's thread, seconds for a level of a thousand lamps: not while
+	nothing is traced, PRISM Raster's BSP changes) */
+	int lamp_grid_pending;
+	uint32_t emitter_count_pending;
 	float lamp_grid_origin[3], lamp_grid_cell;
 	int32_t lamp_grid_cells[3];
 	VkAccelerationStructureKHR alpha_structure;
@@ -481,6 +486,9 @@ static struct
 	the replacement meshes traced within RT_REPLACEMENT_REACH of it) */
 	float eye[3];
 	int eye_known;
+	/* HALO_RT_NO_OBJECTS: 1 the objects left out of the scene (objects_record),
+	-1 not, 0 not read yet */
+	int no_objects;
 	/* the owners' first draws' node 0, this window's and the last's */
 	float owner_now[64][3], owner_last[64][3];
 	uint8_t owner_now_seen[64], owner_last_seen[64];
@@ -1224,6 +1232,7 @@ static void static_release(void)
 		garbage_add(&rt.static_emitters, VK_NULL_HANDLE);
 	if (rt.static_lamp_grid.buffer)
 		garbage_add(&rt.static_lamp_grid, VK_NULL_HANDLE);
+	rt.lamp_grid_pending = 0;
 	if (rt.static_levels_input.buffer)
 		garbage_add(&rt.static_levels_input, VK_NULL_HANDLE);
 	if (rt.static_update_scratch.buffer)
@@ -1402,6 +1411,24 @@ static int level_drawn(uint32_t tag, const uint32_t *levels, uint32_t words)
 /* the set received built: the triangles traced (the opaque, then the
 alpha-tested, each with their attributes), the lamps listed, the
 structures built; the last set's let go of */
+/* the pending lamp grid made (static_build's, its emitters') */
+static void lamp_grid_take(void)
+{
+	if (!rt.lamp_grid_pending)
+		return;
+	rt.lamp_grid_pending = 0;
+	if (rt.static_lamp_grid.buffer)
+		garbage_add(&rt.static_lamp_grid, VK_NULL_HANDLE);
+	memset(&rt.static_lamp_grid, 0, sizeof(rt.static_lamp_grid));
+	if (!rt.static_emitters.mapped || !rt.emitter_count_pending ||
+		!lamp_grid_build((const float *)rt.static_emitters.mapped, rt.emitter_count_pending, &rt.static_lamp_grid,
+		rt.lamp_grid_origin, &rt.lamp_grid_cell, rt.lamp_grid_cells))
+	{
+		memset(&rt.static_lamp_grid, 0, sizeof(rt.static_lamp_grid));
+		rt.lamp_grid_cells[0] = rt.lamp_grid_cells[1] = rt.lamp_grid_cells[2] = 0;
+	}
+}
+
 static void static_build(void)
 {
 	VkMemoryBarrier barrier;
@@ -1591,12 +1618,10 @@ static void static_build(void)
 	rt.static_materials = materials;
 	rt.static_alpha = alpha;
 	rt.static_emitters = emitters;
-	if (!lamp_grid_build((const float *)emitters.mapped, lamps, &rt.static_lamp_grid, rt.lamp_grid_origin,
-		&rt.lamp_grid_cell, rt.lamp_grid_cells))
-	{
-		memset(&rt.static_lamp_grid, 0, sizeof(rt.static_lamp_grid));
-		rt.lamp_grid_cells[0] = rt.lamp_grid_cells[1] = rt.lamp_grid_cells[2] = 0;
-	}
+	rt.lamp_grid_pending = 1;
+	rt.emitter_count_pending = lamps;
+	if (!(rt.frame_received && rt.frame.mode == XGPU_RT_OFF))
+		lamp_grid_take();
 	rt.static_triangles = traced;
 	rt.opaque_triangles = opaque;
 	rt.alpha_triangles = tested;
@@ -2828,8 +2853,13 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 		}
 		built++;
 	}
-	/* the instances: the structure's, then the objects' with a structure */
+	/* the instances: the structure's, then the objects' with a structure
+	(none with HALO_RT_NO_OBJECTS, a diagnostic: the structure alone, as a
+	bake made with HALO_BAKE_NO_SCENERY traces it, for the bake's gate on
+	equal scenes) */
 	instances = (VkAccelerationStructureInstanceKHR *)slot->instances.mapped + first;
+	if (rt.no_objects == 0)
+		rt.no_objects = getenv("HALO_RT_NO_OBJECTS") ? 1 : -1;
 	if (rt.static_structure)
 	{
 		memset(&instances[count], 0, sizeof(instances[count]));
@@ -2841,7 +2871,7 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 		instances[count].accelerationStructureReference = rt.static_address;
 		count++;
 	}
-	for (draw = 0; draw < capture->draw_count && first + count < RT_INSTANCES; draw++)
+	for (draw = 0; rt.no_objects < 0 && draw < capture->draw_count && first + count < RT_INSTANCES; draw++)
 	{
 		uint32_t index = capture->draws[draw] & 0x7fffffffu;
 		struct rt_entry *entry = &rt.entries[index];
@@ -3493,6 +3523,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 		return NULL;
 	}
 	rt.capture.open = 0;
+	lamp_grid_take();
 	scale = pass->camera[3][3] >= 2.0f ? 2u : 1u;
 	out_width = (width + scale - 1) / scale;
 	out_height = (height + scale - 1) / scale;

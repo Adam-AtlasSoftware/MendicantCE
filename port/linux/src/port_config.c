@@ -762,6 +762,16 @@ static const struct config_setting config_settings[] =
 		"irradiance volume, the light where they are. \"classic\" by the\n"
 		"volume, but never darker than Classic lights them (what the game\n"
 		"shows stays seen). Read each frame." },
+	{ "display.prism_sky_light", _config_string, "\"sky\"", "HALO_PRISM_SKY_LIGHT", _environment_value,
+		_platform_desktop,
+		"PRISM Raster's bake (and the path tracer's reference), the light in\n"
+		"Tool's units: the sky's ambient light. \"sky\" a light: the open sky's\n"
+		"radiance (the sky's ambient colour by its power), seen where a path\n"
+		"leaves the level and passed on by the bounces, so a point under the\n"
+		"open sky gets Tool's ambient and one under cover less, and a room with\n"
+		"no sky only what comes in. \"flat\" Tool's fill: the same light at\n"
+		"every point (the sky's outdoor value where the cluster has a sky, its\n"
+		"indoor value where it has none). A change bakes again." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"
@@ -4718,6 +4728,7 @@ static const struct
 	{ "display.denoiser", { "prism", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
 	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },
+	{ "display.prism_sky_light", { "sky", "flat", NULL }, "sky" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
 		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", "pt_diffuse",
