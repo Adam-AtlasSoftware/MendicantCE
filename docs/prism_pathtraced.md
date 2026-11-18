@@ -93,7 +93,9 @@ after it. The specular is denoised as the light the lobe takes in (divided by it
 composite). `display.denoiser` `"off"` shows the light as traced (one sample a pixel). The passes, written from the
 published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
 
-- **temporal**: each pixel's last-frame histories found along the G-buffer's motion, each of the 2 × 2 taps kept only
+- **temporal**: each pixel's last-frame histories found where its surface was: a level pixel's point projected into
+  the last frame's camera (the level stands still: its geometry, not a motion vector), an object's along the
+  G-buffer's motion; each of the 2 × 2 taps kept only
   where its guide (the last frame's: instance, normal, distance) is this surface's: the same instance, the normal
   within 25 degrees, and on the level its point on this pixel's plane (the last frame's camera; an object's distance
   within 5%). So no history is taken across an edge, nor through an opening onto the surface behind it (a10's door

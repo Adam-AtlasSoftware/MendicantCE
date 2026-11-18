@@ -179,6 +179,25 @@ vec3 last_point(ivec2 at, float distance)
     return job.last_camera[0].xyz + distance * ray;
 }
 
+/* where a pixel's surface was in the last frame's target: the level stands
+still, so its point is found in the last frame's camera by its geometry
+(the camera's rays solved for the point: no motion vector trusted); an
+object by its screen motion (the G-buffer's) */
+vec2 last_pixel(vec3 point, vec2 pixel, vec2 motion, bool level)
+{
+    if (!level)
+        return pixel + motion;
+    mat3 rays = mat3(job.last_camera[1].xyz, job.last_camera[2].xyz, job.last_camera[3].xyz);
+    if (abs(determinant(rays)) < 1.0e-12)
+        return pixel + motion;
+    vec3 u = inverse(rays) * (point - job.last_camera[0].xyz);
+    if (u.x <= 1.0e-6)
+        return vec2(-1.0e6);
+    vec2 sxy = u.yz / u.x;
+    vec4 c = vec4(job.last_corners);
+    return vec2((sxy.x + 1.0) * 0.5 * (c.z - c.x) + c.x - 0.5, (sxy.y + 1.0) * 0.5 * (c.w - c.y) + c.y - 0.5);
+}
+
 Surface surface_at(ivec2 pixel)
 {
     Surface g;
@@ -753,7 +772,7 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     float target_kept = target_own;
     if (reuse && g.has_history && (job.frame.y & FLAG_HISTORY) != 0u)
     {
-        ivec2 q = ivec2(floor(vec2(pixel) + 0.5 + g.motion));
+        ivec2 q = ivec2(floor(last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u) + 0.5));
         if (inside(q))
         {
             uvec4 gl = imageLoad(guide_last, q);
@@ -1328,7 +1347,7 @@ bool reproject(ivec2 pixel, Surface g, out vec4 d, out vec4 sp, out vec4 mo, out
     length_d = 0.0;
     if ((job.frame.y & FLAG_HISTORY) == 0u || !g.has_history)
         return false;
-    vec2 at = vec2(pixel) + 0.5 + g.motion - 0.5;
+    vec2 at = last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u);
     ivec2 a = ivec2(floor(at));
     vec2 f = at - vec2(a);
     float weights = 0.0;
