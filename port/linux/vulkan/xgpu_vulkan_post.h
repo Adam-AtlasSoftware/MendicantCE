@@ -111,4 +111,14 @@ after. NULL if it cannot. */
 int xgpu_vulkan_post_rotate_prepare(void);
 struct xgpu_vulkan_image *xgpu_vulkan_post_rotate(struct xgpu_vulkan_image *image, int quarter_turns);
 
+/* the terrain overhaul's debug views (xgpu_vulkan_terrain.c) over a
+target's resolved frame, in place: the target copied, then drawn again
+from the copy, the G-buffer's words (NULL none), the classes' table
+(RGBA8, a texel a material) and the events (RGBA32F, two texels each; NULL
+none); bounds: the views (1 the classes, 2 the events), the events' count,
+1 where there are words. Its colour alone (CE's destination alpha kept).
+0 if it cannot be drawn */
+int xgpu_vulkan_post_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *gbuffer,
+	struct xgpu_vulkan_image *classes, struct xgpu_vulkan_image *events, const float bounds[4]);
+
 #endif

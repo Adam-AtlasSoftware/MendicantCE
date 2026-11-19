@@ -27,6 +27,11 @@ keys (`x y z yaw pitch roll field-of-view`, world units and degrees) and what it
 | S2a | b30 (the shore) | Water |
 | S2b | a10 (the cryo bay) | Glass (the cryo tubes) |
 | S3 | a50, BSP 2 (the hangar) | The hangar's lamps (the flashlight: not yet) |
+| B1 | b30 (the first beach) | Terrain: sand, the shoreline (the terrain overhaul's T0) |
+| N1 | b40, BSP 0 (the canyon floor) | Terrain: snow, snow over rock, cliffs |
+| D1 | d40, BSP 8 (the dunes) | Terrain: sand dunes |
+| R1 | a30 (by the first start) | Terrain: dirt, rock |
+| M1 | c10 (the swamp) | Terrain: dirt and mud |
 
 G1 to G7 are the path tracer's gate scenes, their keys as `prism-pt`'s gate checked them (inside the level, every
 probe pose seeing surfaces). S1 to S3 are the design's stills, their poses from earlier PRISM captures, checked in
@@ -34,6 +39,12 @@ play for out-of-level and sky-only frames; the design's S2 is two scenes (b30's 
 V2 are listed in "Not yet frozen" below.
 
 A scene is changed only with a note here saying why: every milestone's figures are measured on these.
+
+B1, N1, D1, R1 and M1 were added with the terrain overhaul's T0 (2026-11-19; `docs/prism_terrain.md`,
+`overhaul_research/prism_v4_renderer/terrain/design.md` section 13): the ground classes' poses every terrain milestone
+is judged at, each checked by its `debug.gbuffer_view` `"terrain_class"` picture (the camera over the class's ground,
+in the level). Their second key turns the camera 15 degrees. The design's other terrain poses (B2, B3, N2, N3, D2, R2)
+and its scripted actions are recorded in `docs/prism_terrain.md` (A1 and A2 there).
 
 ### What a capture is
 

@@ -94,6 +94,14 @@ inputs a slice a frame (`_REACH_INPUT`, words of the serialised collision BSP, c
 and fighters, the static scenery's triangles and the light fixtures' placements; `_REACH_END`). The host writes the bake's state, progress, time and size into the status block
 (`XGPU_BAKE_STATUS_*`). `docs/prism_bake.md` describes the bake.
 
+The terrain overhaul's T0 adds `PRISM_TERRAIN` (stream version 39; the last scene record, 105 after the merge with
+GOAT H1's records, `XGPU_STREAM_RECORD_TYPES` 106), sent with `display.lighting` `"raster"` or `"pathtraced"` in a
+campaign with `display.terrain` `"on"` (`port/linux/game/prism_terrain.c`; `docs/prism_terrain.md`): each frame its
+`FRAME` (generation, time steps, camera, BSP, settings, weather and wind), then the frame's `EVENTS` (feet, a
+vehicle's mass points on the ground, impacts, detonations, explosions) and `WADERS` (units in water or just out of it),
+items of 32 bytes inline after a fixed part of 176. Its `WEATHER_DRAW` and `WATER_DRAW` phases are specified for T12
+and T7 and not sent yet. Never with `"ce"`, never in multiplayer.
+
 The other three are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_DECAL`, `SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the tests; the stream writes its own
 from `xgpu_stream_encode.c`.
 
@@ -122,6 +130,7 @@ entries are sent; the record's size is its fixed part and those entries.
 | `SCENE_VIEW` | At each G-buffer pass's begin | Flags (history); the camera this frame and last (eye and near plane, the axis at the screen's middle and the far plane, its change a unit of the screen's x and y); the view's corners in the target's pixels, this frame's and last | 176 |
 | `SCENE_MATERIAL_MAPS` | After the map's `SCENE_MATERIAL`s, for each shader a pack or a mod gives a material (again as the texture store answers) | Material id (0 refused); tier (pack, mod; the automatic tier's forgets); model (`XGPU_GBUFFER_MODEL_*`, 15 the automatic tier's); flags (the normal at CE's bump map's coordinates, foliage, the environment shader's type and detail functions); 8 images' texture store ids (albedo, normal, ORM, primary, secondary and micro detail, emissive, height); 24 scalars (albedo and emissive factors, normal scale, roughness, metal, occlusion, specular, translucency, the detail maps' scales, height scale) | 148 |
 | `PRISM_BAKE` | Each frame in Raster (the control); once a BSP (the reach's inputs, sliced) | Phase (control, reach input, reach end), generation, first, count, total, data and size; display.bake, the quality, the rebakes asked for, flags (menus, foreground, reach sent); the map's checksum, the BSP; the bake folder's and the status block's guest addresses; the frame's GPU budget, the threshold; the map's name | 144 |
+| `PRISM_TERRAIN` | Each frame in a campaign in Rebaked or Path Traced with `display.terrain` (`FRAME`; `EVENTS` and `WADERS` where there are any) | Phase, generation, the items' count; the game's time step (0 paused), real seconds, the camera, the BSP, flags (mode, campaign, tracks, drifts, HQ layers, PRISM weather and water, paused, the debug views), `display.terrain_quality`, the camera's weather palette entry, its particle system, the wind at the eye and up to 8 palette entries' winds, the map's checksum; then the items: an event (kind, side, ground material type and species in one word; place; ground normal and facing, octahedral; magnitude; object) or a wader (flags and seconds out of the water; centre, velocity, radius) | 176 + 32 per item (at most 8368: 256 events) |
 
 ### The capacities
 

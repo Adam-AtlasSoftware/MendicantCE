@@ -41,8 +41,9 @@ port/linux/README.md.
 /* 38: GOAT H1's 20 to 23 (the ray traced occlusion's WORLD_AO_MESH and _INSTANCES, the render marks,
 DYNAMIC_LIGHTS_CHANGE, SHARP_UPSCALE, the HDR curve, peak and gamut, PASS_TIMES, the ring's GPU and
 render times, the capabilities' ray_queries to device) merged with PRISM v4's 20 to 37: PRISM's records
-after GOAT H1's, the scene records still last (docs/prism_scene_records.md) */
-#define XGPU_STREAM_VERSION 38
+after GOAT H1's, the scene records still last (docs/prism_scene_records.md); 39: the terrain overhaul's
+PRISM_TERRAIN (T0, docs/prism_terrain.md), the last scene record */
+#define XGPU_STREAM_VERSION 39
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -380,6 +381,9 @@ enum
 	shader PRISM's material, SCENE_MATERIAL_MAPS, below;
 	docs/prism_materials.md) */
 	XGPU_STREAM_SCENE_MATERIAL_MAPS,
+	/* (the terrain overhaul, T0: what of the ground, the weather and the
+	water only the game knows, PRISM_TERRAIN, below; docs/prism_terrain.md) */
+	XGPU_STREAM_PRISM_TERRAIN,
 	XGPU_STREAM_RECORD_TYPES,
 };
 /* (the scene records' own count: they run from SCENE_MATERIAL to the end) */
@@ -2981,6 +2985,167 @@ struct xgpu_stream_prism_bake
 	char map_name[XGPU_BAKE_NAME];
 };
 
+/* PRISM_TERRAIN (the terrain, weather and water overhaul, T0;
+docs/prism_terrain.md): what of the ground, the weather and the water only
+the game knows, sent in the PRISM modes (display.lighting "raster" or
+"pathtraced") of a campaign (no game engine runs) with display.terrain
+"on"; never with "ce", never in multiplayer. Nothing the host makes of it
+comes back to the game. Every record is the fixed part below and count
+items of 32 bytes after it (the record's size: offsetof(items) + count *
+32), by phase:
+- XGPU_TERRAIN_FRAME, once a frame before the windows (count 0): the
+  generation (it moves on with a new map, a BSP switch, a revert to a
+  checkpoint or a new game: the host forgets every dynamic thing then), the
+  game's time step in seconds (0 while it is paused), real seconds since
+  the last FRAME, the first local player's camera, the BSP, the settings
+  (XGPU_TERRAIN_FLAG_*, display.terrain_quality XGPU_TERRAIN_QUALITY_*),
+  the camera's weather palette entry (NONE: -1), whether it has a
+  particle system (weather_type 1, 0 none) and its scale, the wind at the
+  eye (scenario_get_wind: world units a second) and each palette entry's
+  wind (at most XGPU_TERRAIN_WINDS, at the eye; wind_count of them), the
+  map's cache checksum;
+- XGPU_TERRAIN_EVENTS: the frame's events, xgpu_stream_terrain_event each
+  (at most XGPU_TERRAIN_EVENTS_MOST): a foot's step (its kind, the side,
+  the contact marker's place and facing, the ground under it: the
+  footstep's ray's hit, its normal and CE's material type, 255 where the
+  ray found none), a vehicle's mass point on the ground (its contact,
+  ground normal, material, the motion's direction and CE's speed scale), a
+  projectile's impact and detonation, an explosion (its centre and the
+  damage's cutoff radius); sub-steps and co-op prediction may send one
+  twice: what the host makes of each is the same made twice;
+- XGPU_TERRAIN_WADERS: the units within XGPU_TERRAIN_WADER_RANGE world
+  units of the eye that are in water or left it in the last 10 seconds,
+  xgpu_stream_terrain_wader each (at most XGPU_TERRAIN_WADERS_MOST);
+- XGPU_TERRAIN_WEATHER_DRAW and _WATER_DRAW (count 0): where the host draws
+  the weather and the water in CE's place (display.weather and
+  display.water "prism": not drawn yet, T12 and T7; never sent in T0).
+The fixed part's frame fields are FRAME's; the other phases send the
+generation and leave them 0. */
+enum
+{
+	XGPU_TERRAIN_FRAME,
+	XGPU_TERRAIN_EVENTS,
+	XGPU_TERRAIN_WADERS,
+	XGPU_TERRAIN_WEATHER_DRAW,
+	XGPU_TERRAIN_WATER_DRAW,
+	XGPU_TERRAIN_PHASES,
+};
+#define XGPU_TERRAIN_EVENTS_MOST 256u
+#define XGPU_TERRAIN_WADERS_MOST 64u
+#define XGPU_TERRAIN_WINDS 8u
+#define XGPU_TERRAIN_WADER_RANGE 25.0f
+/* FRAME's flags: the mode, campaign, the settings (display.terrain_tracks,
+_drifts, _layers "hq", display.weather and display.water "prism"), the
+game paused, and the debug views (debug.gbuffer_view "terrain_class",
+debug.terrain_events) */
+enum
+{
+	XGPU_TERRAIN_FLAG_CAMPAIGN = 1u << 0,
+	XGPU_TERRAIN_FLAG_RASTER = 1u << 1,
+	XGPU_TERRAIN_FLAG_PATHTRACED = 1u << 2,
+	XGPU_TERRAIN_FLAG_TRACKS = 1u << 3,
+	XGPU_TERRAIN_FLAG_DRIFTS = 1u << 4,
+	XGPU_TERRAIN_FLAG_LAYERS_HQ = 1u << 5,
+	XGPU_TERRAIN_FLAG_WEATHER = 1u << 6,
+	XGPU_TERRAIN_FLAG_WATER = 1u << 7,
+	XGPU_TERRAIN_FLAG_PAUSED = 1u << 8,
+	XGPU_TERRAIN_FLAG_VIEW_CLASS = 1u << 16,
+	XGPU_TERRAIN_FLAG_VIEW_EVENTS = 1u << 17,
+};
+enum
+{
+	XGPU_TERRAIN_QUALITY_AUTO,
+	XGPU_TERRAIN_QUALITY_LOW,
+	XGPU_TERRAIN_QUALITY_MEDIUM,
+	XGPU_TERRAIN_QUALITY_HIGH,
+	XGPU_TERRAIN_QUALITY_ULTRA,
+};
+/* an event's kind (its kind word's bits 0 to 7): a biped's foot (CE's
+material effects of a biped: walk, run, sliding, shuffle, jump, jump's
+landing), a vehicle's mass point on the ground (a tyre, a track, a hover),
+a projectile's impact on a surface and its detonation, an explosion's
+damage. The kind word's bits 8 to 15 are flags (XGPU_TERRAIN_EVENT_RIGHT:
+the right foot), 16 to 23 the ground's material type (CE's, as
+SCENE_MATERIAL's; 255 none known), 24 to 31 a biped's species
+(XGPU_TERRAIN_SPECIES_*, 0 another) */
+enum
+{
+	XGPU_TERRAIN_EVENT_NONE,
+	XGPU_TERRAIN_EVENT_WALK,
+	XGPU_TERRAIN_EVENT_RUN,
+	XGPU_TERRAIN_EVENT_SLIDE,
+	XGPU_TERRAIN_EVENT_SHUFFLE,
+	XGPU_TERRAIN_EVENT_JUMP,
+	XGPU_TERRAIN_EVENT_LAND,
+	XGPU_TERRAIN_EVENT_CONTACT,
+	XGPU_TERRAIN_EVENT_IMPACT,
+	XGPU_TERRAIN_EVENT_DETONATION,
+	XGPU_TERRAIN_EVENT_EXPLOSION,
+	XGPU_TERRAIN_EVENT_KINDS,
+};
+#define XGPU_TERRAIN_EVENT_RIGHT 0x100u
+#define XGPU_TERRAIN_MATERIAL_UNKNOWN 255u
+enum
+{
+	XGPU_TERRAIN_SPECIES_OTHER,
+	XGPU_TERRAIN_SPECIES_HUMAN,
+	XGPU_TERRAIN_SPECIES_ELITE,
+	XGPU_TERRAIN_SPECIES_GRUNT,
+	XGPU_TERRAIN_SPECIES_JACKAL,
+	XGPU_TERRAIN_SPECIES_HUNTER,
+	XGPU_TERRAIN_SPECIES_FLOOD,
+	XGPU_TERRAIN_SPECIES_SENTINEL,
+};
+/* an event: its kind word (above), its place (a foot's: the ground's hit,
+or the contact marker's where the ray found none), the ground's normal and
+the facing (a foot's marker's forward; a mass point's motion; a
+projectile's: its velocity), each octahedral, 2x16 snorm (0 is straight up), the
+magnitude (a foot's 1; a mass point's speed scale, 0 to 1, CE's; an
+explosion's cutoff radius, world units; a projectile's 0), and the object
+(its datum index; NONE: 0xffffffff) */
+struct xgpu_stream_terrain_event
+{
+	uint32_t kind;
+	float position[3];
+	uint32_t normal, facing;
+	float magnitude;
+	uint32_t object;
+};
+/* a wader: its flags (bits 0 to 7: XGPU_TERRAIN_WADER_*) and the seconds
+since it left the water (bits 16 to 31, 1/64 s each, 0 while in it), its
+centre, velocity (world units a second) and bounding radius */
+enum
+{
+	XGPU_TERRAIN_WADER_PARTIALLY = 1u << 0,
+	XGPU_TERRAIN_WADER_WHOLLY = 1u << 1,
+	XGPU_TERRAIN_WADER_BIPED = 1u << 2,
+	XGPU_TERRAIN_WADER_VEHICLE = 1u << 3,
+};
+struct xgpu_stream_terrain_wader
+{
+	uint32_t kind;
+	float position[3];
+	float velocity[3];
+	float radius;
+};
+struct xgpu_stream_prism_terrain
+{
+	uint32_t header;
+	uint32_t phase, generation, count;
+	float game_seconds, real_seconds;
+	float camera[3];
+	int32_t bsp_index;
+	uint32_t flags, quality;
+	int32_t weather_entry;
+	uint32_t weather_type;
+	float weather_scale;
+	float wind[3];
+	uint32_t wind_count;
+	float winds[XGPU_TERRAIN_WINDS][3];
+	uint32_t map_checksum;
+	struct xgpu_stream_terrain_event items[];
+};
+
 /* ---------- display.ambient_occlusion "ray_traced" (docs/world-ao.md,
 "Hardware ray queries")
 
@@ -3113,6 +3278,9 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_view, 16 + 128 + 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_material_maps, 20 + 4 * XGPU_SCENE_MATERIAL_MAPS +
 	4 * XGPU_SCENE_MATERIAL_MAP_SCALARS);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_terrain_event, 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_terrain_wader, 32);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_terrain, 80 + 12 * XGPU_TERRAIN_WINDS);
 /* (the scene records' types still fit the header's 8 bits) */
 _Static_assert(XGPU_STREAM_SCENE_RECORD_TYPES <= 256, "the scene records' types fit a header");
 

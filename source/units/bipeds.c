@@ -278,6 +278,7 @@ symbols in this file:
 #include "structures/structure_bsp_definitions.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 
 /* port: a lift's carry of an AI's biped this tick, a share a sub-step
 (devices/device_machines.c; its header's scenario structures are this
@@ -2174,6 +2175,8 @@ static void biped_make_footstep(
 
 		if (object_get_marker_by_name(biped_index, contact_point->marker_name, &marker, 1))
 		{
+			/* port: the foot for PRISM's terrain (port/linux/game/prism_terrain.c; read only) */
+			prism_terrain_footstep(biped_index, event_index, contact_point_index, &marker.matrix);
 			material_effect_new_from_point(
 				definition->biped.material_effects.index,
 				event_index,

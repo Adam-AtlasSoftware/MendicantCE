@@ -66,6 +66,7 @@ void prism_scene_static_frame(void);
 void prism_scene_static_map_unloaded(void);
 void prism_scene_lights_frame(void);
 void prism_bake_frame(void);
+void prism_terrain_frame(void);
 void prism_scene_lights_map_unloaded(void);
 void prism_rt_map_unloaded(void);
 void prism_bake_map_unloaded(void);
@@ -363,6 +364,9 @@ void world_ao_frame_begin(void)
 	/* (PRISM v4's SCENE_STATIC: before the ray tracer's frame, whose level is
 	it; nothing where no v4 mode or ray tracing wants it) */
 	prism_scene_static_frame();
+	/* (the terrain overhaul's frame, its events and waders: prism_terrain.c;
+	nothing where it is not wanted) */
+	prism_terrain_frame();
 	if (!world_ao_mode())
 	{
 		prism_scene_lights_frame();

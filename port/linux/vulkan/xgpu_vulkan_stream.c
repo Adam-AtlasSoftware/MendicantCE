@@ -67,6 +67,7 @@ its swapchain.
 #include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_pt.h"
 #include "xgpu_vulkan_scene.h"
+#include "xgpu_vulkan_terrain.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -516,6 +517,9 @@ struct gbuffer_instance
 struct gbuffer_material
 {
 	uint8_t known, family, model, flags;
+	/* (the terrain overhaul, T0: CE's material type, SCENE_MATERIAL's,
+	255 past a byte; its surface classes are xgpu_vulkan_terrain.c's) */
+	uint8_t material_type;
 	float roughness, metal, specular;
 	/* (PRISM v4 M4: its maps, where a pack or a mod gives it them:
 	SCENE_MATERIAL_MAPS' tier, XGPU_GBUFFER_TIER_PACK or _MOD, 0 none; its
@@ -2298,9 +2302,12 @@ static void stream_scene_material(void *context, const struct xgpu_stream_scene_
 	else if (record->family == XGPU_SCENE_FAMILY_SOSO && record->scalars[XGPU_SCENE_SCALAR_TRANSLUCENCY] > 0.0f)
 		material->model = XGPU_GBUFFER_MODEL_SUBSURFACE;
 	material->flags = (record->flags & XGPU_SCENE_MATERIAL_FLAG_ALPHA_TESTED) ? XGPU_GBUFFER_FLAG_ALPHA_TESTED : 0;
+	material->material_type = record->material_type < 255u ? (uint8_t)record->material_type : 255u;
 	material->known = 1;
 	if (record->material > gbuffer.material_count)
 		gbuffer.material_count = record->material;
+	/* (the terrain overhaul: its surface classes, by its type and path) */
+	xgpu_vulkan_terrain_material(record->material, record->path_hash, record->family, record->material_type);
 }
 
 /* SCENE_MATERIAL_MAPS: a material's maps where a pack or a mod gives its
@@ -5678,6 +5685,13 @@ static struct xgpu_vulkan_image *pt_relight(struct xgpu_vulkan_image *light, str
 		whole);
 }
 
+/* PRISM_TERRAIN (the terrain overhaul, T0): xgpu_vulkan_terrain.c's */
+static void stream_prism_terrain(void *context, const struct xgpu_stream_prism_terrain *record)
+{
+	(void)context;
+	xgpu_vulkan_terrain_record(record);
+}
+
 static void stream_prism_bake(void *context, const struct xgpu_stream_prism_bake *record, const void *data)
 {
 	(void)context;
@@ -5850,6 +5864,10 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
 				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
 				pathtraced && words ? pt_relight : raster && words ? raster_relight : NULL, &context);
+			/* (the terrain overhaul's debug views over the frame, where this
+			frame's PRISM_TERRAIN asks for them: its class view is a view) */
+			xgpu_vulkan_terrain_debug(color->image, words, gbuffer.view_known ? &gbuffer.view : NULL);
+			held |= xgpu_vulkan_terrain_view_held();
 			/* (a view: nothing more over it this frame) */
 			deferred.hold = held;
 		}
@@ -5866,6 +5884,8 @@ static void stream_frame_end(void *context)
 	(void)context;
 	/* (a window's phases never past its frame) */
 	deferred.phase = 0;
+	/* (the terrain's FRAME is this frame's alone) */
+	xgpu_vulkan_terrain_frame_end();
 	deferred.hold = 0;
 	deferred.albedo_over = 0;
 	gbuffer.active = gbuffer.ready = 0;
@@ -6201,6 +6221,7 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.scene_instance = stream_scene_instance;
 		backend.scene_view = stream_scene_view;
 		backend.prism_bake = stream_prism_bake;
+		backend.prism_terrain = stream_prism_terrain;
 		backend.sharp_upscale = stream_sharp_upscale;
 		backend.hdr_sdr_curve = stream_hdr_sdr_curve;
 		backend.hdr_peak_nits = stream_hdr_peak_nits;

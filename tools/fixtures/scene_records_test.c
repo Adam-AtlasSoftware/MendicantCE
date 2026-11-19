@@ -144,6 +144,37 @@ static void layout(void)
 	FIELD(xgpu_stream_scene_material_maps, flags);
 	FIELD(xgpu_stream_scene_material_maps, maps);
 	FIELD(xgpu_stream_scene_material_maps, scalars);
+	SIZE(xgpu_stream_terrain_event);
+	FIELD(xgpu_stream_terrain_event, kind);
+	FIELD(xgpu_stream_terrain_event, position);
+	FIELD(xgpu_stream_terrain_event, normal);
+	FIELD(xgpu_stream_terrain_event, facing);
+	FIELD(xgpu_stream_terrain_event, magnitude);
+	FIELD(xgpu_stream_terrain_event, object);
+	SIZE(xgpu_stream_terrain_wader);
+	FIELD(xgpu_stream_terrain_wader, kind);
+	FIELD(xgpu_stream_terrain_wader, position);
+	FIELD(xgpu_stream_terrain_wader, velocity);
+	FIELD(xgpu_stream_terrain_wader, radius);
+	SIZE(xgpu_stream_prism_terrain);
+	FIELD(xgpu_stream_prism_terrain, header);
+	FIELD(xgpu_stream_prism_terrain, phase);
+	FIELD(xgpu_stream_prism_terrain, generation);
+	FIELD(xgpu_stream_prism_terrain, count);
+	FIELD(xgpu_stream_prism_terrain, game_seconds);
+	FIELD(xgpu_stream_prism_terrain, real_seconds);
+	FIELD(xgpu_stream_prism_terrain, camera);
+	FIELD(xgpu_stream_prism_terrain, bsp_index);
+	FIELD(xgpu_stream_prism_terrain, flags);
+	FIELD(xgpu_stream_prism_terrain, quality);
+	FIELD(xgpu_stream_prism_terrain, weather_entry);
+	FIELD(xgpu_stream_prism_terrain, weather_type);
+	FIELD(xgpu_stream_prism_terrain, weather_scale);
+	FIELD(xgpu_stream_prism_terrain, wind);
+	FIELD(xgpu_stream_prism_terrain, wind_count);
+	FIELD(xgpu_stream_prism_terrain, winds);
+	FIELD(xgpu_stream_prism_terrain, map_checksum);
+	printf("xgpu_stream_prism_terrain.items %u 0\n", (unsigned)offsetof(struct xgpu_stream_prism_terrain, items));
 }
 
 /* (the bytes, 4-byte aligned) */
@@ -158,6 +189,87 @@ static void show(const char *name, uint32_t size)
 	for (index = 0; index < size; index++)
 		printf("%02x", bytes[index]);
 	printf("\n");
+}
+
+/* PRISM_TERRAIN (the terrain overhaul, T0): a frame, events and waders,
+the floats not finite written 0, and the refusals */
+static void terrain(void)
+{
+	static struct xgpu_stream_terrain_event events[XGPU_TERRAIN_EVENTS_MOST + 1];
+	static struct xgpu_stream_terrain_wader waders[3];
+	struct xgpu_stream_prism_terrain frame;
+	float nan = 0.0f / 0.0f;
+	uint32_t index, axis, size;
+
+	memset(&frame, 0, sizeof(frame));
+	frame.header = 0xdeadbeefu;
+	frame.phase = XGPU_TERRAIN_FRAME;
+	frame.generation = 3;
+	frame.count = 99;
+	frame.game_seconds = 1.0f / 30.0f;
+	frame.real_seconds = nan;
+	frame.camera[0] = -70.0f;
+	frame.camera[1] = 22.0f;
+	frame.camera[2] = 3.5f;
+	frame.bsp_index = 0;
+	frame.flags = XGPU_TERRAIN_FLAG_CAMPAIGN | XGPU_TERRAIN_FLAG_RASTER | XGPU_TERRAIN_FLAG_VIEW_EVENTS;
+	frame.quality = XGPU_TERRAIN_QUALITY_HIGH;
+	frame.weather_entry = 1;
+	frame.weather_type = 0;
+	frame.weather_scale = 1.0f;
+	frame.wind[0] = 1.0f;
+	frame.wind_count = 12;
+	for (index = 0; index < XGPU_TERRAIN_WINDS; index++)
+		for (axis = 0; axis < 3; axis++)
+			frame.winds[index][axis] = (float)(index * 3 + axis);
+	frame.winds[1][2] = nan;
+	frame.map_checksum = 0x12345678u;
+	show("terrain_frame", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, NULL, 0));
+	frame.wind_count = 2;
+	show("terrain_frame_winds", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, NULL, 0));
+	memset(events, 0, sizeof(events));
+	for (index = 0; index <= XGPU_TERRAIN_EVENTS_MOST; index++)
+	{
+		events[index].kind = XGPU_TERRAIN_EVENT_WALK | (index & 1 ? XGPU_TERRAIN_EVENT_RIGHT : 0) | (1u << 16) |
+			((uint32_t)XGPU_TERRAIN_SPECIES_HUMAN << 24);
+		events[index].position[0] = (float)index;
+		events[index].position[1] = 2.0f;
+		events[index].position[2] = 0.25f;
+		events[index].normal = 0;
+		events[index].facing = 0x7fff0000u;
+		events[index].magnitude = 1.0f;
+		events[index].object = 0xe0010000u + index;
+	}
+	events[1].position[2] = nan;
+	events[2].magnitude = 1.0f / 0.0f;
+	frame.phase = XGPU_TERRAIN_EVENTS;
+	show("terrain_events", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, events, 3));
+	size = xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, events, XGPU_TERRAIN_EVENTS_MOST);
+	printf("terrain_events_most %u\n", (unsigned)size);
+	show("terrain_events_many", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, events,
+		XGPU_TERRAIN_EVENTS_MOST + 1));
+	show("terrain_events_room", xgpu_scene_encode_terrain(buffer, sizeof(struct xgpu_stream_prism_terrain) + 32 * 3 - 4,
+		&frame, events, 3));
+	show("terrain_events_none", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, NULL, 3));
+	for (index = 0; index < 3; index++)
+	{
+		waders[index].kind = XGPU_TERRAIN_WADER_PARTIALLY | XGPU_TERRAIN_WADER_BIPED | (index << 16);
+		for (axis = 0; axis < 3; axis++)
+		{
+			waders[index].position[axis] = (float)(index + axis);
+			waders[index].velocity[axis] = -(float)axis;
+		}
+		waders[index].radius = 0.25f;
+	}
+	waders[2].velocity[1] = nan;
+	frame.phase = XGPU_TERRAIN_WADERS;
+	show("terrain_waders", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, waders, 3));
+	show("terrain_waders_many", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, events,
+		XGPU_TERRAIN_WADERS_MOST + 1));
+	frame.phase = XGPU_TERRAIN_WEATHER_DRAW;
+	show("terrain_marker_items", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, events, 1));
+	frame.phase = XGPU_TERRAIN_PHASES;
+	show("terrain_phase", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, NULL, 0));
 }
 
 static void encode(void)
@@ -301,6 +413,7 @@ static void encode(void)
 		planes, 3));
 	size = xgpu_scene_encode_fog(buffer, sizeof(buffer), 0, NULL, NULL, planes, 10);
 	printf("fog_many %u %u\n", (unsigned)size, (unsigned)((struct xgpu_stream_scene_fog *)buffer)->plane_count);
+	terrain();
 }
 
 static void constants(void)
@@ -319,6 +432,7 @@ static void constants(void)
 	printf("scene_view %u\n", (unsigned)XGPU_STREAM_SCENE_VIEW);
 	printf("prism_bake %u\n", (unsigned)XGPU_STREAM_PRISM_BAKE);
 	printf("scene_material_maps %u\n", (unsigned)XGPU_STREAM_SCENE_MATERIAL_MAPS);
+	printf("prism_terrain %u\n", (unsigned)XGPU_STREAM_PRISM_TERRAIN);
 	printf("scene_record_types %u\n", (unsigned)XGPU_STREAM_SCENE_RECORD_TYPES);
 }
 

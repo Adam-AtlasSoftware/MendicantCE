@@ -131,6 +131,9 @@ struct host_render_backend
 	void (*scene_view)(void *context, const struct xgpu_stream_scene_view *record);
 	/* PRISM_BAKE: data its phase's (NULL none), checked to lie in the stream */
 	void (*prism_bake)(void *context, const struct xgpu_stream_prism_bake *record, const void *data);
+	/* PRISM_TERRAIN: its items (count, checked to lie in the record and to
+	be no more than its phase's most) */
+	void (*prism_terrain)(void *context, const struct xgpu_stream_prism_terrain *record);
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);

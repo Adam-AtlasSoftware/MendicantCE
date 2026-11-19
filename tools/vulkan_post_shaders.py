@@ -71,7 +71,8 @@ SAMPLER = re.compile(r"^uniform (u?sampler2D) (\w+);\n", re.M)
 UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents", "gamut")
 # the fragment programs, in xgpu_vulkan_post_shaders.h's order
 PROGRAMS = ("fxaa", "smaa_edges", "smaa_weights", "smaa_blend", "rotate", "hdr_tone_map", "hdr_tone_map_ms",
-            "hdr_encode", "panini", "bloom_down", "bloom_up", "prism_tone", "deferred_resolve", "albedo_over")
+            "hdr_encode", "panini", "bloom_down", "bloom_up", "prism_tone", "deferred_resolve", "albedo_over",
+            "terrain_debug")
 # one triangle over the whole viewport
 VERTEX_SOURCE = (
     "void main()\n"
@@ -224,7 +225,8 @@ SMAA_PREFIX = (
 )
 # each sampler's texture unit, which becomes its binding
 UNITS = {"color_texture": 0, "edges_texture": 0, "area_texture": 1, "search_texture": 2, "weights_texture": 1,
-         "local_texture": 1, "base_texture": 1, "additions_texture": 2, "gbuffer_texture": 3, "albedo_texture": 0}
+         "local_texture": 1, "base_texture": 1, "additions_texture": 2, "gbuffer_texture": 3, "albedo_texture": 0,
+         "classes_texture": 1, "events_texture": 2}
 # display.lighting "ce_deferred"'s resolve (Vulkan's: xgpu_vulkan_post_
 # deferred_resolve): each pixel the copy of the light (the colour target's
 # pixels) times the base plus the additions, the additions' alpha (CE's
@@ -342,6 +344,80 @@ ALBEDO_OVER_SOURCE = (
     "\tif ((word & 0x8000u) == 0u || (word >> 16) != 0u || tier < 3u || albedo.a <= 0.0)\n"
     "\t\tdiscard;\n"
     "\tresult = vec4(albedo.rgb, 1.0);\n"
+    "}\n"
+)
+# the terrain overhaul's debug views (Vulkan's: xgpu_vulkan_post_terrain_debug; port/linux/vulkan/
+# xgpu_vulkan_terrain.c), over the resolved frame (its copy, color_texture): by bounds.x's bits, 1 each opaque pixel
+# of the G-buffer (its words at gbuffer_texture, bounds.z 1 where it was drawn) coloured by its material's classes
+# (classes_texture: a texel a material, its id's low 6 bits across and high 6 down, its two classes in red and green
+# as bytes; xgpu_vulkan_terrain.h's XGPU_TERRAIN_CLASS_*: sand gold, dirt brown, mud dark olive, rock blue-grey,
+# snow white, ice cyan, water blue), striped 8 pixels wide where its second class differs, an object's only where
+# its class is rock, a little of the frame's lightness kept, every other pixel the frame's lightness darkened; 2
+# the events (events_texture: two texels each, x, y, the radius in pixels and the strength, then the kind and the
+# side; bounds.y of them), each a disc with a solid rim, coloured by kind: a left foot green, a right foot red, a
+# landing magenta, a vehicle's contact orange, an impact cyan, a detonation or an explosion white.
+TERRAIN_DEBUG_SOURCE = (
+    "uniform sampler2D color_texture;\n"
+    "uniform sampler2D classes_texture;\n"
+    "uniform sampler2D events_texture;\n"
+    "uniform usampler2D gbuffer_texture;\n"
+    "uniform vec4 metrics;\n"
+    "uniform vec4 bounds;\n"
+    "out vec4 result;\n"
+    "\n"
+    "vec3 class_color(uint c)\n"
+    "{\n"
+    "\treturn c == 1u ? vec3(0.95, 0.75, 0.25) : c == 2u ? vec3(0.55, 0.32, 0.12) : c == 3u ?\n"
+    "\t\tvec3(0.30, 0.26, 0.06) : c == 4u ? vec3(0.45, 0.55, 0.72) : c == 5u ? vec3(1.0) : c == 6u ?\n"
+    "\t\tvec3(0.30, 0.95, 1.0) : c == 7u ? vec3(0.05, 0.25, 1.0) : vec3(0.0);\n"
+    "}\n"
+    "\n"
+    "vec3 event_color(int kind, bool right)\n"
+    "{\n"
+    "\treturn kind <= 5 ? (right ? vec3(1.0, 0.1, 0.1) : vec3(0.1, 1.0, 0.1)) : kind == 6 ? vec3(1.0, 0.0, 1.0) :\n"
+    "\t\tkind == 7 ? vec3(1.0, 0.55, 0.0) : kind == 8 ? vec3(0.0, 1.0, 1.0) : vec3(1.0);\n"
+    "}\n"
+    "\n"
+    "void main()\n"
+    "{\n"
+    "\tivec2 texel = ivec2(gl_FragCoord.xy);\n"
+    "\tvec4 frame = texelFetch(color_texture, texel, 0);\n"
+    "\tint mode = int(bounds.x + 0.5);\n"
+    "\tvec3 color = frame.rgb;\n"
+    "\tif ((mode & 1) != 0)\n"
+    "\t{\n"
+    "\t\tuvec4 words = bounds.z > 0.5 ? texelFetch(gbuffer_texture, texel, 0) : uvec4(0u);\n"
+    "\t\tuint material = words.w & 0xfffu;\n"
+    "\t\tuint instance = words.w >> 16;\n"
+    "\t\tfloat grey = clamp(dot(frame.rgb, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);\n"
+    "\t\tcolor = vec3(grey * 0.3);\n"
+    "\t\tif ((words.w & 0x8000u) != 0u && material != 0u)\n"
+    "\t\t{\n"
+    "\t\t\tuvec2 classes = uvec2(texelFetch(classes_texture, ivec2(int(material & 63u), int(material >> 6)), 0).rg *\n"
+    "\t\t\t\t255.0 + 0.5);\n"
+    "\t\t\tif (instance != 0u)\n"
+    "\t\t\t\tclasses = classes.x == 4u ? uvec2(4u) : uvec2(0u);\n"
+    "\t\t\tuint shown = (((texel.x + texel.y) >> 3) & 1) != 0 ? classes.y : classes.x;\n"
+    "\t\t\tif (shown != 0u)\n"
+    "\t\t\t\tcolor = mix(class_color(shown), vec3(grey), 0.3);\n"
+    "\t\t}\n"
+    "\t}\n"
+    "\tif ((mode & 2) != 0)\n"
+    "\t{\n"
+    "\t\tint count = int(bounds.y + 0.5);\n"
+    "\t\tfor (int i = 0; i < count; i++)\n"
+    "\t\t{\n"
+    "\t\t\tvec4 place = texelFetch(events_texture, ivec2(2 * i, 0), 0);\n"
+    "\t\t\tfloat d = distance(gl_FragCoord.xy, place.xy);\n"
+    "\t\t\tif (d < place.z)\n"
+    "\t\t\t{\n"
+    "\t\t\t\tvec4 what = texelFetch(events_texture, ivec2(2 * i + 1, 0), 0);\n"
+    "\t\t\t\tfloat rim = d > place.z - 2.0 ? 1.0 : 0.45;\n"
+    "\t\t\t\tcolor = mix(color, event_color(int(what.x + 0.5), what.y > 0.5), rim * place.w);\n"
+    "\t\t\t}\n"
+    "\t\t}\n"
+    "\t}\n"
+    "\tresult = vec4(color, frame.a);\n"
     "}\n"
 )
 # Vulkan's own program: the frame turned for a swapchain the display turns
@@ -655,6 +731,7 @@ def generate(args):
     programs["prism_tone"] = ("frag", PRISM_TONE_SOURCE)
     programs["deferred_resolve"] = ("frag", DEFERRED_RESOLVE_SOURCE)
     programs["albedo_over"] = ("frag", ALBEDO_OVER_SOURCE)
+    programs["terrain_debug"] = ("frag", TERRAIN_DEBUG_SOURCE)
     programs["clear"] = ("frag", CLEAR)
     text = [
         "/* Generated by tools/vulkan_post_shaders.py from its GLSL, xgpu_hdr.c and port/third_party/smaa. "

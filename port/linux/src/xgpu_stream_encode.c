@@ -919,6 +919,81 @@ void xgpu_backend_prism_bake(const struct xgpu_stream_prism_bake *bake, const vo
 	record_body->data = bytes ? carry_one(&place, data, bytes) : 0;
 }
 
+/* PRISM_TERRAIN: the fixed part and its items inline (no data carried:
+at most XGPU_TERRAIN_EVENTS_MOST of 32 bytes, 8 KB), as
+xgpu_scene_encode_terrain fills it: the floats finite or 0 */
+static float terrain_finite(float value)
+{
+	uint32_t bits;
+
+	memcpy(&bits, &value, sizeof(bits));
+	return (bits & 0x7f800000u) == 0x7f800000u ? 0.0f : value;
+}
+
+void xgpu_backend_prism_terrain(const struct xgpu_stream_prism_terrain *terrain, const void *items,
+	unsigned long count)
+{
+	struct xgpu_stream_prism_terrain *record_body;
+	uint32_t header, size, index, axis;
+	unsigned long most;
+
+	if (!stream.open || stream.preparing || !terrain || terrain->phase >= XGPU_TERRAIN_PHASES || (count && !items))
+		return;
+	most = terrain->phase == XGPU_TERRAIN_EVENTS ? XGPU_TERRAIN_EVENTS_MOST :
+		terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST : 0;
+	if (count > most)
+		return;
+	size = (uint32_t)(offsetof(struct xgpu_stream_prism_terrain, items) +
+		count * sizeof(struct xgpu_stream_terrain_event));
+	record_body = record(XGPU_STREAM_PRISM_TERRAIN, size);
+	header = record_body->header;
+	memcpy(record_body, terrain, offsetof(struct xgpu_stream_prism_terrain, items));
+	record_body->header = header;
+	record_body->count = (uint32_t)count;
+	record_body->game_seconds = terrain_finite(terrain->game_seconds);
+	record_body->real_seconds = terrain_finite(terrain->real_seconds);
+	record_body->weather_scale = terrain_finite(terrain->weather_scale);
+	record_body->wind_count = terrain->wind_count < XGPU_TERRAIN_WINDS ? terrain->wind_count : XGPU_TERRAIN_WINDS;
+	for (axis = 0; axis < 3; axis++)
+	{
+		record_body->camera[axis] = terrain_finite(terrain->camera[axis]);
+		record_body->wind[axis] = terrain_finite(terrain->wind[axis]);
+		for (index = 0; index < XGPU_TERRAIN_WINDS; index++)
+			record_body->winds[index][axis] = index < record_body->wind_count ?
+				terrain_finite(terrain->winds[index][axis]) : 0.0f;
+	}
+	if (terrain->phase == XGPU_TERRAIN_WADERS)
+	{
+		const struct xgpu_stream_terrain_wader *from = items;
+		struct xgpu_stream_terrain_wader *to = (struct xgpu_stream_terrain_wader *)record_body->items;
+
+		for (index = 0; index < count; index++)
+		{
+			to[index].kind = from[index].kind;
+			for (axis = 0; axis < 3; axis++)
+			{
+				to[index].position[axis] = terrain_finite(from[index].position[axis]);
+				to[index].velocity[axis] = terrain_finite(from[index].velocity[axis]);
+			}
+			to[index].radius = terrain_finite(from[index].radius);
+		}
+	}
+	else
+	{
+		const struct xgpu_stream_terrain_event *from = items;
+
+		for (index = 0; index < count; index++)
+		{
+			struct xgpu_stream_terrain_event *to = &record_body->items[index];
+
+			*to = from[index];
+			for (axis = 0; axis < 3; axis++)
+				to->position[axis] = terrain_finite(from[index].position[axis]);
+			to->magnitude = terrain_finite(from[index].magnitude);
+		}
+	}
+}
+
 /* a SCENE_STATIC slice's bytes by its phase (0 for none) */
 static uint32_t scene_static_bytes(unsigned long phase, unsigned long count)
 {
