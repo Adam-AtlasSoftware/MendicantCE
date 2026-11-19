@@ -37,7 +37,7 @@ base colour multiplies it) and its specular light `S`:
 | Domes | The sky's other lights, direct | One direction of each one's cone, its shadow traced (`domes_at`): `D` | The same | The same |
 | Lamps | The emitting triangles (light cards, lamp surfaces), direct | ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S`; on a pixel whose reflection is traced (roughness up to 0.35) the lamps' `S` shared with the reflection's GGX ray meeting a lamp's face (`lamp_met`) by multiple importance sampling: the power heuristic between the ray's density (GGX's visible normals) and 1 over the lamp's solid angle (`lamp_mis_nee`), the two weights summing to 1 at every direction | The same | Resampled importance over the same 8 candidates, each one's shadow traced and its visibility in its target (`lights_ris_seen`), no reservoir reused |
 | Fixtures | The scenario's light fixtures, direct | In the same reservoir (all of them, or 8 by count) | The same | The same (16) |
-| Dynamic lights | SCENE_LIGHTS' dynamic class (flashlight, plasma, muzzle flashes), direct | In the same reservoir (4), CE's falloff, its shadow traced; never reused from the last frame | The same | The same (16) |
+| Dynamic lights | SCENE_LIGHTS' dynamic class (flashlight, muzzle flashes, plasma and needles, grenades and explosions, the weapons' and vehicles' lights), direct | Apart from the reservoir (`dynamic_direct`): resampled importance over 4, a windowed inverse square with CE's whole light and CE's cone, the kept one's shadow traced; the histories cut where they changed the light ("The dynamic lights", below) | The same | In the reference's resampled importance with the lamps (16) |
 | The sky's floor | The units' rig's ambient, unoccluded, as Tool's: the sky's outdoor value in the structure's clusters with a sky, sky 0's indoor value in those with none (`prism-v4-m2` 4acaa7892, `XGPU_SCENE_INDOOR`) | A constant, `D`: the flag of the structure's triangle the pixel shows (a short stretch of the eye's ray about its point), an object's the structure below it (a ray down past the object) | The same | The same |
 | Indirect | Every bounce of every static light, the sun's bounce included | One cosine bounce, its hit lit from the bake: the hit's glow and albedo by its texel's light less the sun's and less the floor its triangle took (indoor or outdoor; the volume's less the floor where its probes stand), the sun there by the mask (or the volume's visibility); a miss the sky without the domes (the pixel took them as lights) | The bake's indirect layer at the pixel where the level has its texel; else (the objects, a pixel with no texel) `quality`'s bounce | A cosine path of up to 32 bounces (prism-v4-m2 bb2a6b1a4, the bake's alike), next-event estimation of the sun, lamps and fixtures at each hit, the domes at each hit by multiple importance sampling of a direction of their cone and the path's own cosine direction where it leaves (Veach's power heuristic: the bake's light, the quieter estimate for a cone of any width) |
 | Reflections | The light the surface's specular lobe sees, less the lights taken directly | Below a roughness of 0.35, one GGX ray (the visible normals' distribution, Heitz 2018) lit as the bounce's hit, the domes where it leaves; above it, the bake's reflection probes by the split sum | The same | A GGX ray and the same path, the domes where it leaves |
@@ -98,7 +98,7 @@ levels.
 
 ## ReSTIR DI
 
-The lamps, fixtures and dynamic lights are sampled by ReSTIR DI (Bitterli et al. 2020) with the reuse `[lessons]`
+The lamps and fixtures are sampled by ReSTIR DI (Bitterli et al. 2020; the dynamic lights apart, "The dynamic lights") with the reuse `[lessons]`
 found safe:
 
 - **The initial candidates** come from the bake's light-importance grid (each cell's lamps by their light with shadows
@@ -118,7 +118,7 @@ found safe:
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
   frames. The last frame's pixel is one of the 2 × 2 about the surface's place there, chosen by its bilinear
   weight (the nearest gave a lucky sample to every pixel that maps to it when the eye moves toward a surface: blocks
-  that grew along the move, G4's floor streaking); ReSTIR GI's alike. A dynamic light's sample is not reused (their order changes from frame to frame). There is no spatial
+  that grew along the move, G4's floor streaking); ReSTIR GI's alike. A dynamic light is not in the reservoir ("The dynamic lights"). There is no spatial
   reuse: in `prism-pt` it spread a pick's choice over patches.
 - **The target holds the shadow.** The initial reservoir is resampled by the unshadowed light (its candidates' shadows
   are not traced); its kept sample's shadow is then traced, and the last frame's sample's from this pixel, and the two
@@ -149,6 +149,61 @@ whatever its sample (a miss's, a dark one's): left out, the light grows as it is
 `prism-pt` (`tools/test_prism_pt.py`: the merge unbiased across a moved point, its noise far less). The kept sample's
 segment to the pixel is not traced again (the point moves by a pixel's footprint on its own surface between frames).
 There is no spatial reuse yet. `HALO_PT_RESTIR_GI=0` turns it off (each frame's own bounce).
+
+## The dynamic lights
+
+CE's runtime lights (the flashlight, muzzle flashes, plasma bolts and needles, grenades and explosions, the energy
+sword's and plasma weapons' glow, the vehicles' and the Covenant's lights, the effects' lights) reach the path tracer
+as SCENE_LIGHTS' dynamic class: the lights the rasterizer took the frame before (world_scene's list,
+`WORLD_SCENE_LIGHT_DYNAMIC`), each a point or a spot (its axis, CE's falloff and cutoff angles), its colour as CE
+draws it (a light drawn reaching nowhere is sent off). Until `prism-v4-pt-dynlights` none did: SCENE_LIGHTS read
+world_scene's fixture bit (1) as the dynamic one (2), so the table's dynamic class was always empty, in Path Traced
+and in Raster alike (Raster's `dynamic_at` reads the same class).
+
+- **Shape and units.** A point light's inverse square, windowed to none at CE's reach r ((1 - (d/r)^4)^2), held
+  within 0.4 r (CE's reach is the light's whole sphere of light, not its size: held only within 0.2 r, a wall at the
+  flashlight's mouth took 6 times CE's light and went white), its intensity 0.3 r^2 times CE's colour: its light
+  over the sphere of radius r is what CE's 1 - d^2/r^2 gives, so a light's whole light is CE's in the light's units,
+  more than CE's near it (1.9 times at its middle, alike at 0.6 r) and less far off. A spot's cone is CE's: whole
+  inside the falloff angle, to none at the cutoff, linear in the cosine. A light with a gel map (the flashlight's
+  projected texture) is not drawn through it: its colour is taken at the gel's share, 0.45 (`WORLD_SCENE_GEL`,
+  world_scene.c), measured by pictures: CE's flashlight in ce_deferred's light target against the path tracer's
+  diffuse light at the same moment, the median per-pixel ratio 2.2 where neither is white
+  (`work/openh1_eval/v4_dynl_runs/calib`).
+- **Sampling and shadows.** Apart from ReSTIR DI's reservoir (`dynamic_direct`): resampled importance over 4 of
+  them (all where there are 4 or fewer) by their unshadowed diffuse and specular light, one shadow ray for the kept
+  one: by the level to the light's place, by the moving objects to 0.15 world units short of it (`DYNAMIC_OWNER`: a
+  light on or in its own object, a vehicle's lamp, a weapon's glow, is not shadowed by it). Not in the reservoir
+  since the last frame's reservoirs never hold a dynamic light (their order changes from frame to frame), so the
+  reuse's confidences took the rest of its weight: a dynamic sample kept by the reservoir was weighed by 1 over
+  1 + up to 8 reused confidences, a flashlight coming in at a ninth of itself over many frames. The reference
+  (`lights_ris_seen`) keeps them with the lamps (no reuse there).
+- **The denoiser.** The job block carries the recent dynamic lights beside this frame's (`JOB_BYTES` 8192: 64 of
+  each, 12 floats a light; `job.volume.z` and `.w`). A recent light (`recent_lights_take`, xgpu_vulkan_pt.c) is each
+  light of the frames before, by its id, where it was last frame, its colour the most of its last frame's and its
+  recent colour less 1/32 of itself a frame (the slow history's own share: what the history may still hold of it),
+  until that is under 1/500 of white. The temporal pass evaluates this frame's and the recent ones at the pixel's
+  surface (unshadowed, diffuse) and cuts the diffuse and specular histories by the change's share of the light the
+  history holds besides theirs (`dynamic_change`; kept `(1 - 2 x share)^2` of `denoise.x`), and where that keeps
+  under a tenth (`DYNAMIC_RESET`) the histories start again at the frame's own pre-blurred light (four frames
+  long, the variance the neighbours'; not the fix pass's wide gather, which made a flash over the level's sparse
+  bright samples into blocks). So a light switched on is whole in its first frame (not held as a firefly against a
+  long history, not a 32nd of itself); a muzzle flash's flicker keeps a few frames; one switched off, moved on or
+  fading out (CE fades the flashlight over 24 frames, each frame's change small) leaves no trail: by the last
+  frame's light alone the flashlight's spot stayed a ring on the wall for 200 frames. A steady light, or one small
+  beside the room's light, keeps its history.
+- **Diagnostics.** `debug.dynamic_lights_log` (`HALO_DYNAMIC_LIGHTS_LOG=1`) logs the dynamic lights at each step
+  where their count changes: the guest's (the rasterizer's, world_scene's list, those sent) and the path tracer's
+  (those in the frame's job).
+- **As measured** (`work/openh1_eval/v4_dynl_runs`, b30 BSP 1 at G4's place, the demo's settings and bakes, the
+  player put there, the flashlight on and off, a burst of the assault rifle: `tools/dyncap.py`): before, the light
+  table's dynamic class held the fixtures (world AO "world") or nothing, the path tracer's frames 0 dynamic lights
+  (`evidence/stage_counts.txt`); after, the flashlight and the muzzle flash light the walls and floor with the
+  player's traced shadow, none left after either (`evidence/flashlight_ab.png`, `evidence/muzzle_flash_ab.png`,
+  RTX 2060). Raster's "ce" composition is unchanged frame for frame. RTX 3070 Ti, 1080p, quality: the flashlight
+  on costs 0.35 ms (18.32 to 18.67 ms of the path tracer's, its light pass 12.17 to 12.47); with no dynamic light
+  nothing (G4: 16.90 ms before, 16.86 after). G4's gate measures as before (0.1769 / 0.0820 / 0.122 / 1.34);
+  Classic and the defaults byte-identical (identity.py frames, b30).
 
 ## The denoiser
 

@@ -5974,8 +5974,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	job.counts[2] = description->height;
 	job.coarse = b->bricks_coarse.address;
 	job.counts[3] = b->probes.buffer && b->volume.done ? b->coarse_entries : 0;
-	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on) */
-	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
+	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on;
+	in the frame whole alone (display.prism_raster_composition "materials"):
+	CE's composition takes CE's own dynamic lights' passes (its additions),
+	which would count them twice) */
+	lights = materials ? xgpu_vulkan_scene_light_table(&light_count, &serial) : NULL;
 	for (index = 0; lights && index < light_count && dynamic < RASTER_LIGHTS; index++)
 	{
 		const struct xgpu_stream_scene_light *l = &lights[index];

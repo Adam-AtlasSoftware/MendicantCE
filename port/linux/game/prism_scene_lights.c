@@ -45,6 +45,8 @@ objects' places.
 #include "world_scene.h"
 #include "prism_deferred.h"
 #include "prism_scene_lights.h"
+#include "rasterizer/rasterizer.h"
+#include "rasterizer/rasterizer_lights.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -63,6 +65,8 @@ short render_sky_light_count(short sky_index);
 /* prism_rt.c's, world_ao.c's, world_scene.c's */
 int prism_rt_mode(void);
 int world_ao_mode(void);
+/* port/linux/src/port_config.c */
+int config_boolean(const char *name);
 
 
 /* ---------- constants */
@@ -89,9 +93,7 @@ enum
 	EMITTER_ID = 0x10000,
 	/* the table at most (fixtures, emitters and dynamic lights together) */
 	LIGHTS_MOST = 2048,
-	EMITTERS_MOST = 1024,
-	/* (world_scene.h's flags) */
-	SCENE_DYNAMIC = 1
+	EMITTERS_MOST = 1024
 };
 
 /* a light as struct xgpu_stream_scene_light lays it out (20 words) */
@@ -125,6 +127,8 @@ static struct
 	long emitter_count;
 	struct emitter emitters[EMITTERS_MOST];
 	long logged_count;
+	/* (debug.dynamic_lights_log: the counts last logged) */
+	long logged_drawn, logged_listed, logged_sent;
 } scene_lights = { { { 0 } }, NULL, NONE, 0 };
 
 /* ---------- private code */
@@ -435,12 +439,15 @@ void prism_scene_lights_frame(
 	{
 		struct world_scene_light const *drawn = &lights[index];
 
-		if (!(drawn->flags & SCENE_DYNAMIC) || drawn->type == 2)
+		if (!(drawn->flags & WORLD_SCENE_LIGHT_DYNAMIC) || drawn->type == 2)
 		{
 			continue;
 		}
+		/* (on where it gives light: the rasterizer takes a light drawn
+		reaching nowhere as a black one) */
 		light = light_add(&count, (unsigned long)drawn->id, drawn->type == 1 ? LIGHT_SPOT : LIGHT_POINT, CLASS_DYNAMIC,
-			FLAG_ON | FLAG_CASTS_SHADOWS);
+			(drawn->color[0] > 0.0f || drawn->color[1] > 0.0f || drawn->color[2] > 0.0f ? FLAG_ON : 0) |
+			FLAG_CASTS_SHADOWS);
 		if (!light)
 		{
 			break;
@@ -451,10 +458,32 @@ void prism_scene_lights_frame(
 		{
 			memcpy(light->direction, drawn->direction, 3 * sizeof(float));
 			light->direction[3] = drawn->cone_cosine;
+			light->shape[0] = drawn->cone_inner_cosine > drawn->cone_cosine ? drawn->cone_inner_cosine :
+				drawn->cone_cosine;
 		}
 		memcpy(light->radiance, drawn->color, 3 * sizeof(float));
-		light->radiance[3] = drawn->intensity;
+		light->radiance[3] = drawn->intensity * drawn->gel;
 		light_finite(light);
+	}
+	/* (debug.dynamic_lights_log: the dynamic lights at each step, where
+	they changed: the rasterizer's, world_scene's list, those sent) */
+	if (config_boolean("debug.dynamic_lights_log"))
+	{
+		long sent = 0, listed = 0;
+
+		for (index = 0; index < count; index++)
+			sent += scene_lights.lights[index].light_class == CLASS_DYNAMIC;
+		for (index = 0; index < light_count; index++)
+			listed += (lights[index].flags & WORLD_SCENE_LIGHT_DYNAMIC) != 0;
+		if (rasterizer_lights.light_count != scene_lights.logged_drawn || listed != scene_lights.logged_listed ||
+			sent != scene_lights.logged_sent)
+		{
+			scene_lights.logged_drawn = rasterizer_lights.light_count;
+			scene_lights.logged_listed = listed;
+			scene_lights.logged_sent = sent;
+			platform_log("prism scene: dynamic lights: the rasterizer's %ld, listed %ld (of %ld), sent %ld",
+				rasterizer_lights.light_count, listed, light_count, sent);
+		}
 	}
 	for (first = 0; first < count; first += RECORD_LIGHTS)
 	{
