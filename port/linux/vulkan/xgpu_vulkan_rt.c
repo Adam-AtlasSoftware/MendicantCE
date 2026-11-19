@@ -367,13 +367,6 @@ static struct
 	uint64_t object_frame;
 	/* the top level's sizes for RT_INSTANCES instances */
 	VkAccelerationStructureBuildSizesInfoKHR tlas_sizes;
-	/* the buffers' device addresses lately asked for */
-	struct
-	{
-		VkBuffer buffer;
-		VkDeviceAddress address;
-	} addresses[16];
-	uint32_t address_next;
 	/* gi's probes (RT_PROBES_MOST of them, four vec4s each: their
 	irradiance's spherical harmonics, a channel each, then the place they
 	were found at and whether they are valid), zeroed once; the frames whose
@@ -1805,24 +1798,20 @@ void xgpu_vulkan_rt_static(const struct xgpu_stream_rt_static *record, const voi
 
 /* ---------- the objects' entries */
 
-/* a buffer's device address (the last few asked for kept) */
+/* a buffer's device address, asked for each time: the core destroys and
+makes its buffers as it plays, and a new buffer may have a freed one's
+handle (AMD's drivers give it again at once), so a kept address could be
+a freed buffer's */
 static VkDeviceAddress buffer_address(VkBuffer buffer)
 {
 	VkBufferDeviceAddressInfo info;
-	uint32_t index;
 
 	if (!buffer)
 		return 0;
-	for (index = 0; index < 16; index++)
-		if (rt.addresses[index].buffer == buffer)
-			return rt.addresses[index].address;
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
 	info.buffer = buffer;
-	index = rt.address_next++ % 16;
-	rt.addresses[index].buffer = buffer;
-	rt.addresses[index].address = vkGetBufferDeviceAddress(rt.device.device, &info);
-	return rt.addresses[index].address;
+	return vkGetBufferDeviceAddress(rt.device.device, &info);
 }
 
 /* bytes of the pool (256-aligned): a chunk's free range, first fit, or a
