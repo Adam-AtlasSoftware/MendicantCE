@@ -872,6 +872,62 @@ def test_past_the_jobs_room_the_dynamic_lights_that_light_the_eyes_surroundings_
     assert "uint32_t ranked[LIGHTS_MOST], ranked_count = dynamic_lights_rank(lights, light_count, job->camera[0], ranked);" in host
 
 
+def test_past_the_jobs_room_a_light_that_comes_or_goes_is_one_that_lit_little():
+    """more than LIGHTS_MOST lights (90, a fight's), the eye walked through them frame by frame: each light that enters or
+    leaves the kept set between frames is one whose light at the eye is under every kept one's of that frame, so what
+    pops is the faintest (no near or bright light pops), and a frame changes few of them"""
+    rng = np.random.default_rng(7)
+    lights = [((rng.uniform(-30, 30), rng.uniform(-30, 30), rng.uniform(0, 3)), rng.uniform(0.5, 4.0),
+               tuple(rng.uniform(0.05, 1.0, 3))) for _ in range(90)]
+    def score(light, eye):
+        position, reach, colour = light
+        d2 = float(np.sum((np.array(position) - eye) ** 2))
+        return max(colour) * reach * reach / max(d2, reach * reach)
+    before = None
+    changed = []
+    for step in range(300):
+        eye = np.array([-30.0 + step * 0.2, 0.0, 1.5])
+        kept = set(_rank(lights, eye, 64))
+        least_kept = min(score(lights[i], eye) for i in kept)
+        left = [i for i in range(90) if i not in kept]
+        assert all(score(lights[i], eye) <= least_kept for i in left)
+        if before is not None:
+            moved = kept ^ before
+            changed.append(len(moved) // 2)
+            # (what comes in or goes out lights the eye's surroundings under 1/4 of the brightest kept light's)
+            brightest = max(score(lights[i], eye) for i in kept)
+            assert all(score(lights[i], eye) < 0.25 * brightest for i in moved)
+        before = kept
+    assert max(changed) <= 3
+
+
+def test_the_moving_lights_look_in_path_traced_is_calibrated_and_less_saturated():
+    """prism_scene_lights.c's dynamic_look: display.prism_dynamic_lights (0.4) scales a light as far as it is coloured
+    (the flashlight keeps its light, a plasma bolt's green takes 0.4), display.prism_light_saturation (0.6) moves its
+    colour toward its luminance with the luminance kept, a lens flare's light at GLOW_FLARE_SHARE; Path Traced and
+    Raster's "materials" only"""
+    scene = (ROOT / "port/linux/game/prism_scene_lights.c").read_text()
+    config = (ROOT / "port/linux/src/port_config.c").read_text()
+    assert '{ "display.prism_dynamic_lights", _config_real, "0.4",' in config
+    assert '{ "display.prism_light_saturation", _config_real, "0.6",' in config
+    assert "#define GLOW_FLARE_SHARE 0.4f" in scene
+    assert "if (!prism_deferred_pathtraced() && !prism_deferred_raster_materials())" in scene
+    assert "light->radiance[3] *= (1.0f + (scene_lights.look_scale - 1.0f) * chroma) * share;" in scene
+    assert "dynamic_look(light, drawn->flags & WORLD_SCENE_LIGHT_GLOW ? GLOW_FLARE_SHARE : 1.0f);" in scene
+    def look(rgb, scale=0.4, saturation=0.6):
+        rgb = np.array(rgb, dtype=float)
+        chroma = (rgb.max() - rgb.min()) / rgb.max()
+        lum = rgb @ np.array([0.2126, 0.7152, 0.0722])
+        out = np.maximum(lum + saturation * (rgb - lum), 0.0)
+        return out, 1.0 + (scale - 1.0) * chroma, lum
+    white, k, _ = look((1.0, 0.97, 0.9))
+    assert k > 0.9
+    green, k, lum = look((0.26, 1.0, 0.02))
+    assert k == pytest.approx(0.4 + 0.6 * 0.02, abs=0.01)
+    assert green @ np.array([0.2126, 0.7152, 0.0722]) == pytest.approx(lum, rel=1e-6)
+    assert green.min() > 0.25  # (no channel left dark: not neon)
+
+
 def test_what_glows_lights_in_path_traced():
     """glow_lights.c: in Path Traced (and Raster's "materials" composition) CE's lights with no dynamic flag (a
     plasma bolt's, a needle's, a grenade's: drawn as their lens flare alone in CE) are drawn too, by
@@ -886,7 +942,8 @@ def test_what_glows_lights_in_path_traced():
     assert "if (!TEST_FLAG(light->flags, _point_light_dynamic_bit) && glow_lights_all())" in lights
     assert ("return glow_lights.scale > 0.0f && (prism_deferred_pathtraced() || prism_deferred_raster_materials());"
             in glow)
-    assert "if (definition && !(definition->flags & 1))\n\t\t\tlight->intensity = glow_lights_scale();" in world
+    assert ("if (definition && !(definition->flags & 1))\n\t\t{\n\t\t\tlight->intensity = glow_lights_scale();\n"
+            "\t\t\tlight->flags |= WORLD_SCENE_LIGHT_GLOW;" in world)
     assert "#define GLOW_ID 0x7E000000UL" in scene
     assert "(glow->strike ? STRIKE_ID : GLOW_ID) | ((unsigned long)glow->id & 0x00FFFFFFUL)" in scene
     assert "#define STRIKE_ID 0x7D000000UL" in scene
@@ -944,12 +1001,13 @@ def test_a_dynamic_lights_highlight_is_a_sphere_lights_and_keeps_its_energy():
     blocky green patch of the 4K shot at tick 255), and a rough surface's is as it was"""
     text = GLSL.read_text()
     assert "const float DYNAMIC_SIZE = 0.1;" in text
-    assert "float a2 = min(a + 0.5 * DYNAMIC_SIZE * r / max(d, 1.0e-3), 1.0);" in text
+    assert "const float DYNAMIC_SIZE_MOST = 0.08;" in text
+    assert "float a2 = min(a + 0.5 * min(DYNAMIC_SIZE * r, DYNAMIC_SIZE_MOST) / max(d, 1.0e-3), 1.0);" in text
     assert "return ggx(w, l) * (a / a2) * (a / a2) * PI;" in text
     assert text.count("ggx(g, l) * e * PI") == 0
     # (the peak of the lobe, a mirror-like floor 0.3 world units under a bolt of reach 1.5)
     a = 0.1 ** 2
-    a_wide = min(a + 0.5 * 0.1 * 1.5 / 0.3, 1.0)
+    a_wide = min(a + 0.5 * min(0.1 * 1.5, 0.08) / 0.3, 1.0)
     peak_point, peak_sphere = _ggx_d(1.0, a), _ggx_d(1.0, a_wide) * (a / a_wide) ** 2
     assert peak_sphere < peak_point / 1000.0
     # (the energy over the hemisphere: the widened lobe's integral times (a / a')^2 is the narrow's, as Karis's)
@@ -958,6 +1016,11 @@ def test_a_dynamic_lights_highlight_is_a_sphere_lights_and_keeps_its_energy():
         theta = np.arccos(nh)
         return np.trapezoid(_ggx_d(nh, alpha) * nh * np.sin(theta), theta) * 2 * np.pi
     assert whole(a) == pytest.approx(1.0, abs=0.02) and whole(a_wide) == pytest.approx(1.0, abs=0.02)
+    # (the flashlight, reach 12, on a wall 1.5 units off (roughness 0.5): a small light's, not a 1.2-unit sphere's,
+    # which kept a seventh of its highlight)
+    fa = 0.5 ** 2
+    assert (fa / min(fa + 0.5 * min(0.1 * 12.0, 0.08) / 1.5, 1.0)) ** 2 > 0.75
+    assert (fa / min(fa + 0.5 * 0.1 * 12.0 / 1.5, 1.0)) ** 2 < 0.2
     # (a rough surface: nearly unchanged)
     rough = 0.8 ** 2
     assert min(rough + 0.5 * 0.1 * 1.5 / 1.0, 1.0) / rough < 1.15

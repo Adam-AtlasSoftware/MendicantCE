@@ -13,6 +13,7 @@ struct glow_lights_light
 {
 	long id; /* the object's datum handle (a strike's: its projectile's) */
 	boolean strike; /* a projectile's strike's flash (its reach is size) */
+	boolean strike_dynamic; /* (its projectile's light CE's dynamic one) */
 	float position[3];
 	float color[3];
 	float size;

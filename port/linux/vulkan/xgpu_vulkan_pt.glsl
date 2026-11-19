@@ -643,19 +643,21 @@ vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
     return dynamic_light_at(i * DYNAMIC_FLOATS, p, l, d);
 }
 /* a dynamic light's specular light: a light has a size (a plasma bolt, a
-muzzle flash, a grenade's glow are not points), DYNAMIC_SIZE of its reach,
-so its highlight is a sphere light's: the lobe widened by the size over the
-distance (Karis 2013's representative point's roughness, its energy kept
-by (a / a')^2). As a point, a bolt over a polished floor drew a highlight
-as bright as the sun's in a pixel or two, which the floor's specular map
-broke into blocks and the denoiser spread into a pixelated patch (the
-green patch of the 4K shot at tick 255) */
+muzzle flash, a grenade's glow are not points), DYNAMIC_SIZE of its reach
+and DYNAMIC_SIZE_MOST at most, so its highlight is a sphere light's: the
+lobe widened by the size over the distance (Karis 2013's representative
+point's roughness, its energy kept by (a / a')^2). As a point, a bolt over a
+polished floor drew a highlight as bright as the sun's in a pixel or two.
+At most a small one: the flashlight's reach (CE's whole sphere of its light,
+12 units) made it a sphere of 1.2 units, its highlight on the wall it
+pointed at spread to a seventh of itself, the wall hardly lit */
 const float DYNAMIC_SIZE = 0.1;
+const float DYNAMIC_SIZE_MOST = 0.08;
 vec3 dynamic_specular(Surface g, vec3 l, float d, uint i)
 {
     float r = Floats(job.lights).v[i * DYNAMIC_FLOATS + 3u];
     float a = g.roughness * g.roughness;
-    float a2 = min(a + 0.5 * DYNAMIC_SIZE * r / max(d, 1.0e-3), 1.0);
+    float a2 = min(a + 0.5 * min(DYNAMIC_SIZE * r, DYNAMIC_SIZE_MOST) / max(d, 1.0e-3), 1.0);
     Surface w = g;
     w.roughness = sqrt(a2);
     return ggx(w, l) * (a / a2) * (a / a2) * PI;

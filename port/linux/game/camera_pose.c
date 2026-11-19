@@ -467,7 +467,10 @@ static short placed_object_count;
 /* the loaded tag of that name, in the first of the object groups that has it */
 static long camera_pose_object_tag(char const *name)
 {
-	static long const groups[] = { 'vehi', 'bipd', 'weap', 'eqip', 'scen', 'mach', 'ctrl', 'lifi', 'plac', 'ssce', 'garb' };
+	/* (and a projectile, held where it is put: a bolt's or a needle's glow
+	staged in a dark corridor for the glow runs' pictures) */
+	static long const groups[] = { 'vehi', 'bipd', 'weap', 'eqip', 'scen', 'mach', 'ctrl', 'lifi', 'plac', 'ssce', 'garb',
+		'proj' };
 	short i;
 
 	for (i = 0; i < (short)NUMBEROF(groups); i++)
@@ -718,8 +721,11 @@ flashlight where the camera is) */
 	if (object_index == NONE)
 	{
 		console_printf(FALSE, "debug_object_place: %s was not made", name);
+		platform_log("debug_object_place: %s was not made", name);
 		return;
 	}
+	platform_log("debug_object_place: %s at %.3f %.3f %.3f", name, (double)data.position.x, (double)data.position.y,
+		(double)data.position.z);
 	if (seat[0])
 	{
 		unit_scripting_enter_vehicle(object_index, placed_objects[placed_object_count - 1], seat);

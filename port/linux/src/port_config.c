@@ -752,6 +752,20 @@ static const struct config_setting config_settings[] =
 		"bolts, needles and grenades, the energy sword, shields, muzzle flashes,\n"
 		"explosions and the self-illuminated parts of the objects, each a light\n"
 		"with traced shadows. Read each frame." },
+	{ "display.prism_dynamic_lights", _config_real, "0.4", "HALO_PRISM_DYNAMIC_LIGHTS", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\": how brightly the moving lights\n"
+		"light, 0 to 4, as far as their light is coloured (white lights, the\n"
+		"flashlight, keep theirs): plasma, needles, muzzle flashes, grenades,\n"
+		"explosions, and with display.prism_glow_lights what glows. 1 gives\n"
+		"each the whole of CE's light (its colour over its radius, which floods\n"
+		"a wall several metres across); 0.4 the calibrated light. Read each\n"
+		"frame." },
+	{ "display.prism_light_saturation", _config_real, "0.6", "HALO_PRISM_LIGHT_SATURATION", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\": how much of their colour the\n"
+		"moving lights keep, 0 (white, of the same brightness) to 1 (CE's\n"
+		"colours, a plasma bolt's pure green). Read each frame." },
 	{ "display.prism_raster_composition", _config_string, "\"ce\"", "HALO_PRISM_RASTER_COMPOSITION",
 		_environment_value, _platform_desktop,
 		"PRISM Raster: what composes the frame from the baked light. \"ce\" the\n"

@@ -225,6 +225,9 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
 - **The strikes.** A projectile's light is followed while it flies; once the projectile is gone (it struck or
   burst) its light flashes where it was, drawn back 0.15 units along its path off the surface, 1.5 times brighter and
   further, to none over 6 ticks (0.2 s) of the game's clock (`STRIKE_*`).
+- **Needles.** A needle carries no CE light; its model's self-illuminated shader gives it a derived light (below),
+  small (reach 1) and faint, its colour the shader's (a warm white, not the needle's pink: CE's needle colour is its
+  bitmap's, and its contrail's colours are white). The needler's flare (magenta) lights the weapon's surroundings.
 - **What glows with no light.** A projectile in flight or a grenade on the ground whose model has a self-illuminated
   shader and no light of its own gives a point light at its bounding sphere's middle, its colour the shader's
   self-illumination as CE draws it (between its bounds by its object function), reaching 3 times its size (1 to 4
@@ -232,22 +235,38 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
   whole armour, masked to small parts by maps the game does not read; their glowing parts carry CE's lights (the
   weapons' flares, the vehicles' lamps) where they show.
 - **A light has a size.** A dynamic light's highlight is a sphere light's (`dynamic_specular`): the GGX lobe widened
-  by `DYNAMIC_SIZE` (0.1) of its reach over its distance, its energy kept by (a / a')^2 (Karis 2013): as a point, a
-  bolt over b30's polished floor drew a highlight as bright as the sun's in a pixel or two.
+  by `DYNAMIC_SIZE` (0.1) of its reach, `DYNAMIC_SIZE_MOST` (0.08 units) at most, over its distance, its energy kept
+  by (a / a')^2 (Karis 2013): as a point, a bolt over b30's polished floor drew a highlight as bright as the sun's in
+  a pixel or two. (Without the cap, the flashlight's reach of 12 made it a sphere of 1.2 units and its spot on the
+  wall it pointed at a seventh of itself: `prism-v4-pt-glow`'s first commit, c246880f5, put the flashlight out in
+  effect; `evidence/flashlight_offon_ab.png`.)
+- **The look** (`dynamic_look`, prism_scene_lights.c; Path Traced and Raster's "materials" only). CE's light is its
+  colour over its radius, and its radii are in world units (3 m each): a plasma pistol's muzzle flash floods a wall
+  six metres across, and its colours are a channel or two whole and the others none. As CE gives them the fight's
+  walls and floor were washed neon green, cyan and magenta (`evidence/fight_ab_r2.png`, the 40f2b1f95 and c246880f5
+  rows). Each dynamic light now takes `display.prism_dynamic_lights` (0.4, 0 to 4) as far as its colour is a colour
+  (its chroma (most - least) / most: the flashlight, white, keeps its whole light; a plasma bolt's green takes 0.4),
+  its colour moved toward its own luminance by `display.prism_light_saturation` (0.6; its luminance kept), and a lens
+  flare's light `GLOW_FLARE_SHARE` (0.4) of itself (a weapon's flare at that times GLOW_WEAPON_SHARE). Calibrated on
+  the setup4 fight at tick 260 (`cal260/`: 1, 0.6 and 0.4, saturation 1, 0.6 and 0.4).
 - **The pixelated green patch** of the rejected 4K shot at tick 255 (`work/openh1_eval/v4_shot2_runs/final4k/
-  crop255.jpg`) is not a light: reproduced at 1080p and 4K (`v4_glow_runs/t255v`, `t255b`, `t255c`, `t255d_classic`,
-  `evidence/t255_*`), it is in the frame with the dynamic lights off, the glows off, the denoiser off, the classic
-  dynamic lights, and in Classic's own frame (display.lighting "ce"), and in none of the path tracer's light views,
-  nor CE's light target, base, additions or emissive light. It is a plasma effect's z-sprite drawn over the floor: its
-  per-texel depth (the DOT_ZW stage, `effect_zsprite_fade`, xgpu_spirv.c) is cut against the floor's texel by texel,
-  each of the sprite's texels a block on the screen (smaller than a pixel at 720p, 16 pixels at 4K). Left for a
-  round of its own: the fix (the cut softened into the fade over a texel's footprint) changes CE's effects in every
-  mode, Classic's too.
+  crop255.jpg`) is not a light and not yet found. Reproduced at 1080p in Classic (display.lighting "ce", the demo's
+  config, b30's floor under a plasma pistol's bolt, `v4_glow_runs/t255*`), on both cards: blocks of the screen, 2 to
+  8 pixels, axis-aligned, where a green light lies on the floor, that change from frame to frame with the game
+  stopped (game_speed 0) while the rest of the frame stays the same (`t255s_disc0`). Not z-sprites
+  (rasterizer_zsprites 0), not the enhanced dynamic lights' sum, cluster walk or glows (their light at 0, the walk
+  off, the glows skipped), not the effects, contrails, lens flares or any one transparent shader type (each skipped),
+  not all transparent groups together, not CE's environment light passes (diffuse and specular off), nor the
+  world geometry, AO, AA, surface maps, the Vulkan backend's aside or discards, or a synchronization hazard the
+  validation layers see. With display.dynamic_lights "classic" set while running it was gone in one Classic test,
+  not in Path Traced. It was there at c12583535 and 40f2b1f95 alike: a defect of its own, not this branch's.
 - **Where it is, when it is.** The table is sent again after each window places its lights
   (`prism_scene_lights_window`, after `lights_preprocess_scene`): the path tracer lit with the lights the rasterizer
   took the frame before, a fast bolt's light a frame behind the bolt.
 - **Room.** Past the job's 64, the 64 that light the most about the eye are kept (`dynamic_lights_rank`: brightest
-  channel x reach^2 over the distance^2 past the reach), in the table's order.
+  channel x reach^2 over the distance^2 past the reach), in the table's order. What enters or leaves the kept set
+  from frame to frame is the faintest about the eye (tools/test_prism_pt.py walks an eye through 90 lights: each
+  light that pops lights under a quarter of the brightest kept one, at most 3 a frame); there is no hysteresis.
 - **Cost.** The temporal pass's history cut evaluated every light and recent light at every pixel (1.8 ms in a fight
   at 1080p); each light is now tested once a subgroup against the box of its points, and only those reaching it are
   evaluated (`dynamic_lights_luma`; the subgroups' ballot and arithmetic, the path tracer's own extensions).
@@ -261,6 +280,14 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
   frames (`jobs/time_fight.sh`): 18.71 ms with the glows, 18.25 with display.prism_glow_lights 0 (+0.46 ms), 20.20
   before (the temporal pass's history cut 3.86 ms there, 2.30 now). Classic and the defaults byte-identical to
   40f2b1f95 (identity.py frames, b30: `identity/`).
+- **As measured again, with the look** (`v4_glow_runs`, second round): the fight (`evidence/fight_ab_r2.png`:
+  40f2b1f95, c246880f5, now), the dark corridor with each thing placed in it and caught in flight with the game
+  slowed (`tools/glowcorr.py`, `evidence/corridor2_ab.png`: plasma rifle, pistol and overcharged bolts, a needle, a
+  plasma grenade, a Banshee bolt, a fuel rod, the sword and pistol lying on the floor), the flashlight off, on and off
+  by the script's command (`evidence/flashlight_offon_ab.png`). RTX 3070 Ti, 1080p, the fight's live frames' mean:
+  18.70 ms, 18.25 with display.prism_glow_lights 0 (+0.45 ms), 20.27 at 40f2b1f95. Classic and the defaults
+  byte-identical to 40f2b1f95 (`identity_r2/`). The owner's two shots again at 3840x2160 (`shot_best.jpg`,
+  `shot_alt1.jpg`): live frames held 300 frames, not converged references.
 
 ## The denoiser
 

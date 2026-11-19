@@ -601,7 +601,10 @@ static void world_scene_dynamic_lights(void)
 		PRISM Path Traced lights with (glow_lights.c): by
 		display.prism_glow_lights) */
 		if (definition && !(definition->flags & 1))
+		{
 			light->intensity = glow_lights_scale();
+			light->flags |= WORLD_SCENE_LIGHT_GLOW;
+		}
 	}
 }
 

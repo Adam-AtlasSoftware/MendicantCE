@@ -168,6 +168,7 @@ struct glow_strike
 	real_point3d position, last;
 	real radius;
 	real_rgb_color color;
+	boolean dynamic; /* its light CE's dynamic one (not a lens flare's) */
 	long seen, struck; /* game ticks (struck NONE: still flying) */
 };
 
@@ -429,7 +430,7 @@ colour STRIKE_BRIGHTER times and its reach STRIKE_REACH times its own, to
 none over STRIKE_TICKS of the game's clock (a strike's particles' flash:
 CE gives a plasma bolt's or a needle's strike no light, its particles alone,
 and the bolt's own light went out at once) */
-static void glow_strike_track(long object_index, real radius, real_rgb_color const *color,
+static void glow_strike_track(long object_index, boolean dynamic, real radius, real_rgb_color const *color,
 	real_point3d const *position)
 {
 	struct glow_strike *strike = NULL;
@@ -463,6 +464,7 @@ static void glow_strike_track(long object_index, real radius, real_rgb_color con
 	strike->position = *position;
 	strike->radius = radius;
 	strike->color = *color;
+	strike->dynamic = dynamic;
 	strike->seen = game_time_get();
 }
 
@@ -535,7 +537,7 @@ void glow_lights_seen(long definition_index, long object_index, boolean dynamic,
 
 	object = object_index != NONE ? object_try_and_get(object_index) : NULL;
 	if (object && object->object.type == _object_type_projectile && glow_lights_all())
-		glow_strike_track(object_index, radius, color, position);
+		glow_strike_track(object_index, dynamic, radius, color, position);
 	if (!glow_lights_inventory_on())
 		return;
 	if (object)
@@ -615,6 +617,7 @@ void glow_lights_frame(real_point3d const *camera)
 		radius = object->object.bounding_sphere_radius;
 		light->id = iterator.index;
 		light->strike = FALSE;
+		light->strike_dynamic = FALSE;
 		light->position[0] = object->object.bounding_sphere_center.x;
 		light->position[1] = object->object.bounding_sphere_center.y;
 		light->position[2] = object->object.bounding_sphere_center.z;
@@ -647,6 +650,7 @@ void glow_lights_frame(real_point3d const *camera)
 			glow_lights.glow_count++;
 			light->id = strike->object_index;
 			light->strike = TRUE;
+			light->strike_dynamic = strike->dynamic;
 			light->position[0] = strike->position.x - dx * along;
 			light->position[1] = strike->position.y - dy * along;
 			light->position[2] = strike->position.z - dz * along;

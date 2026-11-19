@@ -96,6 +96,9 @@ enum
 	/* a dynamic light, as the rasterizer took it the frame before (the last
 	window's) */
 	WORLD_SCENE_LIGHT_DYNAMIC = 1 << 1,
+	/* (and a light CE draws as its lens flare alone, no dynamic flag, which
+	PRISM Path Traced lights with: glow_lights.c) */
+	WORLD_SCENE_LIGHT_GLOW = 1 << 2,
 };
 
 /* a light of the world light list (world space, linear colour) */

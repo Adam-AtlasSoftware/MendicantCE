@@ -68,6 +68,8 @@ int prism_rt_mode(void);
 int world_ao_mode(void);
 /* port/linux/src/port_config.c */
 int config_boolean(const char *name);
+double config_real(const char *name);
+unsigned long config_changes(void);
 
 
 /* ---------- constants */
@@ -104,6 +106,11 @@ by its size (world units), its colour's strength */
 #define GLOW_REACH_LEAST 1.0f
 #define GLOW_REACH_MOST 4.0f
 #define GLOW_STRENGTH 0.5f
+/* the dynamic lights' look in Path Traced (dynamic_look): a lens flare's
+light's share (CE's flares' colours are whole, saturated, made for a sprite
+seen at the light, their radius its flare's reach: as lights at that they
+washed whole walls neon green in a fight) */
+#define GLOW_FLARE_SHARE 0.4f
 
 /* a light as struct xgpu_stream_scene_light lays it out (20 words) */
 struct scene_light
@@ -138,6 +145,10 @@ static struct
 	long logged_count;
 	/* (debug.dynamic_lights_log: the counts last logged) */
 	long logged_drawn, logged_listed, logged_sent;
+	/* (dynamic_look's settings, read again at each change of the settings) */
+	boolean look_read;
+	unsigned long look_changes;
+	real look_scale, look_saturation;
 } scene_lights = { { { 0 } }, NULL, NONE, 0 };
 
 /* ---------- private code */
@@ -298,6 +309,48 @@ static void light_finite(
 			values[index] = 0.0f;
 		}
 	}
+}
+
+/* a dynamic light's look in Path Traced (and Raster's "materials"
+composition): its strength by display.prism_dynamic_lights as far as its
+colour is a colour (its chroma, (most - least) / most: a white light, the
+flashlight, keeps its whole light, at 0.4 it hardly lit the wall it pointed
+at; a plasma bolt's pure green takes the setting whole) and its share (a
+lens flare's light's GLOW_FLARE_SHARE), its colour moved toward its own
+luminance by display.prism_light_saturation (its luminance kept): CE's
+plasma, needle and shield colours are a channel or two whole and the others
+none, which on b30's pale walls and floor drew neon washes; a light's own
+spectrum is broader than the sprite's tint. White lights (the flashlight)
+keep their colour. Nothing changes in Classic, whose table this is not. */
+static void dynamic_look(
+	struct scene_light *light,
+	real share)
+{
+	float luminance, most, least, chroma;
+	int channel;
+
+	if (!scene_lights.look_read || scene_lights.look_changes != config_changes())
+	{
+		scene_lights.look_read = TRUE;
+		scene_lights.look_changes = config_changes();
+		scene_lights.look_scale = PIN((real)config_real("display.prism_dynamic_lights"), 0.0f, 4.0f);
+		scene_lights.look_saturation = PIN((real)config_real("display.prism_light_saturation"), 0.0f, 1.0f);
+	}
+	if (!prism_deferred_pathtraced() && !prism_deferred_raster_materials())
+	{
+		return;
+	}
+	most = MAX(light->radiance[0], MAX(light->radiance[1], light->radiance[2]));
+	least = MIN(light->radiance[0], MIN(light->radiance[1], light->radiance[2]));
+	chroma = most > 0.0f ? (most - least) / most : 0.0f;
+	luminance = 0.2126f * light->radiance[0] + 0.7152f * light->radiance[1] + 0.0722f * light->radiance[2];
+	for (channel = 0; channel < 3; channel++)
+	{
+		float value = luminance + scene_lights.look_saturation * (light->radiance[channel] - luminance);
+
+		light->radiance[channel] = value > 0.0f ? value : 0.0f;
+	}
+	light->radiance[3] *= (1.0f + (scene_lights.look_scale - 1.0f) * chroma) * share;
 }
 
 /* ---------- public code */
@@ -496,6 +549,7 @@ static void scene_lights_send(
 		}
 		memcpy(light->radiance, drawn->color, 3 * sizeof(float));
 		light->radiance[3] = drawn->intensity * drawn->gel;
+		dynamic_look(light, drawn->flags & WORLD_SCENE_LIGHT_GLOW ? GLOW_FLARE_SHARE : 1.0f);
 		light_finite(light);
 	}
 	/* (and the projectiles' strikes' flashes, glow_lights.c's, each a point
@@ -534,6 +588,9 @@ static void scene_lights_send(
 			light->position[3] = reach;
 			memcpy(light->radiance, glow->color, 3 * sizeof(float));
 			light->radiance[3] = (glow->strike ? 1.0f : GLOW_STRENGTH) * scale;
+			/* (a strike's flash is its projectile's light's: a lens flare's
+			share where that was one) */
+			dynamic_look(light, glow->strike && !glow->strike_dynamic ? GLOW_FLARE_SHARE : 1.0f);
 			light_finite(light);
 		}
 	}
@@ -555,6 +612,20 @@ static void scene_lights_send(
 			scene_lights.logged_sent = sent;
 			platform_log("prism scene: dynamic lights: the rasterizer's %ld, listed %ld (of %ld), sent %ld",
 				rasterizer_lights.light_count, listed, light_count, sent);
+			/* (each light sent: its id, where, its reach and its light) */
+			for (index = 0; index < count; index++)
+			{
+				struct scene_light const *sent_light = &scene_lights.lights[index];
+
+				if (sent_light->light_class != CLASS_DYNAMIC)
+				{
+					continue;
+				}
+				platform_log("prism scene: dynamic light %08lx at %.2f %.2f %.2f reach %.2f colour %.3f %.3f %.3f x %.3f",
+					sent_light->id, (double)sent_light->position[0], (double)sent_light->position[1],
+					(double)sent_light->position[2], (double)sent_light->position[3], (double)sent_light->radiance[0],
+					(double)sent_light->radiance[1], (double)sent_light->radiance[2], (double)sent_light->radiance[3]);
+			}
 		}
 	}
 	for (first = 0; first < count; first += RECORD_LIGHTS)
