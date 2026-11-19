@@ -153,6 +153,16 @@ probes a cell lists */
 /* the spread of a texel's samples: the most invocations a texel, and the
 invocations the running texels are spread to fill */
 #define SPREAD_MOST 16u
+/* the samples a dispatch begins with, at a step's start and a probe batch's;
+and the most samples of all its texels or probes one dispatch takes (16.8
+million paths: a fraction of a second on an RTX 2060), whatever the budget's
+measure: the measure is of the last frames' work, and a step or batch that
+begins with far more texels or probes than the last frames had would
+otherwise run for seconds in one dispatch (an RTX 2060 under GPU-assisted
+validation: 11 s, the probes' first dispatch at 4096 samples after the
+grid's light work; Windows's limit is 2 s, then the device is lost) */
+#define SAMPLES_FIRST 4u
+#define SAMPLES_WORK_MOST (1u << 24)
 #define SPREAD_INVOCATIONS 65536u
 /* the fixtures the bake takes at most */
 #define FIXTURES_MOST 4096u
@@ -535,8 +545,11 @@ static struct
 	uint32_t fixtures_input_count;
 	/* the bake */
 	struct bake_state *bake;
-	/* the samples a batch's dispatch takes, as the budget allows */
+	/* the samples a batch's dispatch takes, as the budget allows; the step
+	they were measured on (another step's work a dispatch differs: they
+	begin again from SAMPLES_FIRST) */
 	uint32_t samples;
+	int samples_step;
 	double gpu_milliseconds;
 	struct xgpu_vulkan_image *raster_light;
 	uint32_t raster_frames;
@@ -952,7 +965,8 @@ static int make(void)
 	for (index = 0; index < STAGING_SLOTS; index++)
 		if (!buffer_make(STAGING_BYTES, 0, 1, &bake.staging[index]))
 			return 0;
-	bake.samples = 4;
+	bake.samples = SAMPLES_FIRST;
+	bake.samples_step = -1;
 	bake.reach_bsp = -1;
 	bake.made = 1;
 	bake.failed = 0;
@@ -3505,6 +3519,17 @@ and compact_args made their dispatch's groups (64 a group): then pipeline
 run over them alone, its job block's slot `at` the list and the next the
 arguments. A batch whose texels are mostly done no longer runs a group for
 each of its few running ones' 64 slots: its running ones fill whole groups */
+/* the samples a dispatch of items texels or probes takes: the budget's,
+no more than SAMPLES_WORK_MOST paths in all */
+static uint32_t samples_for(uint64_t items)
+{
+	uint64_t most = items ? SAMPLES_WORK_MOST / items : bake.samples;
+
+	if (most < 1)
+		most = 1;
+	return bake.samples < most ? bake.samples : (uint32_t)most;
+}
+
 static void run_compacted(VkCommandBuffer commands, int pipeline, struct bake_state *b, VkDeviceAddress states,
 	uint32_t count, VkDeviceAddress *addresses, uint32_t at, uint32_t slot, uint32_t p1, uint32_t p2, uint32_t p3, float v0,
 	float v1, float v2, float v3, uint32_t lanes)
@@ -3930,8 +3955,19 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 	addresses[6] = gather_cache(b);
 	/* (every lamp of the cell's lists at a texel, past the draft) */
 	addresses[7] = b->drafting ? 0 : 1;
+	/* (tiles refilled: their texels' samples at the rate the running ones
+	had, the dispatch's work as before) */
+	if (refilled)
+	{
+		uint64_t before = b->running_texels ? b->running_texels : 1u;
+		uint64_t after = before + (uint64_t)refilled * TILE_TEXELS;
+
+		bake.samples = (uint32_t)((uint64_t)bake.samples * before / after);
+		if (bake.samples < 1)
+			bake.samples = 1;
+	}
 	run_compacted(commands, PIPELINE_LIGHTMAP, b, b->states.address, BATCH_TILES * TILE_TEXELS, addresses, 4, 2,
-		bake.samples, 64, b->frame, threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES,
+		samples_for(b->running_texels + refilled * TILE_TEXELS), 64, b->frame, threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES,
 		lanes_of(b));
 	b->frame++;
 	barrier(commands);
@@ -4247,17 +4283,20 @@ static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
 		addresses[4] = b->probe_states.address + (VkDeviceSize)VOLUME_BATCH * 4;
 		addresses[7] = gather_cache(b);
 		count = b->volume.batched - b->volume.done;
-		run_compacted(commands, PIPELINE_VOLUME, b, b->probe_states.address, count, addresses, 5, 5, bake.samples, 64,
+		run_compacted(commands, PIPELINE_VOLUME, b, b->probe_states.address, count, addresses, 5, 5,
+			samples_for(count), 64,
 			b->frame++, threshold_of(b), BLACK_FLOOR, cap_of(b), (float)BOUNCES, 1u);
 		barrier(commands);
 		copy_region(commands, &b->probe_states, (VkDeviceSize)VOLUME_BATCH * 4, &r->buffer, 0, 4);
 		r->finished = 0;
 		return;
 	}
-	/* the next batch begun */
+	/* the next batch begun (all its probes running: the samples from the
+	start again) */
 	count = prism_bake_batches_begin(&b->volume);
 	if (!count)
 		return;
+	bake.samples = SAMPLES_FIRST;
 	vkCmdFillBuffer(commands, b->probe_accumulators.buffer, 0, VK_WHOLE_SIZE, 0u);
 	vkCmdFillBuffer(commands, b->probe_states.buffer, 0, (VkDeviceSize)VOLUME_BATCH * 4, 0u);
 	vkCmdFillBuffer(commands, b->probe_states.buffer, (VkDeviceSize)VOLUME_BATCH * 4, 4, count);
@@ -5175,6 +5214,11 @@ bake still traces) */
 			bake_fail(b, "failed as HALO_BAKE_DEBUG_FAIL asks");
 			return;
 		}
+	}
+	if (b->step != bake.samples_step)
+	{
+		bake.samples_step = b->step;
+		bake.samples = SAMPLES_FIRST;
 	}
 	timestamp(commands, 0);
 	switch (b->step)
