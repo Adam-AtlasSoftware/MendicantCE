@@ -198,10 +198,12 @@ unshadowed light is computed exactly and only their visibility is estimated (Hei
   there, and the reflection's ray takes no light from an analytic lamp it meets (`analytic_triangle`): nothing is
   counted twice and the other lights' estimate stays unbiased. The reference does not change.
 - **The bake's lamp visibility** (`HALO_PT_BAKED_VISIBILITY`, on by default; `docs/prism_bake.md`, "The lamps'
-  visibility", BAKE_VERSION 20): each tile's 8 lamps and each texel's visibility of each (4 bits), through the level
+  visibility", BAKE_VERSION 21): each tile's 7 lamps and each texel's visibility of each (4 bits), through the level
   and the static scenery. The pixel reads the lamps of the tile of its nearest texel and their visibility bilinear
-  over the 4 texels about its place (each texel's of its own tile's lamps, matched by lamp; a texel not baked left
-  out), as Raster reads the light.
+  over the 4 texels about its place (each texel's of its own tile's lamps, matched by lamp; a texel not baked, or
+  inside the level, left out), as Raster reads the light. The inside flag matters at the foot of a wall: its
+  triangles go on under the floor, and the texels there, seeing no lamp, darkened the wall's lowest pixels by the
+  bilinear read (round 7's G4, a dark band along the floor).
 - **The specular antialiasing** (`HALO_PT_SPECULAR_AA`, on by default; `roughness_filtered`): the analytic lamps' lobe
   is widened by the normal's variance over the pixel (Tokuyoshi and Kaplanyan 2019's geometric specular antialiasing,
   after Kaplanyan et al. 2016): alpha squared plus twice the variance of a Gaussian of slopes, 1/(2 pi) of the
