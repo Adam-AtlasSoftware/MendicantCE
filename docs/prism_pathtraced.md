@@ -113,13 +113,19 @@ found safe:
   cell's few points see; the tree knows which are near: a cell's lists can miss a lamp near one of its surfaces and
   leave it to the level's power, one pick in thousands (round 1's a10: the references' dense fireflies, the live
   frames' noise in motion). `HALO_PT_LAMP_TREE=0` gives the live frames the grid alone.
-- **Temporal reuse only.** The last frame's reservoir at the surface's place there (the G-buffer's motion), reused only
+  Since round 6 each node also bounds its lamps' normals by a cone (its axis and half angle, merged from its children's
+  as Conty Estevez and Kulla's orientation bounds; a leaf's, its triangle's normal), and a node's importance takes the
+  best cosine any of its lamps can have toward the point (the angle to the cone's axis less its half angle and the
+  sphere's angle from the point; nought past a right angle, the lamps being one-sided): a wall's lamps facing away
+  from the point no longer draw its picks. `HALO_PT_TREE_CANDIDATES` (1 to 8, 1 by default) sets how many of the 8
+  initial candidates come from the tree (the rest the grid's), each weighed by its own source's probability.
+- **Temporal reuse by default.** The last frame's reservoir at the surface's place there (the G-buffer's motion), reused only
   where its guide is this surface's (the same instance, the normal, the plane: as the denoiser's history, so no sample
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
   frames. The last frame's pixel is one of the 2 × 2 about the surface's place there, chosen by its bilinear
   weight (the nearest gave a lucky sample to every pixel that maps to it when the eye moves toward a surface: blocks
-  that grew along the move, G4's floor streaking); ReSTIR GI's alike. A dynamic light is not in the reservoir ("The dynamic lights"). There is no spatial
-  reuse: in `prism-pt` it spread a pick's choice over patches.
+  that grew along the move, G4's floor streaking); ReSTIR GI's alike. A dynamic light is not in the reservoir ("The dynamic lights"). Spatial reuse is
+  off by default (below): in `prism-pt` it spread a pick's choice over patches, and here its blobs in motion remain.
 - **The target holds the shadow.** The initial reservoir is resampled by the unshadowed light (its candidates' shadows
   are not traced); its kept sample's shadow is then traced, and the last frame's sample's from this pixel, and the two
   are combined by generalized resampled importance (Lin et al. 2022) with the shadowed light at this pixel as the
@@ -133,6 +139,20 @@ found safe:
   pixel of 40 lamps, 6 seen: both unbiased, the shadowed target's frame-to-frame spread a fifth of the unshadowed
   one's. (Round 1's first attempt, a hidden sample's weight set to nought after a choice made by the unshadowed target
   with its confidence counted, is not this: it took a ninth of a sparsely seen light at G5's first pose.)
+- **Spatiotemporal reuse, off by default** (`HALO_PT_RESTIR_SPATIAL=<1 to 4>`, since round 4): besides the last
+  frame's reservoir at the place, that many of the last frame's reservoirs at points of a disc of 2 to 16 pixels
+  about it, each this surface's by the same test, its sample's shadow traced from this pixel. Round 6 found it biased
+  dark: a neighbour's confidence was counted whatever its sample, so a pixel whose neighbours see lamps it cannot see
+  lost their share (1/M: G4's floor in motion about a third darker than R, its first pose's error 0.0916 to 0.2236).
+  A neighbour's confidence now counts only where the kept sample lights the neighbour's point, in front of it and seen
+  from it (Bitterli et al. 2020's Z: a shadow ray from the neighbour, none where the kept sample is that neighbour's
+  own), so the reuse is unbiased again (`HALO_PT_RESTIR_Z=0`: counted where the neighbour's own sample lit this pixel,
+  no ray; measured worse than none, 0.1971). At G4 with one neighbour and 4 candidates: the moving frames' error
+  against R 0.1814 to 0.1249, FLIP 0.119 to 0.096, the blotch 0.0823 to 0.0782, the flicker 1.34 to 1.40; the walls'
+  sparkles gone from a still frame after a few hundred frames, but in motion the reuse's correlated samples show as
+  blobs the size of the disc where the base shows salt. It costs about 1.4 ms of the RTX 3070 Ti's light pass at 1080p
+  (G4: 18.7 against 17.3 ms), which is why it is not on.
+- `HALO_PT_CANDIDATES` (1 to 8, 8 by default): the live frames' initial lamp candidates a pixel.
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
 
 ## ReSTIR GI
@@ -292,6 +312,44 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
   18.70 ms, 18.25 with display.prism_glow_lights 0 (+0.45 ms), 20.27 at 40f2b1f95. Classic and the defaults
   byte-identical to 40f2b1f95 (`identity_r2/`). The owner's two shots again at 3840x2160 (`shot_best.jpg`,
   `shot_alt1.jpg`): live frames held 300 frames, not converged references.
+
+## The radiance cache
+
+A world-space hash grid of the diffuse bounce's light (the idea of a spatially hashed radiance cache: Binder et al.,
+"Massively Parallel Path Space Filtering", 2019, and NVIDIA's SHaRC; this implementation is our own, no SDK code).
+`xgpu_vulkan_pt.glsl`'s `cache_key`, `cache_add`, `cache_get` and the pass `cache`; `xgpu_vulkan_pt.c` makes its
+cells once (2^19 cells of 12 words, 24 MB) and empties them for each bake's scene generation.
+
+- **A cell** is a cube of the world and one of six normal directions (the hit normal's largest axis and its sign).
+  Its side is 0.03 world units (`HALO_PT_CACHE_CELL`) by the power of two at or under the hit's distance from the eye,
+  so a far hit's cell is larger, as a pixel's footprint there is. Its key (a hash of the cube, its level and its
+  direction) finds it by open addressing (8 places).
+- **The update.** Every fourth pixel's diffuse bounce adds its hit's light as traced (the bake's light at the hit,
+  the moving objects' by the volume and the sun's ray: the bounce estimator's own value) into the hit's cell, by
+  atomics. The `cache` pass then folds the frame's sums into each cell's running mean over at most 256 samples
+  (`HALO_PT_CACHE_MOST`), and lets go of a cell no frame has updated for 600 frames. The cache therefore starts from
+  the bake and follows whatever the live hits see.
+- **The read.** The diffuse bounce reads its hit's cell where the cell holds 8 samples (`HALO_PT_CACHE_LEAST`), in
+  place of its own hit's light; ReSTIR GI then reuses that sample as before. The reflection's GGX ray does not read it
+  (a reflection needs its hit's detail), nor does the reference.
+- **What it does to the light.** A bounce meeting a small bright patch (a lamp's glow, the pool under a small lamp)
+  takes the cell's mean over its cube instead of the patch's own value: the same light spread over the cube, so the
+  pixels about it keep their expected light where the cube is small beside the distance, and lose the sharp detail of
+  the light at the bounce's hit (never the pixel's own surface).
+- **What it measured (round 6), and why it is off.** At G4 (b30's interior, the RTX 2060's gate) the frames with and
+  without it differ by 0.01 to 0.06 of a level in 255 and the gate's figures are the same to the fourth place; it costs
+  about 0.6 ms of the RTX 3070 Ti's light pass at 1080p. Here the path already ends at its first hit in the bake,
+  whose texels are converged: the cache's filtering of the hit's light changes almost nothing, and the bounce's noise
+  is its direction's, which a cache at the hit cannot take away. The interiors' remaining speckle is in the specular
+  light (G4's `pt_specular` view: the small lamps' highlights on the semi-glossy walls), not in the diffuse bounce
+  (`pt_indirect` is smooth). A cache earns its place where a path goes on past its first hit (a longer path,
+  the objects' bounce, the transparent layer's) or where the bake is missing; it stays in, off.
+- `HALO_PT_CACHE=1` turns it on (`0`, the default, off).
+
+**The indirect light's clamp** (`HALO_PT_INDIRECT_CLAMP=<luminance>`, off by default): a bounce's light past that
+luminance (the bake's unit, a white surface's radiance) is scaled down to it, its hue kept. It takes energy away
+wherever a bounce really meets a bright patch (not measured against R yet: the bounce is not where the interiors' speckle is, see above). It is not on
+by default.
 
 ## The denoiser
 
@@ -487,7 +545,7 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
 
 ## What is not done yet
 
-- **ReSTIR's spatial reuse** (left out on purpose, above) and the unbiased (ray-traced) reuse's correction.
+- **ReSTIR DI's spatial reuse by default** (in, off: its cost and its blobs in motion, above).
 - **ReSTIR GI's spatial reuse** (its temporal reuse is in), the dynamic objects' occlusion of the baked light
   (`performance`'s short AO rays), traced-light upscaling and the async queue (M5, M6).
 - **The transparent layer** (water and glass, traced reflection and refraction): after the seven gate scenes pass.
