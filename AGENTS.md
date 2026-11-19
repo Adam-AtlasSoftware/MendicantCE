@@ -446,4 +446,5 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [docs/prism_scene_records.md](docs/prism_scene_records.md) | PRISM v4's scene records in the command stream: what is sent (the materials, the G-buffer's draws, the level's geometry, the lights) and what is specified |
 | [docs/prism_bake.md](docs/prism_bake.md) | PRISM v4's in-game baker (the reach, the light-importance grid, the lightmap, the sun mask, the irradiance volume, the bake file) and PRISM Raster (`display.lighting` `"raster"`) |
 | [docs/prism_pathtraced.md](docs/prism_pathtraced.md) | PRISM Path Traced (`display.lighting` `"pathtraced"`): what it traces and reads from the bake, which light each term carries, ReSTIR DI, the denoiser, its reference |
+| [docs/prism_settings.md](docs/prism_settings.md) | The lighting's settings: Classic, PRISM Rebaked and PRISM Path Traced, and which settings Settings and config.toml show for each |
 | [docs/prism_materials.md](docs/prism_materials.md) | PRISM v4's materials of the pack and mod tiers: the format (2), how the G-buffer's uber-shaders draw them, the material pack the pack tools build (`v4_materials`) |

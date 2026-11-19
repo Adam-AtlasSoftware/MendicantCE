@@ -88,7 +88,7 @@ two can play together. OpenCE starts from the decompilation of
 | **Frames** | One per refresh of your display, each drawn between the last two ticks; nothing the game calculates changes |
 | **Architecture** | A 64-bit program, with the game compiled as a 32-bit-pointer guest inside it (`arm64_32` on ARM, `x32` on x86-64) |
 | **Renderers** | One command stream into Vulkan 1.3 on Linux, Windows, Android and in VR, and into Metal on the Mac |
-| **Picture** | SMAA or FXAA, anisotropic filtering, sharper shadows, per-pixel lighting, full model detail. One switch: Video Setup › Graphics › Preset, Classic or Enhanced |
+| **Picture** | SMAA or FXAA, anisotropic filtering, sharper shadows, per-pixel lighting, full model detail. One switch: Settings › Video › Advanced Graphics › Quality, Xbox or Enhanced; the lighting is Settings › Video › Lighting: Classic, PRISM Rebaked or PRISM Path Traced |
 | **Display** | Any resolution from 640 × 480, a field of view up to 150°, a HUD redrawn at 8× |
 | **Network** | Plays online with OpenCE players; internet play needs no servers to set up |
 | **Mods** | Texture, sound, text and model packs from the game's Mods menu; Custom Edition maps that share themselves |
@@ -183,7 +183,7 @@ so players of the two versions can play together.
    them. Then the game starts.
 
 A game whose maps came from elsewhere, or from a version before the movies
-were extracted, copies them when Startup Movies (Settings > Video) is
+were extracted, copies them when Startup Movies (Settings > Profiles > Game Data) is
 turned on, if the disc image the maps came from is still where it was.
 Otherwise put the disc's `bink/` folder (`intro.bik` and the rest) beside
 `maps/`.

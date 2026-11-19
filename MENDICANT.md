@@ -35,7 +35,7 @@ settings as they come plays as OpenH1 does.
 | | What | Where |
 | --- | --- | --- |
 | **MENDICANT AI** | The campaign's Marines and Covenant fight as units, led through drills, with trained models choosing the drills and each soldier's way of fighting; and an "authenticity layer": soldier character, firing personality, reactions to grenades, convoys, spacing, vehicle lanes | Settings › Profiles › CAMPAIGN AI › MENDICANT AI. From the next map start; on the host of a campaign or co-op game |
-| **PRISM** | Graphics beyond the Xbox's, drawn by the Vulkan renderer: highlights, sun shadows, smoother lightmaps, tone, bloom, and ray traced shadows and light on cards that have ray queries | Settings › Mods › PRISM GRAPHICS, PRISM ASSETS, PRISM RAY TRACING |
+| **PRISM** | Graphics beyond the Xbox's, drawn by the Vulkan renderer: highlights, sun shadows, smoother lightmaps, tone, bloom, and ray traced shadows and light on cards that have ray queries | Settings › Video › Lighting, Lighting Settings and Ray Tracing; Settings › Mods › PRISM GRAPHICS, PRISM ASSETS |
 | **Theater** | Games recorded as replays and watched again, with free and cinematic cameras | Settings › Mods › RECORD GAMES and THEATER |
 | **Forge** | An in-game map editor for multiplayer maps, with AI characters | `game.forge` in `config.toml`, then FORGE on the main menu |
 | **Tag packs** | Tags of one map brought into another, built on your computer from your own maps | `port/linux/TAG_INJECTION.md` |
@@ -57,10 +57,13 @@ Who wrote the Theater, Forge and the tag importer, and under which licences:
 
 ### PRISM: what works in a download, and what needs files no download has
 
-Works with the game's own data, nothing else needed: HIGHLIGHTS, SHADOWS
-(Sun; Soft and Traced with ambient occlusion World), SHADOW DETAIL, SHADOW
-SOFTNESS, LIGHTMAPS Smooth, SHADE DEPTH, BLOOM, TONE, and PRISM RAY TRACING
-(greyed out where the graphics card or its driver has no ray queries).
+Works with the game's own data, nothing else needed: under Lighting Classic,
+MODEL HIGHLIGHTS, SUN SHADOWS (Sun; Soft and Traced with ambient occlusion
+World), SUN SHADOW DETAIL, SUN SHADOW SOFTNESS, LIGHTMAPS Smooth and SHADE
+DEPTH (Settings › Video › Lighting Settings); BLOOM and TONE GRADE with any
+lighting; RAY TRACING; and Lighting PRISM Rebaked and PRISM Path Traced, which
+bake each level on this computer (greyed out, or drawn as Classic, where the
+graphics card or its driver has no ray queries).
 
 Needs files that are made from the game's data, and so are in no download
 and not in the repository. **You can build them yourself**, from your own
@@ -139,7 +142,7 @@ against.
 What the computer needs:
 
 - a graphics card and driver with **Vulkan 1.3**;
-- for PRISM RAY TRACING, a graphics card and driver with **ray queries**
+- for RAY TRACING and Lighting PRISM Rebaked and PRISM Path Traced, a graphics card and driver with **ray queries**
   (`VK_KHR_ray_query` and acceleration structures: the cards sold as ray
   tracing ones). Without them the game plays, and those rows are greyed out;
 - **your own copy of the game**, below.

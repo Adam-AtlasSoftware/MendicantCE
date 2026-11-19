@@ -1802,11 +1802,16 @@ static boolean setting_changed_save(struct widget_instance *spinner, struct pc_m
 	return TRUE;
 }
 
-/* "port settings defaults" */
+/* "port settings defaults" (a row the lighting mode shown hides keeps its
+value: lighting_row_hidden) */
+static boolean lighting_row_hidden(struct widget_instance const *row);
+
 static boolean setting_default_show(struct widget_instance *spinner, struct pc_menu_setting *setting)
 {
 	char text[300];
 
+	if (lighting_row_hidden(spinner->parent))
+		return TRUE;
 	if (setting_text(setting->setting, text, sizeof(text), TRUE))
 		spinner->parameters.list.selected_index = setting_value_index(setting, text);
 	return TRUE;
@@ -2032,18 +2037,22 @@ static void graphics_preset_choose(struct widget_instance *list, char const *pre
 	settings_each(screen_of(list), graphics_preset_row_show);
 }
 
-/* Video's Quality (display.graphics): CLASSIC or ENHANCED, or CUSTOM while
-any setting it chooses (on this page or Advanced Graphics) is another
-value. Classic or Enhanced chosen (Defaults too) puts them all at the
+/* Advanced Graphics' Quality (display.graphics; Android's on Video): XBOX,
+ENHANCED or PRISM EXTRAS, or CUSTOM while any setting it chooses (on this
+page or another) is another value. Classic or Enhanced chosen (Defaults too) puts them all at the
 preset's values; CUSTOM is passed over, the way the spinner went, unless it
 is so */
 static void graphics_preset_show(struct widget_instance *list)
 {
 	struct widget_instance *spinner = named(list, "graphics_spinner", 0);
-	struct pc_menu_setting *setting = spinner ? pc_menu_setting_get(spinner->definition_tag_index) : NULL;
+	struct pc_menu_setting *setting;
 	short index, custom, count;
 	char base[64];
 
+	/* (Android's, on Video) */
+	if (!spinner)
+		spinner = named(list, "graphics_android_spinner", 0);
+	setting = spinner ? pc_menu_setting_get(spinner->definition_tag_index) : NULL;
 	if (!setting || spinner != graphics_preset.spinner)
 		return;
 	count = (short)setting->value_count;
@@ -2178,9 +2187,10 @@ static void gyro_rows_show(struct widget_instance *list)
 		discord_text_set(value, halo_gyro_calibrating() ? "HOLD STILL" : gyro_calibrated ? "DONE" : "");
 }
 
-/* Mods' PRISM Ray Tracing page's rows (display.prism_rt and its settings,
-docs/prism_rt.md): greyed out where the renderer cannot trace rays (the
-graphics card has no ray queries, Metal, the null renderer) */
+/* Video's Ray Tracing page's rows (display.prism_rt and its settings,
+docs/prism_rt.md) and its Traced Light Look page's: greyed out where the
+renderer cannot trace rays (the graphics card has no ray queries, Metal, the
+null renderer) */
 int halo_prism_rt_available(void);
 
 static void prism_rt_rows_show(struct widget_instance *list)
@@ -2192,9 +2202,10 @@ static void prism_rt_rows_show(struct widget_instance *list)
 		{ "op_prism_rt_denoiser", "prism_rt_denoiser_spinner" }, { "op_prism_rt_mood", "prism_rt_mood_spinner" },
 		{ "op_prism_rt_world", "prism_rt_world_spinner" }, { "op_prism_rt_objects", "prism_rt_objects_spinner" },
 		{ "op_prism_rt_cache", "prism_rt_cache_spinner" }, { "op_prism_rt_sun", "prism_rt_sun_spinner" },
-		/* (PRISM PATH TRACING's page) */
+		/* (TRACED LIGHT LOOK's page) */
 		{ "op_prism_rt_style", "prism_rt_style_spinner" }, { "op_prism_rt_anchor", "prism_rt_anchor_spinner" },
-		{ "op_prism_exposure", "prism_exposure_spinner" }, { "op_prism_tone_curve", "prism_tone_curve_spinner" },
+		{ "op_prism_exposure_traced", "prism_exposure_traced_spinner" },
+		{ "op_prism_tone_curve_traced", "prism_tone_curve_traced_spinner" },
 		{ "op_prism_rt_emissive", "prism_rt_emissive_spinner" },
 		{ "op_prism_rt_emissive_scale", "prism_rt_emissive_scale_spinner" },
 		{ "op_prism_sun_size", "prism_sun_size_spinner" }, { "op_prism_rt_materials", "prism_rt_materials_spinner" },
@@ -2264,6 +2275,164 @@ static void prism_assets_rows_show(struct widget_instance *list)
 		row->disabled = locked;
 		spinner->disabled = locked;
 		row->alpha_modifier = locked ? 0.4f : 1.0f;
+	}
+}
+
+/* Video's Lighting (display.lighting) and the rows that apply to the mode
+it shows: Lighting Settings', Ray Tracing's, PRISM Assets' and PRISM
+Graphics' rows of one mode or two are shown only with it (the value shown,
+before OK: a change on Video's tab shows on the pages it opens at once), and
+some only while another row is at a value, as Frame Rate Limit follows VSync.
+A hidden row keeps its value, which Defaults leaves as it is
+(lighting_row_hidden). tools/port_settings.py's LIGHTING_MODE_ROWS has the
+same modes (test_port_settings.py checks it), and packs each page for each.
+A row of none of these shows in every mode. Android, which has no Lighting
+(display.lighting is the desktop's), is Classic's. */
+enum
+{
+	/* Classic: "ce", and the "ce_deferred" diagnostic, Classic's frame */
+	LIGHTING_C = 1,
+	/* PRISM Rebaked: "raster" */
+	LIGHTING_R = 2,
+	/* PRISM Path Traced: "pathtraced" */
+	LIGHTING_P = 4,
+};
+
+/* a row's modes, and the value another setting must have there (NULL: none;
+"!" first: any but it); a row named more than once is shown where any of its
+entries says so */
+static struct
+{
+	char const *row;
+	unsigned char modes;
+	char const *setting;
+	char const *value;
+} const lighting_rows[] =
+{
+	/* (Lighting Settings: Classic's own light and PRISM's extras on it, which
+	the bake's or the path tracer's light replaces in the PRISM modes) */
+	{ "op_shadow_resolution", LIGHTING_C, NULL, NULL },
+	{ "op_per_pixel_lighting", LIGHTING_C, NULL, NULL },
+	{ "op_dynamic_lights", LIGHTING_C, NULL, NULL },
+	{ "op_ambient_occlusion", LIGHTING_C, NULL, NULL },
+	{ "op_ambient_occlusion_strength", LIGHTING_C, "display.ambient_occlusion", "world" },
+	{ "op_prism_lightmaps", LIGHTING_C, NULL, NULL },
+	{ "op_prism_specular", LIGHTING_C, NULL, NULL },
+	{ "op_prism_reflections", LIGHTING_C, NULL, NULL },
+	{ "op_prism_shadows", LIGHTING_C, NULL, NULL },
+	{ "op_prism_shadow_resolution", LIGHTING_C, "display.prism_shadows", "cascaded" },
+	{ "op_prism_shadow_softness", LIGHTING_C, "display.prism_shadows", "cascaded" },
+	{ "op_prism_baked_shadows", LIGHTING_C, NULL, NULL },
+	{ "op_prism_baked_shadow_strength", LIGHTING_C, "display.prism_baked_shadows", "sharp" },
+	/* (PRISM Rebaked's frame; CE's projected object shadows, which it keeps
+	with its object shadows Classic's) */
+	{ "op_prism_raster_composition", LIGHTING_R, NULL, NULL },
+	{ "op_prism_raster_objects", LIGHTING_R, NULL, NULL },
+	{ "op_shadow_resolution_rebaked", LIGHTING_R, "display.prism_raster_object_shadows", "classic" },
+	/* (PRISM Path Traced's) */
+	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
+	{ "op_denoiser", LIGHTING_P, NULL, NULL },
+	/* (both PRISM modes: their exposure and tone curve, and the bake that
+	both read: Rebaked's light, Path Traced's scene and bounced light) */
+	{ "op_prism_exposure", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_prism_exposure_bias", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_prism_tone_curve", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_quality", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_prism_sky_light", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_rebake", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_indicator", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	/* (Ray Tracing: Classic's ray tracer, display.prism_rt, which both PRISM
+	modes turn off (prism_rt.c), its settings only while it is on; PRISM
+	Rebaked's traced object shadows) */
+	{ "op_prism_rt", LIGHTING_C, NULL, NULL },
+	{ "op_prism_rt_quality", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_resolution", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_denoiser", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_mood", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_sun", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_world", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_traced_light_look", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_raster_object_shadows", LIGHTING_R, NULL, NULL },
+	/* (the traced scene: the objects' capture (xgpu_vulkan_rt.c), which Path
+	Traced takes always, Rebaked with its object shadows traced and Classic
+	with its ray tracer on; the see-through surfaces, in the bake's scene) */
+	{ "op_prism_rt_objects", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_objects", LIGHTING_R, "display.prism_raster_object_shadows", "traced" },
+	{ "op_prism_rt_objects", LIGHTING_P, NULL, NULL },
+	{ "op_prism_rt_cache", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_cache", LIGHTING_R, "display.prism_raster_object_shadows", "traced" },
+	{ "op_prism_rt_cache", LIGHTING_P, NULL, NULL },
+	{ "op_prism_rt_alpha", LIGHTING_C, "display.prism_rt", "!off" },
+	{ "op_prism_rt_alpha", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	/* (PRISM Assets: the model shaders' forward light, Classic's; the
+	material packs, the deferred modes') */
+	{ "op_prism_material_overlay", LIGHTING_C, NULL, NULL },
+	{ "op_prism_surface_maps", LIGHTING_C, NULL, NULL },
+	{ "op_material_packs", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	/* (PRISM Graphics: the remodel's shape for Classic's sun shadows) */
+	{ "op_prism_world_geometry_shadows", LIGHTING_C, "display.prism_shadows", "cascaded" },
+};
+
+/* the mode Settings shows (Video's Lighting, changed or not) */
+static unsigned char lighting_mode_shown(void)
+{
+	char text[64];
+
+	if (!settings_value("display.lighting", text, sizeof(text)))
+		return LIGHTING_C;
+	return !strcmp(text, "pathtraced") ? LIGHTING_P : !strcmp(text, "raster") ? LIGHTING_R : LIGHTING_C;
+}
+
+/* whether the row is one of lighting_rows' (found), and shown: by the mode
+alone (mode_only), or by its other setting's value too */
+static boolean lighting_row_shown(char const *row, boolean mode_only, boolean *found)
+{
+	unsigned char mode = lighting_mode_shown();
+	short index;
+
+	*found = FALSE;
+	for (index = 0; index < (short)NUMBEROF(lighting_rows); index++)
+	{
+		char text[64];
+		char const *value = lighting_rows[index].value;
+
+		if (strcmp(lighting_rows[index].row, row))
+			continue;
+		*found = TRUE;
+		if (!(lighting_rows[index].modes & mode))
+			continue;
+		if (mode_only || !lighting_rows[index].setting)
+			return TRUE;
+		if (!settings_value(lighting_rows[index].setting, text, sizeof(text)))
+			continue;
+		if (value[0] == '!' ? strcmp(text, value + 1) != 0 : !strcmp(text, value))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* a row the mode shown hides (Defaults leaves its value as it is) */
+static boolean lighting_row_hidden(struct widget_instance const *row)
+{
+	boolean found;
+
+	return row && row->name && !lighting_row_shown(row->name, TRUE, &found) && found;
+}
+
+static void lighting_rows_show(struct widget_instance *list)
+{
+	struct widget_instance *row;
+
+	for (row = list->child; row; row = row->next)
+	{
+		boolean found, shown;
+
+		if (!row->name || strncmp(row->name, "op_", 3))
+			continue;
+		shown = lighting_row_shown(row->name, FALSE, &found);
+		if (found)
+			row->visible = shown;
 	}
 }
 
@@ -3369,8 +3538,8 @@ static void settings_panel_show(struct widget_instance *list, short tab)
 		if (controls_page(screen_of(list)))
 			controls_panel(row, name, value, &help);
 		row_spinner = spinner;
-		/* (Quality: CLASSIC or ENHANCED framed, neither for CUSTOM) */
-		if (!strcmp(row->name, "op_graphics") && spinner)
+		/* (Quality: XBOX or ENHANCED framed, neither for CUSTOM) */
+		if ((!strcmp(row->name, "op_graphics") || !strcmp(row->name, "op_graphics_android")) && spinner)
 		{
 			struct pc_menu_setting *setting = pc_menu_setting_get(spinner->definition_tag_index);
 			short shown = spinner->parameters.list.selected_index;
@@ -3508,6 +3677,7 @@ static void settings_page_update(struct widget_instance *list)
 	viewmodel_weapon_rows_show(list);
 	gyro_rows_show(list);
 	settings_each(screen, setting_stash);
+	lighting_rows_show(list);
 	settings_sliders_show(list);
 	settings_rows_pack(list, tab != NONE);
 	settings_focus_shown(list);

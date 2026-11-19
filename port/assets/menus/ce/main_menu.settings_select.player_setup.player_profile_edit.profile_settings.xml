@@ -22,8 +22,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_campaign_ai" x="28" y="234"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_7" x="28" y="261"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_map_cache_megabytes" x="28" y="281"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9" x="28" y="308"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" x="28" y="328"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_movies" x="28" y="302"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10" x="28" y="329"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" x="28" y="349"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/tabs" y="76"/>
 	</widget>
@@ -156,15 +157,24 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/map_cache_megabytes_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="INSTANT LOADING|DISK SPACE SAVER" setting="game.map_cache_megabytes" values="0|730" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_movies" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/movies_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/movies_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_9_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="9" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/movies_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/movies_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.movies" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/section_10_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="10" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/op_about" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/about_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/profile_settings/labels">
 		<string text="PLAYER"/>
@@ -174,8 +184,9 @@
 		<string text="MANAGE PROFILES ›"/>
 		<string text="CAMPAIGN"/>
 		<string text="CAMPAIGN AI ›"/>
-		<string text="STORAGE"/>
+		<string text="GAME DATA"/>
 		<string text="MAP STORAGE"/>
+		<string text="STARTUP MOVIES"/>
 		<string text="ABOUT"/>
 		<string text="MENDICANTCE"/>
 	</strings>
@@ -190,6 +201,7 @@
 		<string text="MENDICANT AI: the campaign's Marines and Covenant fight as units led through drills, and how well the AI aims and fires."/>
 		<string text=""/>
 		<string text="Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads a second or more slower.|Switching back unpacks them in the background."/>
+		<string text="Plays the Xbox's intro movie as the game starts, and its attract movies on an idle main menu. Any button skips the intro.|They are the bink folder of your Xbox disc image, copied with the maps. Without them, put the disc's bink folder beside your maps folder."/>
 		<string text=""/>
 		<string text="Halo: Combat Evolved, the Xbox game, played from your own copy of its maps. MendicantCE is a free fan project: OpenH1, modified. Source: github.com/Adam-AtlasSoftware/MendicantCE"/>
 	</strings>

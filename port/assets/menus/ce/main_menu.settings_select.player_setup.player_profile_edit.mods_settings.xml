@@ -22,9 +22,6 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_6" x="28" y="240" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_graphics" x="28" y="260" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_assets" x="28" y="281" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_ray_tracing" x="28" y="302" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_path_tracing" x="28" y="323" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_lighting" x="28" y="344" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 	</widget>
@@ -153,30 +150,6 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_ray_tracing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_ray_tracing_label"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_ray_tracing_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_path_tracing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/prism_pt_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/prism_pt_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_path_tracing_label"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_path_tracing_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_lighting" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_lighting_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_lighting_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting_label"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
-	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
 		<string text="MANAGE MODS ›"/>
@@ -187,9 +160,6 @@
 		<string text="PRISM"/>
 		<string text="PRISM GRAPHICS ›"/>
 		<string text="PRISM ASSETS ›"/>
-		<string text="PRISM RAY TRACING ›"/>
-		<string text="PRISM PATH TRACING ›"/>
-		<string text="PRISM LIGHTING ›"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/help_strings">
 		<string text="Texture, sound, text and model packs from the mods folder, and the Theater's recorded games."/>
@@ -200,10 +170,7 @@
 		<string text="Records each network game you play or host, from the next one on, to watch again in the Theater."/>
 		<string text="The games recorded: watch one again from any player's view, or a free or cinematic camera."/>
 		<string text=""/>
-		<string text="Finer light, shadows and tone, and the remodels and rebaked light a data folder has. Video's Quality PRISM turns on the faithful ones."/>
+		<string text="The level remodelled from the data folder, bloom and the tone grade, with any lighting. The lighting's own settings are Video's."/>
 		<string text="The sharper textures, remodelled characters and materials mods ship, and how much of the graphics card they take."/>
-		<string text="Traced sun shadows, occlusion and bounced light on graphics cards that trace rays, and a path-traced mode."/>
-		<string text="How the path-traced light looks: faithful to the game's lightmaps or lit by the traced lights alone, its lamps, exposure and highlights."/>
-		<string text="PRISM Raster: each level lit by its own light baked on this computer, with sharp sun shadows. Rebake lightmaps, and how finely they are baked."/>
 	</strings>
 </menus>
