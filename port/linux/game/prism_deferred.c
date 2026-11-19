@@ -751,6 +751,20 @@ boolean prism_deferred_body_traced(
 		!TEST_FLAG(object->object.flags, _object_invisible_bit);
 }
 
+/* port: display.player_shadow off in PRISM's lightings (Rebaked, Path
+Traced): the player's own body casts no shadow there at all. Its legs, where
+drawn, are drawn and not traced (render_objects.c), and neither CE's
+projected shadow of it nor display.prism_shadows' sun cascades take it:
+with the legs on, CE's shadow of the whole body (first_person_legs.c's pose)
+was left under the player in both lightings */
+boolean prism_deferred_player_shadowless(
+	void)
+{
+	settings_read();
+
+	return prism_deferred.raster && !prism_deferred.body_shadow;
+}
+
 /* ... its draws' flags while they are drawn: 1 the whole body, traced and
 not drawn (XGPU_GBUFFER_FLAG_TRACE_ONLY); 2 its legs (first_person_legs.c),
 drawn but not traced (the whole body is, in their place); 0 none */

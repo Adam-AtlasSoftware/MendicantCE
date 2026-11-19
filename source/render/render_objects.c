@@ -463,6 +463,7 @@ real_matrix4x3 const *first_person_legs_shadow_node_matrices(long object_index, 
 /* port: port/linux/game/prism_deferred.c */
 boolean prism_deferred_body_traced(long object_index);
 void prism_deferred_body(int mode);
+boolean prism_deferred_player_shadowless(void);
 #ifdef HALO_VR
 /* port: port/linux/game/vr_death.c */
 real_matrix4x3 const *vr_death_body_nodes(long object_index, real_matrix4x3 const *nodes);
@@ -753,9 +754,18 @@ static void render_object_list(
 		legs are */
 		boolean legs = !body && first_person && first_person_legs_wanted(object_index);
 		boolean body_traced = !body && !data->shadow && first_person && prism_deferred_body_traced(object_index);
+		/* port: (display.player_shadow off in PRISM's lightings: the legs
+		drawn in the G-buffer pass and not traced, as with the body traced,
+		and not drawn into display.prism_shadows' sun cascades) */
+		boolean shadowless = legs && !body_traced && render_port_prepass && prism_deferred_player_shadowless();
 		real_matrix4x3 const *node_matrices = !legs ? object_get_node_matrices(object_index) :
 			data->shadow ? first_person_legs_shadow_node_matrices(object_index, object_get_node_matrices(object_index)) :
 			first_person_legs_node_matrices(object_index, object_get_node_matrices(object_index));
+
+		if (shadowless && render_prism_shadow_pass)
+			node_matrices = NULL;
+		if (shadowless && render_gbuffer_pass)
+			prism_deferred_body(2);
 
 		if (body && first_person && first_person_legs_wanted(object_index))
 		{
@@ -1027,7 +1037,7 @@ static void render_object_list(
 			}
 		}
 		/* port: (the legs' draws done: the next object's untouched) */
-		if (body_traced)
+		if (body_traced || (shadowless && render_gbuffer_pass))
 			prism_deferred_body(0);
 		if ((data->port_flags & RENDER_DATA_ONE_OBJECT))
 			break;
@@ -1506,9 +1516,11 @@ static void render_object(
 		struct object_datum *object = object_get(data->object_index);
 
 		/* port: the player's own body casts its shadow in first person
-		with its legs drawn (port/linux/game/first_person_legs.c) */
+		with its legs drawn (port/linux/game/first_person_legs.c); none in
+		PRISM's lightings with display.player_shadow off (prism_deferred.c) */
 		if ((!object_is_first_person_camera(data->object_index) ||
-				(first_person_legs_wanted(data->object_index) && first_person_legs_shadow_node_matrices(
+				(first_person_legs_wanted(data->object_index) && !prism_deferred_player_shadowless() &&
+					first_person_legs_shadow_node_matrices(
 					data->object_index, object_get_node_matrices(data->object_index)))) &&
 			!TEST_FLAG(object->object.flags, _object_shadowless_bit) &&
 			(!TEST_FLAG(object->object.flags, _object_invisible_bit) ||

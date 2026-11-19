@@ -61,6 +61,10 @@ traced modes' G-buffer pass (render_objects.c), and the mode of its draws
 (1 traced alone, 2 its legs drawn alone, 0 neither) */
 boolean prism_deferred_body_traced(long object_index);
 void prism_deferred_body(int mode);
+/* port: display.player_shadow off under display.lighting "raster" or
+"pathtraced": no shadow of the player's own body at all (its legs drawn and
+not traced, no CE or cascaded shadow of it) */
+boolean prism_deferred_player_shadowless(void);
 void prism_deferred_shader(void const *shader);
 /* ... and the lightmap page the level's draws that follow are lit from (its
 bitmap of the BSP's lightmap bitmaps; NULL none), which their G-buffer

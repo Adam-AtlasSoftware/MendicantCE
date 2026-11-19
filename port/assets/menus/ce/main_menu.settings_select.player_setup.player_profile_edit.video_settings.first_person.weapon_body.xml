@@ -228,7 +228,7 @@
 		<string text="Moves and turns your weapon and hands on the screen, for every weapon and, in a game, for the one you hold."/>
 		<string text=""/>
 		<string text="Your legs when you look down, moving as you run: your body as the others see it."/>
-		<string text="Path Traced and Rebaked: your whole body, with the weapon it holds, casts its shadow and blocks light, though you never see it. Classic's shadow of you comes with Legs."/>
+		<string text="Path Traced and Rebaked: your whole body, with the weapon it holds, casts its shadow and blocks light, though you never see it. Off: no shadow of you at all there. Classic's shadow of you comes with Legs."/>
 		<string text="On foot in the campaign: first person, or third person from behind your shoulder, and how far back."/>
 		<string text=""/>
 		<string text="When your shield takes a hit, its flare shows on your first-person arms too, as on your body, and fades as it does there. A full, untouched shield shows nothing.|An overshield stays lit on them with Overshield on, below."/>

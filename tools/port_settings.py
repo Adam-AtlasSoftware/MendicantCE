@@ -1852,7 +1852,8 @@ PAGES = {
             # prism_deferred.c's traced body and chase_camera.c)
             ("SHADOW", "display.player_shadow", ON_OFF,
              "Path Traced and Rebaked: your whole body, with the weapon it holds, casts its shadow and blocks "
-             "light, though you never see it. Classic's shadow of you comes with Legs.", None),
+             "light, though you never see it. Off: no shadow of you at all there. Classic's shadow of you comes "
+             "with Legs.", None),
             ("CAMERA ›", None, _page_screen(*CAMERA_PAGE),
              "On foot in the campaign: first person, or third person from behind your shoulder, and how far "
              "back.", None),
