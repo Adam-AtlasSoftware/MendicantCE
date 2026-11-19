@@ -170,17 +170,46 @@ found safe:
   | 1 neighbour, temporal permutation sampling | 0.1583 / 0.0741 / 0.113 / 1.22 (the first pose darker) |
   | 1 neighbour, temporal kept, 4 plain a-trous steps | 0.1644 / 0.0857 / 0.114 / 1.34 |
   | the same, 5 steps | 0.1530 / 0.0808 / 0.114 / 1.30 |
-  | **round 7's defaults**: 1 neighbour, temporal kept, 4 candidates, the wide a-trous steps, the sun's dark tiles, ReSTIR GI's reuse off | **0.1549 / 0.0783 / 0.114 / 1.32** |
+  | round 7's defaults: 1 neighbour, temporal kept, 4 candidates, the wide a-trous steps, the sun's dark tiles, ReSTIR GI's reuse off | 0.1549 / 0.0783 / 0.114 / 1.32 |
+  | **round 8's defaults**: round 7's with the specular hold (two runs) | **0.1546 / 0.0725 / 0.116 / 1.30**; 0.1508 / 0.0745 / 0.115 / 1.30 |
+  | round 8's with 8 candidates | 0.1498 / 0.0723 / 0.113 / 1.30 (17.69 ms) |
 
   G5 (a10), the same gate: round 6's defaults 0.1403 / 0.0773 / 0.132 / 1.01; round 7's 0.1522 / 0.0781 / 0.133 /
-  1.00 (its first and third poses better, 0.0387 to 0.0367 and 0.0977 to 0.0758; its second, the corridor's floor
-  through the door windows, worse, 0.1403 to 0.1522; with ReSTIR GI's reuse on 0.1526: not that). G2 and G7: below,
-  "Frame time".
+  1.00 (its first and third poses better, its second, the corridor's floor through the door windows, worse). Round 8
+  found the cause by bisection (G5, the second pose's error): round 7 with the spatial reuse off 0.1406 (8
+  candidates come back with it off), with five plain a-trous steps 0.1522 (not the a-trous change), with the reuse on
+  and 8 candidates **0.1248** (every pose better than round 6's: 0.0367 / 0.1248 / 0.0686), with 6 candidates 0.1388.
+  So the spatial reuse helps G5 too; what costs its second pose is the initial candidates cut from 8 to 4 to pay for
+  it: the floor's reflection of the corridor's lamp strips is a lamp the grid's lists rank low, and 4 candidates find
+  it less often than 8 (the reuse cannot pass on a lamp no pixel about it found). 8 candidates cost 1.45 ms of the RTX
+  3070 Ti's light pass at G4 (17.69 ms a frame) and 6 cost 0.79 (16.98), both over the 16.7 ms target, so 4 stay the
+  default; `HALO_PT_CANDIDATES=8` (or 6) is the setting for a faster card. A cheaper target for the candidates (the
+  BRDF is evaluated whole for each) is the way to win the rest back.
 
   What is still seen in motion (`v4_reuse_runs/evidence/`): over a lamp's pool on the semi-glossy walls, small
   clusters of bright pixels about a lucky sample (the neighbours that took it this frame) where round 6 showed blobs
-  and the base a salt over the whole wall; radial streaks of the walls' glints along a forward move, the specular
-  history's (in the base too, fewer with the reuse).
+  and the base a salt over the whole wall; round 8's specular hold (below, "The denoiser") takes most of the radial
+  streaks of the walls' glints along a forward move. Looking at the specular and the diffuse light alone in motion
+  (`debug.gbuffer_view` `pt_specular`, `pt_diffuse`; the gate's states `v4spec`, `v4diff`): the specular's specks are
+  single sharp pixels (lucky lamp samples on bump-mapped glossy walls); the diffuse's are soft blobs of a few pixels,
+  a lucky sample the long diffuse history holds and the a-trous steps spread.
+- **The switches that are off, and which are safe** (round 8; each is a diagnosis or an experiment, none for play):
+
+  | switch | what | status |
+  | --- | --- | --- |
+  | `HALO_PT_RESTIR_FEEDBACK=1` | the spatial result kept for the next frame (round 6's) | unbiased, but blobs in motion: do not use |
+  | `HALO_PT_RESTIR_PERMUTE=1` | temporal permutation sampling | **biased** (darker: G4's first pose 0.0957 to 0.1583): do not use |
+  | `HALO_PT_RESTIR_BOIL=<0..1>` | RTXDI's boiling filter | unbiased in effect; let go of nothing at G4 |
+  | `HALO_PT_BOUNCE_HALF=1/2` | the bake's indirect light as the bounce on half the blocks or pixels | unbiased (the same light); no time saved |
+  | `HALO_PT_RESTIR_GI=1` | ReSTIR GI's temporal reuse | unbiased; 0.45 ms, no gain at G4/G5 |
+  | `HALO_PT_CANDIDATES=6/8` | more initial lamp candidates | unbiased; G5 0.1388 / 0.1248, 0.8 / 1.45 ms more |
+  | `HALO_PT_SPEC_HOLD=0` | the specular hold off (round 7's) | the radial glint streaks back |
+  | `HALO_PT_PREBLUR=1`, `HALO_PT_CACHE=1`, `HALO_PT_INDIRECT_CLAMP` | earlier rounds' pre-blur, radiance cache, indirect clamp | see their sections |
+
+  Round 8 also tried an anti-firefly in the fix pass (each pixel held to the second brightest of its 16 neighbours
+  on the same surface, for the a-trous steps only): on the specular alone G4 0.1549 to 0.1542, the blotch 0.0783 to
+  0.0780; on the diffuse too, at any history length, the error worse (0.1556) and FLIP worse (0.117), 0.18 ms more.
+  Removed.
 - **Reuse options tried and left off** (round 7): temporal permutation sampling (`HALO_PT_RESTIR_PERMUTE=1`, RTXDI's:
   the last frame's reservoir from a pixel of the 4 × 4 about the place by a permutation turned each frame) lowers the
   flicker (1.30 to 1.22) but darkens: a reservoir from another pixel is a spatial neighbour counted without its Z,
@@ -283,6 +312,16 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   moments there (2 × 2 taps, each this surface's), mixed with the surface's by `1 − smoothstep(0.1, 0.45, roughness)`;
   where the image's place holds no history of this surface, the specular's history is shortened in that proportion.
   Round 3's glossy floors in motion streaked toward the point the eye moved to: their history went with the surface.
+  **The specular hold** (round 8, `HALO_PT_SPEC_HOLD`, on by default): while the eye moves, a glossy surface's
+  (roughness under 0.6) specular history is held no brighter than the brightest of this frame's samples over the
+  pixel's 3 × 3 on the same surface, as a TAA's clamp: a glint the history carries where nothing about it reflects one
+  now is a reflection that has moved on, and the reprojection's taps smear it into a radial streak along a forward move
+  (round 7's G4). A lamp's highlight that is still there is among the frame's samples (ReSTIR finds the lamp most
+  frames) and is kept; a still eye is never held. It costs nothing measurable (the temporal pass 1.81 ms either way).
+  Held to roughness under 0.6 rather than on every surface (measured the same within the runs' spread, below): a rough
+  surface's history moves with the surface and is never smeared that way. With the hold the gate's moving frames
+  are no longer exactly repeatable from run to run (whether a frame's camera moved depends on the frame pacing): two
+  runs of the same build gave G4 0.1508 / 0.0745 / 0.115 / 1.30 and 0.1546 / 0.0725 / 0.116 / 1.30.
   A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
   the reflection lobe's width (twice alpha, the roughness squared) over the parallax, the angle the eye turned about the point
   since the last frame, as ReLAX's specular accumulation, and 4 frames for a mirror under a moving eye, the whole 32
@@ -431,6 +470,16 @@ Same-session timings (G4, RTX 3070 Ti, median / p99 ms; the passes light, tempor
 | round 7's defaults: 1 spatial neighbour, 4 candidates, the 4 wide a-trous steps, the sun's dark tiles, GI reuse off | **16.19, 16.05, 16.14** / about 17.6 | 10.6, 1.80, 2.51 |
 | the same with ReSTIR GI's reuse on | 16.54, 16.68 / about 18.3 | 11.0, 1.84, 2.51 |
 
+Round 8 (`v4_reuse_runs/time_r11_*`, made side by side the same morning): round 6's defaults 16.72 / 18.4 (the
+passes 10.1, 2.40, 3.04); round 8's defaults (round 7's with the specular hold) **16.14 and 16.14** / 17.4 and 17.3
+(10.6, 1.83, 2.51); the hold off 16.10. The hold costs nothing measurable; 6 candidates 16.98, 8 candidates 17.69.
+
+The RTX 2060 (`time_r10_2060_*`, `time_r11_2060_q`; the same G4 check, 1080p quality): round 6's defaults 60.3 ms,
+round 7's 58.5, round 8's 58.5 (the light pass 47.4 of it). The 16.7 ms target is the RTX 3070 Ti's; the 2060
+needs `performance` or a lower resolution for 60 frames a second, and its gain from round 7's work (1.8 ms) is in
+the same direction as the 3070 Ti's. The RX 7900 XTX (Adam's Windows PC) is not measured here: that needs the branch
+pushed for the Windows build, which is his call.
+
 The same card measured round 6's defaults at 17.32 and 18.27 on other days: compare only runs made side by side. Of
 round 7's 0.7 ms against round 6's defaults with the spatial reuse's 2.46 ms added: the temporal pass 0.6 (no copy
 pass, the visibility's range), the a-trous steps 0.55 (four wide), the sun's dark tiles about 0.6, ReSTIR GI's reuse
@@ -439,7 +488,10 @@ pass, the visibility's range), the a-trous steps 0.55 (four wide), the sun's dar
 No regression outdoors (the RTX 2060's gates, error / blotch / FLIP / flicker, round 6's defaults then round 7's; G2's
 and G7's R are the pre-materials ones, so read them side by side only): G2 0.0016 / 0.0072 / 0.073 / 1.13 then
 0.0015 / 0.0071 / 0.068 / 1.13; G7 0.0269 / 0.0370 / 0.059 / 1.29 then 0.0258 / 0.0361 / 0.057 / 1.29. Classic stays
-byte-identical on b30 (46 of 46 frames, `v4_reuse_runs/identity/`) and the simulation deterministic.
+byte-identical on b30 (46 of 46 frames, `v4_reuse_runs/identity/`) and the simulation deterministic. Round 8's defaults
+(the specular hold): G2 0.0015 / 0.0071 / 0.068 / 1.13 (unchanged), G7 0.0178 / 0.0296 / 0.054 / 1.28 (better: its
+walls' glints); G5 0.1531 / 0.0781 / 0.132 / 0.99 (round 7's, the candidates' cost above); Classic byte-identical
+on b30 again (46 of 46) and the simulation deterministic.
 
 ## The moving objects
 
