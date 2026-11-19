@@ -745,6 +745,13 @@ static const struct config_setting config_settings[] =
 		"(its diffuse and specular light and the sun's shadows); \"off\" the\n"
 		"traced light as it is, one sample a pixel (for checking). Read each\n"
 		"frame." },
+	{ "display.prism_glow_lights", _config_real, "1.0", "HALO_PRISM_GLOW_LIGHTS", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\": how brightly what glows lights\n"
+		"its surroundings, 0 to 4 (1 the calibrated light, 0 none): plasma\n"
+		"bolts, needles and grenades, the energy sword, shields, muzzle flashes,\n"
+		"explosions and the self-illuminated parts of the objects, each a light\n"
+		"with traced shadows. Read each frame." },
 	{ "display.prism_raster_composition", _config_string, "\"ce\"", "HALO_PRISM_RASTER_COMPOSITION",
 		_environment_value, _platform_desktop,
 		"PRISM Raster: what composes the frame from the baked light. \"ce\" the\n"
@@ -3270,6 +3277,10 @@ static const struct config_setting config_settings[] =
 		"the lights' brightness, core, spill past white and wrap on models, the\n"
 		"glow's size (of the light's radius), brightness, softness (world\n"
 		"units) and least size; empty: the defaults." },
+	{ "debug.glow_inventory", _config_boolean, "false", "HALO_GLOW_INVENTORY", _environment_value, _platform_all,
+		"Log what glows: once per map, every light, object and effect tag with\n"
+		"its lights, self-illuminated shaders and particles; in play, each\n"
+		"light first seen with its owner and whether it was drawn." },
 	{ "debug.dynamic_lights_log", _config_boolean, "false", "HALO_DYNAMIC_LIGHTS_LOG", _environment_value, _platform_all,
 		"Log where the first projectile's light is drawn each frame (the\n"
 		"enhanced dynamic lights)." },

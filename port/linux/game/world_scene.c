@@ -46,6 +46,7 @@ nothing here is read by the simulation.
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
 #include "world_scene.h"
+#include "glow_lights.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -596,6 +597,11 @@ static void world_scene_dynamic_lights(void)
 		/* (a gel map's: the light through it, its texture's mean) */
 		if (definition && ((struct tag_reference const *)((byte const *)definition + WORLD_SCENE_GEL_MAP))->index != NONE)
 			light->gel = WORLD_SCENE_GEL;
+		/* (a light CE draws as its lens flare alone, no dynamic flag, which
+		PRISM Path Traced lights with (glow_lights.c): by
+		display.prism_glow_lights) */
+		if (definition && !(definition->flags & 1))
+			light->intensity = glow_lights_scale();
 	}
 }
 
@@ -805,6 +811,17 @@ void world_scene_lights_refresh(void)
 {
 	world_scene.light_count = 0;
 	world_scene_dynamic_lights();
+}
+
+/* PRISM v4's SCENE_LIGHTS after a window's lights are placed: the list
+made again, the dynamic lights as the window has just drawn them */
+void world_scene_lights_relist(void)
+{
+	world_scene.light_count = 0;
+	if (!world_scene.bsp_found)
+		return;
+	world_scene_dynamic_lights();
+	world_scene_fixtures();
 }
 
 long world_scene_light_count(void)

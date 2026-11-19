@@ -145,6 +145,7 @@ struct world_scene_instance const *world_scene_instance_find(long id);
 /* port: the dynamic lights the rasterizer drew listed alone, where world AO
 is off (PRISM v4's SCENE_LIGHTS) */
 void world_scene_lights_refresh(void);
+void world_scene_lights_relist(void);
 long world_scene_light_count(void);
 struct world_scene_light const *world_scene_lights(void);
 

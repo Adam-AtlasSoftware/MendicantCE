@@ -171,6 +171,7 @@ boolean render_deferred_window = FALSE; /* port: (render.h) */
 /* port: port/linux/game/prism_shadows.c */
 boolean prism_shadows_wanted(void);
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
+#include "prism_scene_lights.h" /* port: port/linux/game/prism_scene_lights.c */
 boolean prism_shadows_pass_begin(struct render_camera const *camera, struct render_frustum const *frustum);
 void prism_shadows_pass_structure(void);
 void prism_shadows_pass_end(void);
@@ -479,6 +480,10 @@ static void render_window(
 #endif
 		first_person_weapon_render_update();
 		lights_preprocess_scene();
+		/* port: PRISM Path Traced's dynamic lights as this window has just
+		placed them, not as the last frame's did (a plasma bolt's light a
+		frame behind the bolt): port/linux/game/prism_scene_lights.c */
+		prism_scene_lights_window();
 		/* port: display.ambient_occlusion "world": the window's proxies and
 		the field's place handed to the shaders' ambient slot before the
 		opaque surfaces shade (port/linux/game/world_ao.c; the objects' draws

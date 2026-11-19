@@ -45,6 +45,7 @@ objects' places.
 #include "world_scene.h"
 #include "prism_deferred.h"
 #include "prism_scene_lights.h"
+#include "glow_lights.h"
 #include "rasterizer/rasterizer.h"
 #include "rasterizer/rasterizer_lights.h"
 
@@ -95,6 +96,14 @@ enum
 	LIGHTS_MOST = 2048,
 	EMITTERS_MOST = 1024
 };
+/* a glowing object's light (glow_lights.c): its id's high bits, its reach
+by its size (world units), its colour's strength */
+#define GLOW_ID 0x7E000000UL
+#define STRIKE_ID 0x7D000000UL
+#define GLOW_REACH 3.0f
+#define GLOW_REACH_LEAST 1.0f
+#define GLOW_REACH_MOST 4.0f
+#define GLOW_STRENGTH 0.5f
 
 /* a light as struct xgpu_stream_scene_light lays it out (20 words) */
 struct scene_light
@@ -293,8 +302,28 @@ static void light_finite(
 
 /* ---------- public code */
 
+static void scene_lights_send(boolean window);
+
 void prism_scene_lights_frame(
 	void)
+{
+	scene_lights_send(FALSE);
+}
+
+void prism_scene_lights_window(
+	void)
+{
+	if (!render_enumerating && (prism_deferred_pathtraced() || prism_deferred_raster_materials()))
+	{
+		scene_lights_send(TRUE);
+	}
+}
+
+/* the table made and sent: at the frame's start, with the lights the
+rasterizer took the frame before; or after a window's lights are placed
+(window), with them */
+static void scene_lights_send(
+	boolean window)
 {
 	short bsp_index, sky_index;
 	struct structure_bsp *bsp;
@@ -433,6 +462,10 @@ void prism_scene_lights_frame(
 	{
 		world_scene_lights_refresh();
 	}
+	else if (window)
+	{
+		world_scene_lights_relist();
+	}
 	lights = world_scene_lights();
 	light_count = lights ? world_scene_light_count() : 0;
 	for (index = 0; index < light_count; index++)
@@ -464,6 +497,45 @@ void prism_scene_lights_frame(
 		memcpy(light->radiance, drawn->color, 3 * sizeof(float));
 		light->radiance[3] = drawn->intensity * drawn->gel;
 		light_finite(light);
+	}
+	/* (and the projectiles' strikes' flashes, glow_lights.c's, each a point
+	light of its projectile's light, under STRIKE_ID) */
+	/* the glowing objects that carry no light of their own (glow_lights.c:
+	a self-illuminated shader's colour as drawn): each a point light at its
+	bounding sphere's middle, reaching GLOW_REACH times its size (at least
+	GLOW_REACH_LEAST, at most GLOW_REACH_MOST), its colour by GLOW_STRENGTH
+	and display.prism_glow_lights; its id the object's handle's index and
+	salt under GLOW_ID (never a light's datum handle, whose salt's high bit
+	is set) */
+	glow_lights_frame(&render.camera.position);
+	{
+		struct glow_lights_light const *glows = glow_lights_get();
+		long glow_count = glow_lights_count();
+		real scale = glow_lights_all() ? glow_lights_scale() : 0.0f;
+
+		for (index = 0; index < glow_count && scale > 0.0f; index++)
+		{
+			struct glow_lights_light const *glow = &glows[index];
+			/* (a strike's flash: its projectile's light's reach, as it is) */
+			real reach = glow->strike ? glow->size : PIN(glow->size * GLOW_REACH, GLOW_REACH_LEAST, GLOW_REACH_MOST);
+
+			if (!(glow->color[0] + glow->color[1] + glow->color[2] > 0.0f))
+			{
+				continue;
+			}
+			light = light_add(&count, (glow->strike ? STRIKE_ID : GLOW_ID) | ((unsigned long)glow->id & 0x00FFFFFFUL),
+				LIGHT_POINT, CLASS_DYNAMIC,
+				FLAG_ON | FLAG_CASTS_SHADOWS);
+			if (!light)
+			{
+				break;
+			}
+			memcpy(light->position, glow->position, 3 * sizeof(float));
+			light->position[3] = reach;
+			memcpy(light->radiance, glow->color, 3 * sizeof(float));
+			light->radiance[3] = (glow->strike ? 1.0f : GLOW_STRENGTH) * scale;
+			light_finite(light);
+		}
 	}
 	/* (debug.dynamic_lights_log: the dynamic lights at each step, where
 	they changed: the rasterizer's, world_scene's list, those sent) */
@@ -504,4 +576,5 @@ void prism_scene_lights_map_unloaded(
 	scene_lights.emitters_bsp_index = NONE;
 	scene_lights.emitter_count = 0;
 	scene_lights.logged_count = 0;
+	glow_lights_map_unloaded();
 }

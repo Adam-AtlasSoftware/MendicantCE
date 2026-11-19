@@ -1182,6 +1182,77 @@ static void recent_lights_take(float *lights, const uint32_t *ids, uint32_t coun
 	pt.recent_count = kept;
 }
 
+/* a dynamic light the path tracer takes: on, a point or a spot, reaching
+somewhere, giving light */
+static int dynamic_light_taken(const struct xgpu_stream_scene_light *l)
+{
+	return l->light_class == XGPU_SCENE_LIGHT_CLASS_DYNAMIC && (l->flags & XGPU_SCENE_LIGHT_FLAG_ON) &&
+		(l->type == XGPU_SCENE_LIGHT_POINT || l->type == XGPU_SCENE_LIGHT_SPOT) && l->position[3] > 0.0f &&
+		l->radiance[3] * (l->radiance[0] + l->radiance[1] + l->radiance[2]) > 0.0f;
+}
+
+/* the dynamic lights the frame takes, by their places in the table: all of
+them in the table's order where LIGHTS_MOST or fewer; past that (a fight's
+bolts, glows, flashes and the shields' flares), the LIGHTS_MOST that light
+the most about the eye, each by its whole light (its colour's brightest
+channel by its reach squared) over its distance's square past its reach,
+in the table's order again (the job's lights keep their ids' order frame to
+frame where the same are kept) */
+static uint32_t dynamic_lights_rank(const struct xgpu_stream_scene_light *lights, uint32_t count, const float eye[4],
+	uint32_t ranked[LIGHTS_MOST])
+{
+	static float scores[4096];
+	static uint32_t found[4096];
+	uint32_t index, taken = 0, kept;
+
+	for (index = 0; lights && index < count && taken < 4096u; index++)
+	{
+		const struct xgpu_stream_scene_light *l = &lights[index];
+		float dx, dy, dz, r, d2, bright;
+
+		if (!dynamic_light_taken(l))
+			continue;
+		dx = l->position[0] - eye[0];
+		dy = l->position[1] - eye[1];
+		dz = l->position[2] - eye[2];
+		r = l->position[3];
+		d2 = dx * dx + dy * dy + dz * dz;
+		bright = l->radiance[3] * fmaxf(l->radiance[0], fmaxf(l->radiance[1], l->radiance[2]));
+		scores[taken] = bright * r * r / fmaxf(d2, r * r);
+		found[taken++] = index;
+	}
+	if (taken <= LIGHTS_MOST)
+	{
+		memcpy(ranked, found, taken * sizeof(uint32_t));
+		return taken;
+	}
+	/* (the least of the kept put out by a brighter one, then the kept put
+	back in the table's order) */
+	for (index = 0; index < LIGHTS_MOST; index++)
+		ranked[index] = index;
+	for (index = LIGHTS_MOST; index < taken; index++)
+	{
+		uint32_t least = 0, at;
+
+		for (at = 1; at < LIGHTS_MOST; at++)
+			if (scores[ranked[at]] < scores[ranked[least]])
+				least = at;
+		if (scores[index] > scores[ranked[least]])
+			ranked[least] = index;
+	}
+	for (index = 1; index < LIGHTS_MOST; index++)
+	{
+		uint32_t value = ranked[index], at = index;
+
+		for (; at > 0 && ranked[at - 1] > value; at--)
+			ranked[at] = ranked[at - 1];
+		ranked[at] = value;
+	}
+	for (kept = 0; kept < LIGHTS_MOST; kept++)
+		ranked[kept] = found[ranked[kept]];
+	return LIGHTS_MOST;
+}
+
 struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
 	const struct xgpu_stream_scene_view *view, uint32_t phase, int *whole)
@@ -1395,15 +1466,14 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	uint32_t ids[LIGHTS_MOST];
 	dynamic_lights = (float *)((char *)slot_buffer->mapped + JOB_LIGHTS_OFFSET);
 	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
-	for (index = 0; lights && index < light_count && dynamic < LIGHTS_MOST; index++)
+	/* (more than LIGHTS_MOST on: those that light the most of the view
+	kept, dynamic_lights_rank) */
+	uint32_t ranked[LIGHTS_MOST], ranked_count = dynamic_lights_rank(lights, light_count, job->camera[0], ranked);
+	for (index = 0; index < ranked_count; index++)
 	{
-		const struct xgpu_stream_scene_light *l = &lights[index];
+		const struct xgpu_stream_scene_light *l = &lights[ranked[index]];
 		float *to = dynamic_lights + dynamic * LIGHT_FLOATS;
 
-		if (l->light_class != XGPU_SCENE_LIGHT_CLASS_DYNAMIC || !(l->flags & XGPU_SCENE_LIGHT_FLAG_ON) ||
-			(l->type != XGPU_SCENE_LIGHT_POINT && l->type != XGPU_SCENE_LIGHT_SPOT) || !(l->position[3] > 0.0f) ||
-			!(l->radiance[3] * (l->radiance[0] + l->radiance[1] + l->radiance[2]) > 0.0f))
-			continue;
 		memcpy(to, l->position, 4 * sizeof(float));
 		to[4] = l->radiance[0] * l->radiance[3];
 		to[5] = l->radiance[1] * l->radiance[3];

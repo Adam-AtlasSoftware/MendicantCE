@@ -92,6 +92,13 @@ def sources() -> dict[str, str]:
     if missing:
         raise SystemExit(f"{SOURCE}: no //@pass {', '.join(missing)}")
     head = bake_common()
+    # (the path tracer's own extensions beside the baker's: the subgroups' ballot and arithmetic, for the dynamic
+    # lights' culling by each subgroup's points, dynamic_change)
+    first = "#extension GL_EXT_ray_query : require\n"
+    if head.count(first) != 1:
+        raise SystemExit(f"{BAKE}: BAKE_COMMON's extensions are not where they were")
+    head = head.replace(first, first + "#extension GL_KHR_shader_subgroup_ballot : require\n"
+                        "#extension GL_KHR_shader_subgroup_arithmetic : require\n")
     return {name: head + "\n#line 1 1\n" + common + "\n#line 1 2\n" + passes[name] for name in NAMES}
 
 

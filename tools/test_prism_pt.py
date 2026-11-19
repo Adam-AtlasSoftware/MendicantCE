@@ -811,18 +811,19 @@ def test_a_dynamic_light_switched_on_or_off_cuts_the_history_and_a_steady_one_do
 
 
 def test_the_dynamic_lights_are_sampled_apart_from_the_reused_reservoir_and_unbiased():
-    """dynamic_direct: resampled importance over 4 of the frame's dynamic lights, unbiased whatever their count;
+    """dynamic_direct: resampled importance over the frame's dynamic lights (every one up to DYNAMIC_ALL, at random
+    past it), unbiased whatever their count;
     and apart from ReSTIR DI's reservoir, whose reuse cannot hold one: there a dynamic sample's weight was divided by
     the reused confidences' sum (1 + up to 8), a ninth of its light"""
     rng = np.random.default_rng(7)
-    for n in (1, 3, 9):
+    for n, every in ((1, 64), (3, 64), (9, 64), (9, 4)):
         light = rng.uniform(0.0, 2.0, n) * (rng.uniform(size=n) > 0.3)
         seen = rng.uniform(size=n) > 0.4
         truth = float(np.sum(light * seen))
         estimates = []
         for _ in range(40000):
-            candidates = min(n, 4)
-            picks = range(n) if n <= 4 else rng.integers(0, n, candidates)
+            candidates = min(n, every)
+            picks = range(n) if n <= every else rng.integers(0, n, candidates)
             total, kept, kept_t = 0.0, None, 0.0
             for i in picks:
                 if light[i] <= 0.0:
@@ -838,6 +839,62 @@ def test_the_dynamic_lights_are_sampled_apart_from_the_reused_reservoir_and_unbi
     text = GLSL.read_text()
     assert "lights_initial(g, int(job.extra.x), 8, 0, kind, index, y, target_own, sum);" in text
     assert "dynamic_direct(g, o, ld, ls);" in text
+    assert "const uint DYNAMIC_ALL = 64u;" in text and "uint candidates = min(n, DYNAMIC_ALL);" in text
+
+
+def _rank(lights, eye, most):
+    """xgpu_vulkan_pt.c's dynamic_lights_rank: every light taken where `most` or fewer, else the `most` with the
+    greatest whole light about the eye (brightest channel x reach^2 over the distance^2 past the reach), in the
+    table's order"""
+    score = []
+    for position, reach, colour in lights:
+        d2 = float(np.sum((np.array(position) - eye) ** 2))
+        score.append(max(colour) * reach * reach / max(d2, reach * reach))
+    if len(lights) <= most:
+        return list(range(len(lights)))
+    return sorted(sorted(range(len(lights)), key=lambda i: -score[i])[:most])
+
+
+def test_past_the_jobs_room_the_dynamic_lights_that_light_the_eyes_surroundings_are_kept():
+    """a fight's bolts, glows and flares past LIGHTS_MOST: the near and bright kept, the far and faint left, in the
+    table's order (a light kept from frame to frame keeps its place among the kept)"""
+    rng = np.random.default_rng(3)
+    eye = np.zeros(3)
+    far = [((rng.uniform(40, 80), rng.uniform(-5, 5), 0.0), 2.0, (0.2, 0.9, 0.3)) for _ in range(70)]
+    near = [((rng.uniform(-3, 3), rng.uniform(-3, 3), 0.5), 2.0, (0.4, 0.2, 1.0)) for _ in range(10)]
+    lights = far[:35] + near + far[35:]
+    kept = _rank(lights, eye, 64)
+    assert len(kept) == 64 and kept == sorted(kept)
+    assert all(35 + i in kept for i in range(10))
+    assert _rank(lights[:20], eye, 64) == list(range(20))
+    host = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
+    assert "scores[taken] = bright * r * r / fmaxf(d2, r * r);" in host
+    assert "uint32_t ranked[LIGHTS_MOST], ranked_count = dynamic_lights_rank(lights, light_count, job->camera[0], ranked);" in host
+
+
+def test_what_glows_lights_in_path_traced():
+    """glow_lights.c: in Path Traced (and Raster's "materials" composition) CE's lights with no dynamic flag (a
+    plasma bolt's, a needle's, a grenade's: drawn as their lens flare alone in CE) are drawn too, by
+    display.prism_glow_lights; the self-illuminated objects with no light of their own each a light under ids no
+    light's datum handle has; the table sent again after each window places its lights (no light a frame behind its
+    bolt); Classic untouched (every change behind glow_lights_all)"""
+    lights = (ROOT / "source/objects/object_lights.c").read_text()
+    glow = (ROOT / "port/linux/game/glow_lights.c").read_text()
+    scene = (ROOT / "port/linux/game/prism_scene_lights.c").read_text()
+    world = (ROOT / "port/linux/game/world_scene.c").read_text()
+    render = (ROOT / "source/render/render.c").read_text()
+    assert "if (!TEST_FLAG(light->flags, _point_light_dynamic_bit) && glow_lights_all())" in lights
+    assert ("return glow_lights.scale > 0.0f && (prism_deferred_pathtraced() || prism_deferred_raster_materials());"
+            in glow)
+    assert "if (definition && !(definition->flags & 1))\n\t\t\tlight->intensity = glow_lights_scale();" in world
+    assert "#define GLOW_ID 0x7E000000UL" in scene
+    assert "(glow->strike ? STRIKE_ID : GLOW_ID) | ((unsigned long)glow->id & 0x00FFFFFFUL)" in scene
+    assert "#define STRIKE_ID 0x7D000000UL" in scene
+    # (a datum handle's salt has its high bit set: a light's id is never a glow's)
+    assert 0x7E000000 & 0x80000000 == 0
+    assert "lights_preprocess_scene();\n" in render and "prism_scene_lights_window();" in render
+    assert render.index("lights_preprocess_scene();\n") < render.index("prism_scene_lights_window();")
+    assert "if (!render_enumerating && (prism_deferred_pathtraced() || prism_deferred_raster_materials()))" in scene
 
 
 def _history_after_a_fade(envelope, frames=32.0, background=0.05, light=5.0, fade=24, after=30):
@@ -875,3 +932,71 @@ def test_a_fading_light_leaves_no_ghost_in_the_history():
     host = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
     assert "float keep = frames > 1.0f ? 1.0f - 1.0f / frames : 0.0f;" in host
     assert "recent_lights_take(dynamic_lights, ids, dynamic, (flags & FLAG_HISTORY) != 0, job->denoise[0]);" in host
+
+
+def _ggx_d(nh, a):
+    return a * a / (np.pi * (nh * nh * (a * a - 1.0) + 1.0) ** 2)
+
+
+def test_a_dynamic_lights_highlight_is_a_sphere_lights_and_keeps_its_energy():
+    """dynamic_specular: a dynamic light's lobe widened by its size over its distance (Karis 2013), its energy kept by
+    (a / a')^2: over a polished floor a bolt's highlight is no longer a pixel or two at the sun's brightness (the
+    blocky green patch of the 4K shot at tick 255), and a rough surface's is as it was"""
+    text = GLSL.read_text()
+    assert "const float DYNAMIC_SIZE = 0.1;" in text
+    assert "float a2 = min(a + 0.5 * DYNAMIC_SIZE * r / max(d, 1.0e-3), 1.0);" in text
+    assert "return ggx(w, l) * (a / a2) * (a / a2) * PI;" in text
+    assert text.count("ggx(g, l) * e * PI") == 0
+    # (the peak of the lobe, a mirror-like floor 0.3 world units under a bolt of reach 1.5)
+    a = 0.1 ** 2
+    a_wide = min(a + 0.5 * 0.1 * 1.5 / 0.3, 1.0)
+    peak_point, peak_sphere = _ggx_d(1.0, a), _ggx_d(1.0, a_wide) * (a / a_wide) ** 2
+    assert peak_sphere < peak_point / 1000.0
+    # (the energy over the hemisphere: the widened lobe's integral times (a / a')^2 is the narrow's, as Karis's)
+    nh = np.cos(np.linspace(0.0, np.pi / 2, 400001))
+    def whole(alpha):
+        theta = np.arccos(nh)
+        return np.trapezoid(_ggx_d(nh, alpha) * nh * np.sin(theta), theta) * 2 * np.pi
+    assert whole(a) == pytest.approx(1.0, abs=0.02) and whole(a_wide) == pytest.approx(1.0, abs=0.02)
+    # (a rough surface: nearly unchanged)
+    rough = 0.8 ** 2
+    assert min(rough + 0.5 * 0.1 * 1.5 / 1.0, 1.0) / rough < 1.15
+
+
+def test_the_temporal_pass_evaluates_only_the_lights_that_reach_its_subgroups_points():
+    """dynamic_change: each light's sphere tested once a subgroup against the box of its points; a light that misses
+    the box gives no light to any point in it, so the sum is the one over every light"""
+    rng = np.random.default_rng(5)
+    points = rng.uniform(-1, 1, (32, 3)) + np.array([5.0, 0.0, 0.0])
+    least, most = points.min(0), points.max(0)
+    for _ in range(200):
+        c = rng.uniform(-8, 12, 3)
+        r = rng.uniform(0.2, 4.0)
+        e = np.maximum(np.maximum(least - c, c - most), 0.0)
+        reaches = r > 0.0 and float(e @ e) < r * r
+        lit = any(float((p - c) @ (p - c)) < r * r for p in points)
+        assert reaches or not lit
+    text = GLSL.read_text()
+    assert "uvec4 mask = subgroupBallot(reaches);" in text
+    assert "vec3 least = subgroupMin(g.point), most = subgroupMax(g.point);" in text
+    tool = (ROOT / "tools/vulkan_pt_shaders.py").read_text()
+    assert "#extension GL_KHR_shader_subgroup_ballot : require" in tool
+
+
+def test_a_projectiles_strike_flashes_and_the_glows_are_read_from_the_first_frame():
+    """glow_lights.c: a projectile's light followed while it flies and, once it is gone, a flash of it where it was
+    (CE's plasma and needle strikes have particles alone), drawn back along its path, to none over STRIKE_TICKS; a
+    weapon's lens flare's light a share of it; the settings read at the start whatever the count of changes (read
+    only at a change, the glows were off until something changed a setting)"""
+    glow = (ROOT / "port/linux/game/glow_lights.c").read_text()
+    lights = (ROOT / "source/objects/object_lights.c").read_text()
+    shield = (ROOT / "port/linux/game/shield_glow.c").read_text()
+    assert "if (!glow_lights.read || glow_lights.changes != config_changes())" in glow
+    assert "STRIKE_TICKS = 6," in glow and "#define STRIKE_BACK 0.15f" in glow
+    assert "if (strike->struck == NONE && !object_try_and_get(strike->object_index))" in glow
+    assert "return object_type == _object_type_weapon ? GLOW_WEAPON_SHARE : 1.0f;" in glow
+    assert "real share = glow_lights_share(object ? object->object.type : NONE);" in lights
+    assert 'enabled = config_boolean("display.shield_glow") != 0 || glow_lights_all();' in shield
+    # (the fade: whole at the strike, none at its end, squared)
+    fade = lambda k: max(0.0, 1.0 - k / 6) ** 2  # noqa: E731
+    assert fade(0) == 1.0 and fade(6) == 0.0 and fade(3) == 0.25

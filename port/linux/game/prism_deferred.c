@@ -738,6 +738,16 @@ boolean prism_deferred_pathtraced(
 	return prism_deferred.pathtraced;
 }
 
+boolean prism_deferred_raster_materials(
+	void)
+{
+	settings_read();
+
+	/* (Raster's frame whole by its own materials: it reads SCENE_LIGHTS'
+	dynamic class, which CE's composition draws by CE's own passes) */
+	return prism_deferred.raster && !prism_deferred.pathtraced && prism_deferred.raster_materials;
+}
+
 boolean prism_deferred_raster_object_shadows(
 	void)
 {
