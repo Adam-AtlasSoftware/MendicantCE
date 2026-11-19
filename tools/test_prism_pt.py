@@ -731,11 +731,21 @@ def test_preblur_spreads_a_lucky_sample_and_keeps_the_light():
 # ---------- the dynamic lights (the flashlight, muzzle flashes, projectiles: SCENE_LIGHTS' dynamic class)
 
 def _dynamic_falloff(x):
-    """xgpu_vulkan_pt.glsl's dynamic_light_at at a distance x of the light's reach (a white point light): the
-    windowed inverse square, 0.3 r^2 / d^2, never more than CE's 1 - d^2/r^2"""
+    """xgpu_vulkan_pt.glsl's dynamic_light_at at a distance x of the light's reach for a spot light (the
+    flashlight): the windowed inverse square, 0.3 r^2 / d^2, never more than CE's 1 - d^2/r^2"""
     x2 = np.minimum(x * x, 1.0)
     window = (1.0 - x2 * x2) ** 2
     return np.minimum(window * 0.3 / np.maximum(x2, 1.0e-4), 1.0 - x2)
+
+
+def _point_falloff(d, r):
+    """dynamic_light_at for a point light of reach r at a distance d (world units): a small glowing body of power
+    DYNAMIC_POWER r over the square of the distance from its size (DYNAMIC_SIZE r, DYNAMIC_SIZE_MOST at most),
+    windowed to none at its reach, never more than DYNAMIC_NEAR_MOST times CE's 1 - d^2/r^2"""
+    x2 = np.minimum((d / r) ** 2, 1.0)
+    window = (1.0 - x2 * x2) ** 2
+    a = min(0.1 * r, 0.08)
+    return np.minimum(window * 0.3 * r / (d * d + a * a), 2.0 * (1.0 - x2))
 
 
 def _dynamic_keep(cut, frames=32.0, lag=0.1):
@@ -778,10 +788,11 @@ def test_the_dynamic_lights_layout_is_the_hosts():
     assert define["JOB_LIGHTS_OFFSET"] + 2 * define["LIGHTS_MOST"] * define["LIGHT_FLOATS"] * 4 <= define["JOB_BYTES"]
 
 
-def test_a_dynamic_lights_light_is_ces_near_it_its_inverse_squares_far_off_and_none_past_its_reach():
-    """CE's 1 - d^2/r^2 within 0.6 r (where the inverse square whose light over the sphere of its reach is CE's
-    would be up to 1.9 times CE's: a wall at the flashlight's mouth went white, and stayed white through CE's fade
-    of its colour), the inverse square's tail past it, never more than CE's, none at or past its reach"""
+def test_a_spot_lights_light_is_ces_near_it_its_inverse_squares_far_off_and_none_past_its_reach():
+    """a spot (the flashlight): CE's 1 - d^2/r^2 within 0.6 r (where the inverse square whose light over the sphere
+    of its reach is CE's would be up to 1.9 times CE's: a wall at the flashlight's mouth went white, and stayed white
+    through CE's fade of its colour), the inverse square's tail past it, never more than CE's, none at or past its
+    reach"""
     x = np.linspace(0.0, 1.0, 200001)
     ce = 1.0 - x * x
     ours = _dynamic_falloff(x)
@@ -795,6 +806,41 @@ def test_a_dynamic_lights_light_is_ces_near_it_its_inverse_squares_far_off_and_n
     # (its whole light about three quarters of CE's: the tail past 0.6 r)
     whole_ce = np.trapezoid(ce * x * x, x)
     assert 0.7 < np.trapezoid(ours * x * x, x) / whole_ce < 0.78
+    text = GLSL.read_text()
+    assert "float fall = axis.w < 1.5 ? min(window * window * 0.3 / max(x2, 1.0e-4), 1.0 - x2) :" in text
+
+
+def test_a_point_lights_reach_is_its_power_so_a_large_one_floods_no_room_and_a_small_one_is_seen():
+    """a point light (a bolt, a grenade, a blast, a shield's flare): its reach its power, its light by its distance
+    (a sized inverse square), not CE's flat sphere of light over its reach, which as a size flooded a corridor with a
+    fuel rod's strike or a shield's flare and left a plasma grenade or a needle a dim 0.75 at the floor under it.
+    A blast (10 units) lights a wall 3 units off at under half CE's and 5 units off at under a fifth; a grenade's
+    1 unit's light is brighter than CE's at the floor under it; never past twice CE's, nothing past its reach"""
+    def ce(d, r):
+        return np.maximum(1.0 - (d / r) ** 2, 0.0)
+    for r in (0.5, 1.0, 1.5, 2.0, 4.2, 10.0):
+        d = np.linspace(1.0e-3, r, 20001)
+        ours = _point_falloff(d, r)
+        assert np.all(ours <= 2.0 * ce(d, r) + 1.0e-9)
+        assert _point_falloff(np.array([r]), r)[0] == 0.0
+        # (more local than CE's: its share of the light over the sphere of its reach in its nearer half grows)
+        near = d <= 0.5 * r
+        assert np.trapezoid((ours * d * d)[near], d[near]) / np.trapezoid(ours * d * d, d) > \
+            np.trapezoid((ce(d, r) * d * d)[near], d[near]) / np.trapezoid(ce(d, r) * d * d, d)
+    assert _point_falloff(np.array([3.0]), 10.0)[0] < 0.5 * ce(3.0, 10.0)
+    assert _point_falloff(np.array([5.0]), 10.0)[0] < 0.2 * ce(5.0, 10.0)
+    assert _point_falloff(np.array([2.5]), 4.2)[0] < 0.5 * ce(2.5, 4.2)
+    assert _point_falloff(np.array([0.3]), 1.0)[0] > 1.5 * ce(0.3, 1.0)
+    # (a bolt grazing a wall: a bright spot, finite)
+    assert np.isfinite(_point_falloff(np.array([1.0e-6]), 1.5)[0])
+    text = GLSL.read_text()
+    for line in ("const float DYNAMIC_POWER = 0.3;", "const float DYNAMIC_NEAR_MOST = 2.0;",
+                 "const float DYNAMIC_SIZE = 0.1;", "const float DYNAMIC_SIZE_MOST = 0.08;",
+                 "float a = min(DYNAMIC_SIZE * r, DYNAMIC_SIZE_MOST);",
+                 "min(window * window * DYNAMIC_POWER * r / (d2 + a * a), DYNAMIC_NEAR_MOST * (1.0 - x2));",
+                 "return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * fall);"):
+        assert line in text, line
+    assert text.index("const float DYNAMIC_SIZE_MOST = 0.08;") < text.index("vec3 dynamic_light_at(")
 
 
 def test_a_dynamic_light_switched_on_or_off_cuts_the_history_and_a_steady_one_does_not():
@@ -818,8 +864,7 @@ def test_a_dynamic_light_switched_on_or_off_cuts_the_history_and_a_steady_one_do
     assert "if (cut * job.denoise.x > DYNAMIC_LAG)" in text and "float most = DYNAMIC_LAG / cut;" in text
     assert "const float DYNAMIC_RESET = 0.1;" in text and "const float DYNAMIC_LAG = 0.1;" in text
     assert "return change / max(max(a, b) + max(history_luma - b, 0.0), 1.0e-4);" in text
-    assert ("return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * min(window * window * 0.3 / max(x2, "
-            "1.0e-4), 1.0 - x2));") in text
+    assert "return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * fall);" in text
 
 
 def test_the_dynamic_lights_are_sampled_apart_from_the_reused_reservoir_and_unbiased():
@@ -925,7 +970,13 @@ def test_the_moving_lights_look_in_path_traced_is_calibrated_and_less_saturated(
     assert "#define GLOW_FLARE_SHARE 0.4f" in scene
     assert "if (!prism_deferred_pathtraced() && !prism_deferred_raster_materials())" in scene
     assert "light->radiance[3] *= (1.0f + (scene_lights.look_scale - 1.0f) * chroma) * share;" in scene
-    assert "dynamic_look(light, drawn->flags & WORLD_SCENE_LIGHT_GLOW ? GLOW_FLARE_SHARE : 1.0f);" in scene
+    # (a projectile's lens flare's light whole: a bolt is the light it flies by; its strike's flash as its light)
+    assert ("dynamic_look(light, !(drawn->flags & WORLD_SCENE_LIGHT_GLOW) ? 1.0f :\n\t\t\tlight_port_object_type(drawn->id)"
+            " == _object_type_projectile ? GLOW_PROJECTILE_SHARE : GLOW_FLARE_SHARE);") in scene
+    assert "#define GLOW_PROJECTILE_SHARE 1.0f" in scene
+    assert "\t\t\tdynamic_look(light, 1.0f);\n\t\t\tlight_finite(light);" in scene
+    lights = (ROOT / "source/objects/object_lights.c").read_text()
+    assert "short light_port_object_type(\n\tlong light_index)" in lights
     def look(rgb, scale=0.4, saturation=0.6):
         rgb = np.array(rgb, dtype=float)
         chroma = (rgb.max() - rgb.min()) / rgb.max()
@@ -964,6 +1015,25 @@ def test_what_glows_lights_in_path_traced():
     assert "lights_preprocess_scene();\n" in render and "prism_scene_lights_window();" in render
     assert render.index("lights_preprocess_scene();\n") < render.index("prism_scene_lights_window();")
     assert "if (!render_enumerating && (prism_deferred_pathtraced() || prism_deferred_raster_materials()))" in scene
+
+
+def test_a_lightless_projectile_glows_its_weapons_colour_and_a_shields_flare_reaches_no_further_in_path_traced():
+    """glow_lights.c: a projectile with no light and no glow of its colour (the needle: no light, a transparent
+    shader, its pink its bitmap's) lights with the colour of its weapon's lens flare (the needler's needle flare),
+    never a muzzle flash's (the bullets would glow); shield_glow.c: display.shield_glow_intensity "light_show"
+    triples a flare's reach in Classic, not in Path Traced, where a light's reach is its power (4.2 units of it lit a
+    corridor end to end with the Chief's flare struck by a fuel rod)"""
+    glow = (ROOT / "port/linux/game/glow_lights.c").read_text()
+    shield = (ROOT / "port/linux/game/shield_glow.c").read_text()
+    body = glow[glow.index("static boolean glow_projectile_tint("):glow.index("/* an object definition's glow (found once) */")]
+    assert "->projectile.index == projectile_index;" in body
+    assert "if (TEST_FLAG(light->flags, _light_definition_dynamic_bit) || !(peak > 0.0f))\n\t\t\t\tcontinue;" in body
+    assert "if (glow->glows && most > 0.0f && (most - least) / most >= 0.5f)\n\t\treturn FALSE;" in body
+    assert ("if (!glow->has_light && definition->object.type == _object_type_projectile)\n"
+            "\t\tglow_projectile_tint(definition_index, glow);") in glow
+    assert "(glow_lights_all() ? 1.f : shield_glow_scale)))" in shield
+    # (Classic's flare as it was: its strength by the scale, light_show's reach three times)
+    assert "real strength = MIN(flare * shield_glow_scale, 1.f);" in shield
 
 
 def _history_after_a_fade(envelope, frames=32.0, background=0.05, light=5.0, fade=24, after=30):

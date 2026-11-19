@@ -19,7 +19,11 @@ dynamic class), every glowing thing in view gives the path tracer a light:
   shader (shader_model's) and no light of its own gives a light at its
   bounding sphere's middle, its colour the shader's self-illumination as CE
   draws it (by its object function), its reach by its size
-  (glow_lights_frame). Not the bodies, vehicles and weapons: their
+  (glow_lights_frame); a projectile with no light and no glow of its
+  colour (the needle: its shader a transparent one, its pink its bitmap's)
+  the colour of the glow its weapon has (the needler's needle flare,
+  magenta: glow_projectile_tint). Not the bodies, vehicles and weapons:
+  their
   self-illumination is masked to small parts by maps the game does not read
   (an Elite's and the Chief's armour have white colours).
 
@@ -40,6 +44,8 @@ machines.
 #include "objects/object_definitions.h"
 #include "models/model_definitions.h"
 #include "effects/effect_definitions.h"
+#include "items/item_definitions.h"
+#include "items/weapon_definitions.h"
 #include "shaders/shader_definitions.h"
 #include "tag_files/tag_files.h"
 #include "tag_files/tag_groups.h"
@@ -159,6 +165,8 @@ struct glow_definition
 	real_rgb_color lower, upper;
 	short animation_function;
 	real animation_period;
+	/* (a projectile's pale glow tinted by its weapon's light: glow_projectile_tint) */
+	boolean tinted;
 };
 
 /* a projectile's light followed */
@@ -358,6 +366,70 @@ static void glow_inventory_dump(void)
 	platform_log("glow inventory: the map's tags end");
 }
 
+/* a projectile's glow where it has no light of its own and no glow of its
+colour (the needle: no light, its model's shader a transparent one, its
+pink its bitmap's, which the game does not read): the colour of the glow
+the weapon that fires it has, its lens flare's light (the needler's needle
+flare, magenta), at the brightness of its own self-illumination where it
+has one (pale: a chroma under a half), else whole. Only a weapon's lens
+flare (no dynamic flag): a muzzle flash's light is the firing's, not the
+bullets' (TRUE: found) */
+static boolean glow_projectile_tint(long projectile_index, struct glow_definition *glow)
+{
+	struct tag_iterator iterator;
+	long weapon_index;
+	real most = MAX(glow->upper.red, MAX(glow->upper.green, glow->upper.blue));
+	real least = MIN(glow->upper.red, MIN(glow->upper.green, glow->upper.blue));
+	real low = MAX(glow->lower.red, MAX(glow->lower.green, glow->lower.blue));
+
+	if (glow->glows && most > 0.0f && (most - least) / most >= 0.5f)
+		return FALSE;
+	if (!glow->glows)
+	{
+		most = 1.0f;
+		low = 1.0f;
+	}
+	tag_iterator_new(&iterator, 'weap');
+	while ((weapon_index = tag_iterator_next(&iterator)) != NONE)
+	{
+		struct weapon_definition const *weapon = (struct weapon_definition const *)tag_get('weap', weapon_index);
+		long index;
+		boolean fires = FALSE;
+
+		for (index = 0; index < weapon->weapon.triggers.count && !fires; index++)
+			fires = TAG_BLOCK_GET_ELEMENT(&weapon->weapon.triggers, index,
+				struct weapon_trigger_definition)->projectile.index == projectile_index;
+		for (index = 0; fires && index < weapon->object.attachments.count; index++)
+		{
+			struct object_attachment_definition const *attachment = TAG_BLOCK_GET_ELEMENT(
+				&weapon->object.attachments, index, struct object_attachment_definition);
+			struct glow_light_definition const *light;
+			real_rgb_color const *color;
+			real peak;
+
+			if (attachment->type.group_tag != 'ligh' || attachment->type.index == NONE)
+				continue;
+			light = (struct glow_light_definition const *)tag_get('ligh', attachment->type.index);
+			color = &light->color_upper_bound.rgb;
+			peak = MAX(color->red, MAX(color->green, color->blue));
+			if (TEST_FLAG(light->flags, _light_definition_dynamic_bit) || !(peak > 0.0f))
+				continue;
+			glow->upper.red = color->red / peak * most;
+			glow->upper.green = color->green / peak * most;
+			glow->upper.blue = color->blue / peak * most;
+			glow->lower.red = color->red / peak * low;
+			glow->lower.green = color->green / peak * low;
+			glow->lower.blue = color->blue / peak * low;
+			if (!glow->glows)
+				glow->color_source = 0;
+			glow->glows = TRUE;
+			glow->tinted = TRUE;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 /* an object definition's glow (found once) */
 static struct glow_definition const *glow_definition_get(long definition_index)
 {
@@ -408,6 +480,8 @@ static struct glow_definition const *glow_definition_get(long definition_index)
 			glow->animation_period = shader->self_illumination_animation_period;
 		}
 	}
+	if (!glow->has_light && definition->object.type == _object_type_projectile)
+		glow_projectile_tint(definition_index, glow);
 	return glow;
 }
 

@@ -7,7 +7,8 @@ it lights what is around it, as a plasma bolt does, in the shield's own
 color: a Spartan's gold, an Elite's blue. display.shield_glow_intensity
 "light_show" makes it reach three times as far, and at full strength from a
 third of the flare (a light is no brighter than full: the game's lights'
-colors go to 1).
+colors go to 1); in PRISM Path Traced it is as bright, as far as the
+default's.
 
 The flare's strength is the shield shader's own: the intensity its plasma is
 drawn with (its intensity source, an object function of the unit, to its
@@ -272,10 +273,14 @@ void shield_glow_update(
 				color.green *= strength;
 				color.blue *= strength;
 			}
+			/* (in PRISM Path Traced, where a light's reach is its power
+			(glow_lights.c), light_show's flare reaches as far as the
+			default's: three times its reach, 4.2 units, lit a corridor
+			end to end with a flare struck by a fuel rod) */
 			if (glow->light_index != NONE &&
 				light_port_glow_set(glow->light_index, iterator.index, &color,
 					(SHIELD_GLOW_RADIUS_MINIMUM + (SHIELD_GLOW_RADIUS_MAXIMUM - SHIELD_GLOW_RADIUS_MINIMUM) * flare) *
-						shield_glow_scale))
+						(glow_lights_all() ? 1.f : shield_glow_scale)))
 			{
 				glow->frame = shield_glow_frame;
 			}

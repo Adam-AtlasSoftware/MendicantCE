@@ -809,6 +809,22 @@ boolean light_port_glow_set(
 	return TRUE;
 }
 
+/* port: the type of the object a light is on (NONE: none, or no light):
+PRISM Path Traced's look of a lens flare's light by what carries it
+(port/linux/game/prism_scene_lights.c) */
+short light_port_object_type(
+	long light_index)
+{
+	struct light_datum *light;
+	struct object_datum *object;
+
+	if (light_index == NONE || !light_data->valid)
+		return NONE;
+	light = (struct light_datum *)datum_try_and_get(light_data, light_index);
+	object = light && light->object_index != NONE ? object_try_and_get(light->object_index) : NULL;
+	return object ? object->object.type : NONE;
+}
+
 void lights_initialize_for_new_map(
 	void)
 {

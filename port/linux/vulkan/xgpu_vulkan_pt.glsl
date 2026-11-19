@@ -620,19 +620,29 @@ DYNAMIC_FLOATS each (the place and reach r, the colour by its intensity, a
 spot's inner cone's cosine (2 none), its axis and outer cone's cosine (2 a
 point light)), job.volume.z of them, then the recent ones (job.volume.w,
 the temporal pass's: xgpu_vulkan_pt.c's recent_lights_take). A point
-light's inverse square, windowed to none at its reach ((1 - (d/r)^4)^2, as
-Karis 2013), its intensity 0.3 r^2 x the colour (the one whose light over
-the sphere of radius r is what CE's 1 - d^2/r^2 gives, 2/15 r^3 x 4 pi),
-and never more than CE's own 1 - d^2/r^2 at that distance: CE's within
-0.6 r, the inverse square's tail past it (CE's reach is a light's whole
-sphere of light, not its size: held at 1.9 x CE's within 0.4 r, a wall
-1 to 2 units from the flashlight's mouth was a white disc, and it stayed
-white through most of CE's 24 frames' fade of the colour; tools/
-test_prism_pt.py). A
-spot's cone is CE's (rasterizer_set_model_lighting_point_light's): whole
-inside the inner cone, to none at the outer, linear in the cosine. Their
-shadows traced (light_seen). */
+light is a small glowing body of its own power, which its reach sets: its
+intensity DYNAMIC_POWER r x the colour by its intensity, over the square of
+the distance from its size a (DYNAMIC_SIZE of its reach, DYNAMIC_SIZE_MOST at
+most: a bolt grazing a wall is a bright spot, not a pole), windowed to none
+at its reach ((1 - (d/r)^4)^2, as Karis 2013), and never more than
+DYNAMIC_NEAR_MOST times CE's own 1 - d^2/r^2 at that distance. CE's reach is
+a light's whole sphere of flat light, which as a light's size flooded a
+room with a fuel rod's or a shield's flare and left a plasma grenade's or a
+needle's small (its 1 unit's reach a dim 0.75 at the floor under it); as
+its power, a large light (a blast's 10 units, a Hunter's charge's 4) lights
+its surroundings by their distance and a small one is bright beside it
+(tools/test_prism_pt.py). A spot light (the flashlight) keeps the windowed
+inverse square of intensity 0.3 r^2 never more than CE's 1 - d^2/r^2 (CE's
+within 0.6 r: held at 1.9 x CE's within 0.4 r, a wall 1 to 2 units from
+the flashlight's mouth was a white disc). A spot's cone is CE's
+(rasterizer_set_model_lighting_point_light's): whole inside the inner cone,
+to none at the outer, linear in the cosine. Their shadows traced
+(light_seen). */
 const uint DYNAMIC_FLOATS = 12u;
+const float DYNAMIC_POWER = 0.3;
+const float DYNAMIC_NEAR_MOST = 2.0;
+const float DYNAMIC_SIZE = 0.1;
+const float DYNAMIC_SIZE_MOST = 0.08;
 vec3 dynamic_light_at(uint at, vec3 p, out vec3 l, out float d)
 {
     Floats f = Floats(job.lights);
@@ -652,7 +662,10 @@ vec3 dynamic_light_at(uint at, vec3 p, out vec3 l, out float d)
     }
     float x2 = d2 / (r * r);
     float window = 1.0 - x2 * x2;
-    return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * min(window * window * 0.3 / max(x2, 1.0e-4), 1.0 - x2));
+    float a = min(DYNAMIC_SIZE * r, DYNAMIC_SIZE_MOST);
+    float fall = axis.w < 1.5 ? min(window * window * 0.3 / max(x2, 1.0e-4), 1.0 - x2) :
+        min(window * window * DYNAMIC_POWER * r / (d2 + a * a), DYNAMIC_NEAR_MOST * (1.0 - x2));
+    return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * fall);
 }
 vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
 {
@@ -666,9 +679,8 @@ point's roughness, its energy kept by (a / a')^2). As a point, a bolt over a
 polished floor drew a highlight as bright as the sun's in a pixel or two.
 At most a small one: the flashlight's reach (CE's whole sphere of its light,
 12 units) made it a sphere of 1.2 units, its highlight on the wall it
-pointed at spread to a seventh of itself, the wall hardly lit */
-const float DYNAMIC_SIZE = 0.1;
-const float DYNAMIC_SIZE_MOST = 0.08;
+pointed at spread to a seventh of itself, the wall hardly lit (DYNAMIC_SIZE,
+DYNAMIC_SIZE_MOST: above) */
 vec3 dynamic_specular(Surface g, vec3 l, float d, uint i)
 {
     float r = Floats(job.lights).v[i * DYNAMIC_FLOATS + 3u];
