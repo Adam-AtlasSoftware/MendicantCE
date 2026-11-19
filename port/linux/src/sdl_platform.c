@@ -1719,6 +1719,11 @@ int host_vulkan_window_open(unsigned int window, unsigned int debug, const char 
 drawn with, before it opens: "auto", the loader's index, 0x and a PCI
 device id, or a part of its name */
 int host_vulkan_device_choose(const char *device);
+/* (host_vulkan.c's) PRISM's renderer plugins (docs/prism_plugin.md): the
+plugin display.upscaler and display.denoiser name ("plugin:<name>"'s name;
+empty: none) and the folder they are opened from, before the window opens
+(the plugins say what the instance and device need) */
+int host_vulkan_plugins_choose(const char *upscaler, const char *denoiser, const char *folder);
 /* (host_vulkan.c's) debug.gpu_stats, debug.gpu_validation (or debug.gl_debug) */
 #define HOST_VULKAN_DEBUG_STATISTICS 1
 #define HOST_VULKAN_DEBUG_VALIDATION 2
@@ -1992,6 +1997,22 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	platform_frame_rate_apply();
 #else
 	host_vulkan_device_choose(config_string("display.vulkan_device"));
+#if !defined(HALO_ANDROID) && !defined(HALO_VR)
+	{
+		/* (display.upscaler's and display.denoiser's plugins, opened from the
+		data folder's plugins as the device is made; none named, none
+		opened; not in the builds that never upscale, Android's and the VR
+		build's: port/linux/game/prism_upscale.c) */
+		const char *upscaler = config_string("display.upscaler");
+		const char *denoiser = config_string("display.denoiser");
+		char folder[1024];
+
+		snprintf(folder, sizeof(folder), "%s/plugins", platform_data_root());
+		/* (display.denoiser "dlss_rr": the plugin "dlss", Ray Reconstruction) */
+		host_vulkan_plugins_choose(!strncmp(upscaler, "plugin:", 7) ? upscaler + 7 : "",
+			!strncmp(denoiser, "plugin:", 7) ? denoiser + 7 : !strcmp(denoiser, "dlss_rr") ? "dlss" : "", folder);
+	}
+#endif
 	if (!host_vulkan_window_open((unsigned int)(uintptr_t)platform_window,
 		(config_boolean("debug.gpu_stats") ? HOST_VULKAN_DEBUG_STATISTICS : 0) |
 		(config_boolean("debug.gpu_validation") || config_boolean("debug.gl_debug") ? HOST_VULKAN_DEBUG_VALIDATION : 0) |

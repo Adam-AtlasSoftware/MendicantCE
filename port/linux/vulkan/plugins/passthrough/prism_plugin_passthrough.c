@@ -6,14 +6,26 @@ PRISM_PLUGIN_PASSTHROUGH.C
 The tree's own plugin (prism_plugin.h, docs/prism_plugin.md): an
 "upscaler" that copies the frame's colour to the output, byte for byte
 where the sizes are the same (vkCmdCopyImage), else stretched to the
-nearest texel (vkCmdBlitImage). It exists to exercise the ABI: with it
-selected the picture must be the one the upscaler off draws. Built as a
-shared library on its own:
+nearest texel (vkCmdBlitImage); and a "denoiser" that leaves the light as
+it is given (a frame with no colour, its radiance denoised in place: none
+of it changed). It exists to exercise the ABI: with it selected the picture
+must be the one the upscaler off draws (at the screen's size, the jitter
+off), and the one the path tracer's own filter off draws. Two diagnostics,
+to see what the host gives a plugin: PRISM_PASSTHROUGH_CAPABILITIES="rr"
+makes it an upscaler and a denoiser that upscales (DLSS Ray
+Reconstruction's kind), so that the host makes the G-buffer's guides and
+hands them over; PRISM_PASSTHROUGH_SHOW names an input put in the output in
+the colour's place (depth, motion, reactive, diffuse, specular, normal,
+hit: the reflection rays' lengths, diffuse_hit: the diffuse bounces',
+motion_reflections: the reflected objects' motion), stretched; and the first frame's flags,
+tone mapper and which images it has are written to standard error once.
+Built as a shared library on its own:
 
   cc -shared -fPIC -fvisibility=hidden -I<vulkan headers> -I port/linux/vulkan \
       port/linux/vulkan/plugins/passthrough/prism_plugin_passthrough.c -o passthrough.so
 */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -139,6 +151,64 @@ static int evaluate(void *context, const struct prism_plugin_frame *frame)
 	}
 	in = &frame->color_in;
 	out = &frame->color_out;
+	/* (what the host gives, the first frame and each time it changes: the
+	frame's flags, its curve, the images it has) */
+	{
+		static uint32_t told;
+		uint32_t key = 0x80000000u | frame->flags | (frame->specular_hit_distance.image != VK_NULL_HANDLE) << 8 |
+			(frame->diffuse_hit_distance.image != VK_NULL_HANDLE) << 9 |
+			(frame->motion_reflections.image != VK_NULL_HANDLE) << 10 |
+			(frame->diffuse_albedo.image != VK_NULL_HANDLE) << 11 | (frame->render_width != frame->output_width) << 12;
+
+		if (told != key)
+		{
+			fprintf(stderr, "passthrough: %s: flags", told ? "frame" : "first frame");
+			told = key;
+			fprintf(stderr, " 0x%x (hdr %d, depth reversed %d, noisy %d), tone mapper "
+				"%u, exposure %g, pre-exposure %g, %ux%u to %ux%u; images: colour %d, depth %d, motion %d, normal %d, "
+				"diffuse %d, specular %d, hit %d, diffuse hit %d, reflection motion %d, reactive %d, exposure image %d\n",
+				frame->flags,
+				(frame->flags & PRISM_FRAME_HDR) != 0, (frame->flags & PRISM_FRAME_DEPTH_REVERSED) != 0,
+				(frame->flags & PRISM_FRAME_NOISY) != 0, frame->tone_mapper, frame->exposure, frame->pre_exposure,
+				frame->render_width, frame->render_height, frame->output_width, frame->output_height,
+				frame->color_in.image != VK_NULL_HANDLE, frame->depth.image != VK_NULL_HANDLE,
+				frame->motion.image != VK_NULL_HANDLE, frame->normal_roughness.image != VK_NULL_HANDLE,
+				frame->diffuse_albedo.image != VK_NULL_HANDLE, frame->specular_albedo.image != VK_NULL_HANDLE,
+				frame->specular_hit_distance.image != VK_NULL_HANDLE, frame->diffuse_hit_distance.image != VK_NULL_HANDLE,
+				frame->motion_reflections.image != VK_NULL_HANDLE, frame->reactive_mask.image != VK_NULL_HANDLE,
+				frame->exposure_image.image != VK_NULL_HANDLE);
+		}
+	}
+	/* (a denoiser's frame: the light left as it is) */
+	if (!in->image && !out->image && frame->diffuse_radiance.image)
+		return 1;
+	/* (PRISM_PASSTHROUGH_SHOW: another input in the colour's place, where
+	the frame has it) */
+	{
+		const char *show = getenv("PRISM_PASSTHROUGH_SHOW");
+		const struct prism_plugin_image *shown = NULL;
+
+		if (show && !strcmp(show, "depth"))
+			shown = &frame->depth;
+		else if (show && !strcmp(show, "motion"))
+			shown = &frame->motion;
+		else if (show && !strcmp(show, "reactive"))
+			shown = &frame->reactive_mask;
+		else if (show && !strcmp(show, "diffuse"))
+			shown = &frame->diffuse_albedo;
+		else if (show && !strcmp(show, "specular"))
+			shown = &frame->specular_albedo;
+		else if (show && !strcmp(show, "normal"))
+			shown = &frame->normal_roughness;
+		else if (show && !strcmp(show, "hit"))
+			shown = &frame->specular_hit_distance;
+		else if (show && !strcmp(show, "diffuse_hit"))
+			shown = &frame->diffuse_hit_distance;
+		else if (show && !strcmp(show, "motion_reflections"))
+			shown = &frame->motion_reflections;
+		if (shown && shown->image && shown->width && shown->height)
+			in = shown;
+	}
 	if (!in->image || !out->image || !in->width || !in->height || !out->width || !out->height)
 	{
 		p->error = "passthrough: no colour in or out";
@@ -195,12 +265,12 @@ static const char *last_error(void *context)
 	return p && p->error ? p->error : last_error_static;
 }
 
-static const struct prism_plugin plugin =
+static struct prism_plugin plugin =
 {
 	{
 		PRISM_PLUGIN_ABI, sizeof(struct prism_plugin_info),
 		"passthrough", "PRISM", "1", "AGPL-3.0-or-later (the game's own code)", "",
-		PRISM_CAP_UPSCALE,
+		PRISM_CAP_UPSCALE | PRISM_CAP_DENOISE,
 		sizeof(struct prism_plugin_vulkan), sizeof(struct prism_plugin_image), sizeof(struct prism_plugin_frame),
 	},
 	instance_extensions,
@@ -215,5 +285,11 @@ static const struct prism_plugin plugin =
 
 PRISM_PLUGIN_EXPORT const struct prism_plugin *prism_plugin_entry(uint32_t host_abi)
 {
+	const char *capabilities = getenv("PRISM_PASSTHROUGH_CAPABILITIES");
+
+	/* (PRISM_PASSTHROUGH_CAPABILITIES "rr": Ray Reconstruction's kind of
+	denoiser in the light's) */
+	plugin.info.capabilities = capabilities && !strcmp(capabilities, "rr") ?
+		PRISM_CAP_UPSCALE | PRISM_CAP_DENOISE_UPSCALE : PRISM_CAP_UPSCALE | PRISM_CAP_DENOISE;
 	return host_abi == PRISM_PLUGIN_ABI ? &plugin : NULL;
 }

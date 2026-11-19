@@ -1291,6 +1291,10 @@ static struct
 	drawn whose writes the pass's other commands have not yet been made to
 	see (color_stores_seen) */
 	int compression_control, color_stored;
+	/* display.upscaler's jitter (xgpu_vulkan_set_jitter): the draws into
+	targets of this size moved by it */
+	float jitter[2];
+	uint32_t jitter_width, jitter_height;
 
 	/* memory blocks for images, by memory type */
 	struct block *blocks;
@@ -8294,6 +8298,13 @@ static void draw_body(const struct xgpu_vulkan_draw *draw)
 	viewport.y = (float)dynamic->viewport[1];
 	viewport.width = (float)dynamic->viewport[2];
 	viewport.height = (float)dynamic->viewport[3];
+	/* (display.upscaler: the view's draws jittered, those into its targets'
+	size) */
+	if (vk.jitter_width && vk.pass_width == vk.jitter_width && vk.pass_height == vk.jitter_height)
+	{
+		viewport.x += vk.jitter[0];
+		viewport.y += vk.jitter[1];
+	}
 	viewport.minDepth = XGPU_VULKAN_REVERSED_DEPTH ? 1.0f - dynamic->depth_range[1] : dynamic->depth_range[0];
 	viewport.maxDepth = XGPU_VULKAN_REVERSED_DEPTH ? 1.0f - dynamic->depth_range[0] : dynamic->depth_range[1];
 	/* (the scissor rectangle where it is one, else the whole target, as
@@ -10924,6 +10935,22 @@ static int instance_make(const struct xgpu_vulkan_options *options)
 	}
 	for (index = 0; index < options->instance_extension_count && extension_count < 30; index++)
 		extensions[extension_count++] = options->instance_extensions[index];
+	/* (PRISM's renderer plugins': where the loader has them; told where not,
+	which turns the plugin off) */
+	for (index = 0; index < options->plugin_instance_extension_count; index++)
+	{
+		const char *name = options->plugin_instance_extensions[index];
+		uint32_t have;
+
+		for (have = 0; have < extension_count && strcmp(extensions[have], name); have++)
+			;
+		if (have < extension_count)
+			continue;
+		if (extension_count < 28 && has_instance_extension(name))
+			extensions[extension_count++] = name;
+		else if (options->plugin_missing)
+			options->plugin_missing(name, 0);
+	}
 	vk.validation = options->validation && has_layer("VK_LAYER_KHRONOS_validation");
 	if (options->validation && !vk.validation)
 		host_logf(HOST_LOG_WARN, "vulkan: no validation layers (VK_LAYER_KHRONOS_validation)");
@@ -11206,7 +11233,7 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	VkDriverId driver = driver_id();
 	VkDeviceQueueCreateInfo queue;
 	VkDeviceCreateInfo info;
-	const char *extensions[28];
+	const char *extensions[48];
 	uint32_t extension_count = 0;
 	float priority = 1.0f;
 	/* (display.prism_rt: hardware ray queries, where the device has them
@@ -11263,6 +11290,12 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		device_has_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
 	VkPhysicalDeviceFaultFeaturesEXT available_fault, fault_features;
 	void **chain;
+	/* (the renderer plugins': their first extension, where the chain was
+	before them, and whether the buffers' addresses were enabled for them) */
+	uint32_t plugin_first;
+	void **plugin_chain;
+	int plugin_addresses = 0;
+	VkResult result;
 
 	memset(&available, 0, sizeof(available));
 	memset(&available11, 0, sizeof(available11));
@@ -11539,6 +11572,50 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	if (checkpoints)
 		extensions[extension_count++] = VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME;
 
+	/* (PRISM's renderer plugins': those the device has; told where it lacks
+	one, which turns the plugin off. VK_EXT_buffer_device_address, NGX's,
+	is met by Vulkan 1.2's bufferDeviceAddress where the device has it, the
+	feature enabled in its place: a device may not have both, and NVIDIA's
+	is not made with both) */
+	plugin_first = extension_count;
+	plugin_chain = chain;
+	if (options->plugin_device_extensions)
+	{
+		const char *wanted[16];
+		uint32_t count = options->plugin_device_extensions(vk.physical, wanted, 16), index, have;
+
+		for (index = 0; index < count && index < 16; index++)
+		{
+			if (!strcmp(wanted[index], VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) &&
+				available12.bufferDeviceAddress)
+			{
+				if (!vk.ray_tracing && !plugin_addresses)
+				{
+					memset(&addresses, 0, sizeof(addresses));
+					addresses.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+					addresses.bufferDeviceAddress = VK_TRUE;
+					*chain = &addresses;
+					chain = &addresses.pNext;
+					plugin_addresses = 1;
+				}
+				continue;
+			}
+			for (have = 0; have < extension_count && strcmp(extensions[have], wanted[index]); have++)
+				;
+			if (have < extension_count)
+				continue;
+			if (extension_count < 46 && device_has_extension(wanted[index]))
+				extensions[extension_count++] = wanted[index];
+			else if (options->plugin_missing)
+				options->plugin_missing(wanted[index], 1);
+		}
+	}
+	/* (display.upscaler's FSR 3.1 writes its output through an image of no
+	declared format, and its intermediates through one- and two-channel
+	ones) */
+	features.features.shaderStorageImageWriteWithoutFormat = available.features.shaderStorageImageWriteWithoutFormat;
+	features.features.shaderStorageImageExtendedFormats = available.features.shaderStorageImageExtendedFormats;
+
 	memset(&queue, 0, sizeof(queue));
 	queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 	queue.queueFamilyIndex = vk.queue_family;
@@ -11551,9 +11628,31 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	info.pQueueCreateInfos = &queue;
 	info.enabledExtensionCount = extension_count;
 	info.ppEnabledExtensionNames = extensions;
-	if (!check(options->create_device ?
+	result = options->create_device ?
 		options->create_device(vkGetInstanceProcAddr, vk.physical, &info, NULL, &vk.device) :
-		vkCreateDevice(vk.physical, &info, NULL, &vk.device), "vkCreateDevice"))
+		vkCreateDevice(vk.physical, &info, NULL, &vk.device);
+	/* (a device the renderer plugins' extensions or features cannot be made
+	with: made without them, the plugins that asked for them off) */
+	if (result < 0 && (extension_count > plugin_first || plugin_addresses))
+	{
+		uint32_t index;
+
+		host_logf(HOST_LOG_WARN, "vulkan: vkCreateDevice with the renderer plugins' extensions: %s (%d): made "
+			"without them", result_name(result), (int)result);
+		for (index = plugin_first; index < extension_count; index++)
+		{
+			if (options->plugin_missing)
+				options->plugin_missing(extensions[index], 2);
+		}
+		if (plugin_addresses && options->plugin_missing)
+			options->plugin_missing(VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, 2);
+		*plugin_chain = NULL;
+		info.enabledExtensionCount = extension_count = plugin_first;
+		result = options->create_device ?
+			options->create_device(vkGetInstanceProcAddr, vk.physical, &info, NULL, &vk.device) :
+			vkCreateDevice(vk.physical, &info, NULL, &vk.device);
+	}
+	if (!check(result, "vkCreateDevice"))
 		return 0;
 #define LOAD(name) name = (PFN_##name)vkGetDeviceProcAddr(vk.device, #name);
 	DEVICE_FUNCTIONS(LOAD)
@@ -12528,4 +12627,79 @@ VkImage xgpu_vulkan_image_handle(const struct xgpu_vulkan_image *image)
 VkImageView xgpu_vulkan_image_view(const struct xgpu_vulkan_image *image)
 {
 	return image ? image->sampled : VK_NULL_HANDLE;
+}
+
+void xgpu_vulkan_set_jitter(float x, float y, uint32_t width, uint32_t height)
+{
+	vk.jitter[0] = x;
+	vk.jitter[1] = y;
+	vk.jitter_width = width;
+	vk.jitter_height = height;
+}
+
+int xgpu_vulkan_image_blit(struct xgpu_vulkan_image *source, const int32_t from[4],
+	struct xgpu_vulkan_image *destination, const int32_t to[4], int linear)
+{
+	VkCommandBuffer commands;
+	VkImageBlit blit;
+	VkFormatProperties properties;
+	int depth;
+
+	if (!source || !destination || source->transient || destination->transient ||
+		source->description.samples > 1 || destination->description.samples > 1 || from[2] <= from[0] ||
+		from[3] <= from[1] || to[2] <= to[0] || to[3] <= to[1] || from[0] < 0 || from[1] < 0 || to[0] < 0 ||
+		to[1] < 0 || from[2] > (int32_t)source->description.width || from[3] > (int32_t)source->description.height ||
+		to[2] > (int32_t)destination->description.width || to[3] > (int32_t)destination->description.height)
+		return 0;
+	depth = (source->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0;
+	if (depth != ((destination->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) != 0) ||
+		(depth && (source->format != destination->format || source->aspect != destination->aspect)))
+		return 0;
+	vkGetPhysicalDeviceFormatProperties(vk.physical, source->format, &properties);
+	if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT))
+		return 0;
+	vkGetPhysicalDeviceFormatProperties(vk.physical, destination->format, &properties);
+	if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT))
+		return 0;
+	commands = main_commands();
+	memset(&blit, 0, sizeof(blit));
+	blit.srcSubresource.aspectMask = source->aspect;
+	blit.srcSubresource.layerCount = 1;
+	blit.dstSubresource = blit.srcSubresource;
+	blit.dstSubresource.aspectMask = destination->aspect;
+	blit.srcOffsets[0].x = from[0];
+	blit.srcOffsets[0].y = from[1];
+	blit.srcOffsets[1].x = from[2];
+	blit.srcOffsets[1].y = from[3];
+	blit.srcOffsets[1].z = 1;
+	blit.dstOffsets[0].x = to[0];
+	blit.dstOffsets[0].y = to[1];
+	blit.dstOffsets[1].x = to[2];
+	blit.dstOffsets[1].y = to[3];
+	blit.dstOffsets[1].z = 1;
+	source->used = destination->used = vk.serial;
+	image_use(source);
+	image_use(destination);
+	image_written(destination);
+	vkCmdBlitImage(commands, source->image, VK_IMAGE_LAYOUT_GENERAL, destination->image, VK_IMAGE_LAYOUT_GENERAL, 1,
+		&blit, linear && !depth ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+	image_transfer_done(commands, destination, source);
+	return 1;
+}
+
+int xgpu_vulkan_handles(struct xgpu_vulkan_handles *handles)
+{
+	memset(handles, 0, sizeof(*handles));
+	if (!vk.device)
+		return 0;
+	handles->instance = vk.instance;
+	handles->physical = vk.physical;
+	handles->device = vk.device;
+	handles->get_instance_proc = vkGetInstanceProcAddr;
+	handles->get_device_proc = vkGetDeviceProcAddr;
+	handles->queue_family = vk.queue_family;
+	handles->queue = vk.queue;
+	handles->memory = &vk.memory_properties;
+	handles->timestamp_period = vk.capabilities.gpu_timestamps ? vk.properties.limits.timestampPeriod : 0.0f;
+	return 1;
 }

@@ -172,6 +172,7 @@ boolean render_deferred_window = FALSE; /* port: (render.h) */
 boolean prism_shadows_wanted(void);
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 #include "prism_scene_lights.h" /* port: port/linux/game/prism_scene_lights.c */
+#include "prism_upscale.h" /* port: port/linux/game/prism_upscale.c */
 boolean prism_shadows_pass_begin(struct render_camera const *camera, struct render_frustum const *frustum);
 void prism_shadows_pass_structure(void);
 void prism_shadows_pass_end(void);
@@ -724,6 +725,13 @@ static void render_window(
 			prism_deferred_phase(_prism_deferred_resolve);
 		}
 		render_deferred_window = FALSE; /* port: (the resolve is made) */
+		/* port: display.upscaler: the view's opaque surfaces drawn, its
+		transparent ones to come (port/linux/game/prism_upscale.c: its
+		reactive mask) */
+		if (rasterizer_target == _render_target_primary)
+		{
+			prism_upscale_opaque();
+		}
 		structure_render_transparent_geometry();
 		structure_render_fog();
 		game_engine_post_rasterize_objects();
@@ -819,6 +827,11 @@ static void render_window(
 				rasterizer_camera->viewport_bounds.y0,
 				rasterizer_camera->viewport_bounds.x1,
 				rasterizer_camera->viewport_bounds.y1);
+			/* port: display.upscaler: the view, drawn smaller, upscaled into
+			the window, which the HUD is drawn over at the screen's scale
+			(port/linux/game/prism_upscale.c; the anti-aliasing passes not
+			drawn after it: the upscaler is the anti-aliasing) */
+			prism_upscale_window_end(&parameters.camera, &parameters.frustum);
 			halo_screen_anti_alias(
 				rasterizer_camera->viewport_bounds.x0,
 				rasterizer_camera->viewport_bounds.y0,
@@ -1272,9 +1285,13 @@ void render_frame(
 					spartan_link_feed_end();
 				}
 			}
+			/* port: display.upscaler: the window's views drawn smaller from
+			here on, to its 3D view's end (port/linux/game/prism_upscale.c) */
+			prism_upscale_player_begin(window->local_player_index);
 			render_player_frame(
 				window,
 				screenshot_index != NULL ? &screenshot_combined_index : NULL);
+			prism_upscale_player_end(); /* port */
 			continue;
 		}
 		else

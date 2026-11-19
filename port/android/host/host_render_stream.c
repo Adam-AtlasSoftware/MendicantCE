@@ -250,6 +250,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_SCENE_VIEW] = sizeof(struct xgpu_stream_scene_view),
 	[XGPU_STREAM_PRISM_BAKE] = sizeof(struct xgpu_stream_prism_bake),
 	[XGPU_STREAM_SCENE_MATERIAL_MAPS] = sizeof(struct xgpu_stream_scene_material_maps),
+	[XGPU_STREAM_UPSCALE] = sizeof(struct xgpu_stream_upscale),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_SHARP_UPSCALE] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_HDR_SDR_CURVE] = sizeof(struct xgpu_stream_value),
@@ -655,6 +656,16 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	case XGPU_STREAM_PANINI:
 		CALL(panini, (const void *)start);
 		break;
+	case XGPU_STREAM_UPSCALE:
+	{
+		const struct xgpu_stream_upscale *upscale = (const void *)start;
+
+		if (upscale->phase >= XGPU_UPSCALE_PHASES || upscale->upscaler >= XGPU_UPSCALE_UPSCALERS ||
+			upscale->denoiser >= XGPU_UPSCALE_DENOISERS)
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(upscale, upscale);
+		break;
+	}
 	case XGPU_STREAM_WORLD_AO_WINDOW:
 		CALL(world_ao_window, (const void *)start);
 		break;

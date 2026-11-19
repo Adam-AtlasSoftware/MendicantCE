@@ -78,7 +78,18 @@ static long shadow_scale_choose(void) { return 1; }
 static void render_targets_evict(void) { evicted++; }
 /* (no extra view's images let go of: d3d8_device.c's halo_view_release) */
 #define FALSE 0
+#define TRUE 1
 static BOOL views_released;
+/* (display.upscaler's view drawn smaller: none on Android, d3d8_device.c's view_scale) */
+static struct
+{
+    BOOL drawing;
+    float screen[2];
+    float ratio;
+    float scale[2];
+    BOOL evict, used;
+    float lod_bias;
+} view_scale;
 static void platform_log(const char *format, ...) { (void)format; }
 static void d3d8_surface_resize(int *surface, int format, unsigned long width, unsigned long height)
 {

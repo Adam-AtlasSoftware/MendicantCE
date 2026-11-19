@@ -181,6 +181,10 @@ layout(set = 0, binding = 33, rgba32f) uniform image2D gi_point_last;
 layout(set = 0, binding = 34, rgba32f) uniform image2D gi_point_now;
 layout(set = 0, binding = 35, rgba32f) uniform image2D gi_data_last;
 layout(set = 0, binding = 36, rgba32f) uniform image2D gi_data_now;
+/* the frame's exposure (x) and curve (y), 1x1, for a plugin that upscales
+the view (xgpu_vulkan_upscale.c: it takes the frame as linear light before
+the tone mapping and its output is tone mapped again by these) */
+layout(set = 0, binding = 37, rgba16f) uniform image2D exposure_out;
 
 ivec2 size_of() { return ivec2(job.counts.y, job.counts.z); }
 bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(job.counts.y) && p.y < int(job.counts.z); }
@@ -2387,7 +2391,8 @@ void main()
             }
         }
     }
-    imageStore(sun_raw, pixel, vec4(direct_on ? v_sun : 0.0, blocker, traced, 0.0));
+    /* (the sun's visibility stored at the end, with the diffuse bounce's
+    length in w) */
 
     vec3 noisy_d = vec3(0.0), noisy_s = vec3(0.0), clean_d = vec3(0.0), clean_s = vec3(0.0);
     vec3 share = specular_share(g);
@@ -2403,6 +2408,10 @@ void main()
     /* (the reflection ray's length, for the specular history's virtual
     motion: 0 where none is traced, far where it leaves the level) */
     float spec_hit = 0.0;
+    /* (the diffuse bounce ray's length, for a denoiser's plugin (Ray
+    Reconstruction's diffuse hit distance): 0 where none is traced, far
+    where it leaves the level) */
+    float diffuse_hit = 0.0;
     if (direct_on)
     {
         /* the domes, the lamps, the fixtures, the dynamic lights */
@@ -2455,6 +2464,7 @@ void main()
             seed_for(pixel, frame, 4u);
             vec3 d = cosine_dir(g.normal);
             vec3 bounce = hit_light_n(o, d, 300.0, false, hd, hn);
+            diffuse_hit = hd > 0.0 ? hd : 1000.0;
             /* (the radiance cache: every fourth pixel's hit added to its
             cell; the cell's mean in the hit's place where it has its
             samples) */
@@ -2529,6 +2539,7 @@ void main()
     imageStore(noisy_specular, pixel, vec4(demodulated, luma(demodulated)));
     imageStore(clean_diffuse, pixel, vec4(clean_d, 0.0));
     imageStore(clean_specular, pixel, vec4(clean_s, 0.0));
+    imageStore(sun_raw, pixel, vec4(direct_on ? v_sun : 0.0, blocker, traced, min(diffuse_hit, 60000.0)));
     if (spec_hit > 0.0)
     {
         uvec4 guide = guide_of(g);
@@ -3529,6 +3540,48 @@ void main()
 
 //@pass composite
 layout(local_size_x = 8, local_size_y = 8) in;
+
+/* a denoiser's plugin's reflection motion (Ray Reconstruction's motion
+vectors of the reflected objects), as the change from the surface's: the
+last frame's place of the reflection's virtual image (the image behind the
+surface along the eye's ray at the reflection ray's length, the mean of
+this pixel's and its 3 x 3 neighbours' on the same surface, as
+specular_virtual finds it) less the surface's own last place, in pixels,
+by the share specular_virtual's virtual motion takes (none past a roughness
+of 0.45: a wide lobe's reflection moves with the surface); none on the
+moving objects, where no ray was traced or the image was behind the last
+frame's camera */
+vec2 reflection_motion_change(ivec2 pixel, Surface g)
+{
+    if (!g.present || g.instance != 0u)
+        return vec2(0.0);
+    float amount = 1.0 - smoothstep(0.1, 0.45, g.roughness);
+    if (amount <= 0.0)
+        return vec2(0.0);
+    uint here = imageLoad(guide_now, pixel).x;
+    float sum = 0.0, count = 0.0;
+    for (int k = 0; k < 9; k++)
+    {
+        ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
+        if (!inside(q))
+            continue;
+        uvec4 gq = imageLoad(guide_now, q);
+        float h = unpackHalf2x16(gq.w).y;
+        if (gq.x != here || !(h > 0.0))
+            continue;
+        sum += h;
+        count += 1.0;
+    }
+    if (count < 1.0)
+        return vec2(0.0);
+    vec2 image = last_pixel(g.point - g.eye * (sum / count), vec2(pixel), g.motion, true);
+    vec2 surface = last_pixel(g.point, vec2(pixel), g.motion, true);
+    if (image.x < -1.0e5 || surface.x < -1.0e5)
+        return vec2(0.0);
+    vec2 change = (image - surface) * amount;
+    return any(isnan(change)) || any(isinf(change)) ? vec2(0.0) : clamp(change, vec2(-4096.0), vec2(4096.0));
+}
+
 /* the frame (Raster's form): the diffuse light (the floor, the bake's
 indirect light, the denoised light, the sun's by its filtered visibility)
 by the base colour less the specular's share, the specular light (the
@@ -3541,6 +3594,13 @@ void main()
     s = Scene(push.scene);
     job = Job(push.job);
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    /* (the frame's exposure as below and its curve, for a plugin that
+    upscales the view: one invocation's) */
+    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
+    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
+    int curve = int(job.exposure.y + 0.5);
+    if (pixel == ivec2(0))
+        imageStore(exposure_out, ivec2(0), vec4(exposure, float(curve), 0.0, 0.0));
     if (!inside(pixel))
         return;
     vec4 additions = texelFetch(additions_in, pixel, 0);
@@ -3553,6 +3613,9 @@ void main()
         sky; nothing of it is CE's lighting) */
         vec3 classic = texelFetch(light_in, pixel, 0).rgb * texelFetch(base_in, pixel, 0).rgb + additions.rgb;
         imageStore(frame_out, pixel, vec4(view >= 20u ? vec3(0.0) : classic, additions.a));
+        /* (source 4: not lit by the tracer, the plugin told so) */
+        if (source == 4u)
+            imageStore(diff_a, pixel, vec4(0.0));
         return;
     }
     vec3 share = specular_share(g);
@@ -3569,11 +3632,13 @@ void main()
     }
     else
     {
-        vec4 dd = source == 2u ? imageLoad(noisy_diffuse, pixel) : source == 1u ? imageLoad(diff_b, pixel) :
+        /* (source 4, the light given raw to the view's plugin: as traced, as 2) */
+        bool raw = source == 2u || source == 4u;
+        vec4 dd = raw ? imageLoad(noisy_diffuse, pixel) : source == 1u ? imageLoad(diff_b, pixel) :
             imageLoad(diff_a, pixel);
-        vec4 ds = source == 2u ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
+        vec4 ds = raw ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
             imageLoad(spec_a, pixel);
-        vec4 dv = source == 2u ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
+        vec4 dv = raw ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
             imageLoad(sun_a, pixel);
         float v = clamp(dv.x, 0.0, 1.0);
         vec3 cd = imageLoad(clean_diffuse, pixel).rgb;
@@ -3617,8 +3682,6 @@ void main()
     channel, its hue kept), before the base colour; the glow as CE's; then
     the tone curve. The live frames and the reference's alike, so that the
     gates compare them on one side of the hold) */
-    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
-    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
     if (metered && (pixel.x & 3) == 0 && (pixel.y & 3) == 0)
     {
         vec3 classic = texelFetch(light_in, pixel, 0).rgb * texelFetch(base_in, pixel, 0).rgb + additions.rgb;
@@ -3627,15 +3690,36 @@ void main()
     /* (the hold at white only under the "ce" curve, the display's clip:
     Adam's direction of 21:34, the light physically lit, a rolled-off curve
     taking what is past white) */
-    int curve = int(job.exposure.y + 0.5);
     vec3 held = diffuse_light * exposure;
     float brightest = max(held.r, max(held.g, held.b));
     if (curve == 0 && brightest > 1.0)
         held /= brightest;
-    vec3 result = tone_curved(kd * held + specular_light * exposure + g.emissive, curve);
+    vec3 lit = kd * held + specular_light * exposure + g.emissive;
+    vec3 result = tone_curved(lit, curve);
     if (any(isnan(result)) || any(isinf(result)))
         result = vec3(0.0);
     imageStore(frame_out, pixel, vec4(result, additions.a));
+    if (source == 4u)
+    {
+        /* the light given raw to the view's plugin (DLSS Ray Reconstruction),
+        in the denoiser's images, which do not run: the light before the
+        exposure and the curve, noisy (diff_a, alpha 1: lit here), the
+        albedos it was demodulated with (the diffuse's base colour less the
+        specular's share, spec_a; the specular's split-sum share, spec_b),
+        the shading normal and roughness (diff_b) and the reflection ray's
+        length (sun_a.x: the light pass's, 0 where none was traced), the
+        diffuse bounce's (sun_a.y, as x) and the reflected image's screen
+        motion less the surface's (sun_a.zw, reflection_motion_change) */
+        vec3 light = lit / max(exposure, 1.0e-6);
+        if (any(isnan(light)) || any(isinf(light)))
+            light = vec3(0.0);
+        imageStore(diff_a, pixel, vec4(max(light, vec3(0.0)), 1.0));
+        imageStore(spec_a, pixel, vec4(kd, 1.0));
+        imageStore(spec_b, pixel, vec4(share, 1.0));
+        imageStore(diff_b, pixel, vec4(g.normal, g.roughness));
+        imageStore(sun_a, pixel, vec4(unpackHalf2x16(imageLoad(guide_now, pixel).w).y, imageLoad(sun_raw, pixel).w,
+            reflection_motion_change(pixel, g)));
+    }
 }
 
 //@pass reference

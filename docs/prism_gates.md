@@ -730,6 +730,196 @@ automatic tier.
 Not measured yet: the G-buffer pass's time with the pack against without (it needs the RTX 2060 alone), and the RTX
 3070 Ti's numbers.
 
+## M5, part 1: the plugins and the frame upscaling
+
+M5's first part (`docs/prism_plugin.md`) is judged by these (the design's M5 exit: FSR 3.1 against native, mean FLIP
+≤ 0.06 at the stills; the passthrough plugin byte-identical to the upscaler off; nothing opened without a plugin set;
+DLSS RR, where built, recorded; the common gates):
+
+- **FSR 3.1 against native**: a frozen scene's probe poses captured in one run, the camera held 300 frames at each
+  pose in each state (native: `display.upscaler` `"off"`; FSR 3.1 at 67% and 50%; DLSS Super Resolution the same
+  where the plugin runs), Classic (`display.lighting` `"ce"`) and `"ce_deferred"`, at 1920 by 1080: the mean FLIP of
+  each upscaled frame against the native frame at the same pose (the metrics' 960 by 540, as the other gates take
+  FLIP, and the full size beside it), against M5's 0.06; and the GPU's time of each frame
+  (`HALO_VULKAN_GPU_TIMES_FILE`), the median of each pose's last 240 frames, paced as every gate's run is (a frame
+  each 33 ms).
+- **In motion**: G2's moves a step a frame, every 4th step's frame against native's.
+- **The passthrough plugin's identity**: with `display.upscaler` `"plugin:passthrough"` at a render scale of 1 and
+  the jitter off (`HALO_UPSCALE_JITTER=0`), every frame byte-identical to the upscaler off.
+- **The light a denoiser's plugin is given**: the path tracer's frames with `display.denoiser` a plugin, and
+  `"off"`, against its own filter on and off, by what changes from one frame to the next (the live tracer is not
+  reproducible byte for byte: its cache's atomics, its frames' seeds).
+- **Nothing opened without a plugin**: a run with no plugin named, the dynamic loader's log (`LD_DEBUG=files`, in
+  `strace`'s place) names nothing in a plugins folder.
+- **Vulkan validation** with synchronisation validation on, with FSR 3.1 (Classic and `"ce_deferred"`, 67% and
+  50%), the passthrough plugin, and DLSS where it runs.
+- **Classic's and Enhanced's identity** against M2's tree (`1e95379ef`), as every milestone's below, with nothing
+  of M5's on.
+
+The tools: `tools/prism_gate`'s harness, driven as M1's and M2's measurements were (their scripts kept with the
+runs, not in the tree); `HALO_UPSCALE_GPU_MARKS=1` times the upscaler's own work (`port/linux/vulkan/README.md`).
+
+### M5 as measured (RTX 2060, driver 615.78.08)
+
+**FSR 3.1 against native** (the worst pose's mean FLIP; the GPU's milliseconds a frame, the poses' mean, paced):
+
+| Scene | Lighting | Native ms | FSR 67%: FLIP 960 | full | ms | FSR 50%: FLIP 960 | full | ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| G2 | Classic | 1.77 | 0.0552 | 0.0578 | 9.58 | 0.0620 | 0.0656 | 7.13 |
+| G2 | ce_deferred | 6.57 | 0.0547 | 0.0573 | 12.59 | 0.0599 | 0.0635 | 8.94 |
+| G5 | Classic | 1.15 | 0.0160 | 0.0172 | 8.77 | 0.0187 | 0.0202 | 6.48 |
+| G5 | ce_deferred | 5.16 | 0.0158 | 0.0170 | 11.51 | 0.0176 | 0.0192 | 8.06 |
+| S1 | Classic | 2.04 | 0.0387 | 0.0420 | 9.69 | 0.0441 | 0.0482 | 7.15 |
+| S1 | ce_deferred | 6.77 | 0.0390 | 0.0422 | 12.62 | 0.0446 | 0.0487 | 9.02 |
+| S3 | Classic | 2.75 | 0.0254 | 0.0286 | 9.92 | 0.0289 | 0.0326 | 7.22 |
+| S3 | ce_deferred | 7.88 | 0.0250 | 0.0282 | 12.96 | 0.0274 | 0.0312 | 9.05 |
+| G7 | Classic | 2.40 | 0.0266 | 0.0280 | 9.67 | 0.0309 | 0.0328 | 7.03 |
+
+At 67% every scene measured is under 0.06 (the worst, G2 in Classic, 0.0552); at 50% G2 is over it in Classic
+(0.0620) and at it on `"ce_deferred"` (0.0599), the others under. What FSR changes most is the native frame's
+aliasing (the edges of the rocks and the alpha-tested trees, smooth under FSR) and the textures' finest grain, a
+little softer. G1, G3, G4, G6, S2a and S2b, and G7 on `"ce_deferred"`, were measured after the review, on the RTX
+3070 Ti (below): S2a, the water, is over 0.06 at 67% too.
+
+**The frame's time.** The gates' runs draw a frame each 33 ms, and Classic's frame is light: the RTX 2060 idles
+between frames at low clocks, where the upscaler's memory-bound passes take several times their time at speed. By
+the GPU time's marks around the upscaler's work at the view's end (G2, Classic): FSR 3.1 at 100% 3.8 ms, at 67%
+8.0 ms, at 50% 5.9 ms; the passthrough plugin (the input pass, one blit and the copies alone) 2.7 ms at 67% and
+3.5 ms at 100%, more than the whole native frame's 1.6 ms. Under the path tracer's load (below) the 67% frame
+takes 13.2 to 14.0 ms against native's 23.9 to 27.9: the tracer's share at 0.45 of the pixels and FSR's together,
+which puts FSR's own at speed near 1.5 ms (an estimate from those two). FSR's time measured on its own with the
+card busy was not reached (the queue).
+
+**In motion** (G2's moves, a step a frame, 30 frames each): FSR 3.1 at 67% against native, mean FLIP 0.0323 (most
+0.0437) in Classic and 0.0325 (0.0443) on `"ce_deferred"`, below the held poses' 0.0552: no history dragged
+behind the moving camera (the motion: the camera's from the depth in Classic, the G-buffer's on `"ce_deferred"`).
+
+**The path tracer** (`display.prism_rt` `"pathtraced"`, faithful, its own filter, G2's poses on `"ce_deferred"`):
+native 23.9 to 27.9 ms a frame, its mean FLIP against R (the converged reference) 0.0139, 0.0219 and 0.0348; FSR
+3.1 at 67% 13.2 to 14.0 ms, 0.0555 against native at the worst pose and 0.0574, 0.0576 and 0.0724 against R; FSR
+3.1 at 100% (its anti-aliasing alone) 26.0 to 28.2 ms, 0.0362 against native.
+
+**The passthrough plugin's identity**: G2's three poses byte-identical with the upscaler off (largest difference
+0 of 255).
+
+**The light a denoiser's plugin is given**: the tracer's own filter on and off, a denoiser's plugin (the
+passthrough) and `"off"`, at G5's poses (a10's interior): from a frame to the next, 1.4 to 2.1 of 255 change in
+every state, and the frames' noise alike; in these scenes the filter leaves nothing a frame shows, so the frames
+cannot tell the raw light from the filtered. The plugin's and `"off"`'s light is what `display.prism_rt_denoiser`
+`"off"` traces (the same value given the tracer, `prism_rt.c`, `xgpu_vulkan_rt.c`), and the passthrough was given
+the path pass's two images each frame without an error. (That run's last state, the tracer's own filter after the
+plugin, was still traced raw: the host kept the plugin's denoiser past its view, the fault the review found, fixed
+below; its first state, the filter on, is the one the others were measured against.)
+
+**The denoise-and-upscale entry** (DLSS Ray Reconstruction's): the input pass makes the guides from the G-buffer
+(the diffuse and specular albedos, the shading normal and roughness) and the plugin is given them at the view's end
+with the depth, motion and jitter, the tracer's own filter off. No plugin of that kind ran (DLSS's could not,
+below); the passthrough plugin in its place (`PRISM_PASSTHROUGH_CAPABILITIES=rr`), after the review and on the RTX
+3070 Ti's shared lane, without the path tracer (G2's probes, `"ce_deferred"`): its colour at 100% with the jitter off
+byte-identical to native at 3 of 3 poses (largest difference 0 of 255; FSR 3.1, which the view falls back to without
+the entry, is not); each guide shown in the colour's place by `PRISM_PASSTHROUGH_SHOW` (the diffuse albedo, black
+where metal; the specular albedo, dark on the dielectric ground and the metal's own colour on the metal; the normal);
+and Vulkan validation, synchronisation's too, with the entry at 100%, from 67%, and the fallback to FSR 3.1 in
+Classic (no G-buffer): no message. With the path tracer it is in the RTX 2060's queue (below).
+
+**Nothing opened without a plugin**: with `display.upscaler` `"fsr3"` and no plugin named, the dynamic loader
+loaded 202 libraries, none from a plugins folder and none of NGX's; no plugin's line logged.
+
+**Vulkan validation**, synchronisation's too: FSR 3.1 at 67% and 50%, Classic and `"ce_deferred"`, and the
+passthrough plugin, at G2's and G5's probes: no message; and FSR 3.1 in the DLSS plugin's place on Classic's,
+`"ce_deferred"`'s and the path tracer's frames, G2: none past the loader's two on the device the driver refused
+(below). The first run (G2) found clears of FSR's images one after another with nothing
+between (`WRITE_AFTER_WRITE`, 10 reported): the images' first clear and the first frame's own, and the scene's
+luminance cleared on a reset and again each frame. Fixed (`62bb08c07`): the luminance cleared as the SDK clears it.
+
+**DLSS** (Super Resolution and Ray Reconstruction) was not measured. The RTX 2060's driver (615.78.08, NVIDIA's open
+kernel modules) makes no Vulkan device with `VK_NVX_binary_import`, one of the four device extensions NGX names:
+`VK_ERROR_INITIALIZATION_FAILED`, in the game and in a process of its own asking for that extension alone (each of
+the other three, `VK_NVX_image_view_handle`, `VK_KHR_push_descriptor` and `VK_EXT_buffer_device_address`, makes a
+device). Everything before the device runs: the plugin builds against the SDK (310.9.16) and NGX names its
+extensions before the device is made. Before this was found, the game was left without a device; now it makes the
+device again without the plugin's extensions, logs why, and draws with FSR 3.1 in DLSS's place. Whether CUDA starts
+in such a process (the extension loads its kernels through it) was not checked (the queue).
+
+**Classic's and Enhanced's identity** against M2's tree: `frames` with the game's defaults (Enhanced) and with
+Classic's settings, b30's and a10's 46 frames each byte-identical, each tree alike with itself; `stills` (the kit's
+settings, RT off) G2, G4 and G5 30 of 30 alike, G7 alike in no run of either tree (its floor lamps' glows, as
+before); **determinism** (`--simulation`): all alike, each tree with itself and the new with the base (1,476
+ticks).
+
+### After the review (`f90828e55` to `1f20c5c06`)
+
+The first round's review found two faults, fixed:
+
+- **The Steam Frame's package** (`tools/frame_package.py`) carried FSR 3.1's code (its VR arm64 host compiles the
+  whole Vulkan renderer, FSR's passes and host half with it) without its MIT notice, and the JSON tokenizer's (jsmn's)
+  from before: it now takes the 64-bit ARM build's notices from `tools/linux_package.py`, the list every other release
+  carries (`test_linux_package.py`'s `test_frame_licences`).
+- **The path tracer's light stayed raw after a denoiser's plugin was let go of**: the host kept BEGIN's denoiser until
+  the next BEGIN, which a frame with no view begun never sends (display.denoiser set back to `"prism"` with no
+  upscaler, split screen, a replay's held view, a movie), so the tracer's own filter stayed off. END now puts it
+  back, and a plugin that denoises and upscales is given the light raw only where the view has its G-buffer (else
+  the filter is kept and FSR 3.1 resolves the view); each change is logged. `tools/test_upscale.py` drives it over
+  fake plugins (at the commit before, the light stayed raw after the view's END and in a frame with no view).
+
+and smaller ones: an extension missing turns off only the plugins that asked for it; a view with no camera is
+stretched, not given to FSR 3.1 with its near and far planes 0; the storage images' features are checked before
+FSR's pipelines are made; the shutdown submits and waits for the last frame's work before the upscaler's objects
+and the plugins go; the builds that never upscale (Android's, the VR build's) open no plugin and read display.denoiser
+`"off"` as `"prism"`; and `xgpu_render_target_find`'s choice between a target and its view's copy applies only
+while views are drawn smaller.
+
+Measured again with them (`1f20c5c06`): the light runs on the RTX 3070 Ti's shared lane, both trees of each
+comparison on it; the path tracer's on the RTX 2060.
+
+- **Classic's and Enhanced's identity** against `1e95379ef`: `frames` with Classic's settings and with the game's
+  defaults, b30's and a10's 46 frames each byte-identical, each tree with itself and the new with the base;
+  **determinism** (`--simulation`): all alike, each tree with itself and the new with the base (1,477 ticks).
+  `stills` (the kit's settings: about 1.8 GB of graphics memory a run, more than the 3070 Ti's shared lane takes) is
+  asked on the RTX 2060 and was not reached in this round; the first round's stands (G2, G4 and G5 30 of 30, G7 0 of
+  30 in every run of either tree).
+- **Vulkan validation**, synchronisation's too, G2's and G5's probes: FSR 3.1 at 67% and 50% in Classic and on
+  `"ce_deferred"`, the passthrough plugin: no message; and the game's own shutdown (b30, a run that ends by itself),
+  after FSR 3.1 at 67% and after the passthrough plugin as upscaler and denoiser: no message.
+- **The passthrough plugin's identity**: G2, 3 of 3 poses byte-identical with the upscaler off, in Classic and on
+  `"ce_deferred"` (largest difference 0 of 255); FSR 3.1 at 100% beside it, 0 of 3 (165 of 255).
+- **The denoise-and-upscale entry**, with the passthrough in a plugin's place: above.
+- **The path tracer with a denoiser's plugin** (the passthrough: the light given raw in a view begun for it and taken
+  back with display.denoiser set back to `"prism"`; the Ray Reconstruction kind with and without the view's
+  G-buffer; validation on): asked on the RTX 2060 and not reached in this round. The hook's state is the one
+  `tools/test_upscale.py` checks over fake plugins.
+
+**FSR 3.1 against native at the scenes the first round did not reach** (RTX 3070 Ti, as above but its frames alone:
+no frame times on that card; the worst pose's mean FLIP):
+
+| Scene | Lighting | FSR 67%: FLIP 960 | full | FSR 50%: FLIP 960 | full |
+| --- | --- | --- | --- | --- | --- |
+| G1 | Classic | 0.0204 | 0.0218 | 0.0225 | 0.0246 |
+| G1 | ce_deferred | 0.0201 | 0.0215 | 0.0211 | 0.0232 |
+| G3 | Classic | 0.0316 | 0.0352 | 0.0358 | 0.0398 |
+| G3 | ce_deferred | 0.0316 | 0.0350 | 0.0355 | 0.0391 |
+| G4 | Classic | 0.0077 | 0.0081 | 0.0085 | 0.0094 |
+| G4 | ce_deferred | 0.0076 | 0.0080 | 0.0081 | 0.0091 |
+| G6 | Classic | 0.0358 | 0.0371 | 0.0410 | 0.0427 |
+| G6 | ce_deferred | 0.0355 | 0.0368 | 0.0401 | 0.0417 |
+| G7 | ce_deferred | 0.0263 | 0.0276 | 0.0286 | 0.0309 |
+| S2a | Classic | 0.0696 | 0.0741 | 0.0859 | 0.0924 |
+| S2a | ce_deferred | 0.0693 | 0.0738 | 0.0851 | 0.0916 |
+| S2b | Classic | 0.0270 | 0.0300 | 0.0312 | 0.0352 |
+| S2b | ce_deferred | 0.0264 | 0.0295 | 0.0291 | 0.0332 |
+
+With these all 22 scene and lighting pairs are measured. At 67% every one is under 0.06 but S2a's (b30's water), at
+0.0696 in Classic and 0.0693 on `"ce_deferred"`: the M5 exit's FLIP is not met there. At 50% G2 is over it in
+Classic (0.0620; on `"ce_deferred"` 0.0599 on the RTX 2060, 0.0601 in the review's run on the 3070 Ti) and S2a in
+both. S2a's frames are
+not moving: held, the native frame is byte-identical from one frame to the next and when the state is held again,
+so the water's own animation is not in the error. The error is over the whole frame (the sky's 0.057 to 0.058, the
+water and the shore's 0.071 to 0.076, by pose), and the reactive mask (the surf and the far water, 16 to 21% of the
+frame) holds 18 to 20% of it, about its share of the frame: it is FSR at 67% losing the finest grain the native frame
+has everywhere in that scene (the ripples, the clouds), not the transparent water being taken for reactive. The
+textures' mip bias under the upscaler is log2 of the ratio, without the extra -1 AMD's sample adds; whether that gives
+the grain back here is not measured.
+
 ## Every milestone also passes
 
 `tools/prism_gate/identity.py` checks the milestone's tree against the tree it started from:

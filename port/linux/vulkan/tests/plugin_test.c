@@ -123,6 +123,20 @@ static int record(const struct prism_plugin *table)
 	frame.color_out.height = 64;
 	if (!table->evaluate(context, &frame))
 		return 1;
+	/* (a denoiser's frame: its radiance alone, nothing recorded) */
+	{
+		struct prism_plugin_frame light;
+		int before = copies + blits + barriers;
+
+		memset(&light, 0, sizeof(light));
+		light.size = sizeof(light);
+		light.commands = frame.commands;
+		light.diffuse_radiance = frame.color_in;
+		light.specular_radiance = frame.color_in;
+		if (!table->evaluate(context, &light))
+			return 1;
+		printf("denoised with %d commands\n", copies + blits + barriers - before);
+	}
 	frame.size = 4;
 	if (table->evaluate(context, &frame))
 		return 1;

@@ -218,7 +218,9 @@ keep that license.
 The renderer's plugin interface, `port/linux/vulkan/prism_plugin.h`, alone is
 offered under the [MIT licence](LICENSES/MIT.txt) or `AGPL-3.0-or-later`, as
 the reader chooses, so that a plugin built against it need not be AGPL
-(`docs/prism_plugin.md`). No vendor's code is in the tree.
+(`docs/prism_plugin.md`). No vendor's code is in the tree but AMD's FidelityFX
+Super Resolution 3.1, which is MIT (`port/third_party/fidelityfx-fsr3`); plugins such as
+DLSS's are built by their players outside it.
 
 GOAT H1 is an unofficial fan project, not endorsed by or affiliated with
 Microsoft, Xbox Game Studios, Halo Studios or Bungie. Halo is a trademark

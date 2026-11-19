@@ -191,6 +191,12 @@ def notices(platform: str) -> List[Tuple[Path, str]]:
         # the DXT textures' ASTC encoder (port/third_party/astc-encoder), in
         # the Apple and Android hosts, whose Apache license asks the same
         pairs.append((ROOT / "port/third_party/astc-encoder/LICENSE.txt", "astc-encoder-LICENSE.txt"))
+    if platform not in ("macos", "ios"):
+        # display.upscaler's FidelityFX Super Resolution 3.1
+        # (port/third_party/fidelityfx-fsr3: its passes compiled into the
+        # Vulkan renderer, its host half written after AMD's), whose MIT
+        # license asks copies to carry its notice
+        pairs.append((ROOT / "port/third_party/fidelityfx-fsr3/LICENSE.txt", "fidelityfx-fsr3-LICENSE.txt"))
     return pairs
 
 

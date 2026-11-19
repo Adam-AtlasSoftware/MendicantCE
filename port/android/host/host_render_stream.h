@@ -131,6 +131,9 @@ struct host_render_backend
 	void (*scene_view)(void *context, const struct xgpu_stream_scene_view *record);
 	/* PRISM_BAKE: data its phase's (NULL none), checked to lie in the stream */
 	void (*prism_bake)(void *context, const struct xgpu_stream_prism_bake *record, const void *data);
+	/* UPSCALE (M5): display.upscaler's and display.denoiser's frame (none:
+	the view is left as it was drawn) */
+	void (*upscale)(void *context, const struct xgpu_stream_upscale *record);
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);

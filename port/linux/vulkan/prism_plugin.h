@@ -40,7 +40,9 @@ extern "C" {
 #endif
 
 /* the ABI's version: raised with any change to a structure or a call
-below. A plugin built for another refuses (or the host refuses it) */
+below, except fields added at a structure's end (each side reads those
+only where the other's size, in info or in the structure, covers them). A
+plugin built for another refuses (or the host refuses it) */
 #define PRISM_PLUGIN_ABI 1u
 
 /* the one symbol a plugin exports, and its type: given the host's ABI, it
@@ -146,9 +148,10 @@ struct prism_plugin_frame
 	VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) */
 	struct prism_plugin_image color_in, color_out;
 	/* the guides, at the render size: depth (reversed or not as the
-	projection says), screen motion in pixels (this frame's position less
-	the last frame's), the shading normal (xyz, world space) and roughness
-	(w) */
+	projection says), screen motion in pixels (the last frame's position
+	less this frame's, this frame's unjittered: from the pixel to where it
+	was, NGX's and FSR's sense), the shading normal (xyz, world space) and
+	roughness (w) */
 	struct prism_plugin_image depth, motion, normal_roughness;
 	/* the surfaces' diffuse and specular albedo, and each pixel's specular
 	ray's hit distance (world units) */
@@ -169,6 +172,49 @@ struct prism_plugin_frame
 	/* reset: 1 where the history must be dropped (a cut, a teleport, a map
 	loaded); the render and output sizes */
 	uint32_t reset, render_width, render_height, output_width, output_height;
+
+	/* ---------- added after the first release (read only where size
+	covers them: a host built before gives none) */
+	/* PRISM_FRAME_*: what color_in is and how the depth is kept */
+	uint32_t flags;
+	/* the curve the host tone maps color_out with afterwards
+	(PRISM_TONE_*), where color_in is HDR */
+	uint32_t tone_mapper;
+	/* the exposure the host's tone mapping multiplies color_out by, as a 1x1
+	R32_SFLOAT image written by the frame's commands (the GPU meters it),
+	where color_in is HDR; exposure then 1 */
+	struct prism_plugin_image exposure_image;
+	/* where a path tracer gives them: the diffuse ray's hit distance (world
+	units) and the reflected objects' screen motion (pixels, in motion's
+	sense: where the reflection's image was) */
+	struct prism_plugin_image diffuse_hit_distance, motion_reflections;
+};
+
+/* prism_plugin_frame's flags */
+enum prism_plugin_frame_flag
+{
+	/* color_in is linear HDR light before the host's tone mapping (pre-
+	exposed by pre_exposure; the exposure in exposure_image or exposure),
+	and color_out is to be the same: the host tone maps it. Without it
+	color_in is the tone-mapped frame (0 to 1) and color_out is shown as it
+	is */
+	PRISM_FRAME_HDR = 1u << 0,
+	/* depth is reversed (1 near, 0 far: the host's own, D3D's [0, 1]) */
+	PRISM_FRAME_DEPTH_REVERSED = 1u << 1,
+	/* color_in is a path tracer's light, noisy, one sample a pixel, not
+	denoised (a denoiser that upscales takes it with its guides) */
+	PRISM_FRAME_NOISY = 1u << 2,
+};
+
+/* prism_plugin_frame's tone_mapper: the curve after color_out */
+enum prism_plugin_tone_mapper
+{
+	/* clipped at white (the display's) */
+	PRISM_TONE_CLIP,
+	/* a gentle roll-off past 0.6 of white (Reinhard-like) */
+	PRISM_TONE_FILMIC,
+	/* Narkowicz's fit of ACES */
+	PRISM_TONE_ACES,
 };
 
 /* the plugin's table. Every call returns 1 on success and 0 on failure

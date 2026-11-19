@@ -54,6 +54,7 @@ the settings. Nothing crosses the network.
 #include "world_scene.h"
 #include "prism_world_geometry.h"
 #include "prism_scene_static.h"
+#include "prism_upscale.h"
 #include "../src/xgpu_coverage.h"
 
 #include <math.h>
@@ -417,6 +418,11 @@ static void settings_read(void)
 	prism_rt.quality = word_index(config_string("display.prism_rt_quality"), qualities, 0);
 	prism_rt.resolution = word_index(config_string("display.prism_rt_resolution"), resolutions, 0);
 	prism_rt.denoiser = word_index(config_string("display.prism_rt_denoiser"), denoisers, 0);
+	/* (display.denoiser "off", PRISM v4's: the light as it is traced,
+	whatever the tracer's own filter is set to, in the builds that upscale,
+	as prism_upscale.c reads it; docs/prism_plugin.md) */
+	if (prism_upscale_denoiser_off())
+		prism_rt.denoiser = 2;
 	prism_rt.reflections = word_index(config_string("display.prism_rt_reflections"), reflections, 0);
 	prism_rt.objects = word_index(config_string("display.prism_rt_objects"), objects, 0);
 	prism_rt.rate = word_index(config_string("display.prism_rt_rate"), rates, 0);

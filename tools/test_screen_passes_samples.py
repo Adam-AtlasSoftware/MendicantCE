@@ -62,6 +62,8 @@ static BOOL bind_targets(BOOL *has_depth) { *has_depth = TRUE; return TRUE; }
 enum { _anti_aliasing_off, _anti_aliasing_fxaa, _anti_aliasing_smaa, _anti_aliasing_msaa };
 static int mode = _anti_aliasing_msaa;
 static int anti_aliasing(void) { return mode; }
+/* (display.upscaler: no view upscaled here) */
+static int halo_upscale_view_upscaled(void) { return 0; }
 static struct render_target_entry back_buffer;
 static struct render_target_entry *render_target_get(void *surface) { (void)surface; return &back_buffer; }
 static int sample_changes, resolves, passes;

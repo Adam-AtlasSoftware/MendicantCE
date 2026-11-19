@@ -922,9 +922,16 @@ static const struct config_setting config_settings[] =
 		"traces a bounce only for the objects. Read each frame." },
 	{ "display.denoiser", _config_string, "\"prism\"", "HALO_DENOISER", _environment_value, _platform_desktop,
 		"With display.lighting \"pathtraced\": \"prism\" the in-tree denoiser\n"
-		"(its diffuse and specular light and the sun's shadows); \"off\" the\n"
-		"traced light as it is, one sample a pixel (for checking). Read each\n"
-		"frame." },
+		"(its diffuse and specular light and the sun's shadows); \"dlss_rr\"\n"
+		"NVIDIA DLSS Ray Reconstruction (the plugin \"dlss\" you built,\n"
+		"docs/prism_plugin.md), opened as the game starts: it takes the traced\n"
+		"light as it is, before the tone mapping, with the path tracer's\n"
+		"guides, and denoises it and brings the view to the screen's pixels in\n"
+		"one step, in place of the in-tree denoiser and of display.upscaler\n"
+		"(display.upscaler_scale under an upscaler, else the screen's pixels:\n"
+		"DLAA); one that cannot be opened is \"prism\". \"plugin:<name>\" any\n"
+		"plugin that denoises; \"off\" the traced light as it is, one sample a\n"
+		"pixel (for checking). Read each frame." },
 	{ "display.prism_glow_lights", _config_real, "1.0", "HALO_PRISM_GLOW_LIGHTS", _environment_value,
 		_platform_desktop,
 		"With display.lighting \"pathtraced\": how brightly what glows lights\n"
@@ -990,6 +997,26 @@ static const struct config_setting config_settings[] =
 		"the one made from CE's shader as the map loads; false: every shader's\n"
 		"made from CE's. Needs a graphics card that draws display.prism_materials'\n"
 		"materials. Read each frame." },
+	{ "display.upscaler", _config_string, "\"off\"", "HALO_UPSCALER", _environment_value, _platform_desktop,
+		"PRISM v4: the 3D view drawn smaller (display.upscaler_scale) and brought\n"
+		"to the screen's pixels before the HUD is drawn, the upscaler its\n"
+		"anti-aliasing: \"off\" (none: the view at the screen's pixels);\n"
+		"\"fsr3\", AMD's FidelityFX Super Resolution 3.1, built in; or\n"
+		"\"plugin:<name>\", a plugin you built (docs/prism_plugin.md: plugins\n"
+		"in the data folder's plugins, such as DLSS's: \"plugin:dlss\"), opened\n"
+		"as the game starts; one that cannot be opened is FSR 3.1. One player's\n"
+		"window only (split screen draws without). Vulkan on the desktop." },
+	{ "display.upscaler_sharpness", _config_real, "0.0", "HALO_UPSCALER_SHARPNESS", _environment_value,
+		_platform_desktop,
+		"With display.upscaler on: how much the upscaled view is sharpened,\n"
+		"0 (none) to 1." },
+	{ "display.upscaler_scale", _config_real, "0.0", "HALO_UPSCALER_SCALE", _environment_value, _platform_desktop,
+		"With display.upscaler on (or display.denoiser \"dlss_rr\" under one):\n"
+		"the share of the window's pixels the 3D view is drawn at, each way,\n"
+		"0.33 to 1.0, which the upscaler brings to the window's before the HUD\n"
+		"is drawn: 0.67 Quality, 0.58 Balanced, 0.5 Performance, 0.33 Ultra\n"
+		"Performance; 0 is 0.67. Apart from display.render_scale, which scales\n"
+		"the whole frame, the HUD too. Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\" or \"pathtraced\" (both read the bake): \"auto\" bakes each\n"
@@ -4488,6 +4515,8 @@ static const char *const config_display_order[] =
 	"=PRISM Path Traced (\"pathtraced\") alone",
 	"display.pt_profile", "display.denoiser", "display.prism_glow_lights", "display.prism_dynamic_lights",
 	"display.prism_light_saturation",
+	"=Upscaling (PRISM Rebaked and PRISM Path Traced; DLSS Ray Reconstruction under Path Traced alone)",
+	"display.upscaler", "display.upscaler_scale", "display.upscaler_sharpness",
 	"=Ray tracing: the traced scene (Classic with display.prism_rt on, PRISM Rebaked's traced object shadows,\n"
 		"PRISM Path Traced), Rebaked's object shadows, then Classic's ray tracer (display.prism_rt, off under\n"
 		"both PRISM modes) and its look",
@@ -4561,6 +4590,9 @@ static const struct
 	{ "display.prism_raster_object_shadows", "PRISM Rebaked (display.lighting \"raster\") alone" },
 	{ "display.pt_profile", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
 	{ "display.denoiser", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
+	{ "display.upscaler", "every mode's 3D view" },
+	{ "display.upscaler_scale", "every mode's 3D view, with display.upscaler on" },
+	{ "display.upscaler_sharpness", "every mode's 3D view, with display.upscaler on" },
 	{ "display.prism_glow_lights", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
 	{ "display.prism_dynamic_lights", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
 	{ "display.prism_light_saturation", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
@@ -6118,7 +6150,7 @@ static const struct
 	{ "display.ambient_occlusion", { "off", "world", "ray_traced", NULL }, "off" },
 	{ "display.lighting", { "ce", "ce_deferred", "raster", "pathtraced", NULL }, "ce" },
 	{ "display.pt_profile", { "quality", "performance", NULL }, "quality" },
-	{ "display.denoiser", { "prism", "off", NULL }, "prism" },
+	{ "display.denoiser", { "prism", "dlss_rr", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
 	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },
 	{ "camera.view", { "first_person", "third_person", NULL }, "first_person" },
@@ -6256,6 +6288,12 @@ static void config_check_words(void)
 				free(value->string);
 				value->string = strdup(renamed);
 			}
+		}
+		/* (a plugin's name, "plugin:<name>": display.upscaler's and
+		display.denoiser's, whichever plugin the player built) */
+		if (!strncmp(value->string, "plugin:", 7) && value->string[7])
+		{
+			continue;
 		}
 		for (word = 0; words[word] && !config_word_is(value->string, strlen(value->string), words[word]); word++)
 		{

@@ -82,6 +82,8 @@ static BOOL platform_screen_mode(long *width, long *height)
 	return TRUE;
 }
 %FUNCTIONS%
+/* (port/linux/game/prism_upscale.c's: display.upscaler off, as by default) */
+int prism_upscale_setting_on(void) { return 0; }
 static long drawn[2];
 static float factor;
 static void choose(void)

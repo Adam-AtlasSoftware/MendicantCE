@@ -164,6 +164,11 @@ KEPT_ELSEWHERE = {
     'halo_view_end': "an extra view's targets: the journal's objects",
     'halo_view_sample': "a view sampled: its target as a stage's texture, the journal's objects",
     'halo_view_release': "an extra view's targets let go",
+    # (display.upscaler (PRISM v4 M5, prism_upscale.c): never on under Classic's lighting, whose draws the journal
+    # records; the view's targets drawn smaller are the screen's at another scale (the viewport, dynamic state))
+    'halo_upscale_view_begin': "display.upscaler's view drawn smaller: never under Classic's lighting, which the "
+                               "journal records; its targets the screen's at another scale",
+    'halo_upscale_view_end': "display.upscaler's view upscaled: never under Classic's lighting",
     'halo_screenshot_png': "a screenshot", 'halo_screenshot_png_taken': "a screenshot",
     'halo_screenshot_named': "a screenshot", 'halo_vr_test_screenshot': "a screenshot",
     'halo_vr_pass': "the VR mode's, which records no preparation (render_prepared.c's prepared_enabled)",
