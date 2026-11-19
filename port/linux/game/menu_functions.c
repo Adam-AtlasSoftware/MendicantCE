@@ -2793,16 +2793,15 @@ static struct
 	/* (PRISM Path Traced's) */
 	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
 	{ "op_denoiser", LIGHTING_P, NULL, NULL },
-	/* (and its Coloured Lights page: the moving lights' brightness and
-	colour) */
+	/* (and the way to its Coloured Lights page, the moving lights'
+	brightness and colour, whose rows show in every mode: only this link
+	opens it) */
 	{ "op_coloured_lights", LIGHTING_P, NULL, NULL },
-	{ "op_prism_dynamic_lights", LIGHTING_P, NULL, NULL },
-	{ "op_prism_light_saturation", LIGHTING_P, NULL, NULL },
-	/* (both PRISM modes' Upscaling page (Classic draws without an
-	upscaler: prism_upscale.c): the upscaler, its scale while one is on) */
+	/* (the way to both PRISM modes' Upscaling page (Classic draws without
+	an upscaler: prism_upscale.c); on it, the upscaler's scale while one is
+	on, whatever the mode, as only this link opens it) */
 	{ "op_upscaling", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_upscaler", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_upscaler_scale", LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
+	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
 	/* (Advanced Graphics' Dynamic Lights: the enhanced dynamic lights under
 	both PRISM modes, which the game gives the plasma bolts' and needles'
 	lights that they light by, and whose glows it draws; Classic's row is

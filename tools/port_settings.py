@@ -874,11 +874,14 @@ LIGHTING_MODE_ROWS = {
     "prism_raster_composition": "R", "prism_raster_objects": "R", "shadow_resolution_rebaked": "R",
     # (PRISM Path Traced's)
     "pt_profile": "P", "denoiser": "P",
-    # (and its COLOURED LIGHTS page: the moving lights' brightness and colour)
-    "coloured_lights": "P", "prism_dynamic_lights": "P", "prism_light_saturation": "P",
-    # (the UPSCALING page in both PRISM modes (prism_upscale.c: Classic draws
-    # without one): the upscaler, its scale while one is on)
-    "upscaling": "RP", "upscaler": "RP", "upscaler_scale": "RP",
+    # (and the way to its COLOURED LIGHTS page, the moving lights' brightness
+    # and colour; the page's rows are in no mode's list, as Traced Light
+    # Look's: only Path Traced's link opens it)
+    "coloured_lights": "P",
+    # (the way to the UPSCALING page, in both PRISM modes (prism_upscale.c:
+    # Classic draws without an upscaler); on it, the upscaler's scale in every
+    # mode while one is on, the condition's entry)
+    "upscaling": "RP", "upscaler_scale": "CRP",
     # (the enhanced dynamic lights in both PRISM modes: which lights the game
     # gives the bake's frame and the path tracer, and the plasma glows)
     "dynamic_lights_prism": "RP",
@@ -2380,8 +2383,9 @@ PAGES = {
         "screen": COLOURED_LIGHTS_PAGE[1], "title": "COLOURED LIGHTS",
         "rows": [
             # (Path Traced's moving lights, Lighting Settings' COLOURED LIGHTS
-            # opens it; the rows Path Traced's alone: LIGHTING_MODE_ROWS.
-            # Their keys and settings as they were on Lighting Settings)
+            # opens it under Path Traced alone: LIGHTING_MODE_ROWS's
+            # "coloured_lights". Their keys and settings as they were on
+            # Lighting Settings)
             (SECTION, "MOVING LIGHTS"),
             # (the moving lights' look: plasma, needles, grenades, muzzle
             # flashes, the shields' flares; port/linux/game/prism_scene_lights.c's
@@ -2400,7 +2404,8 @@ PAGES = {
     UPSCALING_PAGE[0]: {
         "screen": UPSCALING_PAGE[1], "title": "UPSCALING",
         "rows": [
-            # (both PRISM modes', Lighting Settings' UPSCALING opens it)
+            # (both PRISM modes', Lighting Settings' UPSCALING opens it under
+            # them alone: LIGHTING_MODE_ROWS's "upscaling")
             (SECTION, "RESOLUTION"),
             # (display.upscaler, docs/prism_plugin.md: the 3D view drawn smaller
             # and brought to the window's resolution before the HUD, in both
