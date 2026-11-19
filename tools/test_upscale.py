@@ -165,13 +165,17 @@ def test_settings():
     readme = (ROOT / "port/linux/README.md").read_text()
     for name in ("display.upscaler", "display.upscaler_scale", "display.upscaler_sharpness", "display.denoiser"):
         assert f"| `{name}` |" in readme, name
-    menus = (ROOT / "port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit."
-             "video_settings.lighting.xml").read_text()
-    # (Lighting Settings' rows: the DLSS choices last, which menu_tags.c's spinner_expand leaves out where the plugin
-    # is not ready (sdl_platform.c's platform_prism_plugin_ready); PRISM's own denoiser first, the default)
-    assert 'setting="display.upscaler" values="off|fsr3|plugin:dlss"' in menus
+    folder = ROOT / "port/assets/menus/ce"
+    menus = (folder / "main_menu.settings_select.player_setup.player_profile_edit.video_settings.lighting.xml"
+             ).read_text()
+    upscaling = (folder / "main_menu.settings_select.player_setup.player_profile_edit.video_settings.lighting."
+                 "upscaling.xml").read_text()
+    # (Lighting Settings' DENOISER and its UPSCALING page's rows: the DLSS choices last, which menu_tags.c's
+    # spinner_expand leaves out where the plugin is not ready (sdl_platform.c's platform_prism_plugin_ready); PRISM's
+    # own denoiser first, the default)
+    assert 'setting="display.upscaler" values="off|fsr3|plugin:dlss"' in upscaling
     assert 'setting="display.denoiser" values="prism|off|dlss_rr"' in menus
-    assert 'setting="display.upscaler_scale" values="0|0.58|0.5|0.33|1"' in menus
+    assert 'setting="display.upscaler_scale" values="0|0.58|0.5|0.33|1"' in upscaling
     tags = (ROOT / "port/linux/game/menu_tags.c").read_text()
     expand = tags.split("static long spinner_expand(", 1)[1].split("\n}\n", 1)[0]
     assert '!strcmp(setting, "display.denoiser") || !strcmp(setting, "display.upscaler")' in expand

@@ -121,6 +121,8 @@ void prism_scene_lights_frame(void) { }
 void prism_scene_lights_map_unloaded(void) { }
 void prism_bake_frame(void) { }
 void prism_bake_map_unloaded(void) { }
+/* (the terrain overhaul's frame: port/linux/game/prism_terrain.c) */
+void prism_terrain_frame(void) { }
 
 /* the field: a volume whose header world_sdf_current hands on, half faded in */
 static struct world_sdf_volume volume;
