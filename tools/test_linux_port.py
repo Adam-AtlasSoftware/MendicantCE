@@ -301,8 +301,14 @@ def test_menu_settings_exist():
         for setting in re.findall(r'setting="([^"]+)"', path.read_text()):
             assert setting in known | profile | actions, f"{path.name}: {setting}"
     controls = set(re.findall(r'"(controls\.[a-z_]+)"', (root / "port/linux/src/xinput_sdl.c").read_text()))
-    assert controls == {name for name in known if name.startswith("controls.")}
-    assert controls == set(re.findall(r'\{ "(controls\.[a-z_]+)", L"', functions))
+    # (and the controls read by their names as they are held, not among the keyboard's actions (whose bits are
+    # full): halo_named_binding_held's, the third-person camera's distance keys, port/linux/game/chase_camera.c)
+    named = set()
+    for path in (root / "port/linux/game").glob("*.c"):
+        named |= set(re.findall(r'halo_named_binding_held\("(controls\.[a-z_]+)"\)', path.read_text()))
+    assert not controls & named, controls & named
+    assert controls | named == {name for name in known if name.startswith("controls.")}
+    assert controls | named == set(re.findall(r'\{ "(controls\.[a-z_]+)", L"', functions))
 
 
 def config_check_build(tmp_path, defines, fault=None):
@@ -1077,11 +1083,11 @@ def test_config_has_each_section_once(tmp_path):
     def sections():
         return re.findall(r"^\[(\w+)\]$", config.read_text(), re.M)
 
-    # the defaults
-    assert run("get", "display.first_person_legs")[0] == "false"
-    assert len(sections()) == len(set(sections())), sections()
-    run("write", "display.first_person_legs", "true")
+    # the defaults (your legs drawn by default since PRISM v4's body)
     assert run("get", "display.first_person_legs")[0] == "true"
+    assert len(sections()) == len(set(sections())), sections()
+    run("write", "display.first_person_legs", "false")
+    assert run("get", "display.first_person_legs")[0] == "false"
 
     # MCC discovery starts enabled; an explicit later opt-out stays saved.
     for key in ("game.workshop_maps", "game.mcc_campaigns", "game.mcc_collections"):
@@ -1091,9 +1097,9 @@ def test_config_has_each_section_once(tmp_path):
 
     # an older version's
     config.write_text("[display]\nvsync = false\n\n[game]\nconsole_log = \"all\"\n\n"
-                      "[display]\nfirst_person_legs = true\n")
+                      "[display]\nfirst_person_legs = false\n")
     value, log = run("get", "display.first_person_legs")
-    assert value == "true" and "joined" in log
+    assert value == "false" and "joined" in log
     assert sections().count("display") == 1
     assert run("get", "display.vsync")[0] == "false"
     assert run("get", "game.console_log")[0] == "all"
