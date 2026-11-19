@@ -257,6 +257,22 @@ through its own canopy, whose
 leaves' holes are not traced one by one: CE lit a tree's leaves whole) */
 float cutout_skip = 0.0;
 
+/* (port: a ray the traversal is given only with a finite origin and
+direction, a direction of some length, and a reach that is not NaN and
+no shorter than its start: anything else is undefined for ray queries,
+which some drivers' traversal (a shader loop) never leaves. Bits, not
+isnan/isinf, which a compiler may take as never true) */
+bool finite2(vec2 v) { return all(notEqual(floatBitsToUint(v) & 0x7f800000u, uvec2(0x7f800000u))); }
+bool finite3(vec3 v) { return all(notEqual(floatBitsToUint(v) & 0x7f800000u, uvec3(0x7f800000u))); }
+bool ray_ok(vec3 o, vec3 d, float t_min, float t_max)
+{
+    return finite3(o) && finite3(d) && dot(d, d) > 1.0e-12 && (floatBitsToUint(t_max) & 0x7fffffffu) <= 0x7f800000u &&
+        t_max >= t_min;
+}
+/* (port: the candidates a ray's query tests, at most: past them it ends,
+its nearest kept so far its hit) */
+#define CANDIDATES_MOST 1024u
+
 bool alpha_kept(uint custom, uint primitive, vec2 b, float distance)
 {
     if (custom != ALPHA_CUSTOM)
@@ -278,8 +294,13 @@ bool alpha_kept(uint custom, uint primitive, vec2 b, float distance)
     vec2 uv2 = uintBitsToFloat(uvec2(a.v[t * 8u + 5u], a.v[t * 8u + 6u]));
     vec2 uv = uv0 * (1.0 - b.x - b.y) + uv1 * b.x + uv2 * b.y;
     float w = material_value(m, 9u), h = material_value(m, 10u);
-    uvec2 texel = uvec2(clamp(fract(uv) * vec2(w, h), vec2(0.0), vec2(w, h) - 1.0));
-    uint at = uint(material_value(m, 8u)) + texel.y * uint(w) + texel.x;
+    /* (port: no alpha map's size, or a coordinate not finite: opaque, never
+    a texel read past its map) */
+    if (!(w >= 1.0 && h >= 1.0) || !finite2(uv))
+        return true;
+    uvec2 size = uvec2(w, h);
+    uvec2 texel = min(uvec2(fract(uv) * vec2(w, h)), size - 1u);
+    uint at = uint(material_value(m, 8u)) + texel.y * size.x + texel.x;
     uint alpha = (Uints(pass.addresses4.xy).v[at >> 2u] >> ((at & 3u) * 8u)) & 0xffu;
     return float(alpha) * (1.0 / 255.0) > material_value(m, 7u);
 }
@@ -292,15 +313,18 @@ uint ray_flags(uint mask, bool first)
     return (first ? gl_RayFlagsTerminateOnFirstHitEXT : 0u) | ((mask & 10u) == 0u ? gl_RayFlagsOpaqueEXT : 0u);
 }
 
-#define ALPHA_PROCEED(q) while (rayQueryProceedEXT(q)) { \\
+#define ALPHA_PROCEED(q) { uint candidates = 0u; while (rayQueryProceedEXT(q)) { \\
+        if (++candidates > CANDIDATES_MOST) { rayQueryTerminateEXT(q); break; } \\
         if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT && \\
             alpha_kept(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false), \\
             uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)), \\
             rayQueryGetIntersectionBarycentricsEXT(q, false), rayQueryGetIntersectionTEXT(q, false))) \\
-            rayQueryConfirmIntersectionEXT(q); }
+            rayQueryConfirmIntersectionEXT(q); } }
 
 bool blocked(vec3 origin, vec3 direction, float t_max, uint mask)
 {
+    if (!ray_ok(origin, direction, 0.0, t_max))
+        return false;
     rayQueryEXT q;
     rayQueryInitializeEXT(q, scene, ray_flags(mask, true), mask, origin, 0.0, direction, t_max);
     ALPHA_PROCEED(q)
@@ -309,6 +333,8 @@ bool blocked(vec3 origin, vec3 direction, float t_max, uint mask)
 
 float nearest(vec3 origin, vec3 direction, float t_max, uint mask)
 {
+    if (!ray_ok(origin, direction, 0.0, t_max))
+        return t_max;
     rayQueryEXT q;
     rayQueryInitializeEXT(q, scene, ray_flags(mask, false), mask, origin, 0.0, direction, t_max);
     ALPHA_PROCEED(q)
@@ -322,12 +348,14 @@ where it is the level's back: inside it), its instance's custom index and
 its triangle */
 float hit(vec3 origin, vec3 direction, float t_max, uint mask, out vec3 nh, out uint custom, out uint primitive)
 {
-    rayQueryEXT q;
-    rayQueryInitializeEXT(q, scene, ray_flags(mask, false), mask, origin, 0.0, direction, t_max);
-    ALPHA_PROCEED(q)
     nh = vec3(0.0);
     custom = 0u;
     primitive = 0u;
+    if (!ray_ok(origin, direction, 0.0, t_max))
+        return -1.0;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, scene, ray_flags(mask, false), mask, origin, 0.0, direction, t_max);
+    ALPHA_PROCEED(q)
     if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT)
         return -1.0;
     custom = rayQueryGetIntersectionInstanceCustomIndexEXT(q, true);
