@@ -179,6 +179,14 @@ def test_segments_fit_at_16_9():
             assert right <= room, f"{folder}'s {entry[0]}: its segments end at {right}, past {room}"
             # (each segment found by its name, which its instance keeps SETTINGS_WIDGET_NAME_SIZE long)
             assert len(f"{_key(entry)}_seg{count - 1}") < _functions_define("SETTINGS_WIDGET_NAME_SIZE"), entry[0]
+            # (and its spinner by its name cut as its instance has it (settings_segments): another of the page's
+            # widgets cut to the same name would be taken for it)
+            size = _functions_define("SETTINGS_WIDGET_NAME_SIZE") - 1
+            spinner = f"{_key(entry)}_spinner"[:size]
+            others = [f"{_key(other)}{suffix}"[:size] for other in page["rows"] if other is not entry and
+                      other[0] != SECTION and _key(other) for suffix in ("_spinner", "_label", "_seg0", "_seg1",
+                                                                         "_seg2", "_track", "_value")]
+            assert spinner not in others, f"{folder}'s {entry[0]}: its spinner's name, cut, is another's"
     assert segmented and _functions_define("SETTINGS_SEGMENTS_MOST") == port_settings.SEGMENTED_MOST
 
 
