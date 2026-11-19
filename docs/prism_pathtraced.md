@@ -180,11 +180,18 @@ draws it (a light drawn reaching nowhere is sent off). Until `prism-v4-pt-dynlig
 world_scene's fixture bit (1) as the dynamic one (2), so the table's dynamic class was always empty, in Path Traced
 and in Raster alike (Raster's `dynamic_at` reads the same class).
 
-- **Shape and units.** A point light's inverse square, windowed to none at CE's reach r ((1 - (d/r)^4)^2), its
-  intensity 0.3 r^2 times CE's colour (the one whose light over the sphere of radius r is what CE's 1 - d^2/r^2
-  gives), and never more than CE's own 1 - d^2/r^2 at that distance: CE's within 0.6 r, the inverse square's tail
-  past it (its whole light about three quarters of CE's). Held at 1.9 times CE's within 0.4 r instead, a wall 1 to 2
-  units from the flashlight's mouth was a white disc, white through most of CE's fade. A spot's cone is CE's: whole
+- **Shape and units.** A point light (a bolt, a grenade, a blast, a muzzle flash, a shield's flare) is a small
+  glowing body whose power its reach sets: its intensity `DYNAMIC_POWER` (0.3) r times CE's colour, over the square
+  of the distance from its size (`DYNAMIC_SIZE` 0.1 r, `DYNAMIC_SIZE_MOST` 0.08 units at most), windowed to none at
+  CE's reach r ((1 - (d/r)^4)^2), never more than `DYNAMIC_NEAR_MOST` (2) times CE's own 1 - d^2/r^2 at that
+  distance. CE's reach is the radius of a flat sphere of light: taken as a light's size (`prism-v4-pt-glow`'s
+  shape: CE's 1 - d^2/r^2 within 0.6 r) a fuel rod striking the Chief lit the corridor end to end with his shield's
+  flare, and a plasma grenade's 1 unit gave the floor under it a dim 0.75. Taken as its power, a blast's 10 units
+  light a wall 3 units off at a third of CE's and 5 units off at a seventh, and a grenade's floor 0.3 units under it
+  at twice CE's (`prism-v4-pt-glow2`; tools/test_prism_pt.py). A spot light (the flashlight) keeps the windowed
+  inverse square of intensity 0.3 r^2, never more than CE's 1 - d^2/r^2: CE's within 0.6 r, the inverse square's
+  tail past it (its whole light about three quarters of CE's). Held at 1.9 times CE's within 0.4 r instead, a wall 1
+  to 2 units from the flashlight's mouth was a white disc, white through most of CE's fade. A spot's cone is CE's: whole
   inside the falloff angle, to none at the cutoff, linear in the cosine. A light with a gel map (the flashlight's
   projected texture) is not drawn through it: its colour is taken at the gel's share, 0.12 (`WORLD_SCENE_GEL`,
   world_scene.c), calibrated by the spot's peak, not its median: on b30's wall at 1 to 2 units, with the demo's
@@ -245,13 +252,19 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
   tag's colour and reach as the enhanced dynamic lights draw a projectile's, by `display.prism_glow_lights` (0 to
   4, 1 the default, 0 none: CE's own set); a weapon's at a quarter (`GLOW_WEAPON_SHARE`: the plasma pistol's flare
   is carried by every Grunt and Jackal, its glowing part small beside its flare). The shields' glow
-  (`shield_glow.c`, display.shield_glow) is on in Path Traced whatever that setting says.
+  (`shield_glow.c`, display.shield_glow) is on in Path Traced whatever that setting says; its
+  display.shield_glow_intensity "light_show" (the demo's) makes a flare full sooner but no longer three times as far
+  in Path Traced (4.2 units: the Chief's flare struck by a fuel rod lit b30's corridor end to end); Classic's as it
+  was.
 - **The strikes.** A projectile's light is followed while it flies; once the projectile is gone (it struck or
   burst) its light flashes where it was, drawn back 0.15 units along its path off the surface, 1.5 times brighter and
   further, to none over 6 ticks (0.2 s) of the game's clock (`STRIKE_*`).
-- **Needles.** A needle carries no CE light; its model's self-illuminated shader gives it a derived light (below),
-  small (reach 1) and faint, its colour the shader's (a warm white, not the needle's pink: CE's needle colour is its
-  bitmap's, and its contrail's colours are white). The needler's flare (magenta) lights the weapon's surroundings.
+- **Needles.** A needle carries no CE light, and its model's shader is a transparent one (`needler luminous`), not
+  a self-illuminated one: it had no light (the first round's "derived light" of a needle was the plasma grenade's
+  button's). A projectile with no light and no glow of its colour (`glow_projectile_tint`, glow_lights.c) now lights
+  with the colour of the glow of the weapon that fires it: its weapon's lens flare light's (the needler's `needle
+  flare`, magenta 0.94 0.44 1), never a muzzle flash's (the bullets would glow), as a derived light (below). The
+  needler's flare lights the weapon's surroundings, and the needles' burst (`needler\explosion`, dynamic) its own.
 - **What glows with no light.** A projectile in flight or a grenade on the ground whose model has a self-illuminated
   shader and no light of its own gives a point light at its bounding sphere's middle, its colour the shader's
   self-illumination as CE draws it (between its bounds by its object function), reaching 3 times its size (1 to 4
@@ -271,19 +284,25 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
   rows). Each dynamic light now takes `display.prism_dynamic_lights` (0.4, 0 to 4) as far as its colour is a colour
   (its chroma (most - least) / most: the flashlight, white, keeps its whole light; a plasma bolt's green takes 0.4),
   its colour moved toward its own luminance by `display.prism_light_saturation` (0.6; its luminance kept), and a lens
-  flare's light `GLOW_FLARE_SHARE` (0.4) of itself (a weapon's flare at that times GLOW_WEAPON_SHARE). Calibrated on
-  the setup4 fight at tick 260 (`cal260/`: 1, 0.6 and 0.4, saturation 1, 0.6 and 0.4).
+  flare's light `GLOW_FLARE_SHARE` (0.4) of itself (a weapon's flare at that times GLOW_WEAPON_SHARE), a
+  projectile's whole (`GLOW_PROJECTILE_SHARE`, `light_port_object_type`: a plasma or Banshee bolt is the light it
+  flies by; its strike's flash alike). Calibrated on the setup4 fight at tick 260 (`cal260/`: 1, 0.6 and 0.4,
+  saturation 1, 0.6 and 0.4); swept again with the point lights' new shape (`v4_glow2_runs/f_dev2`: 0.4 and 0.6,
+  saturation 0.6, 0.8 and 1): the defaults kept, 0.8 and past it the plasma walls and needles' pools read neon.
+  Both are Lighting Settings rows under Path Traced (Coloured Lights, Light Colour).
 - **The pixelated green patch** of the rejected 4K shot at tick 255 (`work/openh1_eval/v4_shot2_runs/final4k/
-  crop255.jpg`) is not a light and not yet found. Reproduced at 1080p in Classic (display.lighting "ce", the demo's
-  config, b30's floor under a plasma pistol's bolt, `v4_glow_runs/t255*`), on both cards: blocks of the screen, 2 to
-  8 pixels, axis-aligned, where a green light lies on the floor, that change from frame to frame with the game
-  stopped (game_speed 0) while the rest of the frame stays the same (`t255s_disc0`). Not z-sprites
-  (rasterizer_zsprites 0), not the enhanced dynamic lights' sum, cluster walk or glows (their light at 0, the walk
-  off, the glows skipped), not the effects, contrails, lens flares or any one transparent shader type (each skipped),
-  not all transparent groups together, not CE's environment light passes (diffuse and specular off), nor the
-  world geometry, AO, AA, surface maps, the Vulkan backend's aside or discards, or a synchronization hazard the
-  validation layers see. With display.dynamic_lights "classic" set while running it was gone in one Classic test,
-  not in Path Traced. It was there at c12583535 and 40f2b1f95 alike: a defect of its own, not this branch's.
+  crop255.jpg`): not a decal, contrail, sprite or clamp, and not Path Traced's. It is Classic's enhanced dynamic
+  light (display.dynamic_lights "enhanced") on b30's floor under a plasma pistol's bolt, drawn in blocks of 2 to 8
+  pixels that change from frame to frame with the game stopped; Path Traced showed it through CE's base. Found
+  again (`work/openh1_eval/v4_glow2_runs`, the setup4 fight's plan `plans/t255.txt`, Classic, the same frames on
+  each build, both cards): blocky at ed37aba9a (`prism-v4-pt-glow`'s stage) and at 6eafe5a1f (`prism-v4-int2`,
+  before OpenH1/goath1 was merged), smooth at f30b1207d (that merge), 8ec6a3a08 (`prism-v4-int3`, the demo's) and
+  bc960ae79, in Classic and in Path Traced alike (`look/t_bis.png`, `t_old.png`, `t_int3.png`, `t_pt.png`): the
+  light whole, as Classic means it. The fix came with goath1's renderer changes merged at f30b1207d (#1154's
+  toggles HALO_VULKAN_DRAW_BOUNDS, _ALPHA_TEST_DROP, _NARROW_BARRIERS and _PASS_TRANSFERS all 0 leave it smooth,
+  so not those; the likeliest are the draws' inputs kept whole for their pipelines' keys, 127537cc3 and 596760a1a:
+  a draw built with a stale input's pipeline); not narrowed to one commit. Nothing changed for it on this branch, so
+  Classic stays byte-identical.
 - **Where it is, when it is.** The table is sent again after each window places its lights
   (`prism_scene_lights_window`, after `lights_preprocess_scene`): the path tracer lit with the lights the rasterizer
   took the frame before, a fast bolt's light a frame behind the bolt.
@@ -312,6 +331,18 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
   18.70 ms, 18.25 with display.prism_glow_lights 0 (+0.45 ms), 20.27 at 40f2b1f95. Classic and the defaults
   byte-identical to 40f2b1f95 (`identity_r2/`). The owner's two shots again at 3840x2160 (`shot_best.jpg`,
   `shot_alt1.jpg`): live frames held 300 frames, not converged references.
+- **As measured, third round** (`work/openh1_eval/v4_glow2_runs`, `prism-v4-pt-glow2`, the demo's config, data and
+  bakes, every A/B on the RTX 2060: the RTX 3070 Ti's driver refused new devices that day). The dark corridor with
+  each thing placed in it (`tools/glow2.py`, `evidence/corridor_ab.png`, bc960ae79 against this branch): plasma
+  rifle and Banshee bolts now light the floor and wall cyan as they cross; needles light their surroundings magenta
+  (none before); the Chief's shield flared by a Banshee's fuel rod lights a pool at his feet, not the corridor end
+  to end; a fuel rod's wall lit by its distance. Grenades thrown (`tools/corridor.py`, `evidence/grenade_ab.png`):
+  the blast lights its surroundings by their distance, not the far wall whole. The setup4 fight at tick 260
+  (`evidence/fight_ab.png`, the defaults and saturation 0.8): the needles' pools pink, the plasma wall's green held
+  near its bolts. The job's dynamic lights in the fight at most 51 (40 before: the needles), within its 64. Frame
+  time, 1080p, quality, the fight's live frames, RTX 2060 (`jobs/time_*.out`): 75.50 ms median, 75.18 before
+  (+0.3 ms). Classic byte-identical to bc960ae79 (G2's moves, 118 of 120 frames alike in two runs; frames 4 and 5,
+  the Pelican's exhaust, take one of two values in either build from run to run, as `prism-v4-int3` found).
 
 ## The radiance cache
 
@@ -483,7 +514,9 @@ scene changes.
 | `debug.gbuffer_view` | `"pt_diffuse"`, `"pt_specular"`, `"pt_sun"`, `"pt_direct"`, `"pt_indirect"`, `"pt_history"`, `"pt_noisy"` | The diffuse light (denoised), the specular, the sun's visibility, the direct or indirect light alone (each denoised), the history's length, the diffuse light as traced |
 | `debug.pt_reference` | frames | The reference, at most that many frames |
 
-Settings > Video > Lighting > PRISM Path Traced; Lighting Settings then shows Profile and Denoiser, the image's Exposure,
+Settings > Video > Lighting > PRISM Path Traced; Lighting Settings then shows Profile, Denoiser, Coloured Lights
+(`display.prism_dynamic_lights`: Off 0, Faint 0.25, Soft 0.4, Natural 0.6, Full 1) and Light Colour
+(`display.prism_light_saturation`: Pale 0.4, Muted 0.6, Rich 0.8, Pure 1; "What glows", the look), the image's Exposure,
 Exposure Bias and Tone Curve, and the Light Bake (this mode reads the bake); Ray Tracing shows the traced scene's rows
 (Traced Models, Keep Shapes, Cutout Shadows). None of `display.prism_rt`'s settings reaches this mode
 (docs/prism_settings.md).
