@@ -2147,7 +2147,8 @@ void main()
             }
         }
     }
-    imageStore(sun_raw, pixel, vec4(direct_on ? v_sun : 0.0, blocker, traced, 0.0));
+    /* (the sun's visibility stored at the end, with the diffuse bounce's
+    length in w) */
 
     vec3 noisy_d = vec3(0.0), noisy_s = vec3(0.0), clean_d = vec3(0.0), clean_s = vec3(0.0);
     vec3 share = specular_share(g);
@@ -2163,6 +2164,10 @@ void main()
     /* (the reflection ray's length, for the specular history's virtual
     motion: 0 where none is traced, far where it leaves the level) */
     float spec_hit = 0.0;
+    /* (the diffuse bounce ray's length, for a denoiser's plugin (Ray
+    Reconstruction's diffuse hit distance): 0 where none is traced, far
+    where it leaves the level) */
+    float diffuse_hit = 0.0;
     if (direct_on)
     {
         /* the domes, the lamps, the fixtures, the dynamic lights */
@@ -2196,6 +2201,7 @@ void main()
             seed_for(pixel, frame, 4u);
             vec3 d = cosine_dir(g.normal);
             vec3 bounce = hit_light_n(o, d, 300.0, false, hd, hn);
+            diffuse_hit = hd > 0.0 ? hd : 1000.0;
             /* (the radiance cache: every fourth pixel's hit added to its
             cell; the cell's mean in the hit's place where it has its
             samples) */
@@ -2268,6 +2274,7 @@ void main()
     imageStore(noisy_specular, pixel, vec4(demodulated, luma(demodulated)));
     imageStore(clean_diffuse, pixel, vec4(clean_d, 0.0));
     imageStore(clean_specular, pixel, vec4(clean_s, 0.0));
+    imageStore(sun_raw, pixel, vec4(direct_on ? v_sun : 0.0, blocker, traced, min(diffuse_hit, 60000.0)));
     if (spec_hit > 0.0)
     {
         uvec4 guide = guide_of(g);
@@ -3143,6 +3150,48 @@ void main()
 
 //@pass composite
 layout(local_size_x = 8, local_size_y = 8) in;
+
+/* a denoiser's plugin's reflection motion (Ray Reconstruction's motion
+vectors of the reflected objects), as the change from the surface's: the
+last frame's place of the reflection's virtual image (the image behind the
+surface along the eye's ray at the reflection ray's length, the mean of
+this pixel's and its 3 x 3 neighbours' on the same surface, as
+specular_virtual finds it) less the surface's own last place, in pixels,
+by the share specular_virtual's virtual motion takes (none past a roughness
+of 0.45: a wide lobe's reflection moves with the surface); none on the
+moving objects, where no ray was traced or the image was behind the last
+frame's camera */
+vec2 reflection_motion_change(ivec2 pixel, Surface g)
+{
+    if (!g.present || g.instance != 0u)
+        return vec2(0.0);
+    float amount = 1.0 - smoothstep(0.1, 0.45, g.roughness);
+    if (amount <= 0.0)
+        return vec2(0.0);
+    uint here = imageLoad(guide_now, pixel).x;
+    float sum = 0.0, count = 0.0;
+    for (int k = 0; k < 9; k++)
+    {
+        ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
+        if (!inside(q))
+            continue;
+        uvec4 gq = imageLoad(guide_now, q);
+        float h = unpackHalf2x16(gq.w).y;
+        if (gq.x != here || !(h > 0.0))
+            continue;
+        sum += h;
+        count += 1.0;
+    }
+    if (count < 1.0)
+        return vec2(0.0);
+    vec2 image = last_pixel(g.point - g.eye * (sum / count), vec2(pixel), g.motion, true);
+    vec2 surface = last_pixel(g.point, vec2(pixel), g.motion, true);
+    if (image.x < -1.0e5 || surface.x < -1.0e5)
+        return vec2(0.0);
+    vec2 change = (image - surface) * amount;
+    return any(isnan(change)) || any(isinf(change)) ? vec2(0.0) : clamp(change, vec2(-4096.0), vec2(4096.0));
+}
+
 /* the frame (Raster's form): the diffuse light (the floor, the bake's
 indirect light, the denoised light, the sun's by its filtered visibility)
 by the base colour less the specular's share, the specular light (the
@@ -3268,7 +3317,9 @@ void main()
         albedos it was demodulated with (the diffuse's base colour less the
         specular's share, spec_a; the specular's split-sum share, spec_b),
         the shading normal and roughness (diff_b) and the reflection ray's
-        length (sun_a.x: the light pass's, 0 where none was traced) */
+        length (sun_a.x: the light pass's, 0 where none was traced), the
+        diffuse bounce's (sun_a.y, as x) and the reflected image's screen
+        motion less the surface's (sun_a.zw, reflection_motion_change) */
         vec3 light = lit / max(exposure, 1.0e-6);
         if (any(isnan(light)) || any(isinf(light)))
             light = vec3(0.0);
@@ -3276,7 +3327,8 @@ void main()
         imageStore(spec_a, pixel, vec4(kd, 1.0));
         imageStore(spec_b, pixel, vec4(share, 1.0));
         imageStore(diff_b, pixel, vec4(g.normal, g.roughness));
-        imageStore(sun_a, pixel, vec4(unpackHalf2x16(imageLoad(guide_now, pixel).w).y, 0.0, 0.0, 0.0));
+        imageStore(sun_a, pixel, vec4(unpackHalf2x16(imageLoad(guide_now, pixel).w).y, imageLoad(sun_raw, pixel).w,
+            reflection_motion_change(pixel, g)));
     }
 }
 

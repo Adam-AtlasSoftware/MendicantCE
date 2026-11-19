@@ -26,6 +26,7 @@ manifest.json: each frame's SHA-256 (of its pixels), which `gate.py repro` compa
 """
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -72,8 +73,19 @@ STATES = {
                'prism_set "display.prism_tone_curve filmic"', 'prism_set "debug.gbuffer_view pt_history"'),
     "v4raster": ('prism_set "rt off"', 'prism_set "display.lighting raster"'),
 }
+# (Path Traced quality with DLSS Ray Reconstruction in place of the path tracer's denoiser (display.denoiser "dlss_rr":
+# the plugin "dlss", HALO_PRISM_PLUGINS naming its folder), at DLAA (no upscaler) and at Quality (0.67 a side); as v4pt
+# otherwise; v4rrq leaves the upscaler on, so it goes last among a run's states. PRISM_GATE_RR_DENOISER names another denoiser's setting for a check of the hand-off without NGX
+# ("plugin:passthrough", PRISM_PASSTHROUGH_CAPABILITIES=rr: the light as given))
+_RR = os.environ.get("PRISM_GATE_RR_DENOISER", "dlss_rr")
+for _name, _upscale in (("v4rr", ('prism_set "display.upscaler off"',)),
+                        ("v4rrq", ('prism_set "display.upscaler fsr3"', 'prism_set "display.render_scale 0.67"'))):
+    STATES[_name] = ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"',
+                     'prism_set "display.pt_profile quality"', f'prism_set "display.denoiser {_RR}"') + _upscale + (
+                     'prism_set "display.prism_exposure fixed"', 'prism_set "display.prism_tone_curve filmic"',
+                     'prism_set "debug.gbuffer_view off"')
 # (the states that read the bake: entered from another, the bake is loaded again, BAKE_LOAD_FRAMES held)
-BAKE_STATES = ("v4pt", "v4perf", "v4raw", "v4sun", "v4hist", "v4raster")
+BAKE_STATES = ("v4pt", "v4perf", "v4raw", "v4sun", "v4hist", "v4raster", "v4rr", "v4rrq")
 
 
 def load_scenes(path=HERE / "scenes.json"):

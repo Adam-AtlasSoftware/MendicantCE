@@ -91,7 +91,9 @@ upscales the view as linear HDR light before the tone mapping and END tone
 maps its output again; and where pt_raw answered 1, its noisy light before
 the tone mapping (RGBA16F, alpha 1 where it lit the pixel, else 0) and its
 guides (the diffuse and specular albedo it demodulated with, the shading
-normal and roughness, the reflection ray's hit distance in x), else NULL */
+normal and roughness; hit_distance's x the reflection ray's hit distance, y
+the diffuse bounce's, zw the reflected image's last place less the
+surface's, in pixels), else NULL */
 void xgpu_vulkan_upscale_pt_frame(struct xgpu_vulkan_image *exposure, uint32_t curve,
 	struct xgpu_vulkan_image *radiance, struct xgpu_vulkan_image *diffuse_albedo,
 	struct xgpu_vulkan_image *specular_albedo, struct xgpu_vulkan_image *normal_roughness,

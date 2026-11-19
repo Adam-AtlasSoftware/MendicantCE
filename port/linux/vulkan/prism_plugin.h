@@ -148,9 +148,10 @@ struct prism_plugin_frame
 	VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) */
 	struct prism_plugin_image color_in, color_out;
 	/* the guides, at the render size: depth (reversed or not as the
-	projection says), screen motion in pixels (this frame's position less
-	the last frame's), the shading normal (xyz, world space) and roughness
-	(w) */
+	projection says), screen motion in pixels (the last frame's position
+	less this frame's, this frame's unjittered: from the pixel to where it
+	was, NGX's and FSR's sense), the shading normal (xyz, world space) and
+	roughness (w) */
 	struct prism_plugin_image depth, motion, normal_roughness;
 	/* the surfaces' diffuse and specular albedo, and each pixel's specular
 	ray's hit distance (world units) */
@@ -184,7 +185,8 @@ struct prism_plugin_frame
 	where color_in is HDR; exposure then 1 */
 	struct prism_plugin_image exposure_image;
 	/* where a path tracer gives them: the diffuse ray's hit distance (world
-	units) and the reflected surfaces' screen motion (pixels, as motion) */
+	units) and the reflected objects' screen motion (pixels, in motion's
+	sense: where the reflection's image was) */
 	struct prism_plugin_image diffuse_hit_distance, motion_reflections;
 };
 

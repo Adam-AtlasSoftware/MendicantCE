@@ -54,7 +54,12 @@ adds:
   Reconstruction's and Super Resolution's `InToneMapperType`;
 - `exposure_image`: the exposure as a 1x1 `R32_SFLOAT` image written by the frame's commands (PRISM Path Traced
   meters it on the GPU), `exposure` then 1;
-- `diffuse_hit_distance` and `motion_reflections`, for a path tracer that gives them (none yet).
+- `diffuse_hit_distance` and `motion_reflections`, where a path tracer gives them (PRISM Path Traced's, under
+  display.denoiser `"dlss_rr"`): the diffuse bounce ray's length (world units; 0 where none was traced, 1000 where it
+  left the level) and the reflected objects' motion: the surface's motion changed by the move of the reflection's
+  virtual image (the point behind the surface along the eye's ray at the reflection ray's length, the mean of the
+  pixel's 3 x 3 neighbours on the same surface), by the share the path tracer's own specular history gives the
+  virtual motion (all of it for a mirror, none past a roughness of 0.45), the surface's own on the moving objects.
 
 ## The lifecycle
 
@@ -247,8 +252,11 @@ maps its output afterwards:
 - **Resets.** The view's history (the plugin's `reset`) is dropped where the guest says the camera has none (a cut, a
   teleport, a map loaded, the view not drawn the frame before), and where the sizes or the upscaler change.
 
-What remains for Ray Reconstruction (not given yet): the diffuse ray's hit distance, reflected-surface motion,
-particle and animated-texture masks, and a transparency layer of its own in place of the change added to the colour.
+Ray Reconstruction is also given the diffuse bounce's hit distance and the reflected objects' motion (above), and
+the reactive mask (where the transparent surfaces, effects and particles drawn after the opaque pass changed the
+colour) as both its bias mask and its particle mask. What remains (not given yet): an animated-texture mask (the
+G-buffer keeps no mark of a shader's animation) and a transparency layer of its own in place of the change added to
+the colour.
 
 ## Tests
 

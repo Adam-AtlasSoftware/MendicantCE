@@ -113,19 +113,21 @@ static const VkFormat input_formats[INPUT_COUNT] =
 
 /* the guides a denoiser that upscales is given (the render size's, made as
 it is first used; a texel each before): the albedos, the normal and
-roughness, the reflection ray's hit distance (the path tracer's) */
+roughness, the reflection ray's hit distance, the diffuse bounce's and the
+reflected objects' motion (the path tracer's) */
 enum
 {
-	GUIDE_DIFFUSE, GUIDE_SPECULAR, GUIDE_NORMAL, GUIDE_HIT, GUIDE_COUNT
+	GUIDE_DIFFUSE, GUIDE_SPECULAR, GUIDE_NORMAL, GUIDE_HIT, GUIDE_DIFFUSE_HIT, GUIDE_MOTION_REFLECTIONS, GUIDE_COUNT
 };
 
 static const VkFormat guide_formats[GUIDE_COUNT] =
 {
 	VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16_SFLOAT,
+	VK_FORMAT_R16_SFLOAT, VK_FORMAT_R16G16_SFLOAT,
 };
 
 /* the input pass's bindings (its GLSL's; FINISH's within them) */
-#define INPUT_BINDINGS 24
+#define INPUT_BINDINGS 26
 /* the input pass's flags (its GLSL's) */
 #define INPUT_GBUFFER_MOTION 1u
 #define INPUT_HISTORY 2u
@@ -509,6 +511,8 @@ static int make(void)
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		/* (the diffuse hit distance and the reflected objects' motion written) */
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 	};
 	VkDescriptorSetLayoutBinding bindings[INPUT_BINDINGS];
 	VkDescriptorSetLayoutCreateInfo set_info;
@@ -598,7 +602,7 @@ static int make(void)
 	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	sizes[0].descriptorCount = 13;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	sizes[1].descriptorCount = 10;
+	sizes[1].descriptorCount = 12;
 	sizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	sizes[2].descriptorCount = 1;
 	memset(&pool_info, 0, sizeof(pool_info));
@@ -1114,6 +1118,8 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 	images[21].imageView = up.guides[GUIDE_HIT].view;
 	images[22].imageView = up.exposure.view;
 	images[23].imageView = xgpu_vulkan_image_view(up.output);
+	images[24].imageView = up.guides[GUIDE_DIFFUSE_HIT].view;
+	images[25].imageView = up.guides[GUIDE_MOTION_REFLECTIONS].view;
 	for (index = 0; index < INPUT_BINDINGS; index++)
 		images[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 	memset(writes, 0, sizeof(writes));
@@ -1223,7 +1229,11 @@ static int plugin_upscale(int which, VkCommandBuffer commands, const struct xgpu
 		frame.normal_roughness = plugin_image(&up.guides[GUIDE_NORMAL]);
 		/* (the path tracer's reflection rays' lengths, where it gave them) */
 		if (pt_flags & INPUT_PT_NOISY)
+		{
 			frame.specular_hit_distance = plugin_image(&up.guides[GUIDE_HIT]);
+			frame.diffuse_hit_distance = plugin_image(&up.guides[GUIDE_DIFFUSE_HIT]);
+			frame.motion_reflections = plugin_image(&up.guides[GUIDE_MOTION_REFLECTIONS]);
+		}
 	}
 	frame.flags = PRISM_FRAME_DEPTH_REVERSED;
 	/* (linear HDR light before the tone mapping, the exposure the GPU's: the

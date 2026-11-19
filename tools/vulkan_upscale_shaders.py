@@ -87,7 +87,8 @@ layout(set = 0, binding = 13, rgba8) uniform writeonly image2D specular_out;
 layout(set = 0, binding = 14, rgba16f) uniform writeonly image2D normal_out;
 // (the path tracer's, xgpu_vulkan_pt.c: its noisy light before the tone mapping (alpha 1 where it lit the pixel),
 // its exposure and curve (1x1: x the exposure, y display.prism_tone_curve), its guides: the diffuse and specular
-// albedo, the shading normal and roughness, the reflection ray's hit distance (x))
+// albedo, the shading normal and roughness, the reflection ray's hit distance (x), the diffuse bounce's (y), the
+// reflected image's last place less the surface's, in pixels (zw))
 layout(set = 0, binding = 15) uniform sampler2D pt_radiance;
 layout(set = 0, binding = 16) uniform sampler2D pt_exposure;
 layout(set = 0, binding = 17) uniform sampler2D pt_diffuse;
@@ -96,6 +97,9 @@ layout(set = 0, binding = 19) uniform sampler2D pt_normal;
 layout(set = 0, binding = 20) uniform sampler2D pt_hit;
 layout(set = 0, binding = 21, r16f) uniform writeonly image2D hit_out;
 layout(set = 0, binding = 22, r32f) uniform writeonly image2D exposure_out;
+// (the path tracer's diffuse bounce's hit distance and its reflected surfaces' motion, from pt_hit's y and zw)
+layout(set = 0, binding = 24, r16f) uniform writeonly image2D diffuse_hit_out;
+layout(set = 0, binding = 25, rg16f) uniform writeonly image2D motion_reflections_out;
 layout(set = 0, binding = 9, std140) uniform Inputs
 {
     // the view's left, top, width and height in its targets' pixels
@@ -233,18 +237,21 @@ void main()
         // G-buffer's below has them where nothing is drawn
         vec3 diffuse = vec3(1.0), specular = vec3(0.0);
         vec4 normal = vec4(-normalize(u.now[1].xyz), 1.0);
-        float hit = 0.0;
+        vec4 hits = vec4(0.0);
         if (lit)
         {
             diffuse = texelFetch(pt_diffuse, at, 0).rgb;
             specular = texelFetch(pt_specular, at, 0).rgb;
             normal = texelFetch(pt_normal, at, 0);
-            hit = texelFetch(pt_hit, at, 0).x;
+            hits = texelFetch(pt_hit, at, 0);
         }
         imageStore(diffuse_out, pixel, vec4(diffuse, 1.0));
         imageStore(specular_out, pixel, vec4(specular, 1.0));
         imageStore(normal_out, pixel, normal);
-        imageStore(hit_out, pixel, vec4(hit));
+        imageStore(hit_out, pixel, vec4(hits.x));
+        imageStore(diffuse_hit_out, pixel, vec4(hits.y));
+        // (the reflected objects' motion: the surface's, as above, by the change of the reflection's image)
+        imageStore(motion_reflections_out, pixel, vec4(motion + hits.zw, 0.0, 0.0));
     }
     else if ((flags & 8u) != 0u)
     {
