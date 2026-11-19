@@ -237,6 +237,10 @@ boolean chase_camera_command(short local_player_index, struct camera_command *co
 	unsigned long now;
 	struct collision_result collision;
 
+	/* (a local player the arrays have no slot for: never the third person,
+	and nothing of it written) */
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return FALSE;
 	if (!chase_camera_enabled(local_player_index))
 	{
 		chase.target_known[local_player_index] = FALSE;
