@@ -89,7 +89,8 @@ def test_texts_fit():
     game the panel shows) fits its panel's three lines (148 wide, small_ui) at 640x480."""
     pytest.importorskip("PIL")
     menus = read("port/linux/game/menu_functions.c")
-    assert 'L"Couldn\'t join. %s"' in function(menus, "lobby_browser_update")
+    # (the browser's rows made by its table view's model: lobby_browser_model)
+    assert 'L"Couldn\'t join. %s"' in function(menus, "lobby_browser_model")
     status, output = run(build("connect_failure", generated()), "print")
     assert status == 0, output
     for line in output.splitlines():
