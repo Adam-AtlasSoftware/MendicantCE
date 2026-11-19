@@ -26,6 +26,7 @@ symbols in this file:
 #include "scenario/scenario.h"
 #include "sound/game_sound.h"
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 
 /* ---------- constants */
 
@@ -222,6 +223,8 @@ void material_effect_new_from_point(
 			material_type = scenario_location_underwater(&collision.location, &collision.point, NULL)
 				? _material_effect_underwater_material_type
 				: *(long *)&collision.material_type;
+			/* port: the ground under the foot for PRISM's terrain (prism_terrain.c; read only) */
+			prism_terrain_footstep_ground(&collision.point, &collision.plane.n, material_type);
 			material_effect_new(
 				definition_index,
 				effect_index,

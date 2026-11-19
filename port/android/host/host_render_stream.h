@@ -134,6 +134,9 @@ struct host_render_backend
 	/* UPSCALE (M5): display.upscaler's and display.denoiser's frame (none:
 	the view is left as it was drawn) */
 	void (*upscale)(void *context, const struct xgpu_stream_upscale *record);
+	/* PRISM_TERRAIN: its items (count, checked to lie in the record and to
+	be no more than its phase's most) */
+	void (*prism_terrain)(void *context, const struct xgpu_stream_prism_terrain *record);
 	/* display.panini: a 3D view drawn again through the Panini projection
 	(none: not drawn) */
 	void (*panini)(void *context, const struct xgpu_stream_panini *record);

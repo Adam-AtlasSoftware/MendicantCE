@@ -173,6 +173,7 @@ boolean prism_shadows_wanted(void);
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
 #include "prism_scene_lights.h" /* port: port/linux/game/prism_scene_lights.c */
 #include "prism_upscale.h" /* port: port/linux/game/prism_upscale.c */
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 boolean prism_shadows_pass_begin(struct render_camera const *camera, struct render_frustum const *frustum);
 void prism_shadows_pass_structure(void);
 void prism_shadows_pass_end(void);
@@ -742,6 +743,8 @@ static void render_window(
 		/* (the weather's particles about the camera: the eyes') */
 		if (!render_vr_scope_pass)
 #endif
+		/* port: or PRISM's weather in its place (prism_terrain.c; CE's until it draws) */
+		if (!prism_terrain_weather_draw())
 		weather_particle_systems_render();
 		render_particles();
 		particle_systems_render();

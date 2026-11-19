@@ -279,6 +279,7 @@ struct vehicle_suspension
 
 #include "physics/powered_mass_point_datum.h"
 #include "vehicle_hijack.h" /* port: port/linux/game/vehicle_hijack.c */
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 
 struct scenario_object_permutation;
 struct scenario_unit;
@@ -2015,6 +2016,9 @@ static void create_slipping_effects(
 					normal.j += mass_point->ground_plane.n.j*0.5f;
 					normal.k += mass_point->ground_plane.n.k*0.5f;
 
+					/* port: the mass point on the ground for PRISM's terrain (prism_terrain.c; read only) */
+					prism_terrain_contact(vehicle_index, &position, &mass_point->ground_plane.n,
+						&mass_point->velocity_relative_to_ground, mass_point->ground_material_type, scale);
 					material_effect_new(definition->material_effects.index,
 						TEST_FLAG(mass_point_definition->flags, 0) ? 10 : 9,
 						mass_point->ground_material_type, &position, &normal,

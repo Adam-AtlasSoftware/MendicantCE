@@ -70,6 +70,7 @@ symbols in this file:
 #include "rasterizer/rasterizer_transparent_geometry.h"
 #include "rasterizer_xbox_water.h"
 #include "render_enumerate.h" /* port: port/linux/game/render_enumerate.c */
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 #include "rasterizer_xbox_internal.h" /* port: preserve cached stencil around extra preparation */
 
 /* ---------- constants */
@@ -636,6 +637,9 @@ void rasterizer_water_draw(
 		draw_depth_only = TEST_FLAG(water->flags, _shader_transparent_water_draw_before_fog_bit) &&
 			!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_queue_bit) &&
 			!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit);
+		/* port: CE's depth alone where PRISM draws the water's colour (prism_terrain.c; CE's until it draws) */
+		if (prism_terrain_water_draw(group))
+			draw_depth_only = TRUE;
 		/* port: before the water's depth, the planar fog where the world
 		ends under it */
 		if (!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit))

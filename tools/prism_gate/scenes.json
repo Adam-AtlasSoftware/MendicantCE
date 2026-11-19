@@ -43,6 +43,16 @@
   {"id": "S2b", "name": "a10_cryo_glass", "map": "a10", "tests": "Glass (the cryo tubes)",
    "keys": ["-54.5 -0.5 0.7 -85 -5 0 60", "-53.0 -2.0 0.7 -95 -5 0 60"]},
   {"id": "S3", "name": "a50_hangar", "map": "a50", "bsp": 2, "tests": "The hangar's lamps (the flashlight: not yet)",
-   "keys": ["43.089 -41.815 -18.758 132.49 4.28 0 70", "41.0 -39.5 -18.758 132.49 4.28 0 70"]}
+   "keys": ["43.089 -41.815 -18.758 132.49 4.28 0 70", "41.0 -39.5 -18.758 132.49 4.28 0 70"]},
+  {"id": "B1", "name": "b30_first_beach", "map": "b30", "tests": "Terrain: the first beach's sand, the shoreline across the frame (T0)",
+   "keys": ["-60.0 18.3 4.5 180 -15 0 70", "-60.0 18.3 4.5 165 -15 0 70"]},
+  {"id": "N1", "name": "b40_snowfield", "map": "b40", "bsp": 0, "tests": "Terrain: the canyon floor's snow, snow over rock, the cliffs (T0)",
+   "keys": ["150.0 -136.0 2.5 -90 -12 0 70", "150.0 -136.0 2.5 -105 -12 0 70"]},
+  {"id": "D1", "name": "d40_dunes", "map": "d40", "bsp": 8, "tests": "Terrain: d40's sand dunes (T0)",
+   "keys": ["-350.0 330.0 -3.5 90 -8 0 70", "-350.0 330.0 -3.5 75 -8 0 70"]},
+  {"id": "R1", "name": "a30_dirt", "map": "a30", "tests": "Terrain: dirt by the first player start, rock beyond (T0)",
+   "keys": ["27.0 -103.0 60.5 0 -12 0 70", "27.0 -103.0 60.5 15 -12 0 70"]},
+  {"id": "M1", "name": "c10_swamp", "map": "c10", "tests": "Terrain: the swamp's dirt and mud (T0)",
+   "keys": ["-138.0 -44.0 42.5 180 -15 0 70", "-138.0 -44.0 42.5 165 -15 0 70"]}
  ]
 }

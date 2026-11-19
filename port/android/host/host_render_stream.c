@@ -251,6 +251,7 @@ static const uint32_t record_minimum[XGPU_STREAM_RECORD_TYPES] =
 	[XGPU_STREAM_PRISM_BAKE] = sizeof(struct xgpu_stream_prism_bake),
 	[XGPU_STREAM_SCENE_MATERIAL_MAPS] = sizeof(struct xgpu_stream_scene_material_maps),
 	[XGPU_STREAM_UPSCALE] = sizeof(struct xgpu_stream_upscale),
+	[XGPU_STREAM_PRISM_TERRAIN] = offsetof(struct xgpu_stream_prism_terrain, items),
 	[XGPU_STREAM_GAMMA] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_SHARP_UPSCALE] = sizeof(struct xgpu_stream_value),
 	[XGPU_STREAM_HDR_SDR_CURVE] = sizeof(struct xgpu_stream_value),
@@ -624,6 +625,18 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 		if (bake->size)
 			data = host_pointer(bake->data);
 		CALL(prism_bake, bake, data);
+		break;
+	}
+	case XGPU_STREAM_PRISM_TERRAIN:
+	{
+		const struct xgpu_stream_prism_terrain *terrain = (const void *)start;
+		uint32_t most = terrain->phase == XGPU_TERRAIN_EVENTS ? XGPU_TERRAIN_EVENTS_MOST :
+			terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST : 0;
+
+		if (terrain->phase >= XGPU_TERRAIN_PHASES || terrain->count > most ||
+			size < offsetof(struct xgpu_stream_prism_terrain, items) + terrain->count * sizeof(terrain->items[0]))
+			return XGPU_STREAM_ERROR_RECORD;
+		CALL(prism_terrain, terrain);
 		break;
 	}
 	case XGPU_STREAM_SCENE_MATERIAL_ANIMATE:

@@ -104,6 +104,8 @@ static struct
 	/* (its stand-in where there is none: a texel of words, never read, but
 	of the type the shader declares) */
 	struct xgpu_vulkan_image *gbuffer_stand_in;
+	/* (the terrain's debug view's events' stand-in, where none is shown) */
+	struct xgpu_vulkan_image *terrain_events_stand_in;
 } post;
 
 /* ---------- images */
@@ -214,7 +216,8 @@ static struct xgpu_vulkan_pipeline_description *pipeline_of(int program, uint8_t
 		program == XGPU_VULKAN_POST_PANINI;
 	/* (PRISM v4's passes, which draw into the frame's target whatever its format: half floats, display.
 	output_depth's 16 bits since GOAT H1 made them the computers' default, or 8 bits) */
-	int prism = program == XGPU_VULKAN_POST_DEFERRED_RESOLVE || program == XGPU_VULKAN_POST_ALBEDO_OVER;
+	int prism = program == XGPU_VULKAN_POST_DEFERRED_RESOLVE || program == XGPU_VULKAN_POST_ALBEDO_OVER ||
+		program == XGPU_VULKAN_POST_TERRAIN_DEBUG;
 
 	return (into_target || prism) && format == XGPU_VULKAN_FORMAT_RGBA16F ? &post.half_float[program] :
 		(into_target || prism) && format == XGPU_VULKAN_FORMAT_RGBA16 ? &post.deep[program] : &post.pipelines[program];
@@ -346,7 +349,11 @@ static void pass_draw_with(int program, struct xgpu_vulkan_image *into, uint32_t
 		/* (the fourth: the deferred resolve's G-buffer alone) */
 		draw.textures[stage].image = stage < 3 ? images[stage] : post.gbuffer;
 		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
-		draw.textures[stage].sampler = stage < 3 ? post.sampler : post.nearest;
+		/* (the terrain's debug view's tables: fetched, never filtered, as
+		the words are; its events' floats are 32 bits, which a device need
+		not filter) */
+		draw.textures[stage].sampler = stage < 3 && (program != XGPU_VULKAN_POST_TERRAIN_DEBUG || stage == 0) ?
+			post.sampler : post.nearest;
 	}
 	uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
 	if (!uniforms)
@@ -584,6 +591,59 @@ int xgpu_vulkan_post_albedo_over(struct xgpu_vulkan_image *base, struct xgpu_vul
 	rectangle[3] = (int32_t)description->height;
 	post.gbuffer = gbuffer;
 	pass_draw(XGPU_VULKAN_POST_ALBEDO_OVER, base, 0, rectangle, albedo, NULL, NULL, NULL);
+	post.gbuffer = NULL;
+	return 1;
+}
+
+/* the terrain overhaul's debug views (xgpu_vulkan_terrain.c): the target
+copied, then each pixel drawn again from the copy (TERRAIN_DEBUG: the
+classes' colours by the G-buffer's material, the events' discs), its colour
+alone */
+int xgpu_vulkan_post_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *gbuffer,
+	struct xgpu_vulkan_image *classes, struct xgpu_vulkan_image *events, const float bounds[4])
+{
+	const struct xgpu_vulkan_image_description *description;
+	struct xgpu_vulkan_pipeline_description *pipeline;
+	int32_t rectangle[4];
+
+	if (!target || !classes)
+		return 0;
+	description = xgpu_vulkan_image_description(target);
+	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F &&
+		description->format != XGPU_VULKAN_FORMAT_RGBA16) || description->samples > 1)
+		return 0;
+	if (!post.vertex)
+		post.vertex = xgpu_vulkan_shader(xgpu_vulkan_post_vertex.words, xgpu_vulkan_post_vertex.count);
+	if (!post.pixel[XGPU_VULKAN_POST_TERRAIN_DEBUG])
+		post.pixel[XGPU_VULKAN_POST_TERRAIN_DEBUG] = xgpu_vulkan_shader(
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_TERRAIN_DEBUG].words,
+			xgpu_vulkan_post_programs[XGPU_VULKAN_POST_TERRAIN_DEBUG].count);
+	if (!post.vertex || !post.pixel[XGPU_VULKAN_POST_TERRAIN_DEBUG] || !sampler_make())
+		return 0;
+	if (!images_fit(0, description->format, description->width, description->height))
+		return 0;
+	pipeline = pipeline_of(XGPU_VULKAN_POST_TERRAIN_DEBUG, description->format);
+	memset(pipeline, 0, sizeof(*pipeline));
+	pipeline->vertex_shader = post.vertex;
+	pipeline->pixel_shader = post.pixel[XGPU_VULKAN_POST_TERRAIN_DEBUG];
+	pipeline->primitive_class = XGPU_VULKAN_CLASS_TRIANGLES;
+	pipeline->color_mask = 7;
+	pipeline->color_format = description->format;
+	pipeline->samples = 1;
+	/* (stand-ins where there is no G-buffer or no event: never read, but
+	of the types the shader declares) */
+	if (!post.gbuffer_stand_in)
+		post.gbuffer_stand_in = image_make(XGPU_VULKAN_FORMAT_RGBA32_UINT, XGPU_VULKAN_USAGE_SAMPLED |
+			XGPU_VULKAN_USAGE_TARGET, 1, 1);
+	if (!events && !post.terrain_events_stand_in)
+		post.terrain_events_stand_in = image_make(XGPU_VULKAN_FORMAT_RGBA32F, XGPU_VULKAN_USAGE_SAMPLED, 1, 1);
+	rectangle[0] = rectangle[1] = 0;
+	rectangle[2] = (int32_t)description->width;
+	rectangle[3] = (int32_t)description->height;
+	xgpu_vulkan_image_copy_rectangle(target, 0, post.color, rectangle);
+	post.gbuffer = gbuffer ? gbuffer : post.gbuffer_stand_in;
+	pass_draw(XGPU_VULKAN_POST_TERRAIN_DEBUG, target, 0, rectangle, post.color, classes,
+		events ? events : post.terrain_events_stand_in, bounds);
 	post.gbuffer = NULL;
 	return 1;
 }

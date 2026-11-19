@@ -333,3 +333,55 @@ uint32_t xgpu_scene_encode_fog(void *out, uint32_t room, uint32_t flags, const f
 		copy_floats(record->atmosphere_range, atmosphere_range, 2);
 	return size;
 }
+
+uint32_t xgpu_scene_encode_terrain(void *out, uint32_t room, const struct xgpu_stream_prism_terrain *terrain,
+	const void *items, uint32_t count)
+{
+	struct xgpu_stream_prism_terrain *record = out;
+	uint32_t most, size, index;
+
+	if (!out || !terrain || terrain->phase >= XGPU_TERRAIN_PHASES || (count && !items))
+		return 0;
+	most = terrain->phase == XGPU_TERRAIN_EVENTS ? XGPU_TERRAIN_EVENTS_MOST :
+		terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST : 0;
+	size = (uint32_t)(sizeof(*record) + count * sizeof(record->items[0]));
+	if (count > most || room < size)
+		return 0;
+	memcpy(record, terrain, sizeof(*record));
+	record->header = XGPU_STREAM_HEADER(XGPU_STREAM_PRISM_TERRAIN, size);
+	record->count = count;
+	record->game_seconds = finite_or_zero(terrain->game_seconds);
+	record->real_seconds = finite_or_zero(terrain->real_seconds);
+	record->weather_scale = finite_or_zero(terrain->weather_scale);
+	copy_floats(record->camera, terrain->camera, 3);
+	copy_floats(record->wind, terrain->wind, 3);
+	record->wind_count = least(terrain->wind_count, XGPU_TERRAIN_WINDS);
+	memset(record->winds, 0, sizeof(record->winds));
+	for (index = 0; index < record->wind_count; index++)
+		copy_floats(record->winds[index], terrain->winds[index], 3);
+	if (terrain->phase == XGPU_TERRAIN_WADERS)
+	{
+		const struct xgpu_stream_terrain_wader *from = items;
+		struct xgpu_stream_terrain_wader *to = (struct xgpu_stream_terrain_wader *)record->items;
+
+		for (index = 0; index < count; index++)
+		{
+			to[index].kind = from[index].kind;
+			copy_floats(to[index].position, from[index].position, 3);
+			copy_floats(to[index].velocity, from[index].velocity, 3);
+			to[index].radius = finite_or_zero(from[index].radius);
+		}
+	}
+	else
+	{
+		const struct xgpu_stream_terrain_event *from = items;
+
+		for (index = 0; index < count; index++)
+		{
+			record->items[index] = from[index];
+			copy_floats(record->items[index].position, from[index].position, 3);
+			record->items[index].magnitude = finite_or_zero(from[index].magnitude);
+		}
+	}
+	return size;
+}

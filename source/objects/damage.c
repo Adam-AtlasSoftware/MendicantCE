@@ -142,6 +142,7 @@ symbols in this file:
 #include "mcc_damage.h" /* port: port/linux/game/mcc_damage.c */
 #include "mcc_ui_teams.h" /* port: port/linux/game/mcc_ui_teams.c */
 #include "server_team_switch.h" /* port: port/linux/game/server_team_switch.c */
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 
 /* network_game_globals.c's */
 boolean network_game_distributed_client(void);
@@ -1983,6 +1984,8 @@ void area_of_effect_cause_damage(
 	long object_indices[HALO_PORT_MAXIMUM_AREA_OF_EFFECT_OBJECTS];
 	short object_count;
 
+	/* port: the explosion for PRISM's terrain (prism_terrain.c; read only) */
+	prism_terrain_explosion(&damage->epicenter, definition->cutoff_radius);
 	object_count = objects_in_sphere(
 		0,
 		0,

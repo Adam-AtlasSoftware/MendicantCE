@@ -78,4 +78,13 @@ uint32_t xgpu_scene_encode_decal(void *out, uint32_t room, uint32_t decal, uint3
 uint32_t xgpu_scene_encode_fog(void *out, uint32_t room, uint32_t flags, const float atmosphere_color[4],
 	const float atmosphere_range[2], const struct xgpu_stream_scene_fog_plane *planes, uint32_t plane_count);
 
+/* PRISM_TERRAIN (the terrain overhaul, T0): terrain's fixed part as the
+guest fills it (its header and count written here) and count items of 32
+bytes, events or waders by the phase (XGPU_TERRAIN_*: a phase past the last
+refused, and a count past the phase's most: XGPU_TERRAIN_EVENTS_MOST,
+_WADERS_MOST, 0 for the others); the winds past wind_count (cut to
+XGPU_TERRAIN_WINDS) written 0 */
+uint32_t xgpu_scene_encode_terrain(void *out, uint32_t room, const struct xgpu_stream_prism_terrain *terrain,
+	const void *items, uint32_t count);
+
 #endif

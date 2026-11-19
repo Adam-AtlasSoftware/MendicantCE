@@ -260,6 +260,13 @@ display.upscaler's and display.denoiser's frame, the record whole (its
 header written here) */
 struct xgpu_stream_upscale;
 void xgpu_backend_upscale(const struct xgpu_stream_upscale *upscale);
+/* PRISM_TERRAIN (xgpu_stream.h; port/linux/game/prism_terrain.c): the
+record's fixed part as the guest filled it (header and count written here)
+and count items of 32 bytes (events or waders by its phase; at most
+XGPU_TERRAIN_EVENTS_MOST or _WADERS_MOST; none for the others) */
+struct xgpu_stream_prism_terrain;
+void xgpu_backend_prism_terrain(const struct xgpu_stream_prism_terrain *terrain, const void *items,
+	unsigned long count);
 /* SCENE_INSTANCE: an object drawn (its id, flags XGPU_SCENE_INSTANCE_*, CE's
 level of detail), node_count of its nodes' matrices this frame and last
 (three rows of four each: now, then last; last NULL: none, NO_HISTORY) */

@@ -1033,6 +1033,41 @@ static const struct config_setting config_settings[] =
 		"until its noise is under 1%, the sun's shadows at 4 times the texels;\n"
 		"slow and large), \"ultra\", \"high\" or \"draft\" quicker and smaller.\n"
 		"A change bakes again." },
+	{ "display.terrain", _config_string, "\"on\"", "HALO_TERRAIN", _environment_value, _platform_desktop,
+		"The terrain, weather and water overhaul (docs/prism_terrain.md), in a\n"
+		"campaign with PRISM Rebaked or Path Traced (display.lighting \"raster\"\n"
+		"or \"pathtraced\"): \"on\" the game tells the renderer of its ground,\n"
+		"footsteps, tyres, impacts, wind and weather each frame; \"off\" none\n"
+		"of it. Never in Classic or multiplayer. So far (T0) nothing is drawn\n"
+		"of it but its debug views. Read each frame." },
+	{ "display.terrain_quality", _config_string, "\"auto\"", "HALO_TERRAIN_QUALITY", _environment_value,
+		_platform_desktop,
+		"With display.terrain: \"auto\" (by the graphics card), \"low\",\n"
+		"\"medium\", \"high\" or \"ultra\": the HQ layers' size, the prints'\n"
+		"detail, the particles and the water's simulation (not drawn yet)." },
+	{ "display.terrain_layers", _config_string, "\"hq\"", "HALO_TERRAIN_LAYERS", _environment_value,
+		_platform_desktop,
+		"With display.terrain: \"hq\" sand, dirt, mud, rock, snow and ice get\n"
+		"the terrain pack's high-quality layers over CE's colours where the\n"
+		"pack is installed (CE's alone otherwise); \"ce\" CE's alone (not\n"
+		"drawn yet)." },
+	{ "display.terrain_tracks", _config_boolean, "true", "HALO_TERRAIN_TRACKS", _environment_value,
+		_platform_desktop,
+		"With display.terrain: footprints, tyre tracks and craters in sand,\n"
+		"snow, dirt and mud (not drawn yet)." },
+	{ "display.terrain_drifts", _config_boolean, "true", "HALO_TERRAIN_DRIFTS", _environment_value,
+		_platform_desktop,
+		"With display.terrain: sand and snow piled at the walls' feet (not\n"
+		"drawn yet; it will change the bake's geometry: one bake again for\n"
+		"each map it reaches)." },
+	{ "display.weather", _config_string, "\"prism\"", "HALO_WEATHER", _environment_value, _platform_desktop,
+		"With display.terrain: \"prism\" the weather (CE's rain and snow,\n"
+		"blowing dust and spindrift) drawn by the renderer in CE's place;\n"
+		"\"ce\" CE's own. So far (T0) CE's is drawn either way." },
+	{ "display.water", _config_string, "\"prism\"", "HALO_WATER", _environment_value, _platform_desktop,
+		"With display.terrain: \"prism\" the water's surface drawn by the\n"
+		"renderer (reflection, refraction, waves) in CE's place; \"ce\" CE's\n"
+		"own. So far (T0) CE's is drawn either way." },
 	{ "display.bake_folder", _config_string, "\"\"", "HALO_BAKE_FOLDER", _environment_value, _platform_desktop,
 		"Where the bakes are kept (a folder of each map's, a file of each\n"
 		"BSP's; made on this machine, never shared); empty: the data folder's\n"
@@ -3668,8 +3703,19 @@ static const struct config_setting config_settings[] =
 		"with \"pathtraced\", the path tracer's: \"pt_diffuse\" (the diffuse\n"
 		"light, denoised), \"pt_specular\", \"pt_sun\" (the sun's visibility),\n"
 		"\"pt_direct\", \"pt_indirect\", \"pt_history\" (each pixel's history,\n"
-		"white full) or \"pt_noisy\" (the diffuse light as traced);\n"
-		"\"off\" the frame. Read each frame." },
+		"white full) or \"pt_noisy\" (the diffuse light as traced); with\n"
+		"\"raster\" or \"pathtraced\" and display.terrain, \"terrain_class\"\n"
+		"(each opaque pixel by its ground: sand gold, dirt brown, mud olive,\n"
+		"rock blue-grey, snow white, ice cyan, water blue, striped where a\n"
+		"shader blends two; docs/prism_terrain.md); \"off\" the frame. Read\n"
+		"each frame." },
+	{ "debug.terrain_events", _config_boolean, "false", "HALO_TERRAIN_EVENTS", _environment_value,
+		_platform_desktop,
+		"With display.terrain: the terrain's events drawn where they happened\n"
+		"over the frame for 30 seconds (a left foot's step green, a right's\n"
+		"red, a landing magenta, a vehicle's wheels on the ground orange, an\n"
+		"impact cyan, a detonation or an explosion white) and each but the\n"
+		"wheels' logged. For checking. Read each frame." },
 	{ "debug.pt_reference", _config_integer, "0", "HALO_PT_REFERENCE", _environment_value, _platform_desktop,
 		"With display.prism_rt \"pathtraced\", a converged reference for the\n"
 		"quality gates (docs/prism_gates.md): the path tracer unbiased (no reuse,\n"
@@ -6139,7 +6185,7 @@ static const struct
 {
 	const char *name;
 	/* NULL ended; "" where empty is one */
-	/* (32: debug.gbuffer_view's 27 and its end) */
+	/* (32: debug.gbuffer_view's 28 and its end) */
 	const char *words[32];
 	/* what the game does with another, for the log (NULL: not said) */
 	const char *otherwise;
@@ -6161,7 +6207,13 @@ static const struct
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",
 		"bake_volume", "bake_total", "raster_albedo", "raster_specular", "raster_diffuse", "pt_diffuse",
-		"pt_specular", "pt_sun", "pt_direct", "pt_indirect", "pt_history", "pt_noisy", NULL }, "off" },
+		"pt_specular", "pt_sun", "pt_direct", "pt_indirect", "pt_history", "pt_noisy", "terrain_class", NULL },
+		"off" },
+	{ "display.terrain", { "on", "off", NULL }, "on" },
+	{ "display.terrain_quality", { "auto", "low", "medium", "high", "ultra", NULL }, "auto" },
+	{ "display.terrain_layers", { "hq", "ce", NULL }, "hq" },
+	{ "display.weather", { "prism", "ce", NULL }, "prism" },
+	{ "display.water", { "prism", "ce", NULL }, "prism" },
 	{ "display.bake", { "auto", "ask", "off", NULL }, "auto" },
 	{ "display.bake_quality", { "max", "ultra", "high", "draft", NULL }, "max" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },

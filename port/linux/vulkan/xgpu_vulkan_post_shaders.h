@@ -52,6 +52,11 @@ enum xgpu_vulkan_post_program_id
 	albedo target's at unit 0, the G-buffer's words at 3, over the base
 	target: xgpu_vulkan_post_albedo_over) */
 	XGPU_VULKAN_POST_ALBEDO_OVER,
+	/* (the terrain overhaul, T0: debug.gbuffer_view "terrain_class" and
+	debug.terrain_events over the resolved frame, its copy at unit 0, the
+	classes' table at 1, the events at 2, the G-buffer's words at 3:
+	xgpu_vulkan_post_terrain_debug) */
+	XGPU_VULKAN_POST_TERRAIN_DEBUG,
 	XGPU_VULKAN_POST_PROGRAM_COUNT
 };
 

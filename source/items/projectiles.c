@@ -142,6 +142,7 @@ symbols in this file:
 #include "units/bipeds.h"
 #include "units/units.h"
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 /* port: port/linux/game/overshield_effect.c */
 boolean overshield_effect_active(long object_index);
 boolean overshield_effect_hit_effect_allowed(long effect_index);
@@ -1931,6 +1932,8 @@ static void projectile_detonate(
 
 	object_get_origin(projectile_index, &marker_points[0]);
 	object_get_orientation(projectile_index, &marker_forwards[0], &up);
+	/* port: the detonation for PRISM's terrain (prism_terrain.c; read only) */
+	prism_terrain_detonation(projectile_index, &marker_points[0], projectile->projectile.hit_material_type);
 	marker_points[1] = marker_points[0];
 	marker_forwards[1] = *global_down3d;
 	effect_new_unattached_from_markers(
@@ -2077,6 +2080,8 @@ static void projectile_collision(
 	}
 
 	projectile->projectile.hit_material_type = material_type;
+	/* port: the impact for PRISM's terrain (prism_terrain.c; read only) */
+	prism_terrain_impact(projectile_index, &collision->point, &collision->plane.n, (short)material_type, new_velocity);
 	if (VALID_INDEX(material_type, definition->projectile.material_responses.count))
 	{
 		material_response = TAG_BLOCK_GET_ELEMENT(
