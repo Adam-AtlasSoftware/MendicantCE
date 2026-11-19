@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, ROOT, build, enum_with, function, mutated, read, run, structure  # noqa: E402
 
-CASES = ["unlocked", "locked", "locked-agreed", "unlock", "unrelated"]
+CASES = ["unlocked", "locked", "locked-agreed", "unlock", "unrelated", "lighting-mode"]
 
 NEGATIVE_CONTROLS = {
     "ok-writes-locked": (("\tif (spinner->disabled || index < 0", "\tif (index < 0"), "locked"),
@@ -23,15 +23,29 @@ NEGATIVE_CONTROLS = {
     "locked-shows-30": (('"%ld", sim_rate_next()', '"%d", SIM_RATE_CLASSIC'), "locked-agreed"),
     "focus-kept": (("\tif (locked && list->focused_child == row)", "\tif (0)"), "locked"),
     "unlock-keeps-30": (("\t\tspinner->parameters.list.selected_index = setting->loaded_index;\n", ""), "unlock"),
+    # (Defaults sets a row the lighting mode hides)
+    "hidden-defaulted": (("\tif (lighting_row_hidden(spinner->parent))\n\t\treturn TRUE;\n", ""), "lighting-mode"),
+    # (a row of no lighting mode's, as SIMULATION, hidden too)
+    "hidden-by-any-mode": (("!lighting_row_shown(row->name, TRUE, &found) && found",
+                            "!lighting_row_shown(row->name, TRUE, &found)"), "lighting-mode"),
 }
+
+
+def lighting_rows(menus):
+    """menu_functions.c's lighting_rows table (the rows of one lighting mode or two)."""
+    at = menus.index("lighting_rows[] =")
+    return menus[menus.rindex("static struct", 0, at):menus.index("};", at) + 2]
 
 
 def generated(fault=None):
     menus = read("port/linux/game/menu_functions.c")
     config = enum_with(read("port/linux/game/sim_rate.h"), "SIM_RATE_CLASSIC") + "\n"
     config += structure(menus, "pc_menu_setting") + "\n"
+    config += enum_with(menus, "LIGHTING_C = 1") + "\n" + lighting_rows(menus) + "\n"
+    # (Defaults leaves a row the lighting mode shown hides: lighting_row_hidden, before setting_default_show)
     code = "\n\n".join(function(menus, name) for name in (
-        "text_is_number", "setting_value_index", "setting_changed_save", "setting_default_show", "sim_rate_row_show"))
+        "text_is_number", "setting_value_index", "setting_changed_save", "lighting_mode_shown", "lighting_row_shown",
+        "lighting_row_hidden", "setting_default_show", "sim_rate_row_show"))
     if fault:
         code = mutated(code, *fault)
     return (("config.inc", config), ("under_test.inc", code))
@@ -65,8 +79,14 @@ def test_the_row_on_advanced_graphics():
     assert "platform=" not in child, child
     labels = re.search(r'<strings name="[^"]*/advanced/labels">(.*?)</strings>', text, re.S).group(1)
     assert '<string text="TICK RATE"/>' in labels
-    # its row fits above the buttons (y + the row's height <= 414)
-    assert int(re.search(r'y="(\d+)"', child).group(1)) + port_settings.SETTINGS_ROW_HEIGHT <= 414
+    # its row fits above the buttons (at 414), packed as the engine packs the rows each frame (the files' places
+    # are every lighting mode's and every platform's rows), in each lighting mode, on the desktop and Android
+    from harness import menu_layout
+    root = f"{port_settings.PE}/video_settings/advanced/advanced_graphics_screen"
+    for platforms in (menu_layout.DESKTOP, menu_layout.ANDROID):
+        for mode in port_settings.LIGHTING_MODES:
+            row = menu_layout.one(menu_layout.layout(root, 640, platforms, mode=mode), "op_sim_rate")
+            assert row.y1 <= 414, (sorted(platforms), mode, row)
     assert '{ "game.sim_rate", _config_integer, "60", "HALO_SIM_RATE"' in read("port/linux/src/port_config.c")
     update = read("port/linux/game/menu_functions.c")
     update = update[update.index("static void settings_page_update("):]

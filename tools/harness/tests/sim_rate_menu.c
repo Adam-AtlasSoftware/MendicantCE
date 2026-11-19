@@ -3,9 +3,11 @@
 /* Graphics' SIMULATION row (port/linux/game/menu_functions.c's
 sim_rate_row_show, tools/port_settings.py): game.sim_rate's spinner, locked
 at ORIGINAL (30) where the game sets the setting aside, and OK and Defaults,
-which pass over a locked spinner */
+which pass over a locked spinner; Defaults also passes over a row the
+lighting mode shown hides (lighting_row_hidden) */
 
 #define MAXIMUM_STRINGS 32
+#define NUMBEROF(array) (sizeof(array) / sizeof((array)[0]))
 #define _stricmp strcasecmp
 #include <strings.h>
 
@@ -15,7 +17,7 @@ struct widget_instance
 	long definition_tag_index;
 	boolean disabled;
 	real alpha_modifier;
-	struct widget_instance *child, *next, *focused_child;
+	struct widget_instance *parent, *child, *next, *focused_child;
 	union
 	{
 		struct
@@ -77,6 +79,17 @@ static boolean setting_text(char const *name, char *text, unsigned int size, boo
 	return TRUE;
 }
 
+/* Video's Lighting as Settings shows it (NULL: none, as Android's) */
+static char const *lighting_value;
+
+static boolean settings_value(char const *name, char *text, unsigned int size)
+{
+	if (strcmp(name, "display.lighting") || !lighting_value)
+		return setting_text(name, text, size, FALSE);
+	snprintf(text, size, "%s", lighting_value);
+	return TRUE;
+}
+
 static boolean setting_write(char const *name, char const *value)
 {
 	if (strcmp(name, "game.sim_rate"))
@@ -107,12 +120,16 @@ static void setup(void)
 	for (index = 0; index < 3; index++)
 		sim_rate_setting.values[index] = values[index];
 	list = (struct widget_instance){ .name = "options_menu", .alpha_modifier = 1.0f, .child = &other_row };
-	other_row = (struct widget_instance){ .name = "op_model_detail", .alpha_modifier = 1.0f, .next = &row };
-	row = (struct widget_instance){ .name = "op_sim_rate", .alpha_modifier = 1.0f, .child = &label,
+	other_row = (struct widget_instance){ .name = "op_model_detail", .alpha_modifier = 1.0f, .parent = &list,
+		.next = &row };
+	row = (struct widget_instance){ .name = "op_sim_rate", .alpha_modifier = 1.0f, .parent = &list, .child = &label,
 		.next = &button_bar };
-	label = (struct widget_instance){ .name = "sim_rate_label", .alpha_modifier = 1.0f, .next = &spinner };
-	spinner = (struct widget_instance){ .name = "sim_rate_spinner", .definition_tag_index = 7, .alpha_modifier = 1.0f };
-	button_bar = (struct widget_instance){ .name = "button_bar", .alpha_modifier = 1.0f };
+	label = (struct widget_instance){ .name = "sim_rate_label", .alpha_modifier = 1.0f, .parent = &row,
+		.next = &spinner };
+	spinner = (struct widget_instance){ .name = "sim_rate_spinner", .definition_tag_index = 7, .alpha_modifier = 1.0f,
+		.parent = &row };
+	button_bar = (struct widget_instance){ .name = "button_bar", .alpha_modifier = 1.0f, .parent = &list };
+	lighting_value = NULL;
 	list.focused_child = &other_row;
 	/* ("port setting load", on the spinner's created event) */
 	setting_text("game.sim_rate", text, sizeof(text), FALSE);
@@ -219,6 +236,43 @@ int main(int argc, char **argv)
 		spinner.name = "other_spinner";
 		sim_rate_row_show(&list);
 		CHECK(!row.disabled && !spinner.disabled && row.alpha_modifier == 1.0f, "unrelated row locked");
+		return 0;
+	}
+
+	/* Defaults by lighting mode: a row the mode shown hides (Classic's ray
+	tracer, op_prism_rt, under PRISM Path Traced) keeps its value; shown
+	(Classic), Defaults sets it; the SIMULATION row, of every mode, takes
+	its default in any */
+	if (!strcmp(case_name, "lighting-mode"))
+	{
+		static struct pc_menu_setting rt_setting;
+		static struct widget_instance rt_spinner;
+
+		strcpy(config_value, "120");
+		locked = FALSE;
+		setup();
+		memset(&rt_setting, 0, sizeof(rt_setting));
+		/* (setting_text gives a setting not game.sim_rate "": its default,
+		values[0]) */
+		rt_setting.setting = "display.prism_rt";
+		rt_setting.value_count = 2;
+		rt_setting.values[0] = "";
+		rt_setting.values[1] = "on";
+		other_row.name = "op_prism_rt";
+		other_row.child = &rt_spinner;
+		rt_spinner = (struct widget_instance){ .name = "prism_rt_spinner", .alpha_modifier = 1.0f, .parent = &other_row };
+		rt_spinner.parameters.list.selected_index = 1;
+		lighting_value = "pathtraced";
+		setting_default_show(&rt_spinner, &rt_setting);
+		CHECK(rt_spinner.parameters.list.selected_index == 1, "Defaults set a row Path Traced hides: %d",
+			rt_spinner.parameters.list.selected_index);
+		setting_default_show(&spinner, &sim_rate_setting);
+		CHECK(spinner.parameters.list.selected_index == 1, "Path Traced: SIMULATION's default not shown: %d",
+			spinner.parameters.list.selected_index);
+		lighting_value = "ce";
+		setting_default_show(&rt_spinner, &rt_setting);
+		CHECK(rt_spinner.parameters.list.selected_index == 0, "Defaults left a row Classic shows: %d",
+			rt_spinner.parameters.list.selected_index);
 		return 0;
 	}
 
