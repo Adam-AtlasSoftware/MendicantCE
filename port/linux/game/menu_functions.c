@@ -5156,11 +5156,17 @@ static short settings_segments(struct widget_instance *row, struct widget_instan
 	*spinner = NULL;
 	if (!model_row || !model_row->key)
 		return 0;
-	snprintf(name, sizeof(name), "%s_spinner", model_row->key);
+	/* (by the names the instances have, cut short: a long key's spinner,
+	ambient_occlusion_strength_spinner, was never found, so its row drew its
+	spinner and its segments over each other, past the row at 4:3) */
+	settings_widget_name(name, sizeof(name), "", model_row->key, "_spinner");
 	*spinner = named(row, name, 0);
 	for (count = 0; count < SETTINGS_SEGMENTS_MOST; count++)
 	{
-		snprintf(name, sizeof(name), "%s_seg%d", model_row->key, count);
+		char suffix[8];
+
+		snprintf(suffix, sizeof(suffix), "_seg%d", count);
+		settings_widget_name(name, sizeof(name), "", model_row->key, suffix);
 		if ((segments[count] = named(row, name, 0)) == NULL)
 			break;
 	}
