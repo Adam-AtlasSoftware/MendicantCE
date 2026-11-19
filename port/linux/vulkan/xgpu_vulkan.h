@@ -1119,6 +1119,9 @@ struct xgpu_vulkan_rt_device
 	/* nanoseconds a timestamp's tick (0: no timestamps) */
 	float timestamp_period;
 	int nvidia;
+	/* compute shaders' subgroups: the fewest invocations one may have, and
+	the operations compute has (VK_SUBGROUP_FEATURE_*_BIT; 0 none) */
+	uint32_t subgroup_least, subgroup_compute;
 };
 int xgpu_vulkan_rt_device(struct xgpu_vulkan_rt_device *device);
 VkCommandBuffer xgpu_vulkan_compute_commands(void);

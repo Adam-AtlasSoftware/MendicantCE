@@ -3591,10 +3591,18 @@ static uint32_t lanes_of(struct bake_state *b)
 {
 	uint32_t lanes = 1;
 
-	if (b->drafting || !b->running_texels || getenv("HALO_BAKE_NO_SPREAD"))
+	if (b->drafting || !b->running_texels || getenv("HALO_BAKE_NO_SPREAD") ||
+		!(bake.device.subgroup_compute & VK_SUBGROUP_FEATURE_SHUFFLE_BIT))
+	{
 		return 1;
-	while (lanes < SPREAD_MOST && b->running_texels * lanes * 2u <= SPREAD_INVOCATIONS)
+	}
+	/* (a texel's lanes in one subgroup, whatever size the driver gives the
+	pass: no more than the device's fewest) */
+	while (lanes < SPREAD_MOST && lanes * 2u <= bake.device.subgroup_least &&
+		b->running_texels * lanes * 2u <= SPREAD_INVOCATIONS)
+	{
 		lanes <<= 1;
+	}
 	return lanes;
 }
 

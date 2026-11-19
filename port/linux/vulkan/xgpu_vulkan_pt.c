@@ -381,6 +381,11 @@ static void buffer_free(struct pt_buffer *buffer)
 	memset(buffer, 0, sizeof(*buffer));
 }
 
+/* the subgroup operations the passes use in compute (xgpu_vulkan_pt.glsl's
+temporal pass; BAKE_COMMON's shaders) */
+#define PT_SUBGROUP_OPERATIONS (VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | \
+	VK_SUBGROUP_FEATURE_ARITHMETIC_BIT | VK_SUBGROUP_FEATURE_SHUFFLE_BIT)
+
 static void barrier(VkCommandBuffer commands)
 {
 	VkMemoryBarrier memory;
@@ -465,6 +470,15 @@ static int make(void)
 	pt.failed = 1;
 	if (!xgpu_vulkan_rt_device(&pt.device))
 		return 0;
+	/* (the temporal pass's ballots and minimum and maximum, the baker's
+	shuffles, in compute: else no path tracing, rather than pipelines the
+	device cannot run) */
+	if ((pt.device.subgroup_compute & PT_SUBGROUP_OPERATIONS) != PT_SUBGROUP_OPERATIONS)
+	{
+		host_logf(HOST_LOG_WARN, "prism pt: the device's compute shaders lack subgroup operations (0x%x of 0x%x): "
+			"no path tracing", pt.device.subgroup_compute, PT_SUBGROUP_OPERATIONS);
+		return 0;
+	}
 #define LOAD(name) name = (PFN_##name)pt.device.get_device_proc(pt.device.device, #name); \
 	if (!name) { host_logf(HOST_LOG_WARN, "prism pt: no %s: no path tracing", #name); return 0; }
 	PT_FUNCTIONS(LOAD)

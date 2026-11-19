@@ -1253,6 +1253,11 @@ static struct
 	VkFormat depth_format;
 	/* NVIDIA's own driver (its anisotropic filtering: anisotropic_bias) */
 	int nvidia;
+	/* compute shaders' subgroups: the fewest invocations one may have (a
+	pipeline's own size may be any between the device's least and most:
+	AMD's 32 or 64), and the operations compute has
+	(VK_SUBGROUP_FEATURE_*_BIT; 0 none) */
+	uint32_t subgroup_least, subgroup_compute;
 	/* display.prism_rt: the device has acceleration structures and ray
 	queries (their extensions and features enabled: device_make), and
 	buffer device addresses */
@@ -11445,17 +11450,27 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	{
 		VkPhysicalDeviceVulkan11Properties properties11;
 		VkPhysicalDeviceVulkan12Properties properties12;
+		VkPhysicalDeviceSubgroupSizeControlProperties size_control;
 		VkPhysicalDeviceProperties2 properties;
 
 		memset(&properties11, 0, sizeof(properties11));
 		memset(&properties12, 0, sizeof(properties12));
+		memset(&size_control, 0, sizeof(size_control));
 		memset(&properties, 0, sizeof(properties));
 		properties11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES;
 		properties12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES;
+		size_control.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES;
 		properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
 		properties.pNext = &properties11;
 		properties11.pNext = &properties12;
+		if (vk.properties.apiVersion >= VK_API_VERSION_1_3)
+			properties12.pNext = &size_control;
 		vkGetPhysicalDeviceProperties2(vk.physical, &properties);
+		vk.subgroup_least = properties11.subgroupSize;
+		if (size_control.minSubgroupSize && size_control.minSubgroupSize < vk.subgroup_least)
+			vk.subgroup_least = size_control.minSubgroupSize;
+		vk.subgroup_compute = (properties11.subgroupSupportedStages & VK_SHADER_STAGE_COMPUTE_BIT) ?
+			properties11.subgroupSupportedOperations : 0;
 		vk.capabilities.multiview_views = available11.multiview ? properties11.maxMultiviewViewCount : 0;
 		vk.capabilities.subgroups = (properties11.subgroupSupportedStages & VK_SHADER_STAGE_FRAGMENT_BIT) &&
 			(properties11.subgroupSupportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) &&
@@ -12232,6 +12247,8 @@ int xgpu_vulkan_rt_device(struct xgpu_vulkan_rt_device *device)
 	device->memory = &vk.memory_properties;
 	device->timestamp_period = vk.capabilities.gpu_timestamps ? vk.properties.limits.timestampPeriod : 0.0f;
 	device->nvidia = vk.nvidia;
+	device->subgroup_least = vk.subgroup_least;
+	device->subgroup_compute = vk.subgroup_compute;
 	return 1;
 }
 
