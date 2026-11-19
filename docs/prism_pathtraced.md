@@ -241,6 +241,26 @@ round 8's G7 and G4 at the default loading d75c355d4's bakes unchanged).
   lamps chosen or the ratio's pick). The per-pixel error is up where the dark floor gets a little more light than R
   (G4 p2's lower blocks +1 to +3 of 255). Remaining: the walls' specular dots (more lamps a tile, a grazing-view fit,
   or the specular reservoir's reuse), G5's dark wall, the cost.
+- **Measured again (round 8; `v4_ltc_runs/r8`).** Round 7's HEAD row of G4 was taken while bsp 0's bake was still
+  being finished (its log: "resumed"); HEAD's G4 made again on the whole bake is 0.1814 / 0.0823 / 0.119 / 1.34 (round
+  6's numbers), and this branch's default frames are d75c355d4's (G4: 319 of 320 moving frames byte-identical, the
+  other a few pixels by one level; G7 on the RTX 3070 Ti: every measure the same to 4 places, its frames as alike as
+  the Classic state's are from run to run), with d75c355d4's bakes loaded as they are. Gates on the RTX 2060:
+
+  | | G4 error / blotch / FLIP / flicker | G5 error / blotch / FLIP / flicker | G4 3070 Ti ms (light pass) |
+  | --- | --- | --- | --- |
+  | default (= d75c355d4) | 0.1814 / 0.0823 / 0.119 / 1.34 | 0.1403 / 0.0773 / 0.132 / 1.01 | 19.25 (12.65) |
+  | analytic 4, round 7 | 0.1969 / 0.0829 / 0.117 / 1.33 | 0.1686 / 0.0794 / 0.140 / 0.99 | |
+  | analytic 4, visibility by the cosine | 0.1815 / 0.0834 / 0.116 / 1.34 | 0.1675 / 0.0806 / 0.141 / 0.99 | 20.03 (13.43) |
+  | the same, 8 ReSTIR candidates | 0.1969 / 0.0787 / 0.114 / 1.34 | 0.1390 / 0.0774 / 0.133 / 1.01 | 21.57 (15.03) |
+
+  (the three frame times made together; the card's times run about 1 ms above round 7's that day.) G4's extra light on
+  the dark floor was the visibility's point taken by solid angle alone: by the cosine (`analytic_visible`) G4's error
+  is back to HEAD's. G5's darker middle pose is not the bake's visibility (off: 0.1667, the same) nor the visibility's
+  point (0.1675): it is the 4 ReSTIR candidates the analytic lamps paid with, the other lamps then undersampled on the
+  lit floors beyond G5's doorways (8 candidates: 0.1390, below HEAD's). The walls' white dots are fewer with the
+  analytic lamps in motion (`r8/strip_g4_p2_base_i_k.png`, G4's last pose) but not gone, and no setting beats HEAD on
+  every measure at both scenes within the frame time, so the analytic lamps stay off by default.
 - `HALO_PT_DEBUG_ANALYTIC=1` (a diagnosis) under `debug.gbuffer_view "pt_noisy"`: red the analytic lights' count over
   8, green the roughness, blue the bake's lamps among them over 8.
 
