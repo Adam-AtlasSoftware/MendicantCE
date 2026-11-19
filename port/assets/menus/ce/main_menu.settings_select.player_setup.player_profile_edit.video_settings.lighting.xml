@@ -550,12 +550,12 @@
 		<string text="How sharp the game's own object shadows are, which PRISM Rebaked draws while Ray Tracing's Object Shadows are Classic's."/>
 		<string text=""/>
 		<string text="Quality: a bounce of light traced at every pixel. Performance: the bounced light read from the bake where the level has it, a bounce traced for the characters and vehicles alone; faster."/>
-		<string text="PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS Ray Reconstruction, which also brings the view to the screen's resolution; from the next start. Off: the light as traced, grainy (for checking).|DLSS is a plugin you build yourself (see the prism-plugins README); its choices show once it is installed and works on this graphics card."/>
+		<string text="PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS Ray Reconstruction (offered once installed), which also brings the view to the screen's resolution; from the next start. Off: the light as traced, grainy (for checking).|DLSS: a plugin you build (prism-plugins README)."/>
 		<string text=""/>
 		<string text="How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is."/>
 		<string text="Brighter or darker than the exposure chooses, in stops: +1 twice as bright, -1 half."/>
 		<string text="How light past white is drawn. Default and Filmic: rolled off gently, nothing darker moved. ACES: punchier, a film's curve. Local: as Filmic here. Clipped: held at white, as Classic did."/>
-		<string text="Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS from the next start.|DLSS is a plugin you build yourself (see the prism-plugins README); its choices show once it is installed and works on this graphics card."/>
+		<string text="Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS: a plugin you build (prism-plugins README)."/>
 		<string text="How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone."/>
 		<string text=""/>
 		<string text="While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM lightings read the bake."/>

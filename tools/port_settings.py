@@ -2315,9 +2315,9 @@ PAGES = {
             # menu_tags.c's spinner_expand)
             ("DENOISER", "display.denoiser", [("PRISM", "prism"), ("OFF", "off"), ("DLSS RR", "dlss_rr")],
              "PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS "
-             "Ray Reconstruction, which also brings the view to the screen's resolution; from the next start. "
-             "Off: the light as traced, grainy (for checking).|DLSS is a plugin you build yourself (see the "
-             "prism-plugins README); its choices show once it is installed and works on this graphics card.",
+             "Ray Reconstruction (offered once installed), which also brings the view to the screen's resolution; "
+             "from the next start. "
+             "Off: the light as traced, grainy (for checking).|DLSS: a plugin you build (prism-plugins README).",
              "desktop"),
             # (both PRISM modes' exposure and tone curve: the bake's meter and
             # step, shared, prism_rt.c's RT_FRAME settings)
@@ -2344,8 +2344,8 @@ PAGES = {
             # out where it is not ready (menu_tags.c's spinner_expand))
             ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
              "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. "
-             "FSR 3.1 is built in; DLSS from the next start.|DLSS is a plugin you build yourself (see the "
-             "prism-plugins README); its choices show once it is installed and works on this graphics card.",
+             "FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS: a plugin you build "
+             "(prism-plugins README).",
              "desktop"),
             ("UPSCALE QUALITY", "display.upscaler_scale",
              [("QUALITY", "0"), ("BALANCED", "0.58"), ("PERFORMANCE", "0.5"), ("ULTRA PERF.", "0.33"),
