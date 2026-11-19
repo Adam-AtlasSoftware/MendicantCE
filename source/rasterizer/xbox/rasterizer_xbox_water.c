@@ -209,7 +209,8 @@ typedef char verify_pixel_shader_definition_size[
 static void rasterizer_water_fog_beyond_world(
 	struct transparent_geometry_group const *group,
 	short vertex_type,
-	short permutation_index);
+	short permutation_index,
+	boolean write_alpha);
 static void rasterizer_water_draw_prism(
 	struct transparent_geometry_group const *group,
 	struct shader_transparent_water_definition *water,
@@ -668,7 +669,7 @@ void rasterizer_water_draw(
 		/* port: before the water's depth, the planar fog where the world
 		ends under it */
 		if (!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit))
-			rasterizer_water_fog_beyond_world(group, vertex_type, permutation_index);
+			rasterizer_water_fog_beyond_world(group, vertex_type, permutation_index, prism_water);
 		if (prism_water)
 		{
 			rasterizer_water_draw_prism(group, water, vertex_type, permutation_index);
@@ -1336,7 +1337,8 @@ pipeline). */
 static void rasterizer_water_fog_beyond_world(
 	struct transparent_geometry_group const *group,
 	short vertex_type,
-	short permutation_index)
+	short permutation_index,
+	boolean write_alpha)
 {
 	struct render_fog const *fog = &global_window_parameters.fog;
 	struct render_camera const *camera = &global_window_parameters.camera;
@@ -1383,14 +1385,15 @@ static void rasterizer_water_fog_beyond_world(
 	color.blue = PIN(color.blue, 0.0f, 1.0f);
 
 	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_NONE);
-	/* (the alpha too: 1 at the water's pixels, which the host emptied at
-	BEGIN, is the layer's mask) */
+	/* (with PRISM's water layer the alpha too: 1 at the water's pixels,
+	which the host emptied at BEGIN, is the layer's mask; CE's draw, and
+	Classic, leave the alpha as CE left it) */
 	SetRenderStateSmart(
 		D3DRS_COLORWRITEENABLE,
 		D3DCOLORWRITEENABLE_RED |
 		D3DCOLORWRITEENABLE_GREEN |
 		D3DCOLORWRITEENABLE_BLUE |
-		D3DCOLORWRITEENABLE_ALPHA);
+		(write_alpha ? D3DCOLORWRITEENABLE_ALPHA : 0));
 	SetRenderStateSmart(D3DRS_ALPHABLENDENABLE, TRUE);
 	SetRenderStateSmart(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 	SetRenderStateSmart(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
