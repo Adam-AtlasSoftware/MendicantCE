@@ -930,6 +930,13 @@ static float terrain_finite(float value)
 	return (bits & 0x7f800000u) == 0x7f800000u ? 0.0f : value;
 }
 
+/* (the terrain overhaul's water layer, T7: the host's passes need its ray
+tracing's device, display.prism_rt's) */
+int xgpu_backend_ray_tracing(void)
+{
+	return stream.open && stream.capabilities.ray_tracing;
+}
+
 void xgpu_backend_prism_terrain(const struct xgpu_stream_prism_terrain *terrain, const void *items,
 	unsigned long count)
 {
@@ -940,8 +947,9 @@ void xgpu_backend_prism_terrain(const struct xgpu_stream_prism_terrain *terrain,
 	if (!stream.open || stream.preparing || !terrain || terrain->phase >= XGPU_TERRAIN_PHASES || (count && !items))
 		return;
 	most = terrain->phase == XGPU_TERRAIN_EVENTS ? XGPU_TERRAIN_EVENTS_MOST :
-		terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST : 0;
-	if (count > most)
+		terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST :
+		terrain->phase == XGPU_TERRAIN_WATER_DRAW ? XGPU_TERRAIN_WATER_ITEMS : 0;
+	if (count > most || (terrain->phase == XGPU_TERRAIN_WATER_DRAW && count != XGPU_TERRAIN_WATER_ITEMS))
 		return;
 	size = (uint32_t)(offsetof(struct xgpu_stream_prism_terrain, items) +
 		count * sizeof(struct xgpu_stream_terrain_event));
@@ -962,7 +970,23 @@ void xgpu_backend_prism_terrain(const struct xgpu_stream_prism_terrain *terrain,
 			record_body->winds[index][axis] = index < record_body->wind_count ?
 				terrain_finite(terrain->winds[index][axis]) : 0.0f;
 	}
-	if (terrain->phase == XGPU_TERRAIN_WADERS)
+	if (terrain->phase == XGPU_TERRAIN_WATER_DRAW)
+	{
+		const struct xgpu_stream_terrain_water *from = items;
+		struct xgpu_stream_terrain_water *to = (struct xgpu_stream_terrain_water *)record_body->items;
+
+		*to = *from;
+		for (axis = 0; axis < 4; axis++)
+		{
+			to->plane[axis] = terrain_finite(from->plane[axis]);
+			to->perpendicular[axis] = terrain_finite(from->perpendicular[axis]);
+			to->parallel[axis] = terrain_finite(from->parallel[axis]);
+			to->fog[axis] = terrain_finite(from->fog[axis]);
+			to->fog_shape[axis] = terrain_finite(from->fog_shape[axis]);
+		}
+		to->ripple_scale = terrain_finite(from->ripple_scale);
+	}
+	else if (terrain->phase == XGPU_TERRAIN_WADERS)
 	{
 		const struct xgpu_stream_terrain_wader *from = items;
 		struct xgpu_stream_terrain_wader *to = (struct xgpu_stream_terrain_wader *)record_body->items;

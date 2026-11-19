@@ -192,6 +192,16 @@ static void layout(void)
 	FIELD(xgpu_stream_prism_terrain, winds);
 	FIELD(xgpu_stream_prism_terrain, map_checksum);
 	printf("xgpu_stream_prism_terrain.items %u 0\n", (unsigned)offsetof(struct xgpu_stream_prism_terrain, items));
+	SIZE(xgpu_stream_terrain_water);
+	FIELD(xgpu_stream_terrain_water, step);
+	FIELD(xgpu_stream_terrain_water, flags);
+	FIELD(xgpu_stream_terrain_water, plane);
+	FIELD(xgpu_stream_terrain_water, group);
+	FIELD(xgpu_stream_terrain_water, ripple_scale);
+	FIELD(xgpu_stream_terrain_water, perpendicular);
+	FIELD(xgpu_stream_terrain_water, parallel);
+	FIELD(xgpu_stream_terrain_water, fog);
+	FIELD(xgpu_stream_terrain_water, fog_shape);
 }
 
 /* (the bytes, 4-byte aligned) */
@@ -285,6 +295,31 @@ static void terrain(void)
 		XGPU_TERRAIN_WADERS_MOST + 1));
 	frame.phase = XGPU_TERRAIN_WEATHER_DRAW;
 	show("terrain_marker_items", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, events, 1));
+	/* (T7: a water draw, its one xgpu_stream_terrain_water whole, three
+	items; fewer refused) */
+	{
+		struct xgpu_stream_terrain_water water;
+
+		memset(&water, 0, sizeof(water));
+		water.step = XGPU_TERRAIN_WATER_END;
+		water.flags = 1u | XGPU_TERRAIN_WATER_BASE;
+		water.plane[2] = 1.0f;
+		water.plane[3] = nan;
+		water.group = 2;
+		water.ripple_scale = 50.0f;
+		for (axis = 0; axis < 4; axis++)
+		{
+			water.perpendicular[axis] = 0.25f * (float)axis;
+			water.parallel[axis] = 1.0f;
+			water.fog[axis] = 0.5f;
+			water.fog_shape[axis] = (float)axis;
+		}
+		water.fog[3] = 1.0f / 0.0f;
+		frame.phase = XGPU_TERRAIN_WATER_DRAW;
+		show("terrain_water", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, &water,
+			XGPU_TERRAIN_WATER_ITEMS));
+		show("terrain_water_short", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, &water, 2));
+	}
 	frame.phase = XGPU_TERRAIN_PHASES;
 	show("terrain_phase", xgpu_scene_encode_terrain(buffer, sizeof(buffer), &frame, NULL, 0));
 }

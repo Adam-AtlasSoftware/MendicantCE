@@ -631,10 +631,14 @@ static int decode_record(struct host_render_decoder *decoder, const unsigned cha
 	{
 		const struct xgpu_stream_prism_terrain *terrain = (const void *)start;
 		uint32_t most = terrain->phase == XGPU_TERRAIN_EVENTS ? XGPU_TERRAIN_EVENTS_MOST :
-			terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST : 0;
+			terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST :
+			terrain->phase == XGPU_TERRAIN_WATER_DRAW ? XGPU_TERRAIN_WATER_ITEMS : 0;
 
+		/* (a water draw's items whole, its step one of WATER_DRAW's) */
 		if (terrain->phase >= XGPU_TERRAIN_PHASES || terrain->count > most ||
-			size < offsetof(struct xgpu_stream_prism_terrain, items) + terrain->count * sizeof(terrain->items[0]))
+			size < offsetof(struct xgpu_stream_prism_terrain, items) + terrain->count * sizeof(terrain->items[0]) ||
+			(terrain->phase == XGPU_TERRAIN_WATER_DRAW && (terrain->count != most ||
+			((const struct xgpu_stream_terrain_water *)terrain->items)->step >= XGPU_TERRAIN_WATER_STEPS)))
 			return XGPU_STREAM_ERROR_RECORD;
 		CALL(prism_terrain, terrain);
 		break;

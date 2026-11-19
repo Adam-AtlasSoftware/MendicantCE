@@ -17,7 +17,10 @@ sent to the renderer each frame as PRISM_TERRAIN (xgpu_stream.h):
   projectiles' impacts and detonations (projectiles.c), explosions
   (damage.c), within EVENT_RANGE of a local player's camera;
 - WADERS: the units near the eye in water, or out of it for less than
-  WADER_SECONDS (a table of this file's own: when each left).
+  WADER_SECONDS (a table of this file's own: when each left);
+- WATER_DRAW (T7): rasterizer_xbox_water.c's steps of a water group drawn
+  by the host in CE's colour draw's place (display.water "prism"; where the
+  backend has ray tracing, whose device its water layer's passes use).
 
 Only with display.lighting "raster" or "pathtraced", display.terrain "on",
 in a campaign (no game engine runs) being played (prism_terrain_wanted);
@@ -56,6 +59,7 @@ unsigned long config_changes(void);
 void platform_log(const char *format, ...);
 void xgpu_backend_prism_terrain(const struct xgpu_stream_prism_terrain *terrain, const void *items,
 	unsigned long count);
+int xgpu_backend_ray_tracing(void);
 unsigned long long SDL_GetTicksNS(void);
 /* ui_widget.c's */
 boolean main_menu_is_active(void);
@@ -77,6 +81,11 @@ struct terrain_weather_entry
 	char name[32];
 	struct tag_reference particle_system;
 };
+
+/* (prism_terrain.h's steps and flags are the stream's) */
+typedef char verify_water_steps[PRISM_TERRAIN_WATER_BEGIN == XGPU_TERRAIN_WATER_BEGIN &&
+	PRISM_TERRAIN_WATER_CAPTURED == XGPU_TERRAIN_WATER_CAPTURED && PRISM_TERRAIN_WATER_END == XGPU_TERRAIN_WATER_END &&
+	PRISM_TERRAIN_WATER_BASE == XGPU_TERRAIN_WATER_BASE && PRISM_TERRAIN_WATER_SKY == XGPU_TERRAIN_WATER_SKY ? 1 : -1];
 
 /* ---------- globals */
 
@@ -102,6 +111,8 @@ static struct
 	long game_time;
 	unsigned long long real_ns;
 	boolean active;
+	/* the water groups the host has drawn (WATER_DRAW's numbers) */
+	unsigned long water_group;
 } prism_terrain;
 
 /* ---------- private code */
@@ -621,12 +632,49 @@ boolean prism_terrain_weather_draw(
 	return FALSE;
 }
 
-boolean prism_terrain_water_draw(
-	void const *group)
+boolean prism_terrain_water_wanted(
+	void)
 {
-	/* (T7: with display.water "prism", CE's depth alone and PRISM_TERRAIN's
-	WATER_DRAW for the group; nothing draws it yet, so CE's water is
-	drawn) */
-	(void)group;
-	return FALSE;
+	/* (T7: the host's water layer, which its compute passes draw: where the
+	backend has none, CE's water) */
+	return prism_terrain_wanted() && prism_terrain.water && xgpu_backend_ray_tracing();
+}
+
+void prism_terrain_water_step(
+	unsigned long step,
+	unsigned long flags,
+	real_plane3d const *plane,
+	real ripple_scale,
+	float const perpendicular[4],
+	float const parallel[4],
+	float const fog[8])
+{
+	struct xgpu_stream_prism_terrain marker;
+	struct xgpu_stream_terrain_water water;
+
+	if (!prism_terrain_wanted())
+	{
+		return;
+	}
+	if (step == XGPU_TERRAIN_WATER_BEGIN)
+	{
+		prism_terrain.water_group++;
+	}
+	memset(&marker, 0, sizeof(marker));
+	marker.phase = XGPU_TERRAIN_WATER_DRAW;
+	marker.generation = (uint32_t)prism_terrain.generation;
+	memset(&water, 0, sizeof(water));
+	water.step = (uint32_t)step;
+	water.flags = (uint32_t)flags;
+	water.plane[0] = plane->n.i;
+	water.plane[1] = plane->n.j;
+	water.plane[2] = plane->n.k;
+	water.plane[3] = plane->d;
+	water.group = (uint32_t)prism_terrain.water_group;
+	water.ripple_scale = ripple_scale;
+	memcpy(water.perpendicular, perpendicular, sizeof(water.perpendicular));
+	memcpy(water.parallel, parallel, sizeof(water.parallel));
+	memcpy(water.fog, fog, sizeof(water.fog));
+	memcpy(water.fog_shape, fog + 4, sizeof(water.fog_shape));
+	xgpu_backend_prism_terrain(&marker, &water, XGPU_TERRAIN_WATER_ITEMS);
 }

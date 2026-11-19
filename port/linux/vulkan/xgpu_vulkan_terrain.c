@@ -87,6 +87,8 @@ static struct
 	material, its two classes), made again when a class changes */
 	struct xgpu_vulkan_image *class_image;
 	int classes_changed;
+	/* (the map's materials of the water class: an opaque water's, d40's) */
+	uint32_t water_materials;
 	/* the last FRAME's flags (fresh while this frame's) */
 	uint32_t frame_flags;
 	int fresh, ever;
@@ -344,7 +346,7 @@ static struct xgpu_vulkan_image *image_of(uint8_t format, uint32_t width, uint32
 static int classes_upload(void)
 {
 	static unsigned char texels[CLASS_TABLE_SIDE * CLASS_TABLE_SIDE * 4];
-	uint32_t material;
+	uint32_t material, water = 0;
 
 	if (!terrain.class_image)
 	{
@@ -361,7 +363,11 @@ static int classes_upload(void)
 			texels[material * 4 + 1] = terrain.materials[material].classes[1];
 			texels[material * 4 + 2] = terrain.materials[material].flags;
 			texels[material * 4 + 3] = terrain.materials[material].known;
+			if (terrain.materials[material].classes[0] == XGPU_TERRAIN_CLASS_WATER ||
+				terrain.materials[material].classes[1] == XGPU_TERRAIN_CLASS_WATER)
+				water++;
 		}
+		terrain.water_materials = water;
 		xgpu_vulkan_image_upload(terrain.class_image, 0, 0, 0, 0, 0, CLASS_TABLE_SIDE, CLASS_TABLE_SIDE, 1, texels,
 			CLASS_TABLE_SIDE * 4, sizeof(texels));
 		terrain.classes_changed = 0;
@@ -489,4 +495,12 @@ void xgpu_vulkan_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu_vul
 	bounds[2] = words ? 1.0f : 0.0f;
 	bounds[3] = 0.0f;
 	xgpu_vulkan_post_terrain_debug(target, words, terrain.class_image, shown ? terrain.event_image : NULL, bounds);
+}
+
+struct xgpu_vulkan_image *xgpu_vulkan_terrain_water_classes(void)
+{
+	if (!terrain.fresh || !(terrain.frame_flags & XGPU_TERRAIN_FLAG_WATER) ||
+		(terrain.frame_flags & XGPU_TERRAIN_FLAG_VIEW_CLASS) || !classes_upload() || !terrain.water_materials)
+		return NULL;
+	return terrain.class_image;
 }

@@ -42,10 +42,27 @@ void prism_terrain_detonation(long projectile_index, real_point3d const *point, 
 /* damage.c's area_of_effect_cause_damage: an explosion's centre and its
 damage's cutoff radius */
 void prism_terrain_explosion(real_point3d const *centre, real radius);
-/* render.c and rasterizer_xbox_water.c: TRUE where the renderer draws the
-weather (display.weather "prism") or the water (display.water "prism") in
-CE's place; FALSE (CE draws them) until those milestones (T12, T7) */
+/* render.c: TRUE where the renderer draws the weather (display.weather
+"prism") in CE's place; FALSE (CE draws it) until T12 */
 boolean prism_terrain_weather_draw(void);
-boolean prism_terrain_water_draw(void const *group);
+/* rasterizer_xbox_water.c (T7): TRUE where the renderer draws the water
+(display.water "prism", the backend with ray tracing) in CE's colour draw's
+place; then a group's steps (PRISM_TERRAIN_WATER_BEGIN, _CAPTURED, _END)
+about its draws, each with its shader's flags (bits 0 to 3, and
+PRISM_TERRAIN_WATER_BASE and _SKY: xgpu_stream.h's XGPU_TERRAIN_WATER_*), its
+plane, CE's ripple scale, its tints seen straight on and edge on (rgb,
+alpha) and the window's planar fog (colour, maximum density; maximum depth
+and distance, the eye's height over its plane) */
+enum
+{
+	PRISM_TERRAIN_WATER_BEGIN,
+	PRISM_TERRAIN_WATER_CAPTURED,
+	PRISM_TERRAIN_WATER_END,
+	PRISM_TERRAIN_WATER_BASE = 0x100,
+	PRISM_TERRAIN_WATER_SKY = 0x200,
+};
+boolean prism_terrain_water_wanted(void);
+void prism_terrain_water_step(unsigned long step, unsigned long flags, real_plane3d const *plane, real ripple_scale,
+	float const perpendicular[4], float const parallel[4], float const fog[8]);
 
 #endif

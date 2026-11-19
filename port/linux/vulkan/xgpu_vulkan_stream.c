@@ -69,6 +69,7 @@ its swapchain.
 #include "xgpu_vulkan_scene.h"
 #include "xgpu_vulkan_upscale.h"
 #include "xgpu_vulkan_terrain.h"
+#include "xgpu_vulkan_water.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -536,6 +537,9 @@ static struct
 	/* in the pass (its draws skipped, or drawn where ready: its targets
 	made), and drawn for the frame */
 	int active, ready, drawn;
+	/* (its pass begun this frame, its words emptied: the terrain overhaul's
+	water layer reads them where nothing opaque was drawn) */
+	int begun;
 	/* the colour target it was drawn for (the window's) */
 	uint32_t color;
 	struct xgpu_vulkan_image *words, *depth;
@@ -3701,6 +3705,8 @@ static void prepass_twin_prepare(const struct draw_input *input)
 		prepass_draw(input);
 }
 
+static void water_begin_pending(void);
+
 static void draw_input(const struct draw_input *input)
 {
 	uint32_t id = stream.pipeline_id, stand_in = id ? stream.stand_ins[id] : 0;
@@ -3729,6 +3735,9 @@ static void draw_input(const struct draw_input *input)
 	}
 	if (deferred.hold && stream.color == deferred.color)
 		return;
+	/* (the terrain overhaul's water layer: a group's first capture draw,
+	its targets bound now, takes what is behind the water first) */
+	water_begin_pending();
 	if (!stand_in || !definition || !world_definition(definition) || !stream.definitions[stand_in])
 	{
 		draw_pipeline(input, 0);
@@ -5742,10 +5751,288 @@ static struct xgpu_vulkan_image *pt_relight(struct xgpu_vulkan_image *light, str
 		whole);
 }
 
-/* PRISM_TERRAIN (the terrain overhaul, T0): xgpu_vulkan_terrain.c's */
+/* the terrain overhaul's water layer (T7: PRISM_TERRAIN's WATER_DRAW, about
+a CE water group's draws in rasterizer_xbox_water.c): what is behind the
+water kept at BEGIN (the colour; its alpha then emptied, which the capture
+draws make 1 at the water's pixels), CE's ripples taken at CAPTURED (and the
+reflection cube their draw had at stage 3), CE's base map and the mask at
+END (the colour target), after CE's depth: xgpu_vulkan_water.c composites
+the layer, which is copied into the colour target over the window's view
+(what the game's capture draws left elsewhere put back with it). Where it
+cannot be, the frame behind is put back, and the water is not drawn (logged
+once). */
+static struct
+{
+	struct xgpu_vulkan_image *behind, *ripples, *base;
+	struct xgpu_stream_terrain_water begun;
+	struct xgpu_vulkan_image *cube;
+	uint32_t color, depth;
+	int state, pending, pathtraced, failed_logged, unfit_logged;
+	uint32_t groups;
+} water_layer;
+
+/* an image of a target's kind and size, made again where it differs */
+static struct xgpu_vulkan_image *water_image(struct xgpu_vulkan_image **kept, struct xgpu_vulkan_image *like)
+{
+	const struct xgpu_vulkan_image_description *had = *kept ? xgpu_vulkan_image_description(*kept) : NULL;
+	const struct xgpu_vulkan_image_description *description = xgpu_vulkan_image_description(like);
+	struct xgpu_vulkan_image_description made;
+
+	if (had && had->width == description->width && had->height == description->height &&
+		had->format == description->format)
+		return *kept;
+	xgpu_vulkan_image_destroy(*kept);
+	memset(&made, 0, sizeof(made));
+	made.type = XGPU_VULKAN_IMAGE_2D;
+	made.format = description->format;
+	made.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_COPIED;
+	made.width = description->width;
+	made.height = description->height;
+	made.depth_or_layers = 1;
+	made.levels = 1;
+	*kept = xgpu_vulkan_image_create(&made);
+	return *kept;
+}
+
+static void water_failed(const char *why)
+{
+	if (!water_layer.failed_logged)
+	{
+		water_layer.failed_logged = 1;
+		host_logf(HOST_LOG_WARN, "prism water: a group not drawn (%s): what was behind it put back", why);
+	}
+}
+
+/* the window's colour and depth targets, where the layer can use them */
+static int water_targets(struct stream_target **color_out, struct stream_target **depth_out)
+{
+	struct stream_target *color = target_get(stream.color);
+	struct stream_target *depth = target_get(stream.depth);
+
+	*color_out = color;
+	*depth_out = depth;
+	return color && depth && depth->depth && color->layers == 1 && color->samples <= 1 && depth->samples <= 1 &&
+		depth->width == color->width && depth->height == color->height;
+}
+
+/* a group's BEGIN, at its first capture draw (its targets bound): what is
+behind the water kept */
+static void water_begin_pending(void)
+{
+	struct stream_target *color, *depth;
+	int fits;
+
+	if (!water_layer.pending)
+		return;
+	water_layer.pending = 0;
+	water_layer.state = 0;
+	fits = water_targets(&color, &depth);
+	if (!fits || deferred.hold)
+	{
+		if (!fits && water_layer.unfit_logged < 3)
+		{
+			water_layer.unfit_logged++;
+			host_logf(HOST_LOG_WARN, "prism water: the window's targets are not the layer's (colour %ux%u, %u "
+				"layers, %d samples; depth %ux%u, %d samples, depth %d): CE's water's place left as it is",
+				color ? color->width : 0, color ? color->height : 0, color ? color->layers : 0,
+				color ? color->samples : 0, depth ? depth->width : 0, depth ? depth->height : 0,
+				depth ? depth->samples : 0, depth ? depth->depth : 0);
+		}
+		return;
+	}
+	if (!water_image(&water_layer.behind, color->image))
+		return;
+	xgpu_vulkan_image_copy(color->image, 0, 0, water_layer.behind, 0, 0);
+	water_layer.color = stream.color;
+	water_layer.depth = stream.depth;
+	water_layer.state = 1;
+	targets_bind();
+	/* (the colour's alpha emptied: the capture draws write 1 at the water's
+	pixels, the layer's mask; the alpha behind is put back with the layer) */
+	{
+		static const float zero[4];
+		int32_t whole[1][4];
+
+		whole[0][0] = whole[0][1] = 0;
+		whole[0][2] = (int32_t)color->width;
+		whole[0][3] = (int32_t)color->height;
+		xgpu_vulkan_clear((const int32_t (*)[4])whole, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_ALPHA, zero, 1.0f,
+			0);
+	}
+}
+
+/* the frame's sun (SCENE_LIGHTS'), its colour's largest channel 1 */
+static void water_sun(struct xgpu_vulkan_water_job *job)
+{
+	const struct xgpu_stream_scene_light *lights;
+	uint32_t count = 0, serial = 0, index;
+
+	lights = xgpu_vulkan_scene_light_table(&count, &serial);
+	for (index = 0; lights && index < count; index++)
+	{
+		if (lights[index].type == XGPU_SCENE_LIGHT_SUN && (lights[index].flags & XGPU_SCENE_LIGHT_FLAG_ON))
+		{
+			float most = lights[index].radiance[0];
+
+			if (lights[index].radiance[1] > most)
+				most = lights[index].radiance[1];
+			if (lights[index].radiance[2] > most)
+				most = lights[index].radiance[2];
+			if (!(most > 0.0f))
+				return;
+			memcpy(job->sun_direction, lights[index].position, sizeof(job->sun_direction));
+			job->sun_color[0] = lights[index].radiance[0] / most;
+			job->sun_color[1] = lights[index].radiance[1] / most;
+			job->sun_color[2] = lights[index].radiance[2] / most;
+			job->sun = 1;
+			return;
+		}
+	}
+}
+
+/* an opaque water's layer (d40's: a level material of the water class), over
+the window's resolved frame: its reflection, Fresnel and the sun's highlight
+over CE's own colour of it (the terrain overhaul's T7) */
+static void water_opaque(struct stream_target *color, struct stream_target *depth, struct xgpu_vulkan_image *words,
+	int pathtraced)
+{
+	struct xgpu_vulkan_image *classes = xgpu_vulkan_terrain_water_classes();
+	struct xgpu_vulkan_water_job job;
+	struct xgpu_vulkan_image *made;
+	int32_t whole[4];
+
+	if (!classes || !words || !gbuffer.extras || !gbuffer.view_known || !depth || !depth->depth ||
+		color->samples > 1 || depth->width != color->width || depth->height != color->height ||
+		!water_image(&water_layer.behind, color->image))
+		return;
+	xgpu_vulkan_image_copy(color->image, 0, 0, water_layer.behind, 0, 0);
+	memset(&job, 0, sizeof(job));
+	job.behind = water_layer.behind;
+	job.depth = depth->image;
+	job.words = words;
+	job.extras = gbuffer.extras;
+	job.view = &gbuffer.view;
+	job.classes = classes;
+	job.power = 2.2f;
+	job.pathtraced = pathtraced;
+	water_sun(&job);
+	made = xgpu_vulkan_water_composite(&job);
+	whole[0] = whole[1] = 0;
+	whole[2] = (int32_t)color->width;
+	whole[3] = (int32_t)color->height;
+	if (made)
+		xgpu_vulkan_image_blit(made, whole, color->image, whole, 0);
+}
+
+static void stream_water(const struct xgpu_stream_prism_terrain *record)
+{
+	const struct xgpu_stream_terrain_water *step = (const struct xgpu_stream_terrain_water *)record->items;
+	struct stream_target *color, *depth;
+	int fits;
+
+	if (step->step == XGPU_TERRAIN_WATER_BEGIN)
+	{
+		/* (the game's targets are bound with its next draw: what is behind
+		the water is taken then, water_begin_pending) */
+		water_layer.state = 0;
+		water_layer.cube = NULL;
+		water_layer.begun = *step;
+		water_layer.pending = 1;
+		return;
+	}
+	water_layer.pending = 0;
+	fits = water_targets(&color, &depth);
+	if (!water_layer.state || stream.color != water_layer.color || stream.depth != water_layer.depth || !fits)
+	{
+		if (water_layer.state && water_layer.unfit_logged < 6)
+		{
+			water_layer.unfit_logged++;
+			host_logf(HOST_LOG_WARN, "prism water: a group's targets changed between its steps: not drawn");
+		}
+		water_layer.state = 0;
+		return;
+	}
+	if (step->step == XGPU_TERRAIN_WATER_CAPTURED)
+	{
+		if (water_layer.state != 1 || !water_image(&water_layer.ripples, color->image))
+		{
+			water_layer.state = 0;
+			return;
+		}
+		xgpu_vulkan_image_copy(color->image, 0, 0, water_layer.ripples, 0, 0);
+		/* (the ripples' draw's stage 3: CE's reflection cube) */
+		water_layer.cube = stream.textures[3].image && stream.textures[3].kind == XGPU_VULKAN_IMAGE_CUBE ?
+			stream.textures[3].image : NULL;
+		water_layer.state = 2;
+		targets_bind();
+		return;
+	}
+	/* END */
+	if (water_layer.state == 2 && water_image(&water_layer.base, color->image))
+	{
+		struct xgpu_vulkan_water_job job;
+		struct xgpu_vulkan_image *made = NULL;
+		int32_t whole[4];
+		/* (its pass begun this frame for the window: a view of no opaque
+		surface, under the water in fog, has its words empty) */
+		int have_gbuffer = (gbuffer.drawn || gbuffer.begun) && gbuffer.color == stream.color && gbuffer.width == color->width &&
+			gbuffer.height == color->height && gbuffer.words && gbuffer.extras && gbuffer.view_known;
+
+		xgpu_vulkan_image_copy(color->image, 0, 0, water_layer.base, 0, 0);
+		memset(&job, 0, sizeof(job));
+		job.behind = water_layer.behind;
+		job.ripples = water_layer.ripples;
+		job.base = water_layer.base;
+		job.depth = depth->image;
+		job.words = have_gbuffer ? gbuffer.words : NULL;
+		job.extras = have_gbuffer ? gbuffer.extras : NULL;
+		job.cube = water_layer.cube;
+		job.view = have_gbuffer ? &gbuffer.view : NULL;
+		job.water = &water_layer.begun;
+		job.power = 2.2f;
+		job.pathtraced = water_layer.pathtraced;
+		water_sun(&job);
+		if (!have_gbuffer && water_layer.unfit_logged < 9)
+		{
+			water_layer.unfit_logged++;
+			host_logf(HOST_LOG_WARN, "prism water: no G-buffer for the group (drawn %d, its colour %u, the "
+				"window's %u, %ux%u against %ux%u, words %d, extras %d, view %d)", gbuffer.drawn, gbuffer.color,
+				stream.color, gbuffer.width, gbuffer.height, color->width, color->height, gbuffer.words != NULL,
+				gbuffer.extras != NULL, gbuffer.view_known);
+		}
+		if (!have_gbuffer)
+			water_failed("no G-buffer of the window's");
+		else
+			made = xgpu_vulkan_water_composite(&job);
+		whole[0] = whole[1] = 0;
+		whole[2] = (int32_t)color->width;
+		whole[3] = (int32_t)color->height;
+		if (made && xgpu_vulkan_image_blit(made, whole, color->image, whole, 0))
+		{
+			water_layer.groups++;
+		}
+		else
+		{
+			if (have_gbuffer)
+				water_failed("its pass cannot run, or its frame cannot be copied");
+			xgpu_vulkan_image_copy(water_layer.behind, 0, 0, color->image, 0, 0);
+		}
+		color->written++;
+		targets_bind();
+	}
+	water_layer.state = 0;
+}
+
+/* PRISM_TERRAIN (the terrain overhaul, T0): xgpu_vulkan_terrain.c's; its
+water draws (T7) the water layer's */
 static void stream_prism_terrain(void *context, const struct xgpu_stream_prism_terrain *record)
 {
 	(void)context;
+	if (record->phase == XGPU_TERRAIN_WATER_DRAW)
+	{
+		stream_water(record);
+		return;
+	}
 	xgpu_vulkan_terrain_record(record);
 }
 
@@ -5807,6 +6094,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.color = stream.color;
 		gbuffer.ready = 1;
 		gbuffer.drawn = 0;
+		gbuffer.begun = 1;
 		/* (port: "pathtraced": the objects' capture opened) */
 		gbuffer.objects = xgpu_vulkan_rt_objects_only();
 		if (gbuffer.objects)
@@ -5918,6 +6206,7 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			if (words && gbuffer.albedo_drawn && gbuffer.albedo && !deferred.albedo_over)
 				xgpu_vulkan_post_albedo_over(deferred.base, gbuffer.albedo, words);
 			deferred.albedo_over = 0;
+			water_layer.pathtraced = pathtraced;
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
 				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
 				pathtraced && words ? pt_relight : raster && words ? raster_relight : NULL, &context);
@@ -5925,6 +6214,9 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			frame's PRISM_TERRAIN asks for them: its class view is a view) */
 			xgpu_vulkan_terrain_debug(color->image, words, gbuffer.view_known ? &gbuffer.view : NULL);
 			held |= xgpu_vulkan_terrain_view_held();
+			/* (T7: an opaque water's layer over the frame, where the map has one) */
+			if (!held)
+				water_opaque(color, depth && !depth->multisampled ? depth : NULL, words, pathtraced);
 			/* (a view: nothing more over it this frame) */
 			deferred.hold = held;
 		}
@@ -5941,13 +6233,16 @@ static void stream_frame_end(void *context)
 	(void)context;
 	/* (a window's phases never past its frame) */
 	deferred.phase = 0;
-	/* (the terrain's FRAME is this frame's alone) */
+	/* (the terrain's FRAME is this frame's alone; the water layer's sets of
+	four frames back used again) */
 	xgpu_vulkan_terrain_frame_end();
+	xgpu_vulkan_water_frame_end();
 	deferred.hold = 0;
 	deferred.albedo_over = 0;
 	gbuffer.active = gbuffer.ready = 0;
 	gbuffer.objects = 0;
 	gbuffer.drawn = 0;
+	gbuffer.begun = 0;
 	gbuffer.albedo_drawn = 0;
 	world_make_some();
 	prepass.twins_made = 0;

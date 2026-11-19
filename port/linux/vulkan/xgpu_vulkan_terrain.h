@@ -52,6 +52,11 @@ its G-buffer's words and its camera (SCENE_VIEW); nothing where this frame
 had no FRAME or asks for neither */
 void xgpu_vulkan_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *words,
 	const struct xgpu_stream_scene_view *view);
+/* (T7) the classes' table (CLASS_TABLE_SIDE squared RGBA8, a texel a
+material: its two classes) where this frame's FRAME has display.water
+"prism" and the map has a material of the water class (an opaque water's:
+d40's), for the water layer over it; else NULL */
+struct xgpu_vulkan_image *xgpu_vulkan_terrain_water_classes(void);
 /* the frame's end: a FRAME is this frame's alone */
 void xgpu_vulkan_terrain_frame_end(void);
 

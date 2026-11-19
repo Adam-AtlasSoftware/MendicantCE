@@ -210,6 +210,18 @@ static void rasterizer_water_fog_beyond_world(
 	struct transparent_geometry_group const *group,
 	short vertex_type,
 	short permutation_index);
+static void rasterizer_water_draw_prism(
+	struct transparent_geometry_group const *group,
+	struct shader_transparent_water_definition *water,
+	short vertex_type,
+	short permutation_index);
+static unsigned long rasterizer_water_prism_flags(
+	struct shader_transparent_water_definition const *water,
+	struct transparent_geometry_group const *group);
+static void rasterizer_water_prism_step(
+	unsigned long step,
+	struct shader_transparent_water_definition const *water,
+	struct transparent_geometry_group const *group);
 
 /* ---------- globals */
 
@@ -614,6 +626,7 @@ void rasterizer_water_draw(
 	short permutation_index;
 	boolean write_depth;
 	boolean draw_depth_only;
+	boolean prism_water; /* port: (rasterizer_water_draw_prism) */
 	real reflection_amount;
 	union
 	{
@@ -637,13 +650,30 @@ void rasterizer_water_draw(
 		draw_depth_only = TEST_FLAG(water->flags, _shader_transparent_water_draw_before_fog_bit) &&
 			!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_queue_bit) &&
 			!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit);
-		/* port: CE's depth alone where PRISM draws the water's colour (prism_terrain.c; CE's until it draws) */
-		if (prism_terrain_water_draw(group))
+		/* port: PRISM's water layer (the terrain overhaul's T7, prism_terrain.c)
+		in CE's colour draw's place: its captures here, then CE's depth alone,
+		which the host's layer is composited after; a sky's water stays CE's */
+		prism_water = !TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit) &&
+			prism_terrain_water_wanted();
+		/* (a water CE draws before the fog: its colour draw comes as the
+		environment is drawn, before PRISM's frame is resolved, so its depth
+		alone there and the layer at its queued draw, after the resolve, over
+		the fog CE drew on it) */
+		if (prism_water && TEST_FLAG(water->flags, _shader_transparent_water_draw_before_fog_bit) &&
+			TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_queue_bit))
+		{
+			prism_water = FALSE;
 			draw_depth_only = TRUE;
+		}
 		/* port: before the water's depth, the planar fog where the world
 		ends under it */
 		if (!TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit))
 			rasterizer_water_fog_beyond_world(group, vertex_type, permutation_index);
+		if (prism_water)
+		{
+			rasterizer_water_draw_prism(group, water, vertex_type, permutation_index);
+			draw_depth_only = TRUE;
+		}
 		if (draw_depth_only)
 		{
 			IDirect3DDevice8_SetRenderState(
@@ -682,6 +712,9 @@ void rasterizer_water_draw(
 			pixel_shader.combiner_count = 1;
 			rasterizer_set_pixel_shader(&pixel_shader);
 			rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
+			/* port: PRISM's water layer composited over the group's pixels */
+			if (prism_water)
+				rasterizer_water_prism_step(PRISM_TERRAIN_WATER_END, water, group);
 		}
 		else
 		{
@@ -1068,6 +1101,215 @@ void rasterizer_water_draw(
 
 /* ---------- private code */
 
+/* port: PRISM's water layer (the terrain overhaul's T7: prism_terrain.c,
+xgpu_vulkan_water.c), drawn in CE's colour draw's place with
+display.water "prism" in a campaign in Rebaked or Path Traced. The host
+composites the layer itself; what it needs of CE's water only the game's
+draws can give, at CE's own texture coordinates, so they are drawn into the
+colour target at the water's pixels (depth tested, no depth written), each
+taken by the host as a step comes:
+- BEGIN: the host keeps the colour and the depth as they are (what is behind
+  the water), as the next draw binds the targets;
+- the ripple map as CE's reflection pass samples it (CE's bump map of its
+  ripples, built as CE builds it, at the ripple scale and drift), with the
+  reflection map bound beside it (the host's reflection where its rays find
+  nothing); CAPTURED: the host takes both;
+- the base map's colour where it modulates what is behind, else its alpha
+  where that modulates the reflection, else white;
+- then (the caller) CE's own depth-only draw; END: the host takes the base
+  map's, finds the water's pixels by the depth, composites its layer there
+  and puts back what is behind everywhere else.
+Nothing of the game's state is touched; the draws' states are set as CE's
+colour draw sets them. */
+static void rasterizer_water_draw_prism(
+	struct transparent_geometry_group const *group,
+	struct shader_transparent_water_definition *water,
+	short vertex_type,
+	short permutation_index)
+{
+	union
+	{
+		real value;
+		unsigned long bits;
+	} mipmap_lod_bias;
+	boolean base_color = TEST_FLAG(water->flags, _shader_transparent_water_base_map_color_modulates_background_bit);
+	boolean base_alpha = TEST_FLAG(water->flags, _shader_transparent_water_base_map_alpha_modulates_reflection_bit);
+
+	/* (CE's bump map of the ripples, built as its colour draw builds it) */
+	if (water_needs_update_flag || render_enumerating)
+	{
+		short saved_stencil = render_enumerating ? rasterizer_get_stencil_mode() : NONE;
+
+		rasterizer_water_build_bumpmap(group->shader);
+		if (saved_stencil != NONE)
+			rasterizer_set_stencil_mode(saved_stencil);
+		if (!render_enumerating)
+			water_needs_update_flag = FALSE;
+	}
+	rasterizer_water_prism_step(PRISM_TERRAIN_WATER_BEGIN, water, group);
+
+	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_NONE);
+	/* (the alpha too: 1 at the water's pixels, which the host emptied at
+	BEGIN, is the layer's mask) */
+	SetRenderStateSmart(
+		D3DRS_COLORWRITEENABLE,
+		D3DCOLORWRITEENABLE_RED |
+		D3DCOLORWRITEENABLE_GREEN |
+		D3DCOLORWRITEENABLE_BLUE |
+		D3DCOLORWRITEENABLE_ALPHA);
+	SetRenderStateSmart(D3DRS_ALPHABLENDENABLE, FALSE);
+	SetRenderStateSmart(D3DRS_ALPHATESTENABLE, FALSE);
+	SetRenderStateSmart(D3DRS_ZENABLE, TRUE);
+	SetRenderStateSmart(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+	SetRenderStateSmart(D3DRS_ZWRITEENABLE, FALSE);
+
+	/* the ripples as CE's reflection pass samples them, the reflection map
+	bound beside them */
+	rasterizer_set_target_as_texture(
+		0,
+		_rasterizer_target_water_bumpmap,
+		MIN(water->ripple_mipmap_levels, NUMBER_OF_WATER_RIPPLES));
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+	rasterizer_set_texture(3, 2, 0, water->reflection_map.index, group->shader_permutation_index);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 3, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 3, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 3, D3DTSS_ADDRESSW, D3DTADDRESS_CLAMP);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 3, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 3, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 3, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+	rasterizer_set_vertex_shader_permutation(
+		_vertex_shader_transparent_water_reflection,
+		vertex_type,
+		permutation_index);
+	{
+		real vertex_constants[3][4] =
+		{
+			{
+				water->ripple_scale,
+				water->ripple_scale,
+				(real)cos(water->ripple_animation_angle) *
+					water->ripple_animation_velocity * global_frame_parameters.game_time_sec,
+				(real)sin(water->ripple_animation_angle) *
+					water->ripple_animation_velocity * global_frame_parameters.game_time_sec
+			},
+			{ 0.0f, 0.0f, 0.0f, 0.0f },
+			{ 0.0f, 0.0f, 0.0f, 0.0f }
+		};
+
+		IDirect3DDevice8_SetVertexShaderConstant(global_d3d_device, -84, vertex_constants, 3);
+	}
+	csmemset(&pixel_shader, 0, sizeof(pixel_shader));
+	/* (stage 0 the ripples, 2D; stage 3 the reflection map, a cube, bound
+	for the host alone) */
+	pixel_shader.texture_modes = 0x18001;
+	pixel_shader.combiner_count = 1;
+	pixel_shader.final_combiner_inputs_abcd = 0x200800;
+	pixel_shader.final_combiner_inputs_efg = 0x2000;
+	rasterizer_set_pixel_shader(&pixel_shader);
+	mipmap_lod_bias.value = -water->ripple_mipmap_lod_bias;
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPMAPLODBIAS, mipmap_lod_bias.bits);
+	rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
+	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPMAPLODBIAS, 0);
+	rasterizer_water_prism_step(PRISM_TERRAIN_WATER_CAPTURED, water, group);
+
+	/* the base map's colour (or its alpha, or white) */
+	if (base_color || base_alpha)
+	{
+		rasterizer_set_texture(0, 0, 1, water->base_map.index, group->shader_permutation_index);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_ADDRESSV, D3DTADDRESS_CLAMP);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+		IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+	}
+	rasterizer_set_vertex_shader_permutation(
+		_vertex_shader_transparent_water_opacity,
+		vertex_type,
+		permutation_index);
+	csmemset(&pixel_shader, 0, sizeof(pixel_shader));
+	pixel_shader.combiner_count = 1;
+	if (base_color || base_alpha)
+	{
+		/* (final: the texture's colour, or its alpha everywhere) */
+		pixel_shader.texture_modes = 1;
+		pixel_shader.final_combiner_inputs_abcd = base_color ? 0x200800 : 0x201800;
+	}
+	else
+	{
+		/* (final: 1 - zero, white) */
+		pixel_shader.final_combiner_inputs_abcd = 0x200020;
+	}
+	/* (alpha 1; this draw writes the water's depth too, as CE's colour draw
+	does: the depth-only draw after it changes nothing) */
+	pixel_shader.final_combiner_inputs_efg = 0x2000;
+	rasterizer_set_pixel_shader(&pixel_shader);
+	SetRenderStateSmart(D3DRS_ZWRITEENABLE, TRUE);
+	rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
+
+	return;
+}
+
+/* port: (rasterizer_water_draw_prism) the shader's flags as WATER_DRAW
+sends them */
+static unsigned long rasterizer_water_prism_flags(
+	struct shader_transparent_water_definition const *water,
+	struct transparent_geometry_group const *group)
+{
+	unsigned long flags = (unsigned long)(water->flags & 0xf);
+
+	if (TEST_FLAG(water->flags, _shader_transparent_water_base_map_color_modulates_background_bit) ||
+		TEST_FLAG(water->flags, _shader_transparent_water_base_map_alpha_modulates_reflection_bit))
+		flags |= PRISM_TERRAIN_WATER_BASE;
+	if (TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit))
+		flags |= PRISM_TERRAIN_WATER_SKY;
+	return flags;
+}
+
+/* port: (rasterizer_water_draw_prism) a step sent, with the group's plane,
+CE's ripple scale, its tints (rgb, alpha) and the window's planar fog */
+static void rasterizer_water_prism_step(
+	unsigned long step,
+	struct shader_transparent_water_definition const *water,
+	struct transparent_geometry_group const *group)
+{
+	float perpendicular[4];
+	float parallel[4];
+	float fog[8];
+
+	/* (a preparation's draws compile pipelines alone: no step) */
+	if (render_enumerating)
+		return;
+	perpendicular[0] = water->view_perpendicular_tint_color.red;
+	perpendicular[1] = water->view_perpendicular_tint_color.green;
+	perpendicular[2] = water->view_perpendicular_tint_color.blue;
+	perpendicular[3] = water->view_perpendicular_tint_color.alpha;
+	parallel[0] = water->view_parallel_tint_color.red;
+	parallel[1] = water->view_parallel_tint_color.green;
+	parallel[2] = water->view_parallel_tint_color.blue;
+	parallel[3] = water->view_parallel_tint_color.alpha;
+	{
+		struct render_fog const *window_fog = &global_window_parameters.fog;
+		boolean planar = window_fog->planar_mode == _render_planar_fog_mode_normal;
+
+		fog[0] = window_fog->planar_color.red;
+		fog[1] = window_fog->planar_color.green;
+		fog[2] = window_fog->planar_color.blue;
+		fog[3] = planar ? PIN(window_fog->planar_maximum_density, 0.0f, 1.0f) : 0.0f;
+		fog[4] = window_fog->planar_maximum_depth;
+		fog[5] = window_fog->planar_maximum_distance;
+		fog[6] = plane3d_distance_to_point(&window_fog->plane, &global_window_parameters.camera.position);
+		fog[7] = 0.0f;
+	}
+	prism_terrain_water_step(step, rasterizer_water_prism_flags(water, group), &group->plane, water->ripple_scale,
+		perpendicular, parallel, fog);
+
+	return;
+}
+
 /* port: the water's surface, where nothing of the world is behind it,
 fogged as the environment fog fogs a surface deep under the fog plane. The
 water's passes take their colour over what is under the surface
@@ -1141,11 +1383,14 @@ static void rasterizer_water_fog_beyond_world(
 	color.blue = PIN(color.blue, 0.0f, 1.0f);
 
 	IDirect3DDevice8_SetRenderState(global_d3d_device, D3DRS_CULLMODE, D3DCULL_NONE);
+	/* (the alpha too: 1 at the water's pixels, which the host emptied at
+	BEGIN, is the layer's mask) */
 	SetRenderStateSmart(
 		D3DRS_COLORWRITEENABLE,
 		D3DCOLORWRITEENABLE_RED |
 		D3DCOLORWRITEENABLE_GREEN |
-		D3DCOLORWRITEENABLE_BLUE);
+		D3DCOLORWRITEENABLE_BLUE |
+		D3DCOLORWRITEENABLE_ALPHA);
 	SetRenderStateSmart(D3DRS_ALPHABLENDENABLE, TRUE);
 	SetRenderStateSmart(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 	SetRenderStateSmart(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);

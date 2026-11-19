@@ -39,8 +39,8 @@ in progress and no main menu), the game sends:
   the renderer makes of them must be the same made twice (a stamp's `min` and `max`);
 - `WADERS`: units within 25 world units of the eye in water, or out of it for less than 10 seconds (the game's ticks
   since they left it, a table of `prism_terrain.c`'s own);
-- `WEATHER_DRAW` and `WATER_DRAW`: specified for T12 and T7, never sent yet (their guards return false: CE draws the
-  weather and the water).
+- `WEATHER_DRAW`: specified for T12, never sent yet (its guard returns false: CE draws the weather);
+- `WATER_DRAW` (T7, below): the steps about each CE water group the renderer draws.
 
 A frame's records are 176 bytes each plus 32 an item: at most 8,368 bytes for the events (the design's bound is
 12 KB a frame). `tools/test_scene_records.py` checks the layout on ILP32 and LP64, the encoder's bytes and refusals,
@@ -89,7 +89,7 @@ counts as an object in the view (its G-buffer pixels carry no static-scenery fla
 | `display.terrain_tracks` | `true` | Sent, unused |
 | `display.terrain_drifts` | `true` | Sent, unused |
 | `display.weather` | `"prism"`, `"ce"` | Sent; CE's weather is drawn either way |
-| `display.water` | `"prism"`, `"ce"` | Sent; CE's water is drawn either way |
+| `display.water` | `"prism"`, `"ce"` | T7: `"prism"` PRISM's water layer in CE's colour draw's place (below) |
 | `debug.gbuffer_view` | `"terrain_class"` | The class view (a view: nothing drawn over it) |
 | `debug.terrain_events` | `false` | The events drawn over the frame for 30 seconds, and logged |
 
@@ -134,3 +134,68 @@ Scripted actions (the game live, the AI erased, the camera held at a pose, the p
   script it by; T5 can teleport `jeep` with a cutscene flag once one is found.)
 
 The run folder's `tools/tcap.py` and `jobs/actions.sh` make them (`work/openh1_eval/v4_terrain_runs`).
+
+## T7: the water layer (Rebaked, and Path Traced's frame)
+
+With `display.water` `"prism"` (the default) in a campaign in Rebaked or Path Traced, on a backend with ray tracing
+(`xgpu_backend_ray_tracing`: the layer's pass runs on its device), CE's water is drawn by PRISM in place of CE's colour
+draw. CE's depth is kept, so CE's fog planes, effects and particles still depth-test against the water; a sky's water
+stays CE's. Classic and `"ce"` draw CE's water as before (feature-off identity: the frames are byte for byte the
+previous build's).
+
+### How a group is drawn
+
+The design (section 8.1) groups SCENE_STATIC's water triangles into bodies; T7 does not: what the layer needs of CE's
+water (its own ripple map at CE's own texture coordinates and animation, its base map, the reflection cube) only the
+game's draws can give, so the game draws them into the frame for the host, and the host composites. In
+`rasterizer_water_draw` (`rasterizer_xbox_water.c`, `rasterizer_water_draw_prism`):
+
+| Step | The game | The host (`xgpu_vulkan_stream.c`, `stream_water`) |
+| --- | --- | --- |
+| `BEGIN` | CE's ripple bump map built as CE builds it; the step | At the next draw (the game's targets are bound with it): the colour copied (what is behind the water); the colour's alpha emptied |
+| | The ripple map drawn at the water's pixels as CE's reflection pass samples it (its vertex program, ripple scale, drift and mip bias), the reflection cube bound beside it; alpha 1 | |
+| `CAPTURED` | | The ripples copied, the cube kept |
+| | The base map drawn there: its colour where it modulates what is behind, else its alpha where that modulates the reflection, else white; alpha 1; the water's depth written | |
+| | CE's own depth-only draw | |
+| `END` | | The base map and the mask (the alpha) copied; the layer composited (`xgpu_vulkan_water.c`, a compute pass) and copied into the colour target, what was behind put back wherever the captures drew outside the water. Where it cannot run (no G-buffer of the window's), what was behind is put back and the water is not drawn (logged) |
+
+A water CE draws before the fog (c10's swamps) has its colour draw as the environment is drawn, before PRISM's frame
+is resolved: there its depth alone, and the layer at its queued draw after the resolve, over the fog CE drew on it.
+`WATER_DRAW`'s item carries the step, the shader's flags, the group's plane, CE's ripple scale and tints (straight on and
+edge on) and the window's planar fog (its colour and density, depth and distance, the eye's height over it).
+
+### The layer (`xgpu_vulkan_water.glsl`)
+
+Each water pixel: the plane met by the pixel's ray (the G-buffer's distances give what is behind), the normal bent by
+CE's ripples (flattened edge on and far off, where the 8-bit map would alias), in light (the frame's values to 2.2):
+
+- **Fresnel** at an IOR of 1.33 (Schlick, F0 0.02).
+- **Reflection**: marched along the screen against the G-buffer's distances (refined by halving, faded at the view's
+  edges, only surfaces above the water); else what lies far along the reflected ray where the frame shows it (the sky,
+  or far surfaces in their fog); else CE's reflection cube in CE's tint. Blurred with distance (the ripples finer than a
+  pixel as roughness). CE's base map alpha, where it modulates CE's reflection (b30's mask by the shore), modulates it.
+- **Refraction**: the floor the refracted ray reaches (Snell, found on the screen, the pixel's own where it is not), its
+  colour absorbed over the path by Beer and Lambert, in CE's tint's colours (the base map's where it tints the
+  background, else the straight-on tint's hue), in-scattered toward the deep colour (CE's planar fog's colour where the
+  window has one, else the tint's). Where the frame has no floor (CE's fog beyond the world), what CE drew there.
+- **The sun's highlight** off the ripples (GGX, rougher far off), from SCENE_LIGHTS' sun.
+- **The shore**: the water fades into the ground over its first 0.05 world units of depth.
+- **From below**: Snell's window (CE's cube, the sky) and total internal reflection outside it (the deep colour, and
+  what the screen has under the surface along the reflected ray), with a little of the deep colour over long paths.
+  CE's own planar fog (b30's: opaque in 0.15 world units) never fogged CE's water's surface, drawn after it, and
+  would hide the window.
+
+**An opaque water** (d40's: an environment shader of the water class, `classes.json`): no capture and no refraction;
+after the resolve, its pixels (the level's of a material of the water class) take reflection, Fresnel and the sun's
+highlight over CE's own colour of them, the normal from its own bump.
+
+Tuning, for one run (the defaults are the look judged against Classic by pictures): `HALO_WATER_RIPPLES` (0.35),
+`HALO_WATER_ABSORB` (0.25 a world unit), `HALO_WATER_SUN` (1.5), `HALO_WATER_DEEP` (1), `HALO_WATER_CUBE` (1), and
+`HALO_WATER_VIEW` (1 the ripples, 2 the base map, 3 the mask, distance and side, 4 the reflection, 5 the refraction).
+
+The bake is untouched: water stays out of SCENE_STATIC and the bake's scene, and a bake made by the build before loads
+whole. In Path Traced the same layer is drawn over the traced frame; its traced reflection and refraction rays are T8.
+
+What T7 leaves for later: the waves' motion and foam (T9: the surface is CE's plane, its motion CE's ripples), the
+shore's run-up and caustics (T10), water in the acceleration structures and traced water rays (T8, T14), a sun shadow
+on the water's highlight (the cliffs' shade does not dim it yet).

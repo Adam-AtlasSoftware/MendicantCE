@@ -44,8 +44,9 @@ render times, the capabilities' ray_queries to device) merged with PRISM v4's 20
 after GOAT H1's, the scene records still last (docs/prism_scene_records.md);
 39: PRISM v4 M5's UPSCALE (display.upscaler and display.denoiser's plugin, docs/prism_plugin.md), which
 was 38 on its own branch, after 38's records; 40: the terrain overhaul's PRISM_TERRAIN (T0,
-docs/prism_terrain.md), 39 on its own branch, after UPSCALE, the last scene record */
-#define XGPU_STREAM_VERSION 40
+docs/prism_terrain.md), 39 on its own branch, after UPSCALE, the last scene record; 41: its WATER_DRAW
+sent (T7), three items of xgpu_stream_terrain_water */
+#define XGPU_STREAM_VERSION 41
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -3021,9 +3022,17 @@ items of 32 bytes after it (the record's size: offsetof(items) + count *
 - XGPU_TERRAIN_WADERS: the units within XGPU_TERRAIN_WADER_RANGE world
   units of the eye that are in water or left it in the last 10 seconds,
   xgpu_stream_terrain_wader each (at most XGPU_TERRAIN_WADERS_MOST);
-- XGPU_TERRAIN_WEATHER_DRAW and _WATER_DRAW (count 0): where the host draws
-  the weather and the water in CE's place (display.weather and
-  display.water "prism": not drawn yet, T12 and T7; never sent in T0).
+- XGPU_TERRAIN_WEATHER_DRAW (count 0): where the host draws the weather
+  in CE's place (display.weather "prism": not drawn yet, T12; never sent);
+- XGPU_TERRAIN_WATER_DRAW (T7, count XGPU_TERRAIN_WATER_ITEMS: one
+  xgpu_stream_terrain_water, 96 bytes): a CE water group drawn by the host in CE's
+  place (display.water "prism"), in steps about the group's draws in
+  rasterizer_water_draw: BEGIN (before them: the colour and the depth as
+  they are, what is behind the water), CAPTURED (the water's base map drawn
+  into the colour target at its pixels: CE's colour of the water), END (its
+  ripple map drawn there at CE's own coordinates, then CE's depth: the host
+  composites the water layer over its pixels, what CE's draws left elsewhere
+  put back).
 The fixed part's frame fields are FRAME's; the other phases send the
 generation and leave them 0. */
 enum
@@ -3036,6 +3045,7 @@ enum
 	XGPU_TERRAIN_PHASES,
 };
 #define XGPU_TERRAIN_EVENTS_MOST 256u
+#define XGPU_TERRAIN_WATER_ITEMS 3u
 #define XGPU_TERRAIN_WADERS_MOST 64u
 #define XGPU_TERRAIN_WINDS 8u
 #define XGPU_TERRAIN_WADER_RANGE 25.0f
@@ -3132,6 +3142,42 @@ struct xgpu_stream_terrain_wader
 	float position[3];
 	float velocity[3];
 	float radius;
+};
+/* WATER_DRAW's step, its flags (bits 0 to 3 CE's water shader's: the base
+map's alpha modulates the reflection, its colour the background, the
+atmospheric fog, drawn before the fog; XGPU_TERRAIN_WATER_BASE: the
+CAPTURED step's base colour was drawn, XGPU_TERRAIN_WATER_SKY: a sky's
+water), the group's plane (its normal and its distance: CE's, the side the
+water's surface faces), the group's number this frame, and CE's tints
+(rgb and alpha) seen straight on (perpendicular) and edge on (parallel);
+the window's planar fog (CE's colour, its maximum density: 0 none) and its
+shape (its maximum depth and distance, the eye's height over its plane) */
+enum
+{
+	XGPU_TERRAIN_WATER_BEGIN,
+	XGPU_TERRAIN_WATER_CAPTURED,
+	XGPU_TERRAIN_WATER_END,
+	XGPU_TERRAIN_WATER_STEPS,
+};
+enum
+{
+	XGPU_TERRAIN_WATER_ALPHA_MODULATES_REFLECTION = 1u << 0,
+	XGPU_TERRAIN_WATER_COLOR_MODULATES_BACKGROUND = 1u << 1,
+	XGPU_TERRAIN_WATER_ATMOSPHERIC_FOG = 1u << 2,
+	XGPU_TERRAIN_WATER_BEFORE_FOG = 1u << 3,
+	XGPU_TERRAIN_WATER_BASE = 1u << 8,
+	XGPU_TERRAIN_WATER_SKY = 1u << 9,
+};
+struct xgpu_stream_terrain_water
+{
+	uint32_t step, flags;
+	float plane[4];
+	uint32_t group;
+	float ripple_scale;
+	float perpendicular[4];
+	float parallel[4];
+	float fog[4];
+	float fog_shape[4];
 };
 struct xgpu_stream_prism_terrain
 {
