@@ -190,10 +190,12 @@ static int report_unattended(void);
 
 /* the crash of the last run, found as this one started (report_session_start):
 its session's file and the host's record of it (NULL if it wrote none),
-malloc()'s; whether it is to be asked, has been, and its report wanted */
+malloc()'s; whether it is to be asked, has been, and its report wanted;
+whether it is the last run's (fresh), not an older one still to be answered */
 static struct
 {
 	int found;
+	int fresh;
 	char *session;
 	char *record;
 	int asked;
@@ -2053,6 +2055,7 @@ void report_session_start(void)
 		remove(crashed_record);
 		rename(record, crashed_record);
 		rename(running, crashed);
+		report_crash.fresh = 1;
 	}
 	else
 		remove(record);
@@ -2076,6 +2079,22 @@ void report_session_start(void)
 #ifdef HALO_GUEST
 	host_crash_record(record, report_log.text, REPORT_LOG_SIZE, &report_log.written);
 #endif
+}
+
+int report_path_traced_fallback(void)
+{
+	/* (xgpu_vulkan_pt.c's lost_note, in the host's line of the fatal error) */
+	if (!report_crash.fresh || !report_crash.record ||
+		!strstr(report_crash.record, "the device was lost in PRISM Path Traced") ||
+		strcmp(config_string("display.lighting"), "pathtraced") != 0)
+	{
+		return 0;
+	}
+	if (!config_write("display.lighting", "raster"))
+		return 0;
+	platform_log("report: the graphics card's driver stopped in PRISM Path Traced last time: display.lighting is "
+		"\"raster\" (PRISM Rebaked) now");
+	return 1;
 }
 
 void report_session_halted(const char *reason)

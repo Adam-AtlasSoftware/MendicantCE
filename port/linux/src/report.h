@@ -44,6 +44,12 @@ void report_note_done(const char *note);
 server's): the last run's crash found, if it did not exit, and this one's
 file written, and the host told where to write a crash */
 void report_session_start(void);
+/* the last run ended by the graphics card's device lost while PRISM Path
+Traced drew (the host's fatal error says "the device was lost in PRISM
+Path Traced": port/linux/vulkan/xgpu_vulkan_pt.c), display.lighting still
+"pathtraced": set to "raster", PRISM Rebaked, in config.toml (once, for
+that crash), and 1, for the player to be told (sdl_platform.c) */
+int report_path_traced_fallback(void);
 /* the game halted on a fatal error (main.c's halt_and_catch_fire, its
 reason error_get's): reported at the next start as a crash is, though the
 player then closes the game */

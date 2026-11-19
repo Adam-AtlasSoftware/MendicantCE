@@ -543,6 +543,18 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
   (`display.first_person_legs`), drawn, are flagged out of the capture so the body is not traced twice. Raster's
   `objects_visibility` takes the same masks. `display.player_shadow` turns it off.
 
+## A lost device
+
+Path Traced was made on NVIDIA's cards. Should the driver lose the device while it draws (its timeout on a pass that
+does not end, a page fault), halo.log says where the GPU was: the last step recorded (each pass is named as it is
+recorded, the traced objects' skinning and builds too), and where the device can say, the last step it began and the
+last before which every command had finished (AMD's buffer markers) and the device's fault (`VK_EXT_device_fault`).
+The message says the device was lost in PRISM Path Traced, and the next start sets `display.lighting` to `"raster"`
+(PRISM Rebaked) and tells the player, once for that crash (report.c's `report_path_traced_fallback`); Settings can
+choose Path Traced again. Every ray is checked before it is traced: a NaN or infinite origin or direction, or a NaN
+reach, is a miss (undefined for ray queries, and a traversal loop that never ends on AMD's drivers), and a ray's
+query tests at most 1024 candidates.
+
 ## What is not done yet
 
 - **ReSTIR DI's spatial reuse by default** (in, off: its cost and its blobs in motion, above).

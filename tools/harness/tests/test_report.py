@@ -185,3 +185,33 @@ def test_update_ends_the_session_first():
     handover = function(report, "report_session_handover")
     assert "report_session_end();" in handover and "report_session_write();" in handover
     assert "if (!report_session_begun)\n\t\treturn;" in handover
+
+
+def test_path_traced_fallback():
+    """a lost device while PRISM Path Traced drew: the host's fatal error says so (xgpu_vulkan_pt.c's lost_note,
+    through xgpu_vulkan.c's device_lost_report), and the next start alone (the crash fresh, not an older one still to
+    be answered) sets display.lighting "pathtraced" to "raster" and tells the player (sdl_platform.c)"""
+    marker = "the device was lost in PRISM Path Traced"
+    vulkan = read("port/linux/vulkan/xgpu_vulkan.c")
+    report_lost = function(vulkan, "device_lost_report")
+    assert 'host_fatal("vulkan: the device was lost%s", note);' in report_lost
+    assert "vk.lost.note(note, sizeof(note));" in report_lost
+    pt = read("port/linux/vulkan/xgpu_vulkan_pt.c")
+    note = function(pt, "lost_note")
+    assert re.search(r'snprintf\(text, size, " in PRISM Path Traced', note)
+    assert "xgpu_vulkan_device_lost_note(lost_note);" in function(pt, "make")
+    # (the check's lost device reported, the game ended there)
+    assert "device_lost_report();" in function(vulkan, "check")
+    report = read("port/linux/src/report.c")
+    fallback = function(report, "report_path_traced_fallback")
+    assert f'"{marker}"' in fallback
+    assert "!report_crash.fresh" in fallback
+    assert 'strcmp(config_string("display.lighting"), "pathtraced")' in fallback
+    assert 'config_write("display.lighting", "raster")' in fallback
+    start = function(report, "report_session_start")
+    fresh = start.index("report_crash.fresh = 1;")
+    assert start.rindex("if (file)", 0, fresh) < fresh < start.index("else\n\t\tremove(record);")
+    platform = read("port/linux/src/sdl_platform.c")
+    begun = platform.index("report_session_start();")
+    told = platform.index("report_path_traced_fallback()", begun)
+    assert told - begun < 400 and "SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING" in platform[told:told + 600]

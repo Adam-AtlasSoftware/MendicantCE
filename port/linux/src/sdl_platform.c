@@ -651,7 +651,19 @@ BOOL platform_sdl_initialize(void)
 	/* (the last run's crash found, to be offered at the main menu, and
 this run's marked as begun: report.c) */
 	if (!halo_server_mode())
+	{
 		report_session_start();
+		/* (Path Traced's lost device last time: PRISM Rebaked now, the
+		player told, unless nobody watches) */
+		if (report_path_traced_fallback() && !config_boolean("debug.hidden_window") &&
+			config_real("debug.exit_after") <= 0.0 && !config_string("debug.test_input")[0])
+		{
+			SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_WARNING, "Halo",
+				"The graphics card's driver stopped while PRISM Path Traced was drawing, last time the game ran.\n\n"
+				"Lighting is PRISM Rebaked now. Settings can choose PRISM Path Traced again; halo.log says what the "
+				"driver reported.", NULL);
+		}
+	}
 	/* (the mods, and whether to play those that say they cannot be played
 	together, before the window opens: port_mods.c) */
 	port_mods_startup();
