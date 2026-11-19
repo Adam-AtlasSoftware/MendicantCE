@@ -1401,7 +1401,12 @@ the setting for one start of the game. It has priority over the file.
 | `display.viewmodel_visible` | `true` | `HALO_VIEWMODEL_VISIBLE` | `true`: the first-person weapon, hands and what is attached to them are drawn. `false`: they are not; firing, animation, sound and lights go on, and other players' models are drawn. |
 | `display.passenger_third_person` | `false` | `HALO_PASSENGER_THIRD_PERSON` | Third-person view for the Warthog's passenger and the Scorpion's four passengers. Uses the gunner's camera on the Warthog and the driver's on the Scorpion, within the passenger's firing arc. Smooth entry and exit; weapon zoom is disabled while riding. The reticle follows the shot's centre ray. Local view only. In the campaign and co-op only: not in multiplayer, where seeing around the vehicle would be an advantage. Never in VR, which stays in first person in every seat. |
 | `display.viewmodel_shield` | `false` | `HALO_VIEWMODEL_SHIELD` | `true`: the energy shield's flare is drawn on the first-person arms too, as on the body, with the unit's own shield shader, kept closer to the arms than to the body. The stock game draws it on the body only. The flare is the shield's hits: it shows as the shield takes damage and fades over the next second or two (the unit's recent shield damage), so a full shield that nothing hits shows none, on the arms as on the body. An overshield stays lit on the arms with `display.overshield_effect` (OVERSHIELD, on the same screen). |
-| `display.first_person_legs` | `false` | `HALO_FIRST_PERSON_LEGS` | `true`: your own body is drawn in first person from the belly down, with its shadow, so you see your legs when you look down, moving as the body's animation moves them, its feet where they stand; its lower body stays planted as you turn and faces the way you walk, on your screen alone. Refer to "Field of view". |
+| `display.first_person_legs` | `true` | `HALO_FIRST_PERSON_LEGS` | `true` (since PRISM v4's body; upstream's flat-screen default is `false`): your own body is drawn in first person from the belly down, with its shadow, so you see your legs when you look down, moving as the body's animation moves them, its feet where they stand; its lower body stays planted as you turn and faces the way you walk, on your screen alone. Refer to "Field of view". |
+| `display.player_shadow` | `true` | `HALO_PLAYER_SHADOW` | With `display.lighting` `"pathtraced"`, or `"raster"` with its traced object shadows: in first person your whole body, as others see it, with the weapon it holds, is in the traced scene as a shadow caster that is never drawn: it casts its sun and lamp shadows, blocks bounced light and sky light, and the first-person weapon's own rays pass through it. Classic's shadow of you comes with `display.first_person_legs`. Refer to "Your body and the third-person camera". |
+| `camera.view` | `"first_person"` | `HALO_CAMERA_VIEW` | `"third_person"`: on foot in the campaign and co-op, the view from behind your shoulder, your whole body drawn, the reticle where your shots go. Zooming a scope is in first person; vehicles keep their cameras. Refer to "Your body and the third-person camera". |
+| `camera.third_person_distance` | `1.5` | `HALO_CAMERA_THIRD_PERSON_DISTANCE` | Third person: how far behind your head the camera is, in world units (1 to 6); `controls.camera_closer` and `controls.camera_further` (Keypad + and -), and the mouse wheel while `controls.camera_wheel_modifier` (Left Alt) is held, change it as you play, and it is kept. |
+| `camera.third_person_shoulder` | `0.22` | `HALO_CAMERA_THIRD_PERSON_SHOULDER` | Third person: how far right of your head the camera is, in world units (-0.5 to 0.5; below 0 over the left shoulder). |
+| `camera.third_person_netgames` | `false` | `HALO_CAMERA_THIRD_PERSON_NETGAMES` | `camera.view` `"third_person"` in multiplayer games too. |
 | `display.shield_color` | `default` | `HALO_SHIELD_COLOR` | Your energy shield's flare as this machine draws it: `default` (the shield's own) or a multiplayer armor color (`white`, `black`, `red`, `blue`, `gray`, `yellow`, `green`, `pink`, `purple`, `cyan`, `cobalt`, `orange`, `teal`, `sage`, `brown`, `tan`, `maroon`, `salmon`), whatever the armor's, on the body and, with `display.viewmodel_shield`, on the first-person arms. The shield's own shader is drawn with its two colors replaced at their brightness; the flare is added to what is behind it, so `black` is drawn a faint grey. Only this machine sees it. |
 | `display.spartan_link` | `"medium"` | `HALO_SPARTAN_LINK` | The Spartan link: live feeds of your living teammates' views in the HUD's top line (up to four), shown and hidden with `controls.spartan_link` (B; a controller's D-pad Down in the stock layouts), off as each game starts; co-op and team games only, not Pro 2V2. `"small"`, `"medium"` or `"large"` feeds; `"off"`: the key does nothing. SPARTAN LINK in Settings > Interface. Refer to "Spartan link". |
 | `display.high_res_hud` | `true` | `HALO_HIGH_RES_HUD` | `true`: the HUD (meters, counters, panels and their outlines, reticles, waypoints, scopes, the message icons and their pictures of the weapons, the reticle's warnings, the multiplayer icons) is drawn from the high-res assets in `port/assets/hud`, 4x the size of the maps' bitmaps: Aerocatia's and Jessie's art from Halo PC Restored (`port/assets/hud/NOTICE.md`); the motion sensor and the health meter's base, which it has no larger, from redraws at 8x. Another language's text (the message icons' words, the warnings, the seat plates) is upscaled from its maps' own pixels without changing their layout. `false`: the maps' own bitmaps. |
@@ -3009,6 +3014,44 @@ body stands under the real head (VR, "Your body").
 
 Only this machine's view changes. Nothing the machines send each other
 changes, so players with different settings play together.
+
+### Your body and the third-person camera
+
+SHADOW (`display.player_shadow`, on) gives your body its shadow in PRISM's
+traced modes: Path Traced, and Rebaked (`display.lighting` `"raster"`) with
+its traced object shadows. In first person your whole body, as others see
+it, with its animation and the weapon it holds (placed as the legs are,
+where they are drawn), is put in the frame's traced objects as a caster
+that is never drawn (`XGPU_GBUFFER_FLAG_TRACE_ONLY`, instance mask 16), so
+the camera never sees the inside of the helmet. It casts its sun and lamp
+shadows, blocks bounced light and the sky's, and is hit by reflected and
+bounced rays; the rays from the first-person weapon and arms leave it out
+(they start inside or in front of it). Your legs, where drawn, are not
+traced a second time. Classic draws your shadow as the game draws every
+object's, with LEGS (upstream's), unchanged.
+
+CAMERA (Video, First Person, Weapon & Body, Camera; `camera.view`) puts
+the view on foot behind your shoulder: your whole body is drawn and the
+first-person weapon is not. The camera keeps its distance
+(`camera.third_person_distance`, 1.5 world units) behind a point over your
+shoulder (`camera.third_person_shoulder`), found by a sweep from your eye
+that stops short of a wall; the game's own observer then keeps the camera
+out of walls by bringing it nearer along its line, and eases it as it
+eases a vehicle's camera. The camera looks from that point through where
+the game's aim reaches (the same trace the game makes from your eye along
+your aim, eased so a near wall swept over does not jerk the view), so the
+reticle stays in the middle of the screen and on the shot. Only the view
+changes: the game aims, fires and saves from your eye as in first person,
+so a saved game, a demo and a network game are the same in either view.
+Keypad + and Keypad - (Controls, Camera: CAMERA CLOSER and FURTHER) bring
+it closer and further while held, and the wheel does while Left Alt (CAMERA
+WHEEL HOLD) is held, in steps of a quarter world unit, instead of switching
+weapons; the distance is written to the settings a moment after. A
+scope's zoom is in first person until it ends; a vehicle's seat keeps its
+own camera; dying, a cinematic or a scripted camera take theirs. Off in
+multiplayer games (`camera.third_person_netgames`), and never in VR or
+Forge.
+
 
 ## Draw distance
 

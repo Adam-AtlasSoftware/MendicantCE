@@ -19,11 +19,13 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_weapon_position" x="28" y="142"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_4" x="28" y="169"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_first_person_legs" x="28" y="189"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_6" x="28" y="216"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_viewmodel_shield" x="28" y="236"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_shield_color" x="28" y="257"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_overshield_effect" x="28" y="278"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_overshield_layer_color" x="28" y="299"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_player_shadow" x="28" y="210"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_camera" x="28" y="231"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_8" x="28" y="258"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_viewmodel_shield" x="28" y="278"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_shield_color" x="28" y="299"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_overshield_effect" x="28" y="320"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_overshield_layer_color" x="28" y="341"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -117,10 +119,34 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_6" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_6_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_player_shadow" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_seg0" x="188" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_seg1" x="240" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_6_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="6" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_seg1" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/player_shadow_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.player_shadow" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_camera" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/camera_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/camera_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/camera_label"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/camera_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_8" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_8_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/section_8_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="8" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/op_viewmodel_shield" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/viewmodel_shield_label"/>
@@ -128,7 +154,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/viewmodel_shield_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/viewmodel_shield_seg1" x="240" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/viewmodel_shield_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/viewmodel_shield_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/viewmodel_shield_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -142,7 +168,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/shield_color_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/shield_color_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/shield_color_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/shield_color_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/shield_color_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="DEFAULT|WHITE|BLACK|RED|BLUE|GRAY|YELLOW|GREEN|PINK|PURPLE|CYAN|COBALT|ORANGE|TEAL|SAGE|BROWN|TAN|MAROON|SALMON" setting="display.shield_color" values="default|white|black|red|blue|gray|yellow|green|pink|purple|cyan|cobalt|orange|teal|sage|brown|tan|maroon|salmon" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
@@ -153,7 +179,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_effect_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_effect_seg1" x="240" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_effect_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_effect_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_effect_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -169,7 +195,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_layer_color_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_layer_color_seg1" x="263" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_layer_color_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_layer_color_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/overshield_layer_color_seg0" type="text" controller="1" width="71" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="LAYERS" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -186,6 +212,8 @@
 		<string text="WEAPON POSITION ›"/>
 		<string text="BODY"/>
 		<string text="LEGS"/>
+		<string text="SHADOW"/>
+		<string text="CAMERA ›"/>
 		<string text="SHIELDS"/>
 		<string text="ARM SHIELDS"/>
 		<string text="SHIELD COLOR"/>
@@ -200,6 +228,8 @@
 		<string text="Moves and turns your weapon and hands on the screen, for every weapon and, in a game, for the one you hold."/>
 		<string text=""/>
 		<string text="Your legs when you look down, moving as you run: your body as the others see it."/>
+		<string text="Path Traced and Rebaked: your whole body, with the weapon it holds, casts its shadow and blocks light, though you never see it. Classic's shadow of you comes with Legs."/>
+		<string text="On foot in the campaign: first person, or third person from behind your shoulder, and how far back."/>
 		<string text=""/>
 		<string text="When your shield takes a hit, its flare shows on your first-person arms too, as on your body, and fades as it does there. A full, untouched shield shows nothing.|An overshield stays lit on them with Overshield on, below."/>
 		<string text="Your shield's flare in an armor color, whatever your armor. Only you see it. Default keeps its own."/>

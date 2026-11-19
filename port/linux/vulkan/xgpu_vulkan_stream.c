@@ -2699,6 +2699,25 @@ static int constants_update(const struct stream_pipeline *entry, uint64_t serial
 	return 1;
 }
 
+/* port: every vertex constant in the ring for this submission, for a draw
+that no pipeline draws (gbuffer_draw's XGPU_GBUFFER_FLAG_TRACE_ONLY) */
+static int constants_whole(uint64_t serial)
+{
+	uint8_t *to = xgpu_vulkan_upload(CONSTANTS_RANGE, 256, &stream.constants_range);
+	int word;
+
+	if (!to)
+		return 0;
+	memcpy(to, stream.constants, CONSTANTS_RANGE);
+	for (word = 0; word < 3; word++)
+	{
+		stream.constants_valid[word] = ~(uint64_t)0;
+		stream.constants_changed[word] = 0;
+	}
+	stream.constants_uploaded = serial;
+	return 1;
+}
+
 /* the uniforms both stages read and the vertex constants, in the ring for
 this submission (with the VR effects' views, for a VR effect's draw) */
 static int uniforms_update(const struct stream_pipeline *entry)
@@ -4595,6 +4614,10 @@ layout has them) and the constants it is drawn with; an alpha-tested one
 passed over. port: display.lighting "pathtraced" (PRISM v4 M3): the
 G-buffer pass's object draws too (object: its world-light test not made, in
 window, the G-buffer passes' count, not the pre-passes') */
+/* port: the draw prepass_rt_capture captures is the player's own body,
+traced as a shadow caster alone (gbuffer_draw) */
+static int capture_self;
+
 static void prepass_rt_capture(const struct draw_input *input, const struct xgpu_stream_pipeline_define *twin,
 	int object, uint32_t window)
 {
@@ -4654,6 +4677,7 @@ then, drawn opaque) */
 	}
 	memset(&draw, 0, sizeof(draw));
 	draw.occluder = !object && occlusion == XGPU_STREAM_WORLD_AO_OCCLUDER;
+	draw.self = capture_self;
 	draw.serial = xgpu_vulkan_serial();
 	/* (its base map's mean colour: the traced hits' albedo; a cutout's
 	share of texels drawn) */
@@ -4851,6 +4875,21 @@ static void gbuffer_draw(const struct draw_input *input)
 
 	if (!gbuffer.ready || !id || id >= XGPU_STREAM_PIPELINES || !definition || stream.preparing)
 		return;
+	/* (port: the player's own body in first person, XGPU_GBUFFER_FLAG_TRACE_
+	ONLY: captured for the objects' structure as a shadow caster alone,
+	never drawn; its vertex constants (its pose) put in the ring whole, as
+	no pipeline of its put them there) */
+	if (gbuffer.flags & XGPU_GBUFFER_FLAG_TRACE_ONLY)
+	{
+		if (gbuffer.instance && gbuffer.instance != XGPU_GBUFFER_INSTANCE_FIRST_PERSON && gbuffer.objects &&
+			constants_whole(xgpu_vulkan_serial()))
+		{
+			capture_self = 1;
+			prepass_rt_capture(input, definition, 1, gbuffer.pass_number | 0x80000000u);
+			capture_self = 0;
+		}
+		return;
+	}
 	if (!gbuffer.definitions)
 	{
 		gbuffer.definitions = calloc(XGPU_STREAM_PIPELINES, sizeof(*gbuffer.definitions));

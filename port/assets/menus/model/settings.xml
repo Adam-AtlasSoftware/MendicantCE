@@ -1043,7 +1043,31 @@
 			<choice shown="SEAT" value="false"/>
 		</row>
 		<row key="weapon_body" kind="link" label="WEAPON &amp; BODY ›" crumb="VIDEO › FIRST PERSON" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/weapon_body/weapon_body_screen">
-			<help>Your weapon and hands: whether they are drawn, their field of view and their place. Your legs, and your shield's flare on your arms, its color and an overshield's.</help>
+			<help>Your weapon and hands: whether they are drawn, their field of view and their place. Your legs, your shadow and the third-person camera, and your shield's flare on your arms, its color and an overshield's.</help>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/camera_screen" kind="settings" layout="page" geometry="tall" title="CAMERA">
+		<section key="section_0" title="ON FOOT"/>
+		<row key="view" kind="choice" setting="camera.view" label="VIEW" crumb="VIDEO › … › CAMERA" search_choices="first person third">
+			<help>On foot in the campaign: through your eyes, or from behind your shoulder with your whole body drawn. Shots go where the reticle points. A scope zooms in first person; vehicles keep their own views.</help>
+			<choice shown="FIRST PERSON" value="first_person"/>
+			<choice shown="THIRD PERSON" value="third_person"/>
+		</row>
+		<row key="third_person_distance" kind="slider" setting="camera.third_person_distance" label="DISTANCE" crumb="VIDEO › … › CAMERA" least="1" most="6" step="0.25" typed_least="1" typed_most="6">
+			<help>Third person: how far behind you the camera is, in world units of about 3 meters. Camera Closer and Camera Further (Controls, Camera) change it as you play.</help>
+			<note>Click the number (or press A) to type any from 1 to 6.</note>
+		</row>
+		<row key="third_person_shoulder" kind="slider" setting="camera.third_person_shoulder" label="SHOULDER" crumb="VIDEO › … › CAMERA" least="-0.5" most="0.5" step="0.02" typed_least="-0.5" typed_most="0.5">
+			<help>Third person: how far right of your head the camera is, in world units; below 0 over your left shoulder.</help>
+			<note>Click the number (or press A) to type any from -0.5 to 0.5.</note>
+		</row>
+		<row key="third_person_netgames" kind="choice" setting="camera.third_person_netgames" label="MULTIPLAYER" crumb="VIDEO › … › CAMERA">
+			<help>Third person in multiplayer games too. Off keeps it to the campaign and co-op: seeing round corners is an advantage the others may not have.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -1143,7 +1167,15 @@
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
-		<section key="section_6" title="SHIELDS"/>
+		<row key="player_shadow" kind="choice" setting="display.player_shadow" label="SHADOW" crumb="VIDEO › FIRST PERSON › WEAPON &amp; BODY">
+			<help>Path Traced and Rebaked: your whole body, with the weapon it holds, casts its shadow and blocks light, though you never see it. Classic's shadow of you comes with Legs.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="camera" kind="link" label="CAMERA ›" crumb="VIDEO › FIRST PERSON › WEAPON &amp; BODY" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/camera_screen">
+			<help>On foot in the campaign: first person, or third person from behind your shoulder, and how far back.</help>
+		</row>
+		<section key="section_8" title="SHIELDS"/>
 		<row key="viewmodel_shield" kind="choice" setting="display.viewmodel_shield" label="ARM SHIELDS" crumb="VIDEO › FIRST PERSON › WEAPON &amp; BODY">
 			<help>When your shield takes a hit, its flare shows on your first-person arms too, as on your body, and fades as it does there. A full, untouched shield shows nothing.</help>
 			<note>An overshield stays lit on them with Overshield on, below.</note>
@@ -1320,12 +1352,13 @@
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/controls_setup/controls_settings_screen" kind="settings" layout="page" geometry="tall">
 		<section key="section_0" title="KEYBOARD AND MOUSE"/>
-		<row key="group" kind="choice" label="SHOW" crumb="CONTROLS › KEY BINDINGS" search_choices="movement weapons actions communication">
-			<help>Which of the actions to show: movement, weapons, actions or communication.</help>
+		<row key="group" kind="choice" label="SHOW" crumb="CONTROLS › KEY BINDINGS" search_choices="movement weapons actions communication camera">
+			<help>Which of the actions to show: movement, weapons, actions, communication or the third-person camera.</help>
 			<choice shown="MOVEMENT" value="0"/>
 			<choice shown="WEAPONS" value="1"/>
 			<choice shown="ACTIONS" value="2"/>
 			<choice shown="COMMUNICATION" value="3"/>
+			<choice shown="CAMERA" value="4"/>
 		</row>
 		<section key="section_2" title="ACTIONS"/>
 		<row key="command_1" kind="binding" label="" crumb="CONTROLS › KEY BINDINGS"/>

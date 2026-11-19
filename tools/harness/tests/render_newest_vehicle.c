@@ -198,6 +198,7 @@ static boolean player_control_gyro_look_late(short local_player_index, real *yaw
 	return FALSE;
 }
 static boolean passenger_camera_enabled(short local_player_index) { return FALSE; }
+static boolean chase_camera_enabled(short local_player_index) { return FALSE; }
 static real biped_eye_rise_ahead(long unit_index, real since) { return 0.0f; }
 static void unit_get_camera_position(long index, real_point3d *position);
 static real_vector3d *vector3d_from_euler_angles2d(real_vector3d *vector, real_euler_angles2d const *angles)

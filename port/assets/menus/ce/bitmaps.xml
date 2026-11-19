@@ -1194,4 +1194,7 @@
 		<frame png="ce/port/main_menu/campaign/badge_shape_100__0.png" width="100" height="100"/>
 		<frame png="ce/port/main_menu/campaign/badge_shape_100__1.png" width="100" height="100"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera.png" width="512" height="64"/>
+	</bitmap>
 </menus>

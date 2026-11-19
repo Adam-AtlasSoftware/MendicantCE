@@ -150,6 +150,10 @@ drawn view may then take what has come since (halo_linux_mouse_look_late) */
 static BOOL mouse_look_taken;
 static unsigned long mouse_polls_unconsumed = 0;
 static float mouse_wheel_accumulated = 0.0f;
+/* the wheel's turns the third-person camera takes (halo_camera_wheel_take),
+while it is diverted to it (halo_camera_wheel_divert) */
+static float camera_wheel_accumulated = 0.0f;
+static int camera_wheel_diverted = 0;
 /* the wheel's turns the dev tools have not read yet (halo_linux_forge_read_wheel) */
 static float forge_wheel_accumulated = 0.0f;
 /* the wheel's notches turned while a chat line is typed, not yet taken
@@ -1014,10 +1018,17 @@ static void mouse_poll(const struct platform_input_state *input)
 		mouse_pending_y += input->mouse_dy;
 		if (input->mouse_dx != 0.0f || input->mouse_dy != 0.0f)
 			mouse_aimed_ms = SDL_GetTicks();
+		/* (the third-person camera's while its modifier is held:
+		halo_camera_wheel_divert) */
+		if (camera_wheel_diverted)
+			camera_wheel_accumulated += input->mouse_wheel;
+		else
+		{
 		mouse_wheel_accumulated += input->mouse_wheel;
 		forge_wheel_accumulated += input->mouse_wheel;
 		if (input->mouse_wheel != 0.0f)
 			wheel_moved_ms = SDL_GetTicks();
+		}
 	}
 	pthread_mutex_unlock(&mouse_lock);
 }
@@ -1751,6 +1762,26 @@ int halo_push_to_talk_held(void)
 			return 1;
 	}
 	return controller_remap_talk();
+}
+
+void halo_camera_wheel_divert(int divert)
+{
+	pthread_mutex_lock(&mouse_lock);
+	camera_wheel_diverted = divert != 0;
+	if (!camera_wheel_diverted)
+		camera_wheel_accumulated = 0.0f;
+	pthread_mutex_unlock(&mouse_lock);
+}
+
+float halo_camera_wheel_take(void)
+{
+	float turned;
+
+	pthread_mutex_lock(&mouse_lock);
+	turned = camera_wheel_accumulated;
+	camera_wheel_accumulated = 0.0f;
+	pthread_mutex_unlock(&mouse_lock);
+	return turned;
 }
 
 /* whether a binding setting's keys ("F5, Mouse 4", as the controls.*

@@ -250,7 +250,7 @@ struct rt_entry
 	VkDeviceSize offset, size, structure_offset, structure_size, build_scratch, update_scratch;
 	VkAccelerationStructureKHR structure;
 	VkDeviceAddress structure_address, soup_address;
-	int built, skinned, occluder;
+	int built, skinned, occluder, self;
 	uint32_t updates;
 	float rows[RT_NODE_ROWS][4];
 	uint32_t rows_known;
@@ -2332,6 +2332,7 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 		return;
 	}
 	entry->occluder = draw->occluder;
+	entry->self = draw->self;
 	if (draw->owner >= 0 && draw->owner < 64 && !rt.owner_now_seen[draw->owner])
 	{
 		rt.owner_now_seen[draw->owner] = 1;
@@ -2896,8 +2897,10 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 			rt.reused++;
 		memset(instance, 0, sizeof(*instance));
 		instance->transform.matrix[0][0] = instance->transform.matrix[1][1] = instance->transform.matrix[2][2] = 1.0f;
-		/* (a cutout: mask 8, its hits tested by its share) */
-		instance->mask = entry->coverage < 1.0f ? 0x08 : 0x04;
+		/* (a cutout: mask 8, its hits tested by its share; port: the
+		player's own body in first person, mask 16, which the first-person
+		view's rays leave out) */
+		instance->mask = entry->self ? 0x10 : entry->coverage < 1.0f ? 0x08 : 0x04;
 		instance->instanceCustomIndex = objects + 1;
 		instance->flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR | (entry->coverage < 1.0f ?
 			VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR);

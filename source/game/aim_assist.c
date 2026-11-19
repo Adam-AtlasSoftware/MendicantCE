@@ -50,6 +50,7 @@ symbols in this file:
 #include "camera/observer.h"
 #include "camera/first_person_camera.h" /* port: preserve the passenger's input aim basis */
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c */
+#include "chase_camera.h" /* port: port/linux/game/chase_camera.c */
 #include "game/game.h"
 #include "game/game_allegiance.h"
 #include "game/game_globals.h"
@@ -749,7 +750,7 @@ long local_player_aim_assist(
 			real_point3d aim_position = camera->position; /* port: the display camera never steers aim assist */
 			real_vector3d aim_forward = camera->forward;
 
-			if (passenger_camera_enabled(local_player_index))
+			if (passenger_camera_enabled(local_player_index) || chase_camera_enabled(local_player_index))
 				first_person_camera_deterministic(player->unit_index, &aim_position, &aim_forward);
 			if (aim_assist(&parameters, &aim_position, &aim_forward, aiming_unit_index, player->team_index, &target))
 			{

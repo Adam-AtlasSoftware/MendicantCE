@@ -78,6 +78,7 @@ boolean prism_bake_object_static(long object_index);
 
 /* the platform's (port/linux/src) */
 char const *config_string(char const *name);
+int config_boolean(char const *name);
 unsigned long config_changes(void);
 void xgpu_backend_gbuffer_phase(unsigned long phase);
 void xgpu_backend_scene_material(unsigned long material, const unsigned long hash[2], int family, int material_type,
@@ -138,6 +139,9 @@ enum
 #define DRAW_FIRST_PERSON 4ul
 /* (port: xgpu_stream.h's XGPU_GBUFFER_FLAG_STATIC_SCENERY) */
 #define DRAW_STATIC_SCENERY 16ul
+/* (port: xgpu_stream.h's XGPU_GBUFFER_FLAG_TRACE_ONLY: the player's own body
+in first person, traced as a shadow caster, not drawn) */
+#define DRAW_TRACE_ONLY 32ul
 /* GBUFFER_DRAW's instance of the first-person weapon (xgpu_stream.h's
 XGPU_GBUFFER_INSTANCE_FIRST_PERSON) */
 #define INSTANCE_FIRST_PERSON 0xffffUL
@@ -180,6 +184,10 @@ static struct
 	boolean wanted, raster, raster_materials, raster_objects_volume, raster_object_shadows, pathtraced;
 	unsigned long pt_profile;
 	boolean pt_denoiser_off;
+	/* display.player_shadow, and the draw flags the player's body's draws
+	take now (prism_deferred_body) */
+	boolean body_shadow;
+	unsigned long body_flags;
 	unsigned long view;
 	/* the window's phase sent last (0 none: the light) */
 	unsigned long phase;
@@ -245,6 +253,9 @@ static void settings_read(
 	CE's projected shadows) */
 	value = config_string("display.prism_raster_object_shadows");
 	prism_deferred.raster_object_shadows = !value || strcmp(value, "classic");
+	/* (display.player_shadow: the player's own body traced in first person,
+	its shadow cast in the traced modes) */
+	prism_deferred.body_shadow = config_boolean("display.player_shadow") != 0;
 	value = config_string("debug.gbuffer_view");
 	prism_deferred.view = !value ? 0 : !strcmp(value, "base") ? 1 : !strcmp(value, "light") ? 2 :
 		!strcmp(value, "additions") ? 3 : !strcmp(value, "albedo") ? 4 : !strcmp(value, "normal") ? 5 :
@@ -662,8 +673,8 @@ void prism_deferred_object(
 	prism_deferred.instance = absolute >= INSTANCE_FIRST_PERSON ? INSTANCE_FIRST_PERSON - 1 : absolute;
 	/* (port: static scenery, whose shadows the bake has: not among the
 	objects whose sun shadows PRISM Raster traces) */
-	prism_deferred.draw_flags = absolute && prism_deferred.raster && prism_deferred.raster_object_shadows &&
-		prism_bake_object_static(object_index) ? DRAW_STATIC_SCENERY : 0;
+	prism_deferred.draw_flags = (absolute && prism_deferred.raster && prism_deferred.raster_object_shadows &&
+		prism_bake_object_static(object_index) ? DRAW_STATIC_SCENERY : 0) | prism_deferred.body_flags;
 	prism_deferred.lightmap = 0;
 	/* (SCENE_INSTANCE: the object's nodes, before its draws) */
 	if (absolute)
@@ -710,6 +721,44 @@ void prism_deferred_shader(
 	prism_deferred.sent_flags = prism_deferred.draw_flags;
 	prism_deferred.sent_lightmap = prism_deferred.lightmap;
 	xgpu_backend_gbuffer_draw(material, prism_deferred.instance, prism_deferred.draw_flags, prism_deferred.lightmap);
+
+	return;
+}
+
+/* port: the player's own body in first person (render_objects.c): its whole
+body, as others see it, with what it holds, traced as a shadow caster in
+the G-buffer pass of the traced modes (Path Traced; Raster with its traced
+object shadows) but not drawn, and display.player_shadow on; a biped on
+foot, alive and not hidden */
+boolean prism_deferred_body_traced(
+	long object_index)
+{
+	struct object_datum *object;
+
+	if (!render_gbuffer_pass)
+	{
+		return FALSE;
+	}
+	settings_read();
+	if (!prism_deferred.body_shadow || !(prism_deferred.pathtraced ||
+		(prism_deferred.raster && prism_deferred.raster_object_shadows)))
+	{
+		return FALSE;
+	}
+	object = object_try_and_get(object_index);
+	return object && object->object.type == _object_type_biped && object->object.parent_object_index == NONE &&
+		!TEST_FLAG(object->object.damage_flags, _object_dead_bit) &&
+		!TEST_FLAG(object->object.flags, _object_invisible_bit);
+}
+
+/* ... its draws' flags while they are drawn: 1 the whole body, traced and
+not drawn (XGPU_GBUFFER_FLAG_TRACE_ONLY); 2 its legs (first_person_legs.c),
+drawn but not traced (the whole body is, in their place); 0 none */
+void prism_deferred_body(
+	int mode)
+{
+	prism_deferred.body_flags = mode == 1 ? DRAW_TRACE_ONLY : mode == 2 ? DRAW_FIRST_PERSON : 0;
+	prism_deferred.draw_flags = prism_deferred.body_flags;
 
 	return;
 }

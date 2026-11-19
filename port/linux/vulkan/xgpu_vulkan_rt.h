@@ -103,6 +103,10 @@ struct xgpu_vulkan_rt_draw
 	left out where it is all within reach of the eye (the first-person
 	weapon and hands) */
 	int occluder;
+	/* port: the player's own body in first person, a shadow caster alone
+	(instance mask 16, which the first-person view's rays leave out:
+	xgpu_stream.h's XGPU_GBUFFER_FLAG_TRACE_ONLY) */
+	int self;
 	uint64_t identity[4];
 	uint32_t generation[2];
 	uint64_t pose;

@@ -85,6 +85,13 @@ int halo_push_to_talk_held(void);
 settings name them) are held now: the practice keys' (game.practice_*_key),
 which are not keyboard actions */
 int halo_named_binding_held(const char *setting);
+/* the third-person camera's wheel (port/linux/game/chase_camera.c): while
+divert is set (each frame: the camera on foot in third person and
+controls.camera_wheel_modifier held) the wheel's turns are the camera's,
+not the weapon switch's; take returns the notches turned since (up
+positive) */
+void halo_camera_wheel_divert(int divert);
+float halo_camera_wheel_take(void);
 /* whether the HUD's button prompts name the keyboard and mouse's bindings
 in place of the controller's buttons (input.button_prompts: "auto" follows
 the device the first player played with last); the first binding of an

@@ -563,6 +563,12 @@ bits; its high 4 bits the flags */
 /* (GBUFFER_DRAW's alone: the object is static scenery the bake holds, its
 sun shadows baked; PRISM Raster's traced objects leave it out) */
 #define XGPU_GBUFFER_FLAG_STATIC_SCENERY 16u
+/* (GBUFFER_DRAW's alone: the player's own body in first person, traced as a
+shadow caster (the traced objects' structure, instance mask 16: the rays of
+the first-person view's pixels leave it out) but not drawn into the
+G-buffer, so the camera never sees it: port/linux/game/prism_deferred.c's
+prism_deferred_body) */
+#define XGPU_GBUFFER_FLAG_TRACE_ONLY 32u
 
 /* a record of no more than its header: SKIP, INVALIDATE, FLUSH,
 VISIBILITY_BEGIN, VISIBILITY_FRAME, DYNAMIC_LIGHTS_PREPARE,

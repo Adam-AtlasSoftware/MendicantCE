@@ -54,6 +54,11 @@ draw's shader (rasterizer_xbox_models.c's and _environment.c's draws), whose
 material the draws that follow take */
 void prism_deferred_object(long object_index);
 void prism_deferred_first_person(int drawing);
+/* the player's own body in first person, traced as a shadow caster in the
+traced modes' G-buffer pass (render_objects.c), and the mode of its draws
+(1 traced alone, 2 its legs drawn alone, 0 neither) */
+boolean prism_deferred_body_traced(long object_index);
+void prism_deferred_body(int mode);
 void prism_deferred_shader(void const *shader);
 /* ... and the lightmap page the level's draws that follow are lit from (its
 bitmap of the BSP's lightmap bitmaps; NULL none), which their G-buffer

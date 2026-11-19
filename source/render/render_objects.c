@@ -162,13 +162,19 @@ enum
 
 /* ---------- structures */
 
+/* port: object_render_data's port_flags: the player's own body drawn for
+the traced modes alone, whole (prism_deferred_body_traced), and the list
+walked for that one object, not its siblings */
+#define RENDER_DATA_BODY_TRACED 1
+#define RENDER_DATA_ONE_OBJECT 2
+
 struct object_render_data
 {
 	long object_index;
 	struct render_lighting *lighting;
 	boolean shadow;
 	boolean no_planar_fog;
-	word pad;
+	word port_flags; /* port: (was padding) RENDER_DATA_* */
 	real_matrix4x3 shadow_matrix;
 	real shadow_bounding_radius;
 	long unused44;
@@ -408,6 +414,7 @@ void render_objects(
 	rendered_objects_found_early = render_port_prepass && !render_prism_shadow_pass;
 
 	data.shadow = FALSE;
+	data.port_flags = 0; /* port: (render_object_list's RENDER_DATA_*) */
 
 	do
 	{
@@ -453,6 +460,9 @@ real_matrix4x3 const *menu_spartan_node_matrices(long object_index, real_matrix4
 boolean first_person_legs_wanted(long object_index);
 real_matrix4x3 const *first_person_legs_node_matrices(long object_index, real_matrix4x3 const *nodes);
 real_matrix4x3 const *first_person_legs_shadow_node_matrices(long object_index, real_matrix4x3 const *nodes);
+/* port: port/linux/game/prism_deferred.c */
+boolean prism_deferred_body_traced(long object_index);
+void prism_deferred_body(int mode);
 #ifdef HALO_VR
 /* port: port/linux/game/vr_death.c */
 real_matrix4x3 const *vr_death_body_nodes(long object_index, real_matrix4x3 const *nodes);
@@ -504,6 +514,7 @@ void render_object_shadows(
 		rasterizer_shadow_atlas_begin();
 
 		data.shadow = TRUE;
+		data.port_flags = 0; /* port: (render_object_list's RENDER_DATA_*) */
 		process_rendered_objects(&data);
 
 		/* port: (as above) */
@@ -730,15 +741,41 @@ static void render_object_list(
 	while (object_index != NONE)
 	{
 		struct object_datum *object = object_get(object_index);
+		/* port: the player's own body in first person, drawn for the traced
+		modes alone (port/linux/game/prism_deferred.c): whole, as its shadow
+		is posed (placed as its legs are, where they are drawn), with what it
+		holds */
+		boolean body = (data->port_flags & RENDER_DATA_BODY_TRACED) != 0;
+		boolean first_person = !render.camera.mirrored && object_is_first_person_camera(object_index);
 		/* port: the player's own legs, seen looking down in first person
 		(port/linux/game/first_person_legs.c): its body drawn from its belly
 		down, nothing it carries; its shadow the whole body's, placed as the
 		legs are */
-		boolean legs = !render.camera.mirrored &&
-			object_is_first_person_camera(object_index) && first_person_legs_wanted(object_index);
+		boolean legs = !body && first_person && first_person_legs_wanted(object_index);
+		boolean body_traced = !body && !data->shadow && first_person && prism_deferred_body_traced(object_index);
 		real_matrix4x3 const *node_matrices = !legs ? object_get_node_matrices(object_index) :
 			data->shadow ? first_person_legs_shadow_node_matrices(object_index, object_get_node_matrices(object_index)) :
 			first_person_legs_node_matrices(object_index, object_get_node_matrices(object_index));
+
+		if (body && first_person && first_person_legs_wanted(object_index))
+		{
+			real_matrix4x3 const *posed =
+				first_person_legs_shadow_node_matrices(object_index, object_get_node_matrices(object_index));
+
+			if (posed)
+				node_matrices = posed;
+		}
+		/* port: (the whole body first, traced and not drawn; then its legs,
+		drawn and not traced) */
+		if (body_traced)
+		{
+			struct object_render_data body_data = *data;
+
+			body_data.port_flags |= RENDER_DATA_BODY_TRACED | RENDER_DATA_ONE_OBJECT;
+			prism_deferred_body(1);
+			render_object_list(&body_data, parent_model_effect, object_index);
+			prism_deferred_body(legs ? 2 : 0);
+		}
 
 #ifdef HALO_VR
 		/* port: the VR mode's dead player's body, seen from where its head
@@ -751,7 +788,8 @@ static void render_object_list(
 		clock while its view draws it (port/linux/game/menu_spartan.c) */
 		if (!legs && !data->shadow)
 			node_matrices = menu_spartan_node_matrices(object_index, node_matrices);
-		if (!object_is_first_person_camera(object_index) || render.camera.mirrored || (legs && node_matrices))
+		if (!object_is_first_person_camera(object_index) || render.camera.mirrored || (legs && node_matrices) ||
+			body)
 		{
 			struct render_model_effect model_effect;
 
@@ -964,7 +1002,7 @@ static void render_object_list(
 
 			/* port: (not in display.ambient_occlusion "world"'s pre-pass: the
 			widgets draw as transparent geometry, queued for later) */
-			if (!data->shadow && !legs && object->object.first_widget_index != NONE &&
+			if (!data->shadow && !legs && !body && object->object.first_widget_index != NONE &&
 				!render_port_prepass)
 			{
 				struct render_animation animation;
@@ -977,12 +1015,22 @@ static void render_object_list(
 
 			if (object->object.first_child_object_index != NONE && !legs)
 			{
+				/* port: (a body drawn alone for the traced modes: its
+				children all, each with its siblings) */
+				struct object_render_data children = *data;
+
+				children.port_flags &= ~RENDER_DATA_ONE_OBJECT;
 				render_object_list(
-					data,
+					(data->port_flags & RENDER_DATA_ONE_OBJECT) ? &children : data,
 					data->shadow ? NULL : &model_effect,
 					object->object.first_child_object_index);
 			}
 		}
+		/* port: (the legs' draws done: the next object's untouched) */
+		if (body_traced)
+			prism_deferred_body(0);
+		if ((data->port_flags & RENDER_DATA_ONE_OBJECT))
+			break;
 
 		object_index = object->object.next_object_index;
 	}

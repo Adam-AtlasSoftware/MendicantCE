@@ -134,6 +134,7 @@ the frame takes its view.
 #include "devices/device_machines.h"
 #include "devices/device_definitions.h"
 #include "passenger_camera.h"
+#include "chase_camera.h"
 #include "sim_rate.h"
 #include "demo.h"
 #include "network_standard.h"
@@ -4260,7 +4261,7 @@ static struct observer_result const *render_interpolation_seat_camera(
 		/* (held at the seat's pitch limit, evenly; and the late motion) */
 		yaw = 0.0f;
 		pitch = render_interpolation_seat_pitch(local_player_index);
-		if (!passenger_camera_enabled(local_player_index))
+		if (!passenger_camera_enabled(local_player_index) && !chase_camera_enabled(local_player_index))
 		{
 			real late_yaw, late_pitch;
 

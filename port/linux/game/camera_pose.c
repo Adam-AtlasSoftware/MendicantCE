@@ -127,6 +127,10 @@ builds draw the same poses in the same frames whatever their frame rates.
                      units, degrees)
   save <frame>       a frame of the path saved (frames in order); with none,
                      every frame is
+  release            at the path's end, the camera given back to the
+                     director (the player's own view: a test that puts the
+                     player somewhere with cheat_teleport_to_camera, then
+                     plays from there)
 
 The poses between keys follow a Catmull-Rom spline through them (their
 angles too, the yaw's the shorter way round), so that the camera's speed
@@ -162,7 +166,7 @@ struct camera_path_key
 
 static struct
 {
-	boolean read, running, done;
+	boolean read, running, done, release;
 	long start_frames, frames_seen, frame, start_ticks;
 	long key_count, command_count;
 	struct camera_path_key keys[MAXIMUM_PATH_KEYS];
@@ -236,6 +240,10 @@ static void camera_path_read(void)
 		if (strncmp(line, "start ", 6) == 0)
 		{
 			camera_path.start_frames = atol(line + 6);
+		}
+		else if (strcmp(line, "release") == 0)
+		{
+			camera_path.release = TRUE;
 		}
 		else if (strncmp(line, "start_tick ", 11) == 0)
 		{
@@ -422,6 +430,8 @@ void camera_path_frame(void)
 		double waited_milliseconds;
 
 		camera_path.done = TRUE;
+		if (camera_path.release)
+			director_script_camera(FALSE);
 		prism_popin_counts(&skipped, &waited, &world_switches, &waited_milliseconds);
 		platform_log("camera path: done after %ld frames (%ld more held for the streams); since the map: %lu draws "
 			"left out for a texture not in, %lu waited for (%.1f ms), %lu remodel surfaces switched near or far",

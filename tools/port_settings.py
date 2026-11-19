@@ -724,6 +724,10 @@ VIEWMODEL_ROTATIONS = Slider(-15, 15, 0.5, -15, 15)
 # display.lowered_reticle_amount's: percent of the view's height below its
 # middle; any of 0 to 30 typed
 LOWERED_RETICLE_AMOUNTS = Slider(1, 25, 1, 0, 30, whole=True)
+# camera.third_person_distance's: world units behind the eye (chase_camera.c's
+# CHASE_DISTANCE_LEAST and _MOST); camera.third_person_shoulder's: right of it
+CAMERA_DISTANCES = Slider(1, 6, 0.25, 1, 6)
+CAMERA_SHOULDERS = Slider(-0.5, 0.5, 0.02, -0.5, 0.5)
 # display.vehicle_fov's: the game's own view ("default"), display.fov's
 # ("match"), or degrees; any of 20 to 160 typed, as display.fov's
 VEHICLE_FIELDS_OF_VIEW = FIELDS_OF_VIEW._replace(
@@ -795,6 +799,7 @@ WEAPON_BODY = ("video_settings/first_person/weapon_body", "weapon_body_screen")
 # (Weapon & Body's weapon position: every weapon's offsets and turns, and in a
 # game the held weapon's own: menu_functions.c's viewmodel_weapon_rows_show)
 WEAPON_POSITION = ("video_settings/first_person/weapon_position", "weapon_position_screen")
+CAMERA_PAGE = ("video_settings/first_person/camera", "camera_screen")
 CONTROLLER = ("gamepad_setup", "gamepad_setup_screen")
 # (the controller's own button layout, each player's: controller_remap_menu.inl)
 BUTTON_REMAPPING = ("gamepad_setup/button_remapping", "button_remapping_screen")
@@ -817,7 +822,7 @@ KEY_BINDINGS = ("controls_setup", "controls_settings_screen")
 # Key Bindings: the keyboard and mouse's actions, in groups (the order of
 # port/linux/game/menu_functions.c's table of them), and its rows for a
 # group's actions (the most a group has), each its action's two bindings
-CONTROL_GROUPS = ["MOVEMENT", "WEAPONS", "ACTIONS", "COMMUNICATION"]
+CONTROL_GROUPS = ["MOVEMENT", "WEAPONS", "ACTIONS", "COMMUNICATION", "CAMERA"]
 CONTROL_ROWS = 8
 CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
@@ -1656,8 +1661,31 @@ PAGES = {
              "Riding in a Warthog or a Scorpion in the campaign and co-op: the view from behind the vehicle, or "
              "from your seat. Behind, the weapon cannot zoom.", None),
             ("WEAPON & BODY ›", None, _page_screen(*WEAPON_BODY),
-             "Your weapon and hands: whether they are drawn, their field of view and their place. Your legs, and "
-             "your shield's flare on your arms, its color and an overshield's.", None),
+             "Your weapon and hands: whether they are drawn, their field of view and their place. Your legs, your "
+             "shadow and the third-person camera, and your shield's flare on your arms, its color and an "
+             "overshield's.", None),
+        ],
+    },
+    CAMERA_PAGE[0]: {
+        "screen": CAMERA_PAGE[1], "title": "CAMERA",
+        "rows": [
+            # (PRISM v4's third-person campaign camera: port/linux/game/
+            # chase_camera.c; its own page, its own block)
+            (SECTION, "ON FOOT"),
+            ("VIEW", "camera.view", [("FIRST PERSON", "first_person"), ("THIRD PERSON", "third_person")],
+             "On foot in the campaign: through your eyes, or from behind your shoulder with your whole body "
+             "drawn. Shots go where the reticle points. A scope zooms in first person; vehicles keep their own "
+             "views.", None),
+            ("DISTANCE", "camera.third_person_distance", CAMERA_DISTANCES,
+             "Third person: how far behind you the camera is, in world units of about 3 meters. Camera Closer "
+             "and Camera Further (Controls, Camera) change it as you play.|Click the number (or press A) to type "
+             "any from 1 to 6.", None),
+            ("SHOULDER", "camera.third_person_shoulder", CAMERA_SHOULDERS,
+             "Third person: how far right of your head the camera is, in world units; below 0 over your left "
+             "shoulder.|Click the number (or press A) to type any from -0.5 to 0.5.", None),
+            ("MULTIPLAYER", "camera.third_person_netgames", ON_OFF,
+             "Third person in multiplayer games too. Off keeps it to the campaign and co-op: seeing round "
+             "corners is an advantage the others may not have.", None),
         ],
     },
     WEAPON_POSITION[0]: {
@@ -1728,6 +1756,14 @@ PAGES = {
             (SECTION, "BODY"),
             ("LEGS", "display.first_person_legs", ON_OFF,
              "Your legs when you look down, moving as you run: your body as the others see it.", None),
+            # (PRISM v4's body and camera: their own block, port/linux/game/
+            # prism_deferred.c's traced body and chase_camera.c)
+            ("SHADOW", "display.player_shadow", ON_OFF,
+             "Path Traced and Rebaked: your whole body, with the weapon it holds, casts its shadow and blocks "
+             "light, though you never see it. Classic's shadow of you comes with Legs.", None),
+            ("CAMERA ›", None, _page_screen(*CAMERA_PAGE),
+             "On foot in the campaign: first person, or third person from behind your shoulder, and how far "
+             "back.", None),
             (SECTION, "SHIELDS"),
             ("ARM SHIELDS", "display.viewmodel_shield", ON_OFF,
              "When your shield takes a hit, its flare shows on your first-person arms too, as on your body, "
@@ -1822,7 +1858,7 @@ PAGES = {
             # keys, are its controls_update's, each frame)
             (SECTION, "KEYBOARD AND MOUSE"),
             ("SHOW", None, [(group, str(index)) for index, group in enumerate(CONTROL_GROUPS)],
-             "Which of the actions to show: movement, weapons, actions or communication.", None, "group"),
+             "Which of the actions to show: movement, weapons, actions, communication or the third-person camera.", None, "group"),
             (SECTION, "ACTIONS"),
             *[("", None, None, "", None, f"command_{n}") for n in range(1, CONTROL_ROWS + 1)],
             # (the keys' Walk, controls.walk: port/linux/game/keyboard_walk.c;

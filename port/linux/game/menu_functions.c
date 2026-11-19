@@ -5917,6 +5917,11 @@ static struct
 	/* (ACTIONS' last row, after CLIP: the HUD hidden, source/interface/
 	hud.c) */
 	{ "controls.hide_hud", L"HIDE HUD", 2, FALSE },
+	/* (CAMERA: the third-person camera's distance, port/linux/game/
+	chase_camera.c, camera.view) */
+	{ "controls.camera_closer", L"CAMERA CLOSER", 4, FALSE },
+	{ "controls.camera_further", L"CAMERA FURTHER", 4, FALSE },
+	{ "controls.camera_wheel_modifier", L"CAMERA WHEEL HOLD", 4, FALSE },
 };
 
 static struct

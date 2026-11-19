@@ -456,6 +456,28 @@ static const struct config_setting config_settings[] =
 		"Off, they are not drawn; firing, animation, sound and lights go on.", _scope_player },
 	{ "display.passenger_third_person", _config_boolean, "false", "HALO_PASSENGER_THIRD_PERSON", _environment_value, _platform_all,
 		"Third-person Warthog and Scorpion passengers. Weapon zoom is disabled.", _scope_player },
+	/* (port/linux/game/chase_camera.c: the campaign's third-person camera on
+	foot, its own block of settings; display.first_person_legs is above) */
+	{ "camera.view", _config_string, "\"first_person\"", "HALO_CAMERA_VIEW", _environment_value, _platform_all,
+		"Your view on foot: \"first_person\" (the game's), or \"third_person\":\n"
+		"behind and over the shoulder of your body, which is drawn whole,\n"
+		"kept out of walls, the reticle where your shots go. Campaign and\n"
+		"co-op only (camera.third_person_netgames). Zooming a scope goes to\n"
+		"first person while zoomed; vehicles keep their own cameras.", _scope_player },
+	{ "camera.third_person_distance", _config_real, "1.5", "HALO_CAMERA_THIRD_PERSON_DISTANCE", _environment_value,
+		_platform_all,
+		"In third person, how far behind your head the camera is, in world\n"
+		"units of about 3 meters (1.0 to 6.0). controls.camera_closer and\n"
+		"controls.camera_further change it as you play, and the mouse wheel\n"
+		"while controls.camera_wheel_modifier is held.", _scope_player },
+	{ "camera.third_person_shoulder", _config_real, "0.22", "HALO_CAMERA_THIRD_PERSON_SHOULDER", _environment_value,
+		_platform_all,
+		"In third person, how far right of your head the camera is, in world\n"
+		"units (-0.5 to 0.5; below 0 over the left shoulder, 0 centered).", _scope_player },
+	{ "camera.third_person_netgames", _config_boolean, "false", "HALO_CAMERA_THIRD_PERSON_NETGAMES",
+		_environment_value, _platform_all,
+		"camera.view \"third_person\" in multiplayer games too (off: seeing\n"
+		"around corners is an advantage the others may not have).", _scope_player },
 	{ "display.high_res_hud", _config_boolean, "true", "HALO_HIGH_RES_HUD", _environment_value, _platform_all,
 		"Draw the HUD (meters, counters, panels, motion sensor, reticles,\n"
 		"waypoints, scopes, message icons) from the high-res assets: Aerocatia's\n"
@@ -1984,6 +2006,16 @@ static const struct config_setting config_settings[] =
 		"demo.clip_seconds (docs/demos.md).", _scope_keyboard },
 	{ "controls.push_to_talk", _config_string, "\"V\"", "HALO_KEY_PUSH_TO_TALK", _environment_value, _platform_all,
 		"Voice chat: talk while it is held (audio.voice_chat \"push_to_talk\").", _scope_keyboard },
+	{ "controls.camera_closer", _config_string, "\"Keypad +\"", "HALO_KEY_CAMERA_CLOSER", _environment_value,
+		_platform_all,
+		"Third person (camera.view): bring the camera closer while held.", _scope_keyboard },
+	{ "controls.camera_further", _config_string, "\"Keypad -\"", "HALO_KEY_CAMERA_FURTHER", _environment_value,
+		_platform_all,
+		"Third person (camera.view): move the camera further back while held.", _scope_keyboard },
+	{ "controls.camera_wheel_modifier", _config_string, "\"Left Alt\"", "HALO_KEY_CAMERA_WHEEL_MODIFIER",
+		_environment_value, _platform_all,
+		"Third person (camera.view): while held, the mouse wheel moves the\n"
+		"camera closer (up) or further (down) instead of switching weapons.", _scope_keyboard },
 	{ "controls.chat", _config_string, "\"T\"", "HALO_KEY_CHAT", _environment_value, _platform_all,
 		"Network games' text chat: type a line to everyone (Enter sends it,\n"
 		"Escape lets it go).", _scope_keyboard },
@@ -2303,12 +2335,20 @@ static const struct config_setting config_settings[] =
 		"An overshield stays lit on the arms with display.overshield_effect.", _scope_player },
 #ifdef HALO_VR
 	/* (the VR build's on: in the headset, your body under you, port/linux/README.md "Your body") */
+	/* (on in every build since PRISM v4's body: your legs looking down, and
+	your body's shadow; upstream keeps it off on a flat screen) */
 	{ "display.first_person_legs", _config_boolean, "true", "HALO_FIRST_PERSON_LEGS", _environment_value, _platform_all,
 #else
-	{ "display.first_person_legs", _config_boolean, "false", "HALO_FIRST_PERSON_LEGS", _environment_value, _platform_all,
+	{ "display.first_person_legs", _config_boolean, "true", "HALO_FIRST_PERSON_LEGS", _environment_value, _platform_all,
 #endif
 		"Your own legs in first person, seen looking down: your body as others\n"
 		"see it, drawn from the belly down, moving as it moves, with its shadow.", _scope_player },
+	{ "display.player_shadow", _config_boolean, "true", "HALO_PLAYER_SHADOW", _environment_value, _platform_all,
+		"In first person with display.lighting \"pathtraced\" or \"raster\" (its\n"
+		"traced object shadows): your whole body, as others see it, with the\n"
+		"weapon it holds, casts its shadow and blocks light, though you never\n"
+		"see it (display.first_person_legs draws your legs). Classic's shadow\n"
+		"of you comes with display.first_person_legs.", _scope_player },
 	{ "display.overshield_effect", _config_boolean, "true", "HALO_OVERSHIELD_EFFECT", _environment_value, _platform_all,
 		"The overshield as this machine draws it: its flare lit as it charges\n"
 		"and staying lit for as long as it lasts, its energy slower, in its own\n"
@@ -4009,6 +4049,10 @@ static const struct config_setting config_settings[] =
 		"start, cmd and key lines) it is moved along once the map is in, the\n"
 		"same frames each run whatever the frame rate, each frame saved as\n"
 		"screenshot_every saves one; empty none." },
+	{ "debug.camera_log", _config_boolean, "false", "HALO_CAMERA_LOG", _environment_value, _platform_all,
+		"Log the third-person camera (camera.view) once a second: the distance\n"
+		"asked, the distance the walls left it, the shoulder kept and the aim's\n"
+		"target (port/linux/game/chase_camera.c)." },
 	{ "debug.camera_path_settle", _config_integer, "0", "HALO_CAMERA_PATH_SETTLE", _environment_value, _platform_all,
 		"With camera_path, each frame it saves drawn with every texture the\n"
 		"stock cache has to read (as while the map's shaders are made), and held\n"
@@ -5773,6 +5817,7 @@ static const struct
 	{ "display.denoiser", { "prism", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
 	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },
+	{ "camera.view", { "first_person", "third_person", NULL }, "first_person" },
 	{ "display.prism_raster_object_shadows", { "traced", "classic", NULL }, "traced" },
 	{ "display.prism_sky_light", { "sky", "flat", NULL }, "sky" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
@@ -6394,6 +6439,7 @@ static const char *const config_picture_view_settings[][2] =
 {
 	{ "display.fov", "0" },
 	{ "display.vehicle_fov", "default" },
+	{ "camera.view", "first_person" },
 	{ "display.viewmodel_fov", "0" },
 	{ "display.panini", "0" },
 	{ "display.panini_vertical", "0" },

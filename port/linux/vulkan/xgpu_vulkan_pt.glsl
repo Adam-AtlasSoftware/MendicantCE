@@ -227,6 +227,11 @@ vec2 last_pixel(vec3 point, vec2 pixel, vec2 motion, bool level)
     return vec2((sxy.x + 1.0) * 0.5 * (c.z - c.x) + c.x - 0.5, (sxy.y + 1.0) * 0.5 * (c.w - c.y) + c.y - 0.5);
 }
 
+/* (port: the objects' instances a ray sees: 4 and 8, and 16 the player's own
+body in first person (XGPU_GBUFFER_FLAG_TRACE_ONLY: a shadow caster never
+drawn), which the rays of the first-person view's pixels (the weapon and
+arms, inside or before that body) leave out; surface_at sets it a pixel) */
+uint object_cull = 28u;
 Surface surface_at(ivec2 pixel)
 {
     Surface g;
@@ -234,6 +239,7 @@ Surface surface_at(ivec2 pixel)
     uvec4 x = texelFetch(extras, pixel, 0);
     g.present = (w.w & 0x8000u) != 0u && uintBitsToFloat(x.w) > 0.0;
     g.instance = w.w >> 16;
+    object_cull = g.instance == 0xffffu ? 12u : 28u;
     g.page = (x.z >> 17u) & 0x7fu;
     g.lightmap = unpackUnorm2x16(w.x);
     g.distance = uintBitsToFloat(x.w);
@@ -642,7 +648,7 @@ bool objects_blocked(vec3 o, vec3 d, float t_max)
     if (job.objects == uvec2(0u) || t_max <= OBJECT_NEAR)
         return false;
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), gl_RayFlagsTerminateOnFirstHitEXT, 12u, o,
+    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), gl_RayFlagsTerminateOnFirstHitEXT, object_cull, o,
         OBJECT_NEAR, d, t_max);
     while (rayQueryProceedEXT(q))
     {
@@ -661,7 +667,7 @@ float objects_hit(vec3 o, vec3 d, float t_max, out vec3 nh, out vec3 albedo)
     if (job.objects == uvec2(0u) || t_max <= OBJECT_NEAR)
         return -1.0;
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), 0u, 12u, o, OBJECT_NEAR, d, t_max);
+    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), 0u, object_cull, o, OBJECT_NEAR, d, t_max);
     while (rayQueryProceedEXT(q))
     {
         if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&

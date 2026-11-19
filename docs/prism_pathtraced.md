@@ -328,7 +328,14 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
 - **Not yet.** An object hit's own glow and specular, its texture's colour at the hit (the mean only); the baked
   indirect light (the texels' and the volume's, at the pixel and at a hit) has no object in it, so an object takes no
   share of the indirect light the bake carries beyond the traced bounce (`performance`'s short occlusion rays are the
-  plan); the first-person view's shadow on the world.
+  plan).
+- **The player's own body (prism-v4-body).** In first person the player's whole body, with its weapon, is drawn
+  in the G-buffer pass with `XGPU_GBUFFER_FLAG_TRACE_ONLY` (`prism_deferred_body`, render_objects.c): captured
+  into the objects' structure as instance mask 16 and never rasterized (its vertex constants put in the ring whole,
+  `constants_whole`). The objects' rays take mask 28 (`object_cull`, set by `surface_at` a pixel), but the
+  first-person view's pixels take 12 (their rays start inside or in front of the body). The legs
+  (`display.first_person_legs`), drawn, are flagged out of the capture so the body is not traced twice. Raster's
+  `objects_visibility` takes the same masks. `display.player_shadow` turns it off.
 
 ## What is not done yet
 

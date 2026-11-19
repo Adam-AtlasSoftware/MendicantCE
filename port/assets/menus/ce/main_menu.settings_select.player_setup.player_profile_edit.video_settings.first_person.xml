@@ -234,6 +234,6 @@
 		<string text="Puts the reticle below the middle of the screen, as Halo 2 and 3 do. Your view tilts up a little, so shots still go where the reticle points. Zooming centers it."/>
 		<string text="How far below the middle the lowered reticle sits, in percent of the screen's height. 10 is about Halo 2's and 3's.|Click the number (or press A) to type any from 0 to 30."/>
 		<string text="Riding in a Warthog or a Scorpion in the campaign and co-op: the view from behind the vehicle, or from your seat. Behind, the weapon cannot zoom."/>
-		<string text="Your weapon and hands: whether they are drawn, their field of view and their place. Your legs, and your shield's flare on your arms, its color and an overshield's."/>
+		<string text="Your weapon and hands: whether they are drawn, their field of view and their place. Your legs, your shadow and the third-person camera, and your shield's flare on your arms, its color and an overshield's."/>
 	</strings>
 </menus>

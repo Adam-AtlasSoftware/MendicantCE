@@ -42,6 +42,7 @@ symbols in this file:
 
 #include "following_camera.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c */
+#include "chase_camera.h" /* port: port/linux/game/chase_camera.c */
 #include "cseries/errors.h" /* port: (error, for a short camera track) */
 #include "observer.h"
 
@@ -219,7 +220,14 @@ void following_camera_update(
 	camera->unit_index = camera_info.unit_index;
 	camera->seat_index = camera_info.seat_index;
 
-	if (camera_info.camera)
+	/* port: the campaign's third-person camera on foot gives its own command
+	(port/linux/game/chase_camera.c) */
+	if (chase_camera_command(controls->local_player_index, command))
+	{
+		camera->facing_offset.yaw = 0.f;
+		camera->facing_offset.pitch = 0.f;
+	}
+	else if (camera_info.camera)
 	{
 		struct unit_datum *unit;
 		boolean crouched;
