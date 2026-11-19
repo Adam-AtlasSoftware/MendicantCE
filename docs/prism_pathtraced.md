@@ -33,13 +33,13 @@ base colour multiplies it) and its specular light `S`:
 
 | Term | Light | `quality` | `performance` | The reference |
 | --- | --- | --- | --- | --- |
-| Sun | The sky's sun, direct | A ray to a point of its disc at every pixel (since round 3: the mask's texels missed thin sunlit edges far off, round 2's G3). `D` += sun × cos × v, `S` += GGX × the sun × v | A ray within 60 world units of the eye and on every object pixel; past 60 the baked sun mask (the level's pixels) | A ray to its disc at every pixel |
+| Sun | The sky's sun, direct | A ray to a point of its disc at every pixel (since round 3: the mask's texels missed thin sunlit edges far off, round 2's G3), except where the pixel's tile of the bake's mask is all in shadow (none of its 16 × 16 texels' samples saw the sun; since round 7, `HALO_PT_SUN_TILES`). `D` += sun × cos × v, `S` += GGX × the sun × v | A ray within 60 world units of the eye and on every object pixel; past 60 the baked sun mask (the level's pixels) | A ray to its disc at every pixel |
 | Domes | The sky's other lights, direct | One direction of each one's cone, its shadow traced (`domes_at`): `D` | The same | The same |
 | Lamps | The emitting triangles (light cards, lamp surfaces), direct | ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S`; on a pixel whose reflection is traced (roughness up to 0.35) the lamps' `S` shared with the reflection's GGX ray meeting a lamp's face (`lamp_met`) by multiple importance sampling: the power heuristic between the ray's density (GGX's visible normals) and 1 over the lamp's solid angle (`lamp_mis_nee`), the two weights summing to 1 at every direction | The same | Resampled importance over the same 8 candidates, each one's shadow traced and its visibility in its target (`lights_ris_seen`), no reservoir reused |
 | Fixtures | The scenario's light fixtures, direct | In the same reservoir (all of them, or 8 by count) | The same | The same (16) |
 | Dynamic lights | SCENE_LIGHTS' dynamic class (flashlight, plasma, muzzle flashes), direct | In the same reservoir (4), CE's falloff, its shadow traced; never reused from the last frame | The same | The same (16) |
 | The sky's floor | The units' rig's ambient, unoccluded, as Tool's: the sky's outdoor value in the structure's clusters with a sky, sky 0's indoor value in those with none (`prism-v4-m2` 4acaa7892, `XGPU_SCENE_INDOOR`) | A constant, `D`: the flag of the structure's triangle the pixel shows (a short stretch of the eye's ray about its point), an object's the structure below it (a ray down past the object) | The same | The same |
-| Indirect | Every bounce of every static light, the sun's bounce included | One cosine bounce, its hit lit from the bake: the hit's glow and albedo by its texel's light less the sun's and less the floor its triangle took (indoor or outdoor; the volume's less the floor where its probes stand), the sun there by the mask (or the volume's visibility); a miss the sky without the domes (the pixel took them as lights) | The bake's indirect layer at the pixel where the level has its texel; else (the objects, a pixel with no texel) `quality`'s bounce | A cosine path of up to 32 bounces (prism-v4-m2 bb2a6b1a4, the bake's alike), next-event estimation of the sun, lamps and fixtures at each hit, the domes at each hit by multiple importance sampling of a direction of their cone and the path's own cosine direction where it leaves (Veach's power heuristic: the bake's light, the quieter estimate for a cone of any width) |
+| Indirect | Every bounce of every static light, the sun's bounce included | One cosine bounce, its hit lit from the bake (or, with `HALO_PT_BOUNCE_HALF`, off by default, on half the pixels the bake's indirect layer at the pixel as the bounce's sample: below): the hit's glow and albedo by its texel's light less the sun's and less the floor its triangle took (indoor or outdoor; the volume's less the floor where its probes stand), the sun there by the mask (or the volume's visibility); a miss the sky without the domes (the pixel took them as lights) | The bake's indirect layer at the pixel where the level has its texel; else (the objects, a pixel with no texel) `quality`'s bounce | A cosine path of up to 32 bounces (prism-v4-m2 bb2a6b1a4, the bake's alike), next-event estimation of the sun, lamps and fixtures at each hit, the domes at each hit by multiple importance sampling of a direction of their cone and the path's own cosine direction where it leaves (Veach's power heuristic: the bake's light, the quieter estimate for a cone of any width) |
 | Reflections | The light the surface's specular lobe sees, less the lights taken directly | Below a roughness of 0.35, one GGX ray (the visible normals' distribution, Heitz 2018) lit as the bounce's hit, the domes where it leaves; above it, the bake's reflection probes by the split sum | The same | A GGX ray and the same path, the domes where it leaves |
 | Emission | The surface's own (the G-buffer's emissive: an object's self-illumination; the level's, by its base colour, as CE's lightmap pass folds it in) | Added | Added | Added |
 
@@ -139,20 +139,58 @@ found safe:
   pixel of 40 lamps, 6 seen: both unbiased, the shadowed target's frame-to-frame spread a fifth of the unshadowed
   one's. (Round 1's first attempt, a hidden sample's weight set to nought after a choice made by the unshadowed target
   with its confidence counted, is not this: it took a ninth of a sparsely seen light at G5's first pose.)
-- **Spatiotemporal reuse, off by default** (`HALO_PT_RESTIR_SPATIAL=<1 to 4>`, since round 4): besides the last
-  frame's reservoir at the place, that many of the last frame's reservoirs at points of a disc of 2 to 16 pixels
-  about it, each this surface's by the same test, its sample's shadow traced from this pixel. Round 6 found it biased
-  dark: a neighbour's confidence was counted whatever its sample, so a pixel whose neighbours see lamps it cannot see
-  lost their share (1/M: G4's floor in motion about a third darker than R, its first pose's error 0.0916 to 0.2236).
-  A neighbour's confidence now counts only where the kept sample lights the neighbour's point, in front of it and seen
-  from it (Bitterli et al. 2020's Z: a shadow ray from the neighbour, none where the kept sample is that neighbour's
-  own), so the reuse is unbiased again (`HALO_PT_RESTIR_Z=0`: counted where the neighbour's own sample lit this pixel,
-  no ray; measured worse than none, 0.1971). At G4 with one neighbour and 4 candidates: the moving frames' error
-  against R 0.1814 to 0.1249, FLIP 0.119 to 0.096, the blotch 0.0823 to 0.0782, the flicker 1.34 to 1.40; the walls'
-  sparkles gone from a still frame after a few hundred frames, but in motion the reuse's correlated samples show as
-  blobs the size of the disc where the base shows salt. It costs about 1.4 ms of the RTX 3070 Ti's light pass at 1080p
-  (G4: 18.7 against 17.3 ms), which is why it is not on.
-- `HALO_PT_CANDIDATES` (1 to 8, 8 by default): the live frames' initial lamp candidates a pixel.
+- **Spatiotemporal reuse, on by default since round 7** (`HALO_PT_RESTIR_SPATIAL=<0 to 4>`, 1 by default): besides
+  the last frame's reservoir at the place, that many of the last frame's reservoirs at points of a disc of 2 to 16
+  pixels about it (`HALO_PT_RESTIR_RADIUS`), each this surface's by the same test, its sample's shadow traced from
+  this pixel. A neighbour's confidence counts only where the kept sample lights the neighbour's point, in front of it
+  and seen from it (Bitterli et al. 2020's Z: a shadow ray from the neighbour, none where the kept sample is that
+  neighbour's own), so the reuse is unbiased (round 6; before it, 1/M took the light of every pixel whose neighbours
+  see lamps it does not: G4's floor in motion a third darker than R; `HALO_PT_RESTIR_Z=0` counts where the
+  neighbour's own sample lit this pixel, no ray, measured worse than none).
+  **The reservoir kept for the next frame is the temporal one** (the initial reservoir merged with the last frame's at
+  the place), not the spatial result: the neighbours' samples light this frame alone. Round 6 kept the spatial
+  result, as Bitterli et al. do, and so a lucky sample (a semi-glossy wall's highlight of a lamp the candidates find
+  once in hundreds) was offered to the pixels about it, kept by them, offered again by them the next frame: a walk
+  from pixel to pixel over the frames, its light spread over the disc and held there for the confidence's frames,
+  which the a-trous steps then smoothed into blobs the size of the disc (`v4_reuse_runs/evidence/g4_p2_motion.png`,
+  row 2). That is the correlation Wyman and Panteleev 2021 manage by capping the confidence and by the boiling
+  filter; here it is cut at its root, at the cost of the chains' length (each pixel's own history alone builds its
+  reservoir's quality). `tools/test_prism_pt.py` models a row of pixels: the two unbiased alike, the frame's errors
+  of pixels six apart correlated a half as much and under 0.15 without the feedback.
+  `HALO_PT_RESTIR_FEEDBACK=1` keeps the spatial result (round 6's). With the reuse the initial candidates are 4 (the
+  neighbours' reservoirs bring the rest; 8 without it).
+  Measured (G4, the RTX 2060's moving frames against R, error / blotch / FLIP / flicker; `v4_reuse_runs/g/`):
+
+  | variant | G4 |
+  | --- | --- |
+  | no spatial reuse (round 6's defaults) | 0.1814 / 0.0823 / 0.119 / 1.34 |
+  | 1 neighbour, the spatial result kept (round 6's, `FEEDBACK=1`) | 0.1578 / 0.0807 / 0.094 / 1.39 (blobs in motion) |
+  | 1 neighbour, the temporal reservoir kept | 0.1462 / 0.0772 / 0.114 / 1.30 |
+  | 2 neighbours, the temporal reservoir kept | 0.1374 / 0.0741 / 0.110 / 1.29 (2.0 ms more than 1) |
+  | 1 neighbour, temporal permutation sampling | 0.1583 / 0.0741 / 0.113 / 1.22 (the first pose darker) |
+  | 1 neighbour, temporal kept, 4 plain a-trous steps | 0.1644 / 0.0857 / 0.114 / 1.34 |
+  | the same, 5 steps | 0.1530 / 0.0808 / 0.114 / 1.30 |
+  | **round 7's defaults**: 1 neighbour, temporal kept, 4 candidates, the wide a-trous steps, the sun's dark tiles, ReSTIR GI's reuse off | **0.1549 / 0.0783 / 0.114 / 1.32** |
+
+  G5 (a10), the same gate: round 6's defaults 0.1403 / 0.0773 / 0.132 / 1.01; round 7's 0.1522 / 0.0781 / 0.133 /
+  1.00 (its first and third poses better, 0.0387 to 0.0367 and 0.0977 to 0.0758; its second, the corridor's floor
+  through the door windows, worse, 0.1403 to 0.1522; with ReSTIR GI's reuse on 0.1526: not that). G2 and G7: below,
+  "Frame time".
+
+  What is still seen in motion (`v4_reuse_runs/evidence/`): over a lamp's pool on the semi-glossy walls, small
+  clusters of bright pixels about a lucky sample (the neighbours that took it this frame) where round 6 showed blobs
+  and the base a salt over the whole wall; radial streaks of the walls' glints along a forward move, the specular
+  history's (in the base too, fewer with the reuse).
+- **Reuse options tried and left off** (round 7): temporal permutation sampling (`HALO_PT_RESTIR_PERMUTE=1`, RTXDI's:
+  the last frame's reservoir from a pixel of the 4 × 4 about the place by a permutation turned each frame) lowers the
+  flicker (1.30 to 1.22) but darkens: a reservoir from another pixel is a spatial neighbour counted without its Z,
+  the 1/M bias again (G4's first pose 0.0957 to 0.1583). The boiling filter (`HALO_PT_RESTIR_BOIL=<strength>`,
+  RTXDI's, each kept reservoir's W against the mean of the others' in its subgroup of 32) let go of nothing at G4:
+  a lucky sample of a bright light has a large target too, so its W is no outlier; filtering by the estimate (W by
+  its target) would take such samples and the light they find with them (`tools/test_prism_pt.py`). The confidence
+  Half the frame's blocks with spatial neighbours a frame saved no time. `HALO_PT_RESTIR_M` sets the reservoirs'
+  confidence cap (8 frames by default).
+- `HALO_PT_CANDIDATES` (1 to 8; 4 by default with the spatial reuse, else 8): the live frames' initial lamp candidates a pixel.
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
 
 ## ReSTIR GI
@@ -168,7 +206,9 @@ point's measure to the other's) by its target here by its contribution weight. T
 whatever its sample (a miss's, a dark one's): left out, the light grows as it is reused, as ReSTIR DI's did in
 `prism-pt` (`tools/test_prism_pt.py`: the merge unbiased across a moved point, its noise far less). The kept sample's
 segment to the pixel is not traced again (the point moves by a pixel's footprint on its own surface between frames).
-There is no spatial reuse yet. `HALO_PT_RESTIR_GI=0` turns it off (each frame's own bounce).
+There is no spatial reuse yet. Off by default since round 7 (`HALO_PT_RESTIR_GI=1` turns it on): it cost about 0.45 ms
+of the RTX 3070 Ti's light pass at G4 (measured in one run with the parts left out in turn, below), where the bounce
+already ends in a converged bake texel, and the frame had to fit 16.7 ms with ReSTIR DI's spatial reuse on.
 
 ## The radiance cache
 
@@ -223,6 +263,8 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   neighbours rather than shown and carried by the history alone (round 3's moving interiors: glitter, and radial
   streaks where the history dragged such samples along the move). The temporal pass takes these as the frame's samples.
   `HALO_PT_RAY_ROUGHNESS` (a diagnosis) sets the roughness under which the reflection is traced (0.35; 1 everywhere).
+  Off by default: the temporal pass then reads the light as traced itself (until round 7 a pass of its own copied it
+  for it).
 - **temporal**: each pixel's last-frame histories found where its surface was: a level pixel's point projected into
   the last frame's camera (the level stands still: its geometry, not a motion vector), an object's along the
   G-buffer's motion; each of the 2 × 2 taps kept only
@@ -269,8 +311,11 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
 - **atrous**: the first step holds a pixel brighter than twice the brightest of its eight neighbours on the same
   surface to that (ReLAX's anti-firefly), for the frame shown only: the histories keep the light whole, and a sample
   of a light few rays find adds its share to them without showing as a single bright pixel (round 3's G7 walls).
-  Then five steps of the a-trous filter (a 3 × 3 kernel, 1/4 1/2 1/4 each way, at strides 1 to 16: the reach
-  of SVGF's five 5 × 5 steps with a third of their taps), each tap weighed by its
+  Then four steps of the a-trous filter (a 3 × 3 kernel, 1/4 1/2 1/4 each way) at strides 1, 2, 4 and 16
+  (`HALO_PT_ATROUS_WIDE`, since round 7: five steps' reach, the reach of SVGF's five 5 × 5 steps with a third of their
+  taps, for four steps' time; after the first three the light is smooth over about 8 pixels, so the last step's taps
+  16 apart do not alias; `HALO_PT_ATROUS_STEPS` 1 to 5, the plain strides 1 to 2^(n-1) with `HALO_PT_ATROUS_WIDE=0`;
+  at G4 four plain steps raised the blotch 0.0808 to 0.0857 against five, the wide four 0.0822), each tap weighed by its
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
   against the pixel's by the variance (the diffuse's prefiltered over the pixel's cross, as SVGF prefilters it); the
   specular's kernel narrowed by the roughness and stopped after three steps (none on a mirror).
@@ -278,7 +323,9 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   pixel's 5 × 5 on the same surface (a lit pixel among lit neighbours is lit, whatever the reprojection's bilinear taps
   brought from a shadow beside it: round 1's G2 lost up to 8% of its foreground's light over its first leg's forward
   move, measured block by block against the light as traced; in a penumbra the 25 samples span 0 to 1 and the history
-  accumulates), the fix's gather, and the a-trous steps only at a pixel
+  accumulates; where the slow and the fast history already equal this frame's visibility, an interior's 0 or open
+  lit ground's 1, the range cannot move them and the 5 × 5 is not read: round 7, half a millisecond of the RTX
+  3070 Ti's temporal pass at G4), the fix's gather, and the a-trous steps only at a pixel
   whose visibility is neither all lit nor all dark (above 0.02, below 0.98, with a variance) and only as wide as the
   penumbra; a lit pixel is never filtered, so a shadow beside it cannot darken it (in G2's moves of round 1, before
   this rule, the foreground's sunlight lost up to a third where the variance of a moving camera's short histories
@@ -345,7 +392,54 @@ scene changes.
 R's says what the live estimator holds apart from what the denoiser does.
 
 `HALO_PT_TIMES_FILE` writes each frame's GPU time and its passes' (light, temporal, fix, atrous, composite), as the log
-does their means every 600 frames.
+does their means every 600 frames. `HALO_PT_PARTS_OFF=<mask>` leaves parts of the light pass out (1 the sun's ray, 2
+the domes, 4 ReSTIR DI's spatial reuse, 8 the bounce, 16 the reflection's ray, 32 ReSTIR GI's reuse, 64 the spatial
+neighbours' traced Z), and `HALO_PT_PARTS_CYCLE=<frames>` leaves each out alone in turn, none first, so that one run's
+timestamps give each part's cost at one pose under the same conditions (`v4_reuse_runs/tools/parts.py`): the RTX 3070
+Ti's frame times vary by half a millisecond from run to run, more than most single changes.
+
+## Frame time
+
+The target is G4 (b30's interior, many lamps) at 1080p quality under 16.7 ms median on the RTX 3070 Ti
+(`time_3070.sh`: three poses, 600 frames each, three times). Its light pass's parts, measured with one spatial
+neighbour (`HALO_PT_PARTS_CYCLE`, round 7): of 11.96 ms, the bounce 2.73, ReSTIR DI's spatial reuse 2.46 (its Z rays
+0.93 of it; a second neighbour 1.9 more), the reflection's ray 2.01, the sun's ray 0.85, the domes 0.53, ReSTIR GI's
+reuse 0.45.
+
+The light pass's options that are off cost nothing: they are specialization constants of the passes' pipelines
+(`SPEC_*` in the shader, `spec_options` on the host, read from the same variables), so their code (the radiance
+cache, the indirect clamp, the tree's emitter cones, the spatial neighbours, the parts diagnosis, the boiling filter,
+the half bounce) is not in the pass when off, nor its registers.
+
+**The sun's ray left out in the bake's dark tiles** (`HALO_PT_SUN_TILES`, on by default since round 7): the bake's
+mask marks a tile of 16 × 16 texels whose samples all missed the sun (state 1); there the ray (the same structure, the
+same length) would miss it too, and a moving object only takes light away. In an interior that is nearly every pixel
+facing the sun.
+
+**The bounce from the bake on half the pixels** (`HALO_PT_BOUNCE_HALF`: 1 half the level's 8 × 8 blocks, 2 half its
+pixels, a checkerboard turned each frame; 0, the default): a pixel with a texel takes the bake's indirect light at the
+pixel as its sample of the bounce, through the denoiser like a traced one. The two estimate the same light (the traced
+bounce's hit is lit from the same bake). Measured and left off: in the runs made side by side the traced bounce
+everywhere was as fast (G4 16.14 against 16.13 ms by blocks, 15.87 by pixels, within the runs' spread), and at G5
+it did not help (error 0.1539 by blocks, 0.1522 with the bounce traced).
+
+Same-session timings (G4, RTX 3070 Ti, median / p99 ms; the passes light, temporal, a-trous):
+
+| stage | frame | passes |
+| --- | --- | --- |
+| round 6's defaults (`v4_m3_runs/stage_demo`) | 16.80, 16.80, 16.86 / about 18.5 | 10.2, 2.40, 3.07 |
+| round 7's defaults: 1 spatial neighbour, 4 candidates, the 4 wide a-trous steps, the sun's dark tiles, GI reuse off | **16.19, 16.05, 16.14** / about 17.6 | 10.6, 1.80, 2.51 |
+| the same with ReSTIR GI's reuse on | 16.54, 16.68 / about 18.3 | 11.0, 1.84, 2.51 |
+
+The same card measured round 6's defaults at 17.32 and 18.27 on other days: compare only runs made side by side. Of
+round 7's 0.7 ms against round 6's defaults with the spatial reuse's 2.46 ms added: the temporal pass 0.6 (no copy
+pass, the visibility's range), the a-trous steps 0.55 (four wide), the sun's dark tiles about 0.6, ReSTIR GI's reuse
+0.45, 4 candidates in place of 8, and the specialization constants.
+
+No regression outdoors (the RTX 2060's gates, error / blotch / FLIP / flicker, round 6's defaults then round 7's; G2's
+and G7's R are the pre-materials ones, so read them side by side only): G2 0.0016 / 0.0072 / 0.073 / 1.13 then
+0.0015 / 0.0071 / 0.068 / 1.13; G7 0.0269 / 0.0370 / 0.059 / 1.29 then 0.0258 / 0.0361 / 0.057 / 1.29. Classic stays
+byte-identical on b30 (46 of 46 frames, `v4_reuse_runs/identity/`) and the simulation deterministic.
 
 ## The moving objects
 
@@ -390,7 +484,8 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
 
 ## What is not done yet
 
-- **ReSTIR DI's spatial reuse by default** (in, off: its cost and its blobs in motion, above).
+- **The interiors in motion** (round 7, above): small clusters of bright pixels about a lucky lamp sample where
+  the spatial neighbours took it, and the specular history's radial streaks of the walls' glints along a forward move.
 - **ReSTIR GI's spatial reuse** (its temporal reuse is in), the dynamic objects' occlusion of the baked light
   (`performance`'s short AO rays), traced-light upscaling and the async queue (M5, M6).
 - **The transparent layer** (water and glass, traced reflection and refraction): after the seven gate scenes pass.
