@@ -572,6 +572,8 @@ static void buffer_free(struct rt_buffer *buffer)
 	memset(buffer, 0, sizeof(*buffer));
 }
 
+static void garbage_collect(void);
+
 /* (after the submission being recorded, which may use them) */
 static void garbage_add(struct rt_buffer *buffer, VkAccelerationStructureKHR structure)
 {
@@ -579,8 +581,11 @@ static void garbage_add(struct rt_buffer *buffer, VkAccelerationStructureKHR str
 
 	if (rt.garbage_count == RT_GARBAGE)
 	{
-		/* (full: the oldest waited for) */
+		/* (full: the oldest waited for, and what is done let go of; before,
+		the list stayed full and the item was dropped, its memory never
+		freed) */
 		xgpu_vulkan_wait(rt.garbage[0].serial);
+		garbage_collect();
 	}
 	if (rt.garbage_count == RT_GARBAGE)
 		return;
