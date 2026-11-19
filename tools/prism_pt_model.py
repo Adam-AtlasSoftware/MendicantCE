@@ -472,6 +472,67 @@ def restir_di(rng, pick, light, visible, candidates, last=None, m_cap=20.0, shad
     return estimate, (kept if big_w > 0.0 else None, big_w, m_total)
 
 
+def restir_di_row(rng, pick, light, width, frames, spatial=1, feedback=False, m_cap=8.0, candidates=4, boil=0.0,
+                  by_estimate=False):
+    """lights_restir over a row of `width` pixels of one surface that sees the same lights (light: each light's rgb
+    at every pixel, all seen), the eye still: each frame each pixel's initial reservoir, the last frame's at its own
+    place, and `spatial` of the last frame's at 2 to 16 pixels from it (each neighbour counted, as Z counts it where
+    the kept sample lights the neighbour: here everywhere). feedback: the reservoir kept for the next frame is the
+    spatial one (round 4's), else the temporal one (round 7's); boil: the boiling filter's strength (0 none), each
+    reservoir's W (by_estimate: its estimate, W by its target) against the others' mean over the whole row as one subgroup. Returns the frames' estimates' luminance, frames x width"""
+    pick = np.asarray(pick, float) / float(np.sum(pick))
+    cumulative = np.cumsum(pick)
+    target = luma(np.asarray(light, float))
+    lum = target
+    last = [(None, 0.0, 0.0)] * width
+    out = np.zeros((frames, width))
+
+    def merge(state, offered):
+        kept, w_total, m_total = state
+        j, big_w, m = offered
+        m = min(m, m_cap)
+        if j is not None and big_w > 0.0:
+            w = target[j] * big_w * m
+            w_total += w
+            if rng.random() * w_total <= w:
+                kept = j
+        return kept, w_total, m_total + m
+
+    for f in range(frames):
+        now = []
+        for x in range(width):
+            kept, total = None, 0.0
+            for _ in range(candidates):
+                i = min(int(np.searchsorted(cumulative, rng.random(), side="right")), len(pick) - 1)
+                w = target[i] / pick[i] / candidates
+                total += w
+                if rng.random() * total <= w:
+                    kept = i
+            state = merge((kept, total, 1.0), last[x])
+            temporal = state
+            for _ in range(spatial):
+                r = 2.0 + 14.0 * np.sqrt(rng.random())
+                q = x + int(round(r if rng.random() < 0.5 else -r))
+                if 0 <= q < width:
+                    state = merge(state, last[q])
+            kept, w_total, m_total = state
+            big_w = w_total / (target[kept] * m_total) if kept is not None else 0.0
+            out[f, x] = lum[kept] * big_w if kept is not None else 0.0
+            keep = state if feedback else temporal
+            k, wt, mt = keep
+            now.append((k, wt / (target[k] * mt) if k is not None else 0.0, mt))
+        if boil > 0.0:
+            weights = np.array([(n[1] * target[n[0]] if by_estimate else n[1]) if n[0] is not None else 0.0
+                                for n in now])
+            total, count = weights.sum(), float((weights > 0.0).sum())
+            most = 10.0 / boil - 9.0
+            if count > 1.5:
+                now = [(None, 0.0, 0.0) if w > 0.0 and w > most * (total - w) / (count - 1.0) else n
+                       for n, w in zip(now, weights)]
+        last = now
+    return out
+
+
 def held_history(samples, most=32.0, raw_moments=True):
     """the temporal pass's slow history at a still pixel over its frames' samples (each frame's array, one value a
     pixel), each sample held as firefly_cap's long rule holds it once the history has 16 frames; its moments the
@@ -608,3 +669,12 @@ def preblur(image, taps=12, radius=6.0, turn=0.0):
                     count += 1.0
             out[y, x] = total / count
     return out
+
+
+
+def specular_hold(history, here, neighbours, moving=True, roughness=0.3):
+    """the temporal pass's hold of the specular history (HALO_PT_SPEC_HOLD): while the eye moves, a glossy surface's
+    (roughness under 0.6) history luminance no brighter than the brightest of this frame's samples over the 3 x 3"""
+    if not moving or roughness >= 0.6:
+        return history
+    return min(history, max([here] + list(neighbours)))

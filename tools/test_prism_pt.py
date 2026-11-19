@@ -1137,3 +1137,70 @@ def test_the_light_trees_cone_holds_both_childrens_normals():
         for child_axis, child_cos in cones:
             gap = np.arccos(np.clip(np.dot(axis, child_axis), -1, 1)) + np.arccos(child_cos)
             assert gap <= np.arccos(np.clip(cos_o, -1, 1)) + 1e-4
+
+
+def _row_correlation(frames, distance):
+    e = frames - frames.mean()
+    a, b = e[:, :-distance].ravel(), e[:, distance:].ravel()
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def test_restir_dis_spatial_reuse_without_feedback_is_unbiased_and_decorrelated():
+    # (a wall of one light far brighter than the rest that the candidates rarely pick: round 4's spatial reservoirs
+    # kept for the next frame pass a lucky pick from pixel to pixel, so the row's pixels agree over spans of the
+    # disc (the blobs in motion); the temporal reservoir kept, the neighbours' picks are this frame's light alone)
+    rng = np.random.default_rng(7)
+    count = 24
+    light = np.full((count, 3), 0.05)
+    light[3] = 6.0
+    pick = np.ones(count)
+    pick[3] = 0.03
+    exact = model.luma(light).sum()
+    rows = {fb: model.restir_di_row(rng, pick, light, 96, 160, spatial=1, feedback=fb) for fb in (True, False)}
+    for fb, frames in rows.items():
+        y = frames[40:]
+        # (the mean near the exact light either way: one light far over the rest is a heavy tail, so within 12%)
+        assert abs(y.mean() - exact) < 0.12 * exact, (fb, y.mean(), exact)
+    near_fb = _row_correlation(rows[True][40:], 6)
+    near = _row_correlation(rows[False][40:], 6)
+    assert near < 0.5 * near_fb, (near, near_fb)
+    assert near < 0.15, near
+
+
+def test_the_boiling_filter_keeps_a_lucky_bright_light_and_an_estimate_filter_would_not():
+    # (a light far over the rest that the candidates find rarely: its lucky sample's W is not an outlier, since its
+    # target is as large, so RTXDI's filter (by W) keeps it and the mean; a filter by the estimate takes the light)
+    count = 24
+    light = np.full((count, 3), 0.05)
+    light[3] = 40.0
+    pick = np.ones(count)
+    pick[3] = 0.01
+    plain = model.restir_di_row(np.random.default_rng(3), pick, light, 64, 120, spatial=1)
+    by_w = model.restir_di_row(np.random.default_rng(3), pick, light, 64, 120, spatial=1, boil=0.2)
+    by_estimate = model.restir_di_row(np.random.default_rng(3), pick, light, 64, 120, spatial=1, boil=0.2,
+                                      by_estimate=True)
+    assert abs(by_w[30:].mean() - plain[30:].mean()) < 1e-9
+    assert by_estimate[30:].mean() < 0.3 * plain[30:].mean()
+
+
+def test_the_light_passs_specialization_constants_match_the_hosts():
+    # (xgpu_vulkan_pt.c's spec_options fills SPEC_COUNT values, constant ids 0 to SPEC_COUNT - 1, as the GLSL declares)
+    import re
+    glsl = GLSL.read_text()
+    host = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
+    ids = sorted(int(i) for i in re.findall(r"layout\(constant_id = (\d+)\) const", glsl))
+    count = int(re.search(r"#define SPEC_COUNT (\d+)u", host).group(1))
+    assert ids == list(range(count)), (ids, count)
+    filled = sorted(set(int(i) for i in re.findall(r"\tvalues\[(\d+)\] = ", host)))
+    assert filled == list(range(count)), filled
+
+
+
+def test_the_specular_hold_drops_a_glint_that_moved_on_and_keeps_a_highlight_still_there():
+    # (a glint the history carries over a wall whose samples now see nothing bright: held to them)
+    assert model.specular_hold(5.0, 0.02, [0.01] * 8) == 0.02
+    # (a lamp's highlight still there: one of the 3 x 3's samples finds it, the history kept)
+    assert model.specular_hold(5.0, 0.02, [0.01] * 7 + [9.0]) == 5.0
+    # (a still eye, or a rough surface: never held)
+    assert model.specular_hold(5.0, 0.02, [0.01] * 8, moving=False) == 5.0
+    assert model.specular_hold(5.0, 0.02, [0.01] * 8, roughness=0.8) == 5.0

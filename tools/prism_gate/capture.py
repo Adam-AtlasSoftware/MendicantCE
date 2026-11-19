@@ -70,10 +70,17 @@ STATES = {
     "v4hist": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
                'prism_set "display.denoiser prism"', 'prism_set "display.prism_exposure fixed"',
                'prism_set "display.prism_tone_curve filmic"', 'prism_set "debug.gbuffer_view pt_history"'),
+    # (the denoised specular and diffuse light alone, for looking at either in motion)
+    "v4spec": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
+               'prism_set "display.denoiser prism"', 'prism_set "display.prism_exposure fixed"',
+               'prism_set "display.prism_tone_curve filmic"', 'prism_set "debug.gbuffer_view pt_specular"'),
+    "v4diff": ('prism_set "rt off"', 'prism_set "display.lighting pathtraced"', 'prism_set "display.pt_profile quality"',
+               'prism_set "display.denoiser prism"', 'prism_set "display.prism_exposure fixed"',
+               'prism_set "display.prism_tone_curve filmic"', 'prism_set "debug.gbuffer_view pt_diffuse"'),
     "v4raster": ('prism_set "rt off"', 'prism_set "display.lighting raster"'),
 }
 # (the states that read the bake: entered from another, the bake is loaded again, BAKE_LOAD_FRAMES held)
-BAKE_STATES = ("v4pt", "v4perf", "v4raw", "v4sun", "v4hist", "v4raster")
+BAKE_STATES = ("v4pt", "v4perf", "v4raw", "v4sun", "v4hist", "v4spec", "v4diff", "v4raster")
 
 
 def load_scenes(path=HERE / "scenes.json"):
