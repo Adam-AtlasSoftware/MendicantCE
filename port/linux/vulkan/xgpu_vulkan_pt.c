@@ -538,8 +538,9 @@ static int make(void)
 	layout_info.pPushConstantRanges = &push;
 	if (vkCreatePipelineLayout(pt.device.device, &layout_info, NULL, &pt.pipeline_layout) != VK_SUCCESS)
 		return 0;
-	/* (logged first: a driver that ends the game as it compiles them is seen
-	at the next start, report.c, as a lost device is) */
+	/* (logged first: a driver that ends the game as it compiles them leaves
+	this as halo.log's last Path Traced line. The next start does not yet
+	fall back to PRISM Rebaked for that, only for a lost device: report.c) */
 	host_logf(HOST_LOG_INFO, "prism pt: making its passes");
 	if (!pipeline_make(PASS_LIGHT, xgpu_vulkan_pt_light_words, xgpu_vulkan_pt_light_count) ||
 		!pipeline_make(PASS_TEMPORAL, xgpu_vulkan_pt_temporal_words, xgpu_vulkan_pt_temporal_count) ||

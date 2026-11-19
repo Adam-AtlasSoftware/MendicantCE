@@ -3876,7 +3876,7 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 	VkDeviceAddress job, addresses[8];
 	struct bake_readback *r;
 	float entry_words[8];
-	uint32_t asked = 0;
+	uint32_t asked = 0, lanes;
 
 	/* the free slots refilled with tiles still to do */
 	if (b->frame == 0)
@@ -3966,9 +3966,12 @@ static void lightmap_frame(VkCommandBuffer commands, struct bake_state *b)
 		if (bake.samples < 1)
 			bake.samples = 1;
 	}
+	/* (spread over lanes, each texel's samples are its lanes' shares: the
+	paths a dispatch takes are its texels' lanes' samples) */
+	lanes = lanes_of(b);
 	run_compacted(commands, PIPELINE_LIGHTMAP, b, b->states.address, BATCH_TILES * TILE_TEXELS, addresses, 4, 2,
-		samples_for(b->running_texels + refilled * TILE_TEXELS), 64, b->frame, threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES,
-		lanes_of(b));
+		samples_for(((uint64_t)b->running_texels + (uint64_t)refilled * TILE_TEXELS) * lanes), 64, b->frame,
+		threshold_of(b), BLACK_FLOOR, b->drafting ? 64.0f : cap_of(b), (float)BOUNCES, lanes);
 	b->frame++;
 	barrier(commands);
 	/* the readback: the running counts, and the asked slots' results */
