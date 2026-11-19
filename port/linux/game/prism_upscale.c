@@ -126,12 +126,15 @@ static void settings_read(
 		prism_upscale.upscaler = _upscaler_none;
 		prism_upscale.denoiser = _denoiser_prism;
 	}
-	/* (Classic, display.lighting "ce", draws without an upscaler: Settings
-	offers one under the PRISM modes alone, so that one chosen there never
-	stays on, unseen, in Classic's frame) */
+	/* (Classic, display.lighting "ce", draws without an upscaler or a
+	denoiser's plugin: Settings offers them under the PRISM modes alone, so
+	that one chosen there never stays on, unseen, in Classic's frame; a
+	denoiser's plugin with no upscaler would still jitter the view and
+	resolve it at its own size) */
 	else if (!strcmp(config_string("display.lighting"), "ce"))
 	{
 		prism_upscale.upscaler = _upscaler_none;
+		prism_upscale.denoiser = _denoiser_prism;
 	}
 	scale = (real)config_real("display.upscaler_scale");
 	if (!(scale > 0.0f))

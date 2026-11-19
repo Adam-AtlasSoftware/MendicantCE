@@ -146,7 +146,7 @@ Each has its environment variable (`HALO_UPSCALER`, `HALO_UPSCALER_SCALE`, `HALO
 `HALO_DENOISER`) and the console's form (`prism_set "display.upscaler fsr3"`). `display.upscaler_scale` was
 `display.render_scale` on the M5 branch: GOAT H1's `display.render_scale` scales the whole frame (the HUD too), so the
 upscaler's share of the view has a setting of its own. Classic (`display.lighting` `"ce"`) draws without an upscaler
-(`prism_upscale.c`); `"ce_deferred"` and the PRISM lightings upscale.
+or a denoiser's plugin (`prism_upscale.c`); `"ce_deferred"` and the PRISM lightings upscale.
 
 Settings (Video, Lighting Settings): UPSCALER under IMAGE in PRISM Rebaked and Path Traced, UPSCALE QUALITY
 (`display.upscaler_scale`: Quality, Balanced, Performance, Ultra Performance, Native) under Path Traced while an

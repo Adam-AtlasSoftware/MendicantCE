@@ -176,6 +176,11 @@ def test_settings():
     expand = tags.split("static long spinner_expand(", 1)[1].split("\n}\n", 1)[0]
     assert '!strcmp(setting, "display.denoiser") || !strcmp(setting, "display.upscaler")' in expand
     assert '!platform_prism_plugin_ready("dlss") && count > 1 ? count - 1 : count' in expand
+    # (Classic, display.lighting "ce", draws without an upscaler or a denoiser's plugin: neither jitters its view)
+    upscale = (ROOT / "port/linux/game/prism_upscale.c").read_text()
+    classic = upscale.split('else if (!strcmp(config_string("display.lighting"), "ce"))', 1)[1].split("}", 1)[0]
+    assert "prism_upscale.upscaler = _upscaler_none;" in classic
+    assert "prism_upscale.denoiser = _denoiser_prism;" in classic
     platform = (ROOT / "port/linux/src/sdl_platform.c").read_text()
     assert "return host_vulkan_plugin_ready(name) != 0;" in platform
     assert "host_vulkan_plugin_ready" in (ROOT / "port/linux/vulkan/host_imports.list").read_text().split()
