@@ -29,6 +29,8 @@ enum xgpu_vulkan_upscale_program_id
 	XGPU_VULKAN_FSR3_RCAS,
 	/* the view's inputs for an upscaler (xgpu_vulkan_upscale.c) */
 	XGPU_VULKAN_UPSCALE_INPUTS,
+	/* a plugin's HDR output tone mapped as the path tracer's frame is */
+	XGPU_VULKAN_UPSCALE_FINISH,
 	XGPU_VULKAN_UPSCALE_PROGRAM_COUNT
 };
 

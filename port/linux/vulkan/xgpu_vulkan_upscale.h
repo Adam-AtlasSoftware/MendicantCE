@@ -73,4 +73,28 @@ int xgpu_vulkan_upscale_raw_light(void);
 int xgpu_vulkan_upscale_denoise(VkCommandBuffer commands, struct xgpu_vulkan_image *light,
 	struct xgpu_vulkan_image *added, uint32_t width, uint32_t height);
 
+/* ---------- PRISM Path Traced's frame (xgpu_vulkan_pt.c, display.lighting
+"pathtraced")
+
+Whether the view drawn now gives the path tracer's noisy light to the
+denoiser's plugin that denoises and upscales (display.denoiser "dlss_rr" or
+"plugin:<name>", one ready, between the view's BEGIN and END): the tracer's
+own filter is then off and it gives its light raw (pt_frame's radiance and
+guides). Each change of the answer is logged where a denoiser's plugin is
+named. */
+int xgpu_vulkan_upscale_pt_raw(void);
+/* the path tracer's frame drawn in the view now, each one an image of its
+(the view's target's size): its exposure (1x1, RGBA16F: x the exposure, y
+the curve, written by the frame's commands) and the curve (display.
+prism_tone_curve: 0 clipped, 1 filmic, 2 aces, 3 local), so that a plugin
+upscales the view as linear HDR light before the tone mapping and END tone
+maps its output again; and where pt_raw answered 1, its noisy light before
+the tone mapping (RGBA16F, alpha 1 where it lit the pixel, else 0) and its
+guides (the diffuse and specular albedo it demodulated with, the shading
+normal and roughness, the reflection ray's hit distance in x), else NULL */
+void xgpu_vulkan_upscale_pt_frame(struct xgpu_vulkan_image *exposure, uint32_t curve,
+	struct xgpu_vulkan_image *radiance, struct xgpu_vulkan_image *diffuse_albedo,
+	struct xgpu_vulkan_image *specular_albedo, struct xgpu_vulkan_image *normal_roughness,
+	struct xgpu_vulkan_image *hit_distance);
+
 #endif

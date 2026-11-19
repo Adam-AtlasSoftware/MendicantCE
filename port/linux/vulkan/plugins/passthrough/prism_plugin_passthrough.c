@@ -15,13 +15,16 @@ to see what the host gives a plugin: PRISM_PASSTHROUGH_CAPABILITIES="rr"
 makes it an upscaler and a denoiser that upscales (DLSS Ray
 Reconstruction's kind), so that the host makes the G-buffer's guides and
 hands them over; PRISM_PASSTHROUGH_SHOW names an input put in the output in
-the colour's place (depth, motion, reactive, diffuse, specular, normal),
-stretched. Built as a shared library on its own:
+the colour's place (depth, motion, reactive, diffuse, specular, normal,
+hit: the reflection rays' lengths), stretched; and the first frame's flags,
+tone mapper and which images it has are written to standard error once.
+Built as a shared library on its own:
 
   cc -shared -fPIC -fvisibility=hidden -I<vulkan headers> -I port/linux/vulkan \
       port/linux/vulkan/plugins/passthrough/prism_plugin_passthrough.c -o passthrough.so
 */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -147,6 +150,27 @@ static int evaluate(void *context, const struct prism_plugin_frame *frame)
 	}
 	in = &frame->color_in;
 	out = &frame->color_out;
+	/* (what the host gives, once: the frame's flags, its curve, the images it
+	has) */
+	{
+		static int told;
+
+		if (!told)
+		{
+			told = 1;
+			fprintf(stderr, "passthrough: first frame: flags 0x%x (hdr %d, depth reversed %d, noisy %d), tone mapper "
+				"%u, exposure %g, pre-exposure %g, %ux%u to %ux%u; images: colour %d, depth %d, motion %d, normal %d, "
+				"diffuse %d, specular %d, hit %d, reactive %d, exposure image %d\n", frame->flags,
+				(frame->flags & PRISM_FRAME_HDR) != 0, (frame->flags & PRISM_FRAME_DEPTH_REVERSED) != 0,
+				(frame->flags & PRISM_FRAME_NOISY) != 0, frame->tone_mapper, frame->exposure, frame->pre_exposure,
+				frame->render_width, frame->render_height, frame->output_width, frame->output_height,
+				frame->color_in.image != VK_NULL_HANDLE, frame->depth.image != VK_NULL_HANDLE,
+				frame->motion.image != VK_NULL_HANDLE, frame->normal_roughness.image != VK_NULL_HANDLE,
+				frame->diffuse_albedo.image != VK_NULL_HANDLE, frame->specular_albedo.image != VK_NULL_HANDLE,
+				frame->specular_hit_distance.image != VK_NULL_HANDLE, frame->reactive_mask.image != VK_NULL_HANDLE,
+				frame->exposure_image.image != VK_NULL_HANDLE);
+		}
+	}
 	/* (a denoiser's frame: the light left as it is) */
 	if (!in->image && !out->image && frame->diffuse_radiance.image)
 		return 1;
@@ -168,6 +192,8 @@ static int evaluate(void *context, const struct prism_plugin_frame *frame)
 			shown = &frame->specular_albedo;
 		else if (show && !strcmp(show, "normal"))
 			shown = &frame->normal_roughness;
+		else if (show && !strcmp(show, "hit"))
+			shown = &frame->specular_hit_distance;
 		if (shown && shown->image && shown->width && shown->height)
 			in = shown;
 	}

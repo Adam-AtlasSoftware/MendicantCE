@@ -7,7 +7,8 @@ sections 6 and 7; M5; docs/prism_plugin.md): display.upscaler ("off",
 "plugin:<name>": a plugin the player built), display.render_scale (the share
 of the screen's pixels each way the 3D view is drawn at under an upscaler),
 display.upscaler_sharpness and display.denoiser (the path tracer's light:
-"prism", its own filter, "plugin:<name>" or "off").
+"prism", its own filter, "dlss_rr", DLSS Ray Reconstruction (the plugin
+"dlss"), "plugin:<name>" or "off").
 
 A player's window's frame (a mirror's view and its own, render_player_frame)
 is drawn at the render scale and its view upscaled into the window as it is
@@ -115,8 +116,8 @@ static void settings_read(
 	denoiser = config_string("display.denoiser");
 	prism_upscale.upscaler = !strcmp(upscaler, "fsr3") ? _upscaler_fsr3 : plugin_named(upscaler) ? _upscaler_plugin :
 		_upscaler_none;
-	prism_upscale.denoiser = plugin_named(denoiser) ? _denoiser_plugin : !strcmp(denoiser, "off") ? _denoiser_off :
-		_denoiser_prism;
+	prism_upscale.denoiser = plugin_named(denoiser) || !strcmp(denoiser, "dlss_rr") ? _denoiser_plugin :
+		!strcmp(denoiser, "off") ? _denoiser_off : _denoiser_prism;
 	if (!UPSCALE_BUILT)
 	{
 		prism_upscale.upscaler = _upscaler_none;

@@ -43,6 +43,7 @@ a frame; the log: their means every 600 frames).
 #include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_scene.h"
+#include "xgpu_vulkan_upscale.h"
 #include "host.h"
 #include "xgpu_exr.h"
 
@@ -64,7 +65,7 @@ diagnostics), four words in the job's block before its lights */
 #define JOB_COUNTERS_OFFSET 960u
 #define SET_SLOTS 16u
 /* the bindings (xgpu_vulkan_pt.glsl's) */
-#define BINDINGS 37u
+#define BINDINGS 38u
 /* the reference's floats a pixel (the GLSL's SUMS), its noise's bound (the
 gates' reference_noise, as the gates' frames measure it), the frames
 between its noise's measures, the fewest it sums, the gates' frames' width
@@ -146,6 +147,8 @@ enum
 	IMAGE_GI_POINT_NOW,
 	IMAGE_GI_DATA_LAST,
 	IMAGE_GI_DATA_NOW,
+	/* the frame's exposure and curve (1x1), for a plugin that upscales */
+	IMAGE_EXPOSURE,
 };
 
 /* the job block's flags (xgpu_vulkan_pt.glsl's FLAG_*) */
@@ -251,6 +254,11 @@ static struct
 	radiance, confidence and weight), the last frame's and this one's */
 	struct xgpu_vulkan_image *gi_point[2], *gi_data[2];
 	struct xgpu_vulkan_image *diff_a, *diff_b, *spec_a, *spec_b, *sun_a, *sun_b, *out;
+	/* the frame's exposure and curve (1x1: xgpu_vulkan_upscale_pt_frame's);
+	whether the last frame gave its light raw to display.denoiser's plugin
+	(the denoiser's images were then its guides: no history across a change) */
+	struct xgpu_vulkan_image *exposure;
+	int raw_last;
 	uint32_t parity;
 	int history_valid;
 	uint32_t frame;
@@ -598,6 +606,8 @@ static int images_make(uint32_t width, uint32_t height)
 			!(pt.gi_point[index] = image_make(pt.gi_point[index], XGPU_VULKAN_FORMAT_RGBA32F, width, height)) ||
 			!(pt.gi_data[index] = image_make(pt.gi_data[index], XGPU_VULKAN_FORMAT_RGBA32F, width, height)))
 			return 0;
+	if (!(pt.exposure = image_make(pt.exposure, XGPU_VULKAN_FORMAT_RGBA16F, 1, 1)))
+		return 0;
 	pt.width = width;
 	pt.height = height;
 	pt.history_valid = 0;
@@ -1195,7 +1205,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	uint32_t groups_x, groups_y, pt_view, flags = 0, source;
 	const struct xgpu_stream_scene_light *lights;
 	float *dynamic_lights;
-	int reference, denoiser_off, steps, step;
+	int reference, denoiser_off, steps, step, raw;
 	uint64_t scene;
 
 	if (whole)
@@ -1253,6 +1263,14 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	reference = reference_take(view, scene, description->width, description->height);
 	if (reference)
 		flags |= FLAG_REFERENCE;
+	/* (display.denoiser's plugin that denoises and upscales, in a view begun
+	for it (DLSS Ray Reconstruction): the light given raw with the tracer's
+	own guides, its own filter off; the denoiser's history dropped across a
+	change, its images having held the guides) */
+	raw = !reference && !denoiser_off && xgpu_vulkan_upscale_pt_raw();
+	if (raw != pt.raw_last)
+		flags &= ~(uint32_t)FLAG_HISTORY;
+	pt.raw_last = raw;
 	job->pages = lookup.pages;
 	job->charts = lookup.charts;
 	job->vpages = lookup.vpages;
@@ -1512,6 +1530,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	bound[IMAGE_GI_POINT_NOW] = pt.gi_point[now];
 	bound[IMAGE_GI_DATA_LAST] = pt.gi_data[last];
 	bound[IMAGE_GI_DATA_NOW] = pt.gi_data[now];
+	bound[IMAGE_EXPOSURE] = pt.exposure;
 	set = pt.sets[set_slot];
 	for (index = 0; index < BINDINGS; index++)
 		write_image(&writes[index], &infos[index], set, index, bound[index], index < 4 || index == IMAGE_LIGHT_IN);
@@ -1635,7 +1654,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		}
 		stamp(commands, time_slot, 1);
 		barrier(commands);
-		if (!denoiser_off)
+		if (raw)
+		{
+			/* (the denoiser's passes not run: composite gives the plugin its
+			light and guides, source 4) */
+			stamp(commands, time_slot, 2);
+			stamp(commands, time_slot, 3);
+			stamp(commands, time_slot, 4);
+			source = 4u;
+		}
+		else if (!denoiser_off)
 		{
 			/* (the pre-blur, HALO_PT_PREBLUR=1: the fix pass's first use, the
 			light as traced spread over a small disc before the histories
@@ -1679,9 +1707,18 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		meter, as Raster's frame makes it) */
 		if (job->exposure[2] > 0.5f)
 			xgpu_vulkan_bake_exposure_step(commands);
+		/* (with the light raw the history is ReSTIR's reservoirs' alone, which
+		the light pass keeps) */
 		pt.history_valid = !denoiser_off;
 		pt.parity ^= 1u;
 	}
+	/* the frame's exposure, and with the light raw its light and guides, for
+	the view's plugin (xgpu_vulkan_upscale.c, at the view's END): the
+	denoiser's images, free while it does not run: diff_a the light, spec_a
+	and spec_b the albedos, diff_b the normal and roughness, sun_a the
+	reflection ray's length */
+	xgpu_vulkan_upscale_pt_frame(pt.exposure, (uint32_t)(job->exposure[1] + 0.5f), raw ? pt.diff_a : NULL,
+		raw ? pt.spec_a : NULL, raw ? pt.spec_b : NULL, raw ? pt.diff_b : NULL, raw ? pt.sun_a : NULL);
 	barrier(commands);
 	host_barrier(commands);
 	pt.job_serial[slot] = xgpu_vulkan_serial();
@@ -1695,7 +1732,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		pt.logged_first = 1;
 		host_logf(HOST_LOG_INFO, "prism pt: first frame %ux%u (%s, denoiser %s): the bake's %u of %u tiles, %u pages, "
 			"%u dynamic lights, the volume %s, %u reflection probes", description->width, description->height,
-			(flags & FLAG_PERFORMANCE) ? "performance" : "quality", denoiser_off ? "off" : "prism", lookup.tiles_done,
+			(flags & FLAG_PERFORMANCE) ? "performance" : "quality", denoiser_off ? "off" : raw ? "the plugin's" : "prism",
+			lookup.tiles_done,
 			lookup.tiles_planned, lookup.page_count, dynamic, lookup.probes ? "made" : "not made yet",
 			lookup.reflection_count);
 	}
@@ -1713,7 +1751,7 @@ void xgpu_vulkan_pt_shutdown(void)
 		&pt.guide[1], &pt.diff[0], &pt.diff[1], &pt.spec[0], &pt.spec[1], &pt.moments[0], &pt.moments[1],
 		&pt.spec_moments[0], &pt.spec_moments[1], &pt.sun[0], &pt.sun[1], &pt.diff_a, &pt.diff_b, &pt.spec_a, &pt.spec_b,
 		&pt.sun_a, &pt.sun_b, &pt.out, &pt.reservoir_point[0], &pt.reservoir_point[1], &pt.reservoir_info[0],
-		&pt.reservoir_info[1], &pt.gi_point[0], &pt.gi_point[1], &pt.gi_data[0], &pt.gi_data[1],
+		&pt.reservoir_info[1], &pt.gi_point[0], &pt.gi_point[1], &pt.gi_data[0], &pt.gi_data[1], &pt.exposure,
 	};
 	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
 		&pt.tree, &pt.cache };

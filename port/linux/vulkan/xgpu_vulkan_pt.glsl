@@ -144,6 +144,10 @@ layout(set = 0, binding = 33, rgba32f) uniform image2D gi_point_last;
 layout(set = 0, binding = 34, rgba32f) uniform image2D gi_point_now;
 layout(set = 0, binding = 35, rgba32f) uniform image2D gi_data_last;
 layout(set = 0, binding = 36, rgba32f) uniform image2D gi_data_now;
+/* the frame's exposure (x) and curve (y), 1x1, for a plugin that upscales
+the view (xgpu_vulkan_upscale.c: it takes the frame as linear light before
+the tone mapping and its output is tone mapped again by these) */
+layout(set = 0, binding = 37, rgba16f) uniform image2D exposure_out;
 
 ivec2 size_of() { return ivec2(job.counts.y, job.counts.z); }
 bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(job.counts.y) && p.y < int(job.counts.z); }
@@ -3151,6 +3155,13 @@ void main()
     s = Scene(push.scene);
     job = Job(push.job);
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    /* (the frame's exposure as below and its curve, for a plugin that
+    upscales the view: one invocation's) */
+    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
+    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
+    int curve = int(job.exposure.y + 0.5);
+    if (pixel == ivec2(0))
+        imageStore(exposure_out, ivec2(0), vec4(exposure, float(curve), 0.0, 0.0));
     if (!inside(pixel))
         return;
     vec4 additions = texelFetch(additions_in, pixel, 0);
@@ -3163,6 +3174,9 @@ void main()
         sky; nothing of it is CE's lighting) */
         vec3 classic = texelFetch(light_in, pixel, 0).rgb * texelFetch(base_in, pixel, 0).rgb + additions.rgb;
         imageStore(frame_out, pixel, vec4(view >= 20u ? vec3(0.0) : classic, additions.a));
+        /* (source 4: not lit by the tracer, the plugin told so) */
+        if (source == 4u)
+            imageStore(diff_a, pixel, vec4(0.0));
         return;
     }
     vec3 share = specular_share(g);
@@ -3179,11 +3193,13 @@ void main()
     }
     else
     {
-        vec4 dd = source == 2u ? imageLoad(noisy_diffuse, pixel) : source == 1u ? imageLoad(diff_b, pixel) :
+        /* (source 4, the light given raw to the view's plugin: as traced, as 2) */
+        bool raw = source == 2u || source == 4u;
+        vec4 dd = raw ? imageLoad(noisy_diffuse, pixel) : source == 1u ? imageLoad(diff_b, pixel) :
             imageLoad(diff_a, pixel);
-        vec4 ds = source == 2u ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
+        vec4 ds = raw ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
             imageLoad(spec_a, pixel);
-        vec4 dv = source == 2u ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
+        vec4 dv = raw ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
             imageLoad(sun_a, pixel);
         float v = clamp(dv.x, 0.0, 1.0);
         vec3 cd = imageLoad(clean_diffuse, pixel).rgb;
@@ -3227,8 +3243,6 @@ void main()
     channel, its hue kept), before the base colour; the glow as CE's; then
     the tone curve. The live frames and the reference's alike, so that the
     gates compare them on one side of the hold) */
-    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
-    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
     if (metered && (pixel.x & 3) == 0 && (pixel.y & 3) == 0)
     {
         vec3 classic = texelFetch(light_in, pixel, 0).rgb * texelFetch(base_in, pixel, 0).rgb + additions.rgb;
@@ -3237,15 +3251,33 @@ void main()
     /* (the hold at white only under the "ce" curve, the display's clip:
     Adam's direction of 21:34, the light physically lit, a rolled-off curve
     taking what is past white) */
-    int curve = int(job.exposure.y + 0.5);
     vec3 held = diffuse_light * exposure;
     float brightest = max(held.r, max(held.g, held.b));
     if (curve == 0 && brightest > 1.0)
         held /= brightest;
-    vec3 result = tone_curved(kd * held + specular_light * exposure + g.emissive, curve);
+    vec3 lit = kd * held + specular_light * exposure + g.emissive;
+    vec3 result = tone_curved(lit, curve);
     if (any(isnan(result)) || any(isinf(result)))
         result = vec3(0.0);
     imageStore(frame_out, pixel, vec4(result, additions.a));
+    if (source == 4u)
+    {
+        /* the light given raw to the view's plugin (DLSS Ray Reconstruction),
+        in the denoiser's images, which do not run: the light before the
+        exposure and the curve, noisy (diff_a, alpha 1: lit here), the
+        albedos it was demodulated with (the diffuse's base colour less the
+        specular's share, spec_a; the specular's split-sum share, spec_b),
+        the shading normal and roughness (diff_b) and the reflection ray's
+        length (sun_a.x: the light pass's, 0 where none was traced) */
+        vec3 light = lit / max(exposure, 1.0e-6);
+        if (any(isnan(light)) || any(isinf(light)))
+            light = vec3(0.0);
+        imageStore(diff_a, pixel, vec4(max(light, vec3(0.0)), 1.0));
+        imageStore(spec_a, pixel, vec4(kd, 1.0));
+        imageStore(spec_b, pixel, vec4(share, 1.0));
+        imageStore(diff_b, pixel, vec4(g.normal, g.roughness));
+        imageStore(sun_a, pixel, vec4(unpackHalf2x16(imageLoad(guide_now, pixel).w).y, 0.0, 0.0, 0.0));
+    }
 }
 
 //@pass reference

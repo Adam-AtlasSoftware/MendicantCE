@@ -42,6 +42,20 @@ demodulated radiance and the sun's visibility for a denoiser, the reactive and t
 exposure, matrices, reset flag and sizes. Every image is given with the layout it is in; the plugin's commands must
 leave each image in that layout.
 
+Fields added at a structure's end keep the ABI at 1: each side reads them only where the other's size covers them (the
+host refuses a plugin that expects a larger frame than it gives). The frame's second revision (PRISM v4's DLSS work)
+adds:
+
+- `flags`: `PRISM_FRAME_HDR` (the colour is linear HDR light before the host's tone mapping, pre-exposed by
+  `pre_exposure`, and the output is to be the same: the host tone maps it), `PRISM_FRAME_DEPTH_REVERSED` (1 near,
+  0 far: always, the host's own depth), `PRISM_FRAME_NOISY` (the colour is a path tracer's noisy light, for a
+  denoiser that upscales);
+- `tone_mapper`: the curve the host applies after the output (`PRISM_TONE_CLIP`, `_FILMIC`, `_ACES`), Ray
+  Reconstruction's and Super Resolution's `InToneMapperType`;
+- `exposure_image`: the exposure as a 1x1 `R32_SFLOAT` image written by the frame's commands (PRISM Path Traced
+  meters it on the GPU), `exposure` then 1;
+- `diffuse_hit_distance` and `motion_reflections`, for a path tracer that gives them (none yet).
+
 ## The lifecycle
 
 1. Before the host makes its Vulkan instance and device: `instance_extensions` and `device_extensions` (a vendor
@@ -121,11 +135,11 @@ is drawn instead.
 | `display.upscaler` | `"off"` (default), `"fsr3"`, `"plugin:<name>"` | The 3D view drawn smaller and upscaled before the HUD: FSR 3.1, built in, or a plugin opened as the game starts |
 | `display.render_scale` | `0.33` to `1.0`; `0` (default) is `0.67` | The share of the screen's pixels the view is drawn at each way, under an upscaler (iOS: its own meaning, the whole game's) |
 | `display.upscaler_sharpness` | `0` (default) to `1` | FSR's RCAS sharpening; a plugin's `sharpness` |
-| `display.denoiser` | `"prism"` (default), `"plugin:<name>"`, `"off"` | What filters the path tracer's light: its own filter, a plugin, or none |
+| `display.denoiser` | `"prism"` (default), `"dlss_rr"`, `"plugin:<name>"`, `"off"` | What filters the path tracer's light: its own filter, DLSS Ray Reconstruction (the plugin `dlss`), a plugin, or none |
 
 Each has its environment variable (`HALO_UPSCALER`, `HALO_RENDER_SCALE`, `HALO_UPSCALER_SHARPNESS`,
-`HALO_DENOISER`) and the console's form (`prism_set "display.upscaler fsr3"`), and all four are on Settings'
-PRISM LIGHTING page (UPSCALING). A plugin is opened as the game starts: choosing one in the menus takes effect at the
+`HALO_DENOISER`) and the console's form (`prism_set "display.upscaler fsr3"`). The upscaler and the denoiser are
+on Settings' PRISM LIGHTING page, the render scale and the sharpness on PRISM PATH TRACING's (UPSCALING), for room. A plugin is opened as the game starts: choosing one in the menus takes effect at the
 next start. Under an upscaler there is no multisampling or supersampling (`display.anti_aliasing`'s `msaa*` and
 `ssaa2x` are drawn as off) and no FXAA or SMAA after it: the upscaler is the view's anti-aliasing.
 
@@ -143,7 +157,8 @@ sampled with a mip bias of log2 of the ratio meanwhile (as sharp as the screen's
 models' detail is measured at the screen's scale. One player's window only (split screen's are drawn as without), not
 the VR build's, nor a view the replay holds or a movie plays over.
 
-The stream's record, `UPSCALE` (`xgpu_stream.h`; version 35), in three phases:
+The stream's record, `UPSCALE` (`xgpu_stream.h`; version 38, its type 94 after M4's `SCENE_MATERIAL_MAPS`), in three
+phases:
 
 - **BEGIN**, as the frame's views begin: the view's colour and depth targets. The backend jitters every draw into a
   target of the view's size from here on (the view, its G-buffer, its passes' targets; not the shadow maps, nor the
@@ -200,6 +215,40 @@ the setting is `"prism"`'s (`prism_upscale_denoiser_off`).
 
 The path tracer of display.prism_rt is the mode PRISM v4's M3 replaces; the hooks are its light's and the view's, not
 its own, so that M3's path tracer takes them as they are.
+
+## PRISM Path Traced and a plugin (DLSS Ray Reconstruction and Super Resolution)
+
+With display.lighting `"pathtraced"` (M3's path tracer, `xgpu_vulkan_pt.c`) a plugin is given the frame as linear HDR
+light before the tone mapping, as Ray Reconstruction is trained on and as Super Resolution prefers, and the host tone
+maps its output afterwards:
+
+- **The exposure.** Each frame the path tracer's composite writes its exposure (display.prism_exposure's: the metered
+  one, on the GPU) and its curve (display.prism_tone_curve) into a 1x1 image and hands it to the view's END
+  (`xgpu_vulkan_upscale_pt_frame`). Where a plugin upscales the view (display.upscaler `"plugin:<name>"`, or a
+  denoiser that upscales), INPUTS undoes the view's curve and takes the exposure out (`untone`: the filmic curve's
+  roll-off and Narkowicz's ACES fit both invert; the clipped curve is the identity), so the colour is linear light;
+  the plugin reads the exposure from its own 1x1 `R32_SFLOAT` copy (`exposure_image`, `PRISM_FRAME_HDR`); and after
+  it FINISH (`xgpu_vulkan_upscale_shaders.c`) applies the exposure and the curve again to the output, as the
+  composite draws its frame. FSR 3.1 (built for the tone-mapped frame) takes the view as before.
+- **Ray Reconstruction** (display.denoiser `"dlss_rr"`, the plugin `dlss`; or `"plugin:<name>"` naming any plugin
+  that denoises and upscales). In a view begun for it (`xgpu_vulkan_upscale_pt_raw`: the plugin ready, between the
+  view's BEGIN and END) the path tracer runs its light pass and not its denoiser (temporal, fix, a-trous: about
+  5 ms of the RTX 3070 Ti's frame at 1080p) and its composite (source 4) writes, into the denoiser's images, which
+  are free then: the noisy light before the exposure and the curve (`diff_a`, alpha 1 where it lit the pixel), the
+  albedos it demodulated with (the diffuse: the base colour less the specular's share; the specular: the split sum's
+  share), the shading normal and roughness, and the reflection ray's length (its hit distance, world units; 0 where
+  none was traced, the rough surfaces read from the probes). At END, INPUTS gives the plugin those as the colour (the
+  change the transparent surfaces, effects and fog made after OPAQUE added, undone as above) and as its guides
+  (`specular_hit_distance` included), with the depth, motion, jitter, reactive mask, camera matrices and reset; the
+  sky and what the tracer did not light come from the view (undone). Ray Reconstruction then replaces both the
+  in-tree denoiser and the upscaler: under display.upscaler `"off"` it runs at the screen's pixels (DLAA), under an
+  upscaler at display.render_scale (its Quality at 0.67). The denoiser's history is dropped where the mode changes
+  (its images held the guides); ReSTIR's reservoirs, the light pass's, are kept.
+- **Resets.** The view's history (the plugin's `reset`) is dropped where the guest says the camera has none (a cut, a
+  teleport, a map loaded, the view not drawn the frame before), and where the sizes or the upscaler change.
+
+What remains for Ray Reconstruction (not given yet): the diffuse ray's hit distance, reflected-surface motion,
+particle and animated-texture masks, and a transparency layer of its own in place of the change added to the colour.
 
 ## Tests
 

@@ -112,19 +112,27 @@ static const VkFormat input_formats[INPUT_COUNT] =
 };
 
 /* the guides a denoiser that upscales is given (the render size's, made as
-it is first used; a texel each before) */
+it is first used; a texel each before): the albedos, the normal and
+roughness, the reflection ray's hit distance (the path tracer's) */
 enum
 {
-	GUIDE_DIFFUSE, GUIDE_SPECULAR, GUIDE_NORMAL, GUIDE_COUNT
+	GUIDE_DIFFUSE, GUIDE_SPECULAR, GUIDE_NORMAL, GUIDE_HIT, GUIDE_COUNT
 };
 
 static const VkFormat guide_formats[GUIDE_COUNT] =
 {
-	VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT,
+	VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R16_SFLOAT,
 };
 
-/* the input pass's bindings (its GLSL's) */
-#define INPUT_BINDINGS 15
+/* the input pass's bindings (its GLSL's; FINISH's within them) */
+#define INPUT_BINDINGS 24
+/* the input pass's flags (its GLSL's) */
+#define INPUT_GBUFFER_MOTION 1u
+#define INPUT_HISTORY 2u
+#define INPUT_OPAQUE 4u
+#define INPUT_GBUFFER_GUIDES 8u
+#define INPUT_HDR 16u
+#define INPUT_PT_NOISY 32u
 
 static struct
 {
@@ -200,6 +208,23 @@ static struct
 	/* the last frame's camera block (the matrices' last) */
 	float view_last[16], projection_last[16];
 	int logged_fallback, logged_upscaled;
+
+	/* ---------- PRISM Path Traced's frame (xgpu_vulkan_upscale_pt_frame):
+	this view's, from its BEGIN to its END (NULL none) */
+	struct xgpu_vulkan_image *pt_exposure, *pt_radiance, *pt_guides[4];
+	uint32_t pt_curve;
+	/* (the curve of the frame END upscales: the plugin's tone mapper) */
+	uint32_t pt_curve_kept;
+	/* the exposure as a plugin reads it (1x1 R32F), whether it is in its
+	layout; FINISH's pipeline (the plugin's HDR output tone mapped again) */
+	struct upscale_image exposure;
+	int exposure_ready;
+	VkPipeline finish;
+	/* the last pt_raw's answer logged */
+	int pt_raw_logged, pt_raw_last;
+	int logged_hdr;
+	/* the input pass's set this frame (FINISH binds it again) */
+	VkDescriptorSet set;
 } up;
 
 /* ---------- the plugins */
@@ -323,7 +348,13 @@ uint32_t xgpu_vulkan_upscale_device_extensions(VkPhysicalDevice physical, const 
 		}
 		if (!table->supported(physical))
 		{
-			plugin_off(which, "it does not work on this graphics card or driver");
+			char why[400];
+			const char *error = table->last_error(NULL);
+
+			/* (with the plugin's reason, where it gives one) */
+			snprintf(why, sizeof(why), "it does not work on this graphics card or driver%s%s",
+				error && error[0] ? ": " : "", error ? error : "");
+			plugin_off(which, why);
 			continue;
 		}
 		for (index = 0; index < count; index++)
@@ -460,6 +491,8 @@ static int memory_type(uint32_t bits)
 	return -1;
 }
 
+static int image_make(struct upscale_image *made, VkFormat format, uint32_t width, uint32_t height);
+
 static int make(void)
 {
 	static const VkDescriptorType types[INPUT_BINDINGS] =
@@ -468,6 +501,12 @@ static int make(void)
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		/* (the path tracer's light, exposure and guides; the hit distance,
+		the exposure and FINISH's output written) */
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 	};
@@ -481,7 +520,7 @@ static int make(void)
 	VkDescriptorPoolCreateInfo pool_info;
 	struct xgpu_vulkan_image_description description;
 	VkShaderModule module;
-	uint32_t index;
+	uint32_t index, program;
 	VkResult result;
 
 	if (up.made)
@@ -526,23 +565,28 @@ static int make(void)
 	layout_info.pSetLayouts = &up.set_layout;
 	if (vkCreatePipelineLayout(up.handles.device, &layout_info, NULL, &up.pipeline_layout) != VK_SUCCESS)
 		return failed("its pipeline's layout cannot be made");
-	memset(&module_info, 0, sizeof(module_info));
-	module_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	module_info.codeSize = xgpu_vulkan_upscale_programs[XGPU_VULKAN_UPSCALE_INPUTS].count * sizeof(uint32_t);
-	module_info.pCode = xgpu_vulkan_upscale_programs[XGPU_VULKAN_UPSCALE_INPUTS].words;
-	if (vkCreateShaderModule(up.handles.device, &module_info, NULL, &module) != VK_SUCCESS)
-		return failed("its shader cannot be made");
-	memset(&info, 0, sizeof(info));
-	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	info.stage.module = module;
-	info.stage.pName = "main";
-	info.layout = up.pipeline_layout;
-	result = vkCreateComputePipelines(up.handles.device, VK_NULL_HANDLE, 1, &info, NULL, &up.pipeline);
-	vkDestroyShaderModule(up.handles.device, module, NULL);
-	if (result != VK_SUCCESS)
-		return failed("its pipeline cannot be made");
+	/* (the input pass, and FINISH in its layout) */
+	for (program = XGPU_VULKAN_UPSCALE_INPUTS; program <= XGPU_VULKAN_UPSCALE_FINISH; program++)
+	{
+		memset(&module_info, 0, sizeof(module_info));
+		module_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		module_info.codeSize = xgpu_vulkan_upscale_programs[program].count * sizeof(uint32_t);
+		module_info.pCode = xgpu_vulkan_upscale_programs[program].words;
+		if (vkCreateShaderModule(up.handles.device, &module_info, NULL, &module) != VK_SUCCESS)
+			return failed("its shader cannot be made");
+		memset(&info, 0, sizeof(info));
+		info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		info.stage.module = module;
+		info.stage.pName = "main";
+		info.layout = up.pipeline_layout;
+		result = vkCreateComputePipelines(up.handles.device, VK_NULL_HANDLE, 1, &info, NULL,
+			program == XGPU_VULKAN_UPSCALE_INPUTS ? &up.pipeline : &up.finish);
+		vkDestroyShaderModule(up.handles.device, module, NULL);
+		if (result != VK_SUCCESS)
+			return failed("its pipeline cannot be made");
+	}
 	memset(&sampler, 0, sizeof(sampler));
 	sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 	sampler.magFilter = sampler.minFilter = VK_FILTER_NEAREST;
@@ -552,9 +596,9 @@ static int make(void)
 		return failed("its sampler cannot be made");
 	memset(sizes, 0, sizeof(sizes));
 	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	sizes[0].descriptorCount = 7;
+	sizes[0].descriptorCount = 13;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	sizes[1].descriptorCount = 7;
+	sizes[1].descriptorCount = 10;
 	sizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 	sizes[2].descriptorCount = 1;
 	memset(&pool_info, 0, sizeof(pool_info));
@@ -579,6 +623,10 @@ static int make(void)
 	up.extras_stand_in = xgpu_vulkan_image_create(&description);
 	if (!up.extras_stand_in)
 		return failed("its stand-in cannot be made");
+	/* (the exposure a plugin reads, 1x1 R32F, put in its layout as it is
+	first used) */
+	if (!image_make(&up.exposure, VK_FORMAT_R32_SFLOAT, 1, 1))
+		return failed("its exposure's image cannot be made");
 	{
 		const char *jitter = getenv("HALO_UPSCALE_JITTER");
 
@@ -834,6 +882,50 @@ static void camera_matrices(const float camera[4][4], float view[16], float proj
 	projection[14] = near_plane * far_plane / (far_plane - near_plane);
 }
 
+/* ---------- PRISM Path Traced's frame */
+
+/* the path tracer's frame of the view let go of (BEGIN, END) */
+static void pt_frame_clear(void)
+{
+	up.pt_exposure = up.pt_radiance = NULL;
+	memset(up.pt_guides, 0, sizeof(up.pt_guides));
+}
+
+int xgpu_vulkan_upscale_pt_raw(void)
+{
+	/* (a view begun for the denoiser's plugin that denoises and upscales) */
+	int raw = up.jittering && up.denoiser == XGPU_UPSCALE_DENOISER_PLUGIN &&
+		plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE_UPSCALE);
+
+	if (up.plugins[PLUGIN_DENOISER].library && (!up.pt_raw_logged || raw != up.pt_raw_last))
+	{
+		host_logf(HOST_LOG_INFO, raw ? "denoiser: the path tracer's noisy light and guides given to %s (its own "
+			"filter off)" : "denoiser: the path tracer's own filter (%s not given the light)",
+			up.plugins[PLUGIN_DENOISER].name);
+		up.pt_raw_logged = 1;
+		up.pt_raw_last = raw;
+	}
+	return raw;
+}
+
+void xgpu_vulkan_upscale_pt_frame(struct xgpu_vulkan_image *exposure, uint32_t curve,
+	struct xgpu_vulkan_image *radiance, struct xgpu_vulkan_image *diffuse_albedo,
+	struct xgpu_vulkan_image *specular_albedo, struct xgpu_vulkan_image *normal_roughness,
+	struct xgpu_vulkan_image *hit_distance)
+{
+	/* (only in a view begun: END takes them) */
+	if (!up.jittering)
+		return;
+	up.pt_exposure = exposure;
+	up.pt_curve = curve;
+	up.pt_radiance = radiance && diffuse_albedo && specular_albedo && normal_roughness && hit_distance ? radiance :
+		NULL;
+	up.pt_guides[GUIDE_DIFFUSE] = up.pt_radiance ? diffuse_albedo : NULL;
+	up.pt_guides[GUIDE_SPECULAR] = up.pt_radiance ? specular_albedo : NULL;
+	up.pt_guides[GUIDE_NORMAL] = up.pt_radiance ? normal_roughness : NULL;
+	up.pt_guides[GUIDE_HIT] = up.pt_radiance ? hit_distance : NULL;
+}
+
 /* ---------- the view */
 
 void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view)
@@ -843,6 +935,7 @@ void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct 
 
 	up.opaque_kept = 0;
 	up.jittering = 0;
+	pt_frame_clear();
 	up.denoiser = record->denoiser;
 	up.view_number = record->view;
 	up.view_gbuffer = 0;
@@ -904,7 +997,8 @@ void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct
 render size */
 static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upscale *record,
 	struct xgpu_vulkan_image *view, struct xgpu_vulkan_image *view_depth, struct xgpu_vulkan_image *extras,
-	struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *base, uint32_t width, uint32_t height)
+	struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *base, uint32_t width, uint32_t height,
+	uint32_t pt_flags)
 {
 	struct upscale_inputs_block *block;
 	struct xgpu_vulkan_range range;
@@ -952,13 +1046,21 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 	block->rect[2] = (int32_t)width;
 	block->rect[3] = (int32_t)height;
 	if (extras)
-		flags |= 1u;
+		flags |= INPUT_GBUFFER_MOTION;
 	if (history)
-		flags |= 2u;
+		flags |= INPUT_HISTORY;
 	if (up.opaque_kept && up.opaque)
-		flags |= 4u;
+		flags |= INPUT_OPAQUE;
 	if (words && base)
-		flags |= 8u;
+		flags |= INPUT_GBUFFER_GUIDES;
+	/* (the colour linear HDR by the path tracer's exposure; its noisy light
+	and guides) */
+	if ((pt_flags & INPUT_HDR) && up.pt_exposure)
+	{
+		flags |= INPUT_HDR;
+		if ((pt_flags & INPUT_PT_NOISY) && up.pt_radiance)
+			flags |= INPUT_PT_NOISY;
+	}
 	block->jitter[0] = up.jitter[0];
 	block->jitter[1] = up.jitter[1];
 	block->jitter[2] = (float)flags;
@@ -967,7 +1069,7 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 	block->last_eye[1] = record->last[0][1];
 	block->last_eye[2] = record->last[0][2];
 	if (!inverse3(record->last[1], record->last[2], record->last[3], block->last_inverse))
-		block->jitter[2] = (float)(flags & ~2u);
+		block->jitter[2] = (float)(flags & ~INPUT_HISTORY);
 	block->last_rect[0] = (float)record->view_corners[0];
 	block->last_rect[1] = (float)record->view_corners[1];
 	block->last_rect[2] = (float)width;
@@ -984,7 +1086,7 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 		return failed("its descriptor set cannot be had");
 	memset(images, 0, sizeof(images));
 	images[0].imageView = xgpu_vulkan_image_view(view);
-	images[1].imageView = xgpu_vulkan_image_view((flags & 4u) ? up.opaque : view);
+	images[1].imageView = xgpu_vulkan_image_view((flags & INPUT_OPAQUE) ? up.opaque : view);
 	images[2].imageView = xgpu_vulkan_image_view(view_depth);
 	images[3].imageView = stencil;
 	images[4].imageView = xgpu_vulkan_image_view(extras ? extras : up.extras_stand_in);
@@ -994,12 +1096,24 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 		images[5 + index].imageView = up.inputs[index].view;
 	/* (the G-buffer's words and base where its guides are wanted, else
 	stand-ins of their types, never read) */
-	images[10].imageView = xgpu_vulkan_image_view((flags & 8u) ? words : up.extras_stand_in);
+	images[10].imageView = xgpu_vulkan_image_view((flags & INPUT_GBUFFER_GUIDES) ? words : up.extras_stand_in);
 	images[10].sampler = up.nearest;
-	images[11].imageView = xgpu_vulkan_image_view((flags & 8u) ? base : view);
+	images[11].imageView = xgpu_vulkan_image_view((flags & INPUT_GBUFFER_GUIDES) ? base : view);
 	images[11].sampler = up.nearest;
-	for (index = 0; index < GUIDE_COUNT; index++)
+	for (index = 0; index < 3; index++)
 		images[12 + index].imageView = up.guides[index].view;
+	/* (the path tracer's light, exposure and guides where it gave them, else
+	the view, of their type, never read) */
+	images[15].imageView = xgpu_vulkan_image_view((flags & INPUT_PT_NOISY) ? up.pt_radiance : view);
+	images[16].imageView = xgpu_vulkan_image_view((flags & INPUT_HDR) ? up.pt_exposure : view);
+	for (index = 0; index < 4; index++)
+		images[17 + index].imageView = xgpu_vulkan_image_view((flags & INPUT_PT_NOISY) && up.pt_guides[index] ?
+			up.pt_guides[index] : view);
+	for (index = 15; index < 21; index++)
+		images[index].sampler = up.nearest;
+	images[21].imageView = up.guides[GUIDE_HIT].view;
+	images[22].imageView = up.exposure.view;
+	images[23].imageView = xgpu_vulkan_image_view(up.output);
 	for (index = 0; index < INPUT_BINDINGS; index++)
 		images[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 	memset(writes, 0, sizeof(writes));
@@ -1009,7 +1123,7 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 		writes[index].dstSet = set;
 		writes[index].dstBinding = index;
 		writes[index].descriptorCount = 1;
-		writes[index].descriptorType = index < 5 || index == 10 || index == 11 ?
+		writes[index].descriptorType = index < 5 || index == 10 || index == 11 || (index >= 15 && index < 21) ?
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : index == 9 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER :
 			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		if (index != 9)
@@ -1021,6 +1135,7 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 	buffer.range = sizeof(*block);
 	writes[9].pBufferInfo = &buffer;
 	vkUpdateDescriptorSets(up.handles.device, INPUT_BINDINGS, writes, 0, NULL);
+	up.set = set;
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, up.pipeline);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, up.pipeline_layout, 0, 1, &set, 0, NULL);
 	vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
@@ -1061,7 +1176,8 @@ static uint32_t plugin_quality(uint32_t render_width, uint32_t output_width)
 /* the frame upscaled by the upscaler's plugin; 0 where it was not (the
 plugin then off) */
 static int plugin_upscale(int which, VkCommandBuffer commands, const struct xgpu_stream_upscale *record,
-	int reset, int guides, uint32_t width, uint32_t height, uint32_t output_width, uint32_t output_height)
+	int reset, int guides, uint32_t pt_flags, uint32_t width, uint32_t height, uint32_t output_width,
+	uint32_t output_height)
 {
 	const struct prism_plugin *table = up.plugins[which].library->table;
 	void *context = up.plugins[which].context;
@@ -1105,7 +1221,22 @@ static int plugin_upscale(int which, VkCommandBuffer commands, const struct xgpu
 		frame.diffuse_albedo = plugin_image(&up.guides[GUIDE_DIFFUSE]);
 		frame.specular_albedo = plugin_image(&up.guides[GUIDE_SPECULAR]);
 		frame.normal_roughness = plugin_image(&up.guides[GUIDE_NORMAL]);
+		/* (the path tracer's reflection rays' lengths, where it gave them) */
+		if (pt_flags & INPUT_PT_NOISY)
+			frame.specular_hit_distance = plugin_image(&up.guides[GUIDE_HIT]);
 	}
+	frame.flags = PRISM_FRAME_DEPTH_REVERSED;
+	/* (linear HDR light before the tone mapping, the exposure the GPU's: the
+	path tracer's frame; END tone maps the output again) */
+	if (pt_flags & INPUT_HDR)
+	{
+		frame.flags |= PRISM_FRAME_HDR;
+		frame.exposure_image = plugin_image(&up.exposure);
+		frame.tone_mapper = up.pt_curve_kept == 2 ? PRISM_TONE_ACES : up.pt_curve_kept == 1 ||
+			up.pt_curve_kept == 3 ? PRISM_TONE_FILMIC : PRISM_TONE_CLIP;
+	}
+	if (pt_flags & INPUT_PT_NOISY)
+		frame.flags |= PRISM_FRAME_NOISY;
 	frame.color_out.image = xgpu_vulkan_image_handle(up.output);
 	frame.color_out.view = xgpu_vulkan_image_view(up.output);
 	frame.color_out.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -1161,10 +1292,12 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	struct xgpu_vulkan_image *gbuffer_base)
 {
 	VkCommandBuffer commands;
-	uint32_t width, height, output_width, output_height, upscaler = record->upscaler;
+	uint32_t width, height, output_width, output_height, upscaler = record->upscaler, pt_flags = 0;
 	int32_t from[4], to[4];
 	int reset, done = 0, denoise_upscale;
 	VkMemoryBarrier memory;
+	struct xgpu_vulkan_image *pt_exposure = up.pt_exposure, *pt_radiance = up.pt_radiance, *pt_guides[4];
+	uint32_t index;
 
 	/* (the view over: the path tracer's light is given raw to a plugin only
 	between a view's BEGIN and its END, so that a frame with no view begun,
@@ -1177,9 +1310,12 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	if (!up.jittering || !view || !view_depth || !output)
 	{
 		up.jittering = 0;
+		pt_frame_clear();
 		return;
 	}
 	up.jittering = 0;
+	memcpy(pt_guides, up.pt_guides, sizeof(pt_guides));
+	up.pt_curve_kept = up.pt_curve;
 	/* (a view jittered for the denoiser's plugin with no upscaler: FSR 3.1
 	at its own size resolves it where the plugin does not) */
 	if (upscaler == XGPU_UPSCALE_UPSCALER_NONE)
@@ -1209,11 +1345,23 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 		upscaler = XGPU_UPSCALE_UPSCALER_FSR3;
 	}
 	/* (the denoiser's plugin, where it denoises and upscales and the view had
-	its G-buffer, the guides: Ray Reconstruction, in the upscaler's place) */
+	its G-buffer, the guides, or the path tracer gave it its noisy light and
+	guides: Ray Reconstruction, in the upscaler's place) */
 	denoise_upscale = record->denoiser == XGPU_UPSCALE_DENOISER_PLUGIN &&
-		plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE_UPSCALE) && gbuffer_extras && gbuffer_words && gbuffer_base;
+		plugin_ready(PLUGIN_DENOISER, PRISM_CAP_DENOISE_UPSCALE) &&
+		((gbuffer_extras && gbuffer_words && gbuffer_base) || (pt_exposure && pt_radiance));
 	if (denoise_upscale)
 		upscaler = XGPU_UPSCALE_UPSCALERS;
+	/* (a plugin upscaling the path tracer's frame takes it as linear HDR
+	light before the tone mapping, and its output is tone mapped again:
+	FSR 3.1, built for the tone-mapped frame, takes the view as it is) */
+	if (pt_exposure && (denoise_upscale || upscaler == XGPU_UPSCALE_UPSCALER_PLUGIN))
+	{
+		pt_flags = INPUT_HDR;
+		if (denoise_upscale && pt_radiance)
+			pt_flags |= INPUT_PT_NOISY;
+	}
+	pt_frame_clear();
 	reset = !(record->flags & XGPU_UPSCALE_FLAG_HISTORY) || up.last_sizes[0] != width ||
 		up.last_sizes[1] != height || up.last_sizes[2] != output_width || up.last_sizes[3] != output_height ||
 		up.last_upscaler != upscaler;
@@ -1230,10 +1378,21 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 		xgpu_vulkan_image_compute_use(up.opaque, 0);
 	if (gbuffer_extras)
 		xgpu_vulkan_image_compute_use(gbuffer_extras, 0);
-	if (denoise_upscale)
+	if (denoise_upscale && gbuffer_words && gbuffer_base)
 	{
 		xgpu_vulkan_image_compute_use(gbuffer_words, 0);
 		xgpu_vulkan_image_compute_use(gbuffer_base, 0);
+	}
+	if (pt_flags & INPUT_HDR)
+	{
+		xgpu_vulkan_image_compute_use(pt_exposure, 0);
+		if (pt_flags & INPUT_PT_NOISY)
+		{
+			xgpu_vulkan_image_compute_use(pt_radiance, 0);
+			for (index = 0; index < 4; index++)
+				if (pt_guides[index])
+					xgpu_vulkan_image_compute_use(pt_guides[index], 0);
+		}
 	}
 	commands = xgpu_vulkan_compute_commands();
 	if (up.gpu_marks)
@@ -1246,16 +1405,44 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	}
 	xgpu_vulkan_image_compute_use(up.output, 1);
 	xgpu_vulkan_image_compute_use(up.extras_stand_in, 0);
-	if (!inputs_record(commands, record, view, view_depth, gbuffer_extras, denoise_upscale ? gbuffer_words : NULL,
-		denoise_upscale ? gbuffer_base : NULL, width, height))
+	/* (the exposure's image in its layout before any set names it) */
+	if (!up.exposure_ready)
 	{
+		VkImageMemoryBarrier barrier;
+
+		memset(&barrier, 0, sizeof(barrier));
+		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image = up.exposure.image;
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		barrier.subresourceRange.levelCount = 1;
+		barrier.subresourceRange.layerCount = 1;
+		vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+			NULL, 0, NULL, 1, &barrier);
+		up.exposure_ready = 1;
+	}
+	/* (the path tracer's images, the record's: kept for the input pass's
+	set) */
+	up.pt_exposure = pt_exposure;
+	up.pt_radiance = pt_radiance;
+	memcpy(up.pt_guides, pt_guides, sizeof(up.pt_guides));
+	if (!inputs_record(commands, record, view, view_depth, gbuffer_extras,
+		denoise_upscale && gbuffer_words && gbuffer_base ? gbuffer_words : NULL,
+		denoise_upscale && gbuffer_words && gbuffer_base ? gbuffer_base : NULL, width, height, pt_flags))
+	{
+		pt_frame_clear();
 		stretch(record, view, output);
 		return;
 	}
+	pt_frame_clear();
 	if (denoise_upscale)
-		done = plugin_upscale(PLUGIN_DENOISER, commands, record, reset, 1, width, height, output_width, output_height);
+		done = plugin_upscale(PLUGIN_DENOISER, commands, record, reset, 1, pt_flags, width, height, output_width,
+			output_height);
 	else if (upscaler == XGPU_UPSCALE_UPSCALER_PLUGIN)
-		done = plugin_upscale(PLUGIN_UPSCALER, commands, record, reset, 0, width, height, output_width,
+		done = plugin_upscale(PLUGIN_UPSCALER, commands, record, reset, 0, pt_flags, width, height, output_width,
 			output_height);
 	if (!done)
 	{
@@ -1288,6 +1475,26 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 			stretch(record, view, output);
 			return;
 		}
+	}
+	/* (an HDR output tone mapped again, as the path tracer's composite maps
+	its frame: FINISH, in place, with the input pass's set) */
+	if (pt_flags & INPUT_HDR)
+	{
+		commands = xgpu_vulkan_compute_commands();
+		memset(&memory, 0, sizeof(memory));
+		memory.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+		memory.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+		memory.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1,
+			&memory, 0, NULL, 0, NULL);
+		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, up.finish);
+		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, up.pipeline_layout, 0, 1, &up.set, 0, NULL);
+		vkCmdDispatch(commands, (output_width + 7) / 8, (output_height + 7) / 8, 1);
+		if (!up.logged_hdr)
+			host_logf(HOST_LOG_INFO, "upscaler: the path tracer's frame given as linear HDR light before its tone "
+				"mapping (the exposure the GPU's, curve %u)%s; the output tone mapped again", up.pt_curve_kept,
+				(pt_flags & INPUT_PT_NOISY) ? ", its noisy light and its own guides" : "");
+		up.logged_hdr = 1;
 	}
 	/* (the output written before it is read) */
 	commands = xgpu_vulkan_compute_commands();
@@ -1420,6 +1627,9 @@ void xgpu_vulkan_upscale_shutdown(void)
 			image_release(&up.inputs[index]);
 		for (index = 0; index < GUIDE_COUNT; index++)
 			image_release(&up.guides[index]);
+		image_release(&up.exposure);
+		if (up.finish)
+			vkDestroyPipeline(up.handles.device, up.finish, NULL);
 		for (index = 0; index < UPSCALE_SLOTS; index++)
 		{
 			if (up.stencils[index])

@@ -747,11 +747,16 @@ static const struct config_setting config_settings[] =
 		"traces a bounce only for the objects. Read each frame." },
 	{ "display.denoiser", _config_string, "\"prism\"", "HALO_DENOISER", _environment_value, _platform_desktop,
 		"With display.lighting \"pathtraced\": \"prism\" the in-tree denoiser\n"
-		"(its diffuse and specular light and the sun's shadows);\n"
-		"\"plugin:<name>\", a plugin you built that denoises (NRD) or denoises\n"
-		"and upscales (DLSS Ray Reconstruction: \"plugin:dlss\"), opened as the\n"
-		"game starts; \"off\" the traced light as it is, one sample a pixel\n"
-		"(for checking). Read each frame." },
+		"(its diffuse and specular light and the sun's shadows); \"dlss_rr\"\n"
+		"NVIDIA DLSS Ray Reconstruction (the plugin \"dlss\" you built,\n"
+		"docs/prism_plugin.md), opened as the game starts: it takes the traced\n"
+		"light as it is, before the tone mapping, with the path tracer's\n"
+		"guides, and denoises it and brings the view to the screen's pixels in\n"
+		"one step, in place of the in-tree denoiser and of display.upscaler\n"
+		"(display.render_scale under an upscaler, else the screen's pixels:\n"
+		"DLAA); one that cannot be opened is \"prism\". \"plugin:<name>\" any\n"
+		"plugin that denoises; \"off\" the traced light as it is, one sample a\n"
+		"pixel (for checking). Read each frame." },
 	{ "display.prism_raster_composition", _config_string, "\"ce\"", "HALO_PRISM_RASTER_COMPOSITION",
 		_environment_value, _platform_desktop,
 		"PRISM Raster: what composes the frame from the baked light. \"ce\" the\n"
@@ -4762,7 +4767,7 @@ static const struct
 	{ "display.ambient_occlusion", { "off", "world", NULL }, "off" },
 	{ "display.lighting", { "ce", "ce_deferred", "raster", "pathtraced", NULL }, "ce" },
 	{ "display.pt_profile", { "quality", "performance", NULL }, "quality" },
-	{ "display.denoiser", { "prism", "off", NULL }, "prism" },
+	{ "display.denoiser", { "prism", "dlss_rr", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
 	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },
 	{ "display.prism_raster_object_shadows", { "traced", "classic", NULL }, "traced" },

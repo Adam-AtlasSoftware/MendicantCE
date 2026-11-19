@@ -1746,8 +1746,9 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 		char folder[1024];
 
 		snprintf(folder, sizeof(folder), "%s/plugins", platform_data_root());
+		/* (display.denoiser "dlss_rr": the plugin "dlss", Ray Reconstruction) */
 		host_vulkan_plugins_choose(!strncmp(upscaler, "plugin:", 7) ? upscaler + 7 : "",
-			!strncmp(denoiser, "plugin:", 7) ? denoiser + 7 : "", folder);
+			!strncmp(denoiser, "plugin:", 7) ? denoiser + 7 : !strcmp(denoiser, "dlss_rr") ? "dlss" : "", folder);
 	}
 #endif
 	if (!host_vulkan_window_open((unsigned int)(uintptr_t)platform_window,

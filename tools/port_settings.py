@@ -1638,7 +1638,7 @@ PAGES = {
              "FSR 3.1 is built in; DLSS is a plugin you build (docs/prism_plugin.md), used from the next start.",
              "desktop"),
             ("DENOISER", "display.denoiser",
-             [("PRISM", "prism"), ("DLSS RAY RECON.", "plugin:dlss"), ("OFF", "off")],
+             [("PRISM", "prism"), ("DLSS RR", "dlss_rr"), ("OFF", "off")],
              "What smooths PRISM Path Traced's light: PRISM's own filter, or DLSS Ray Reconstruction (a plugin "
              "you build, used from the next start), which also brings the view to the screen's resolution.",
              "desktop"),

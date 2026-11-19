@@ -168,4 +168,74 @@ def test_settings():
     menus = (ROOT / "port/assets/menus/ce/main_menu.settings_select.player_setup.player_profile_edit."
              "mods_settings.prism_lighting.xml").read_text()
     assert 'setting="display.upscaler" values="off|fsr3|plugin:dlss"' in menus
-    assert 'setting="display.denoiser" values="prism|plugin:dlss|off"' in menus
+    assert 'setting="display.denoiser" values="prism|dlss_rr|off"' in menus
+
+
+def _tone_curved(c, curve):
+    """xgpu_vulkan_bake_glsl.inc's tone_curved (the path tracer's composite's), in numpy"""
+    import numpy as np
+    c = np.maximum(c, 0.0)
+    if curve == 2:
+        return np.clip((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0)
+    if curve not in (1, 3):
+        return c
+    brightest = c.max(axis=-1, keepdims=True)
+    k = 0.6
+    mapped = np.where(brightest <= k, brightest, k + (1 - k) * (1 - np.exp(-(brightest - k) / (1 - k))))
+    return np.where(brightest > 1e-5, c * mapped / np.maximum(brightest, 1e-30), c)
+
+
+def _untone(c, curve):
+    """INPUTS' untone (tools/vulkan_upscale_shaders.py), in numpy"""
+    import numpy as np
+    c = np.maximum(c, 0.0)
+    if curve == 2:
+        y = np.minimum(c, 0.995)
+        a, b, k = 2.51 - 2.43 * y, 0.03 - 0.59 * y, -0.14 * y
+        return (-b + np.sqrt(np.maximum(b * b - 4 * a * k, 0.0))) / (2 * a)
+    if curve not in (1, 3):
+        return c
+    mapped = c.max(axis=-1, keepdims=True)
+    knee = 0.6
+    t = np.minimum((mapped - knee) / (1 - knee), 0.995)
+    brightest = knee - (1 - knee) * np.log(1 - t)
+    return np.where(mapped <= knee, c, c * brightest / np.maximum(mapped, 1e-30))
+
+
+def test_hdr_hand_off_undoes_the_tone_curve():
+    """the HDR hand-off (PRISM Path Traced's frame to a plugin): INPUTS' untone inverts the composite's curves, so
+    FINISH's tone_curved of a plugin that returned its colour unchanged draws the frame the composite drew; the
+    shaders' curves are the bake's"""
+    import numpy as np
+    rng = np.random.default_rng(1)
+    light = rng.uniform(0.0, 3.0, (4096, 3)) * rng.uniform(0.0, 1.0, (4096, 1))
+    for curve in (0, 1, 2, 3):
+        shown = _tone_curved(light, curve)
+        if curve == 0:
+            shown = np.minimum(shown, 1.0)
+        again = _tone_curved(_untone(shown, curve), curve)
+        if curve == 0:
+            again = np.minimum(again, 1.0)
+        # (what is past the curve's last step from white is held there: under 1/255 elsewhere)
+        keep = shown.max(axis=-1) < 0.99
+        assert np.abs(again - shown)[keep].max() < 1.0 / 255.0, curve
+    source = (ROOT / "tools/vulkan_upscale_shaders.py").read_text()
+    bake = (VULKAN / "xgpu_vulkan_bake_glsl.inc").read_text()
+    for constant in ("2.51 * c + 0.03", "2.43 * c + 0.59) + 0.14", "k = 0.6"):
+        assert constant in source and constant in bake, constant
+
+
+def test_pt_hands_its_frame_to_the_plugin():
+    """the path tracer gives its exposure every frame and, in a view begun for a denoiser that upscales, its noisy light
+    and guides (composite's source 4); END takes them as the HDR hand-off (flags 16 and 32) and FINISH tone maps"""
+    pt = (VULKAN / "xgpu_vulkan_pt.c").read_text()
+    glsl = (VULKAN / "xgpu_vulkan_pt.glsl").read_text()
+    upscale = (VULKAN / "xgpu_vulkan_upscale.c").read_text()
+    assert "xgpu_vulkan_upscale_pt_raw()" in pt and "xgpu_vulkan_upscale_pt_frame(pt.exposure" in pt
+    assert "source = 4u;" in pt
+    assert "layout(set = 0, binding = 37, rgba16f) uniform image2D exposure_out;" in glsl
+    assert "if (source == 4u)" in glsl
+    assert "#define INPUT_HDR 16u" in upscale and "#define INPUT_PT_NOISY 32u" in upscale
+    assert "up.finish" in upscale and "PRISM_FRAME_HDR" in upscale
+    header = (VULKAN / "prism_plugin.h").read_text()
+    assert "PRISM_FRAME_HDR = 1u << 0" in header and "struct prism_plugin_image exposure_image;" in header

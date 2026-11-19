@@ -15,7 +15,13 @@ The generated C (port/linux/vulkan/xgpu_vulkan_upscale_shaders.c) embeds the SPI
   from the G-buffer's second target where its pass drew the pixel with history, else the camera's from the depth
   (none on the first-person weapon, which the stencil marks: it moves with the camera); the reactive mask where the
   transparent surfaces changed the colour (FSR's own generation's rule: the largest change of the tone-mapped
-  colour, 0.9 past 0.2, else 0). xgpu_vulkan_upscale.c runs it.
+  colour, 0.9 past 0.2, else 0). Where the path tracer gives its exposure (display.lighting "pathtraced") and a
+  plugin upscales, the colour is made linear HDR light before the tone mapping (the view's tone curve undone and
+  its exposure taken out); where it also gives its noisy light and guides (display.denoiser "dlss_rr": Ray
+  Reconstruction), the lit pixels' colour is that light (the transparent surfaces' change added) and the guides
+  are the path tracer's own. xgpu_vulkan_upscale.c runs it.
+- FINISH (below): the plugin's HDR output tone mapped again as the path tracer's composite maps it (the exposure,
+  then the curve), in place, at the output size.
 
 --check verifies that the checked-in file still matches its sources. glslang 16.6.0 and SPIRV-Tools produce the
 checked-in words.
@@ -79,12 +85,24 @@ layout(set = 0, binding = 11) uniform sampler2D gbuffer_base;
 layout(set = 0, binding = 12, rgba8) uniform writeonly image2D diffuse_out;
 layout(set = 0, binding = 13, rgba8) uniform writeonly image2D specular_out;
 layout(set = 0, binding = 14, rgba16f) uniform writeonly image2D normal_out;
+// (the path tracer's, xgpu_vulkan_pt.c: its noisy light before the tone mapping (alpha 1 where it lit the pixel),
+// its exposure and curve (1x1: x the exposure, y display.prism_tone_curve), its guides: the diffuse and specular
+// albedo, the shading normal and roughness, the reflection ray's hit distance (x))
+layout(set = 0, binding = 15) uniform sampler2D pt_radiance;
+layout(set = 0, binding = 16) uniform sampler2D pt_exposure;
+layout(set = 0, binding = 17) uniform sampler2D pt_diffuse;
+layout(set = 0, binding = 18) uniform sampler2D pt_specular;
+layout(set = 0, binding = 19) uniform sampler2D pt_normal;
+layout(set = 0, binding = 20) uniform sampler2D pt_hit;
+layout(set = 0, binding = 21, r16f) uniform writeonly image2D hit_out;
+layout(set = 0, binding = 22, r32f) uniform writeonly image2D exposure_out;
 layout(set = 0, binding = 9, std140) uniform Inputs
 {
     // the view's left, top, width and height in its targets' pixels
     ivec4 rect;
     // the jitter (pixels), the flags (1 the G-buffer's motion, 2 history, 4 the opaque colour kept, 8 the
-    // G-buffer's guides wanted), unused
+    // G-buffer's guides wanted, 16 the colour linear HDR by the path tracer's exposure, 32 the path tracer's
+    // noisy light and guides), unused
     vec4 jitter;
     // the camera this frame (SCENE_VIEW's: the eye and near, the axis at the middle and far, its change a unit of
     // the screen's x and y)
@@ -108,6 +126,29 @@ vec3 tone(vec3 c)
     return c / (1.0 + largest(c));
 }
 
+// display.prism_tone_curve undone (the curves of xgpu_vulkan_bake_glsl.inc's tone_curved: 1 and 3 filmic, the
+// brightest channel rolled off past 0.6 of white; 2 Narkowicz's ACES fit, by channel; else as it is), what is at
+// white taken as just under it
+vec3 untone(vec3 c, int curve)
+{
+    c = max(c, vec3(0.0));
+    if (curve == 2)
+    {
+        vec3 y = min(c, vec3(0.995));
+        vec3 a = 2.51 - 2.43 * y, b = 0.03 - 0.59 * y, k = -0.14 * y;
+        return (-b + sqrt(max(b * b - 4.0 * a * k, vec3(0.0)))) / (2.0 * a);
+    }
+    if (curve != 1 && curve != 3)
+        return c;
+    float mapped = largest(c);
+    const float knee = 0.6;
+    if (mapped <= knee)
+        return c;
+    float t = min((mapped - knee) / (1.0 - knee), 0.995);
+    float brightest = knee - (1.0 - knee) * log(1.0 - t);
+    return c * (brightest / mapped);
+}
+
 void main()
 {
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -118,7 +159,33 @@ void main()
     vec4 view = texelFetch(view_color, at, 0);
     vec3 color = view.rgb;
     float depth = texelFetch(view_depth, at, 0).r;
-    imageStore(color_out, pixel, view);
+    bool lit = false;
+    if ((flags & 16u) != 0u)
+    {
+        // linear HDR light before the tone mapping: the view's curve undone, its exposure out; where the path
+        // tracer lit the pixel and gives its noisy light, that light, with what the transparent surfaces drawn
+        // after it changed (the change of the view since OPAQUE, undone alike)
+        vec4 e = texelFetch(pt_exposure, ivec2(0), 0);
+        float exposure = max(e.x, 1.0e-6);
+        int curve = int(e.y + 0.5);
+        vec3 linear = untone(view.rgb, curve);
+        vec4 traced = (flags & 32u) != 0u ? texelFetch(pt_radiance, at, 0) : vec4(0.0);
+        lit = traced.a > 0.5;
+        vec3 hdr = linear / exposure;
+        if (lit)
+        {
+            hdr = traced.rgb;
+            if ((flags & 4u) != 0u)
+                hdr += (linear - untone(texelFetch(view_opaque, at, 0).rgb, curve)) / exposure;
+        }
+        if (any(isnan(hdr)) || any(isinf(hdr)))
+            hdr = vec3(0.0);
+        imageStore(color_out, pixel, vec4(max(hdr, vec3(0.0)), view.a));
+        if (pixel == ivec2(0))
+            imageStore(exposure_out, ivec2(0), vec4(exposure));
+    }
+    else
+        imageStore(color_out, pixel, view);
     imageStore(depth_out, pixel, vec4(depth));
 
     vec2 motion = vec2(0.0);
@@ -160,7 +227,26 @@ void main()
     }
     imageStore(reactive_out, pixel, vec4(reactive));
 
-    if ((flags & 8u) != 0u)
+    if ((flags & 32u) != 0u)
+    {
+        // the path tracer's own guides (the albedos it demodulated with), where it lit the pixel; else as the
+        // G-buffer's below has them where nothing is drawn
+        vec3 diffuse = vec3(1.0), specular = vec3(0.0);
+        vec4 normal = vec4(-normalize(u.now[1].xyz), 1.0);
+        float hit = 0.0;
+        if (lit)
+        {
+            diffuse = texelFetch(pt_diffuse, at, 0).rgb;
+            specular = texelFetch(pt_specular, at, 0).rgb;
+            normal = texelFetch(pt_normal, at, 0);
+            hit = texelFetch(pt_hit, at, 0).x;
+        }
+        imageStore(diffuse_out, pixel, vec4(diffuse, 1.0));
+        imageStore(specular_out, pixel, vec4(specular, 1.0));
+        imageStore(normal_out, pixel, normal);
+        imageStore(hit_out, pixel, vec4(hit));
+    }
+    else if ((flags & 8u) != 0u)
     {
         // the guides a denoiser that upscales asks for, from the G-buffer (xgpu_stream.h's GBUFFER_BEGIN): the
         // diffuse albedo (an object's base colour in word 0, the level's the base target's), the specular albedo
@@ -190,6 +276,41 @@ void main()
         imageStore(specular_out, pixel, vec4(specular, 1.0));
         imageStore(normal_out, pixel, vec4(normal, roughness));
     }
+}
+"""
+
+FINISH_SOURCE = r"""#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+
+// the plugin's output (HDR light, as its colour was given) and the path tracer's exposure and curve (as INPUTS)
+layout(set = 0, binding = 16) uniform sampler2D pt_exposure;
+layout(set = 0, binding = 23, rgba16f) uniform image2D output_image;
+
+// xgpu_vulkan_bake_glsl.inc's tone_curved, as the path tracer's composite draws its frame
+vec3 tone_curved(vec3 c, int curve)
+{
+    c = max(c, vec3(0.0));
+    if (curve == 2)
+        return clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);
+    if (curve != 1 && curve != 3)
+        return c;
+    float brightest = max(c.r, max(c.g, c.b));
+    const float k = 0.6;
+    float mapped = brightest <= k ? brightest : k + (1.0 - k) * (1.0 - exp(-(brightest - k) / (1.0 - k)));
+    return brightest > 1.0e-5 ? c * (mapped / brightest) : c;
+}
+
+void main()
+{
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel, imageSize(output_image))))
+        return;
+    vec4 e = texelFetch(pt_exposure, ivec2(0), 0);
+    vec4 light = imageLoad(output_image, pixel);
+    vec3 shown = tone_curved(light.rgb * max(e.x, 1.0e-6), int(e.y + 0.5));
+    if (any(isnan(shown)) || any(isinf(shown)))
+        shown = vec3(0.0);
+    imageStore(output_image, pixel, vec4(shown, light.a));
 }
 """
 
@@ -226,6 +347,9 @@ def generate(args):
     inputs = args.build_dir / "upscale_inputs.comp"
     inputs.write_text(INPUTS_SOURCE)
     programs.append(("upscale_inputs", compile_program(args, "upscale_inputs", inputs, [], [])))
+    finish = args.build_dir / "upscale_finish.comp"
+    finish.write_text(FINISH_SOURCE)
+    programs.append(("upscale_finish", compile_program(args, "upscale_finish", finish, [], [])))
     text = [
         "/* Generated by tools/vulkan_upscale_shaders.py from port/third_party/fidelityfx-fsr3 (AMD's FidelityFX "
         "Super Resolution 3.1, MIT: its LICENSE.txt) and its own GLSL. Do not edit. */\n",
