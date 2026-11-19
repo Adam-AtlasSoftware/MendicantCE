@@ -1124,6 +1124,14 @@ struct xgpu_vulkan_rt_device
 	uint32_t subgroup_least, subgroup_compute;
 };
 int xgpu_vulkan_rt_device(struct xgpu_vulkan_rt_device *device);
+/* a lost device's diagnosis (halo.log): a step of the GPU's work recorded
+into commands (id 1 to 255; name a string that lives as long as the
+program), the last one recorded and, where the device has its markers or
+checkpoints, the last it began and finished, logged if the device is lost;
+note, what a user of the device adds to the lost device's message (" in
+PRISM Path Traced": xgpu_vulkan_pt.c) */
+void xgpu_vulkan_breadcrumb(VkCommandBuffer commands, uint32_t id, const char *name);
+void xgpu_vulkan_device_lost_note(void (*note)(char *text, size_t size));
 VkCommandBuffer xgpu_vulkan_compute_commands(void);
 void xgpu_vulkan_image_compute_use(struct xgpu_vulkan_image *image, int written);
 VkImage xgpu_vulkan_image_handle(const struct xgpu_vulkan_image *image);

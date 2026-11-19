@@ -381,6 +381,19 @@ static void buffer_free(struct pt_buffer *buffer)
 	memset(buffer, 0, sizeof(*buffer));
 }
 
+/* the passes' names, for a lost device's report (xgpu_vulkan_breadcrumb:
+each pass's id its index + 1; the frame's begun and done BREADCRUMB_BEGUN
+and BREADCRUMB_DONE) */
+static const char *const pass_names[] =
+{
+	"Path Traced's light pass", "Path Traced's temporal pass", "Path Traced's fix pass", "Path Traced's atrous pass",
+	"Path Traced's composite pass", "Path Traced's reference pass", "Path Traced's reference statistics",
+	"Path Traced's lamps copy", "Path Traced's radiance cache",
+};
+typedef char pass_names_complete[sizeof(pass_names) / sizeof(pass_names[0]) == PASSES ? 1 : -1];
+#define BREADCRUMB_BEGUN 20u
+#define BREADCRUMB_DONE 21u
+
 /* the subgroup operations the passes use in compute (xgpu_vulkan_pt.glsl's
 temporal pass; BAKE_COMMON's shaders) */
 #define PT_SUBGROUP_OPERATIONS (VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT | \
@@ -436,7 +449,10 @@ static int pipeline_make(int which, const uint32_t *words, size_t word_count)
 	VkResult result;
 
 	if (!module)
+	{
+		host_logf(HOST_LOG_WARN, "prism pt: %s's shader module cannot be made", pass_names[which]);
 		return 0;
+	}
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -446,7 +462,20 @@ static int pipeline_make(int which, const uint32_t *words, size_t word_count)
 	info.layout = pt.pipeline_layout;
 	result = vkCreateComputePipelines(pt.device.device, VK_NULL_HANDLE, 1, &info, NULL, &pt.pipelines[which]);
 	vkDestroyShaderModule(pt.device.device, module, NULL);
+	if (result != VK_SUCCESS)
+		host_logf(HOST_LOG_WARN, "prism pt: %s's pipeline cannot be made (%d)", pass_names[which], (int)result);
 	return result == VK_SUCCESS;
+}
+
+/* a lost device's (xgpu_vulkan_device_lost_note): where Path Traced drew
+one of the last frames, the message says so, and the next start draws
+PRISM Rebaked instead (report.c's report_path_traced_fallback reads it) */
+static void lost_note(char *text, size_t size)
+{
+	if (!pt.made || !pt.last_serial || pt.last_serial + 16 < xgpu_vulkan_serial())
+		return;
+	snprintf(text, size, " in PRISM Path Traced. The next start uses PRISM Rebaked; Settings can choose Path Traced "
+		"again.");
 }
 
 static int make(void)
@@ -509,6 +538,9 @@ static int make(void)
 	layout_info.pPushConstantRanges = &push;
 	if (vkCreatePipelineLayout(pt.device.device, &layout_info, NULL, &pt.pipeline_layout) != VK_SUCCESS)
 		return 0;
+	/* (logged first: a driver that ends the game as it compiles them is seen
+	at the next start, report.c, as a lost device is) */
+	host_logf(HOST_LOG_INFO, "prism pt: making its passes");
 	if (!pipeline_make(PASS_LIGHT, xgpu_vulkan_pt_light_words, xgpu_vulkan_pt_light_count) ||
 		!pipeline_make(PASS_TEMPORAL, xgpu_vulkan_pt_temporal_words, xgpu_vulkan_pt_temporal_count) ||
 		!pipeline_make(PASS_FIX, xgpu_vulkan_pt_fix_words, xgpu_vulkan_pt_fix_count) ||
@@ -567,6 +599,7 @@ static int make(void)
 	}
 	pt.made = 1;
 	pt.failed = 0;
+	xgpu_vulkan_device_lost_note(lost_note);
 	host_logf(HOST_LOG_INFO, "prism pt: ready");
 	return 1;
 }
@@ -1190,6 +1223,7 @@ static void dispatch(VkCommandBuffer commands, int pass, VkDeviceAddress scene, 
 	push.parameters[1] = p1;
 	push.parameters[2] = p2;
 	push.parameters[3] = p3;
+	xgpu_vulkan_breadcrumb(commands, (uint32_t)pass + 1u, pass_names[pass]);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pt.pipelines[pass]);
 	vkCmdPushConstants(commands, pt.pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 	vkCmdDispatch(commands, groups_x, groups_y, 1);
@@ -1735,6 +1769,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			vkCmdResetQueryPool(commands, pt.queries, time_slot * STAMPS, STAMPS);
 		}
 	}
+	xgpu_vulkan_breadcrumb(commands, BREADCRUMB_BEGUN, "Path Traced's frame begun");
 	barrier(commands);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pt.pipeline_layout, 0, 1, &set, 0, NULL);
 	stamp(commands, time_slot, 0);
@@ -1885,6 +1920,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	}
 	barrier(commands);
 	host_barrier(commands);
+	xgpu_vulkan_breadcrumb(commands, BREADCRUMB_DONE, "Path Traced's frame done");
 	pt.job_serial[slot] = xgpu_vulkan_serial();
 	pt.set_serial[set_slot] = xgpu_vulkan_serial();
 	if (time_slot < TIME_SLOTS)

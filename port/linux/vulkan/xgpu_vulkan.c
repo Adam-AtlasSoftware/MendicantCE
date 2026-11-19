@@ -1258,6 +1258,28 @@ static struct
 	AMD's 32 or 64), and the operations compute has
 	(VK_SUBGROUP_FEATURE_*_BIT; 0 none) */
 	uint32_t subgroup_least, subgroup_compute;
+	/* a lost device's diagnosis (device_lost_report): the GPU's steps named
+	as they are recorded (xgpu_vulkan_breadcrumb), the last of them; the
+	markers the device writes of each (VK_AMD_buffer_marker: the last begun,
+	the last whose work before it was done), its checkpoints
+	(VK_NV_device_diagnostic_checkpoints), its fault's description
+	(VK_EXT_device_fault); what a user of the device adds
+	(xgpu_vulkan_device_lost_note) */
+	struct
+	{
+		const char *names[256];
+		const char *last;
+		uint64_t last_serial;
+		VkBuffer markers;
+		struct allocation markers_memory;
+		volatile uint32_t *markers_mapped;
+		PFN_vkCmdWriteBufferMarkerAMD write_marker;
+		PFN_vkCmdSetCheckpointNV set_checkpoint;
+		PFN_vkGetQueueCheckpointDataNV checkpoint_data;
+		PFN_vkGetDeviceFaultInfoEXT fault_info;
+		void (*note)(char *text, size_t size);
+		int reporting;
+	} lost;
 	/* display.prism_rt: the device has acceleration structures and ray
 	queries (their extensions and features enabled: device_make), and
 	buffer device addresses */
@@ -1669,18 +1691,35 @@ static const char *result_name(VkResult result)
 	case VK_ERROR_FORMAT_NOT_SUPPORTED: return "VK_ERROR_FORMAT_NOT_SUPPORTED";
 	case VK_ERROR_SURFACE_LOST_KHR: return "VK_ERROR_SURFACE_LOST_KHR";
 	case VK_ERROR_OUT_OF_DATE_KHR: return "VK_ERROR_OUT_OF_DATE_KHR";
+	case VK_ERROR_MEMORY_MAP_FAILED: return "VK_ERROR_MEMORY_MAP_FAILED";
+	case VK_ERROR_INCOMPATIBLE_DRIVER: return "VK_ERROR_INCOMPATIBLE_DRIVER";
+	case VK_ERROR_TOO_MANY_OBJECTS: return "VK_ERROR_TOO_MANY_OBJECTS";
+	case VK_ERROR_FRAGMENTED_POOL: return "VK_ERROR_FRAGMENTED_POOL";
+	case VK_ERROR_UNKNOWN: return "VK_ERROR_UNKNOWN";
+	case VK_ERROR_OUT_OF_POOL_MEMORY: return "VK_ERROR_OUT_OF_POOL_MEMORY";
+	case VK_ERROR_FRAGMENTATION: return "VK_ERROR_FRAGMENTATION";
+	case VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS: return "VK_ERROR_INVALID_OPAQUE_CAPTURE_ADDRESS";
+	case VK_PIPELINE_COMPILE_REQUIRED: return "VK_PIPELINE_COMPILE_REQUIRED";
+	case VK_ERROR_NATIVE_WINDOW_IN_USE_KHR: return "VK_ERROR_NATIVE_WINDOW_IN_USE_KHR";
+	case VK_ERROR_INCOMPATIBLE_DISPLAY_KHR: return "VK_ERROR_INCOMPATIBLE_DISPLAY_KHR";
+	case VK_ERROR_VALIDATION_FAILED_EXT: return "VK_ERROR_VALIDATION_FAILED_EXT";
+	case VK_ERROR_INVALID_SHADER_NV: return "VK_ERROR_INVALID_SHADER_NV";
+	case VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT: return "VK_ERROR_FULL_SCREEN_EXCLUSIVE_MODE_LOST_EXT";
 	default: return "VkResult";
 	}
 }
 
-/* a result checked: 1 if it succeeded, else logged (what failed) */
+static void device_lost_report(void);
+
+/* a result checked: 1 if it succeeded, else logged (what failed); a lost
+device reported (device_lost_report), the game ended */
 static int check(VkResult result, const char *what)
 {
 	if (result >= 0)
 		return 1;
 	host_logf(HOST_LOG_ERROR, "vulkan: %s: %s (%d)", what, result_name(result), (int)result);
 	if (result == VK_ERROR_DEVICE_LOST)
-		host_fatal("vulkan: the device was lost");
+		device_lost_report();
 	return 0;
 }
 
@@ -1933,6 +1972,143 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, Vk
 		return 0;
 	}
 	return 1;
+}
+
+/* ---------- a lost device's diagnosis
+
+A lost device (VK_ERROR_DEVICE_LOST: the driver's timeout, a page fault)
+ends the game, and the player sees only that. halo.log is told what is
+known of where the GPU was: the last step recorded (xgpu_vulkan_breadcrumb:
+Path Traced's passes), and where the device can say, what it had begun and
+finished (VK_AMD_buffer_marker's markers, VK_NV_device_diagnostic_
+checkpoints' checkpoints) and its fault (VK_EXT_device_fault). A marker is
+the step's id and the low 24 bits of its submission's serial. */
+
+void xgpu_vulkan_breadcrumb(VkCommandBuffer commands, uint32_t id, const char *name)
+{
+	uint32_t marker;
+
+	if (!commands || !id || id > 255)
+		return;
+	vk.lost.names[id] = name;
+	vk.lost.last = name;
+	vk.lost.last_serial = vk.serial;
+	marker = id | ((uint32_t)vk.serial << 8);
+	if (vk.lost.markers_mapped && vk.lost.write_marker)
+	{
+		/* (begun: the command processor reached it; done: every command
+		before it finished) */
+		vk.lost.write_marker(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, vk.lost.markers, 0, marker);
+		vk.lost.write_marker(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, vk.lost.markers, 4, marker);
+	}
+	if (vk.lost.set_checkpoint)
+		vk.lost.set_checkpoint(commands, (const void *)(uintptr_t)marker);
+}
+
+void xgpu_vulkan_device_lost_note(void (*note)(char *text, size_t size))
+{
+	vk.lost.note = note;
+}
+
+/* a marker's step, as words */
+static void marker_text(uint32_t marker, char *text, size_t size)
+{
+	const char *name = vk.lost.names[marker & 0xff];
+
+	if (!marker)
+		snprintf(text, size, "nothing");
+	else
+		snprintf(text, size, "%s (submission %u)", name ? name : "an unnamed step", marker >> 8);
+}
+
+/* (the device's markers, checkpoints and fault, where it has them) */
+static void device_lost_where(void)
+{
+	char begun[160], done[160];
+
+	if (vk.lost.markers_mapped)
+	{
+		marker_text(vk.lost.markers_mapped[0], begun, sizeof(begun));
+		marker_text(vk.lost.markers_mapped[1], done, sizeof(done));
+		host_logf(HOST_LOG_ERROR, "vulkan: the device's markers: the last step begun %s; every command before %s "
+			"finished", begun, done);
+	}
+	if (vk.lost.checkpoint_data)
+	{
+		VkCheckpointDataNV points[16];
+		uint32_t count = 0, index;
+
+		vk.lost.checkpoint_data(vk.queue, &count, NULL);
+		if (count > 16)
+			count = 16;
+		for (index = 0; index < count; index++)
+		{
+			memset(&points[index], 0, sizeof(points[index]));
+			points[index].sType = VK_STRUCTURE_TYPE_CHECKPOINT_DATA_NV;
+		}
+		if (count)
+			vk.lost.checkpoint_data(vk.queue, &count, points);
+		for (index = 0; index < count && index < 16; index++)
+		{
+			marker_text((uint32_t)(uintptr_t)points[index].pCheckpointMarker, done, sizeof(done));
+			host_logf(HOST_LOG_ERROR, "vulkan: the device's checkpoint: %s at stage 0x%x", done,
+				(unsigned)points[index].stage);
+		}
+	}
+	if (vk.lost.fault_info)
+	{
+		VkDeviceFaultCountsEXT counts;
+		VkDeviceFaultInfoEXT info;
+		VkDeviceFaultAddressInfoEXT addresses[16];
+		VkDeviceFaultVendorInfoEXT vendors[16];
+		uint32_t index;
+
+		memset(&counts, 0, sizeof(counts));
+		counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
+		if (vk.lost.fault_info(vk.device, &counts, NULL) < 0)
+			return;
+		counts.addressInfoCount = counts.addressInfoCount > 16 ? 16 : counts.addressInfoCount;
+		counts.vendorInfoCount = counts.vendorInfoCount > 16 ? 16 : counts.vendorInfoCount;
+		counts.vendorBinarySize = 0;
+		memset(addresses, 0, sizeof(addresses));
+		memset(vendors, 0, sizeof(vendors));
+		memset(&info, 0, sizeof(info));
+		info.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT;
+		info.pAddressInfos = addresses;
+		info.pVendorInfos = vendors;
+		if (vk.lost.fault_info(vk.device, &counts, &info) < 0)
+			return;
+		host_logf(HOST_LOG_ERROR, "vulkan: the device's fault: %.*s", (int)sizeof(info.description), info.description);
+		for (index = 0; index < counts.addressInfoCount; index++)
+			host_logf(HOST_LOG_ERROR, "vulkan: the device's fault: address 0x%llx (+-0x%llx), kind %d",
+				(unsigned long long)addresses[index].reportedAddress,
+				(unsigned long long)addresses[index].addressPrecision, (int)addresses[index].addressType);
+		for (index = 0; index < counts.vendorInfoCount; index++)
+			host_logf(HOST_LOG_ERROR, "vulkan: the device's fault: %.*s (code 0x%llx, data 0x%llx)",
+				(int)sizeof(vendors[index].description), vendors[index].description,
+				(unsigned long long)vendors[index].vendorFaultCode, (unsigned long long)vendors[index].vendorFaultData);
+	}
+}
+
+/* the device lost: what is known logged, then the game ended with a
+message (and what a user of the device adds: Path Traced's "in PRISM Path
+Traced", which the next start reads, report.c) */
+static void device_lost_report(void)
+{
+	char note[512];
+
+	note[0] = 0;
+	if (!vk.lost.reporting)
+	{
+		vk.lost.reporting = 1;
+		host_logf(HOST_LOG_ERROR, "vulkan: the device was lost: submission %llu recorded, %llu done; the last step "
+			"recorded %s (submission %llu)", (unsigned long long)vk.serial, (unsigned long long)vk.completed,
+			vk.lost.last ? vk.lost.last : "none", (unsigned long long)vk.lost.last_serial);
+		device_lost_where();
+		if (vk.lost.note)
+			vk.lost.note(note, sizeof(note));
+	}
+	host_fatal("vulkan: the device was lost%s", note);
 }
 
 /* ---------- the timeline */
@@ -11062,6 +11238,16 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	VkPhysicalDeviceAccelerationStructureFeaturesKHR available_structures, structures;
 	VkPhysicalDeviceRayQueryFeaturesKHR available_queries, queries;
 	VkPhysicalDeviceBufferDeviceAddressFeatures addresses;
+	/* (a lost device's diagnosis, device_lost_report: its fault's
+	description and AMD's markers where the device has them, NVIDIA's
+	checkpoints with HALO_VULKAN_CHECKPOINTS=1 (they cost a little);
+	HALO_VULKAN_NO_DIAGNOSIS none of them) */
+	int diagnosis = !getenv("HALO_VULKAN_NO_DIAGNOSIS");
+	int fault = diagnosis && device_has_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+	int markers = diagnosis && device_has_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
+	int checkpoints = diagnosis && getenv("HALO_VULKAN_CHECKPOINTS") && atoi(getenv("HALO_VULKAN_CHECKPOINTS")) != 0 &&
+		device_has_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+	VkPhysicalDeviceFaultFeaturesEXT available_fault, fault_features;
 	void **chain;
 
 	memset(&available, 0, sizeof(available));
@@ -11137,6 +11323,13 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		*chain = &available_id;
 		available_id.pNext = &available_wait;
 		chain = &available_wait.pNext;
+	}
+	memset(&available_fault, 0, sizeof(available_fault));
+	available_fault.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+	if (fault)
+	{
+		*chain = &available_fault;
+		chain = &available_fault.pNext;
 	}
 	vkGetPhysicalDeviceFeatures2(vk.physical, &available);
 	if (!required_features(&available, &available12, &available13) || !depth_format_choose())
@@ -11316,6 +11509,21 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		vk.capabilities.ray_queries = ray_queries;
 		vk.ray_tracing = ray_tracing;
 	}
+	if (fault && available_fault.deviceFault)
+	{
+		memset(&fault_features, 0, sizeof(fault_features));
+		fault_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+		fault_features.deviceFault = VK_TRUE;
+		*chain = &fault_features;
+		chain = &fault_features.pNext;
+		extensions[extension_count++] = VK_EXT_DEVICE_FAULT_EXTENSION_NAME;
+	}
+	else
+		fault = 0;
+	if (markers)
+		extensions[extension_count++] = VK_AMD_BUFFER_MARKER_EXTENSION_NAME;
+	if (checkpoints)
+		extensions[extension_count++] = VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME;
 
 	memset(&queue, 0, sizeof(queue));
 	queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -11343,6 +11551,37 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		LOAD(vkSetHdrMetadataEXT)
 #undef LOAD
 	vkGetDeviceQueue(vk.device, vk.queue_family, 0, &vk.queue);
+	memset(&vk.lost, 0, sizeof(vk.lost));
+	if (fault)
+		vk.lost.fault_info = (PFN_vkGetDeviceFaultInfoEXT)vkGetDeviceProcAddr(vk.device, "vkGetDeviceFaultInfoEXT");
+	if (markers)
+		vk.lost.write_marker = (PFN_vkCmdWriteBufferMarkerAMD)vkGetDeviceProcAddr(vk.device, "vkCmdWriteBufferMarkerAMD");
+	if (checkpoints)
+	{
+		vk.lost.set_checkpoint = (PFN_vkCmdSetCheckpointNV)vkGetDeviceProcAddr(vk.device, "vkCmdSetCheckpointNV");
+		vk.lost.checkpoint_data = (PFN_vkGetQueueCheckpointDataNV)vkGetDeviceProcAddr(vk.device,
+			"vkGetQueueCheckpointDataNV");
+		if (!vk.lost.set_checkpoint || !vk.lost.checkpoint_data)
+			vk.lost.set_checkpoint = NULL, vk.lost.checkpoint_data = NULL;
+	}
+	/* (the markers' buffer: the host's, cached, which it reads once the
+	device is lost) */
+	if (vk.lost.write_marker)
+	{
+		void *mapped = NULL;
+
+		if (buffer_make(16, VK_BUFFER_USAGE_TRANSFER_DST_BIT, BUFFER_READBACK, &vk.lost.markers,
+			&vk.lost.markers_memory, &mapped) && mapped)
+		{
+			memset(mapped, 0, 16);
+			vk.lost.markers_mapped = (volatile uint32_t *)mapped;
+		}
+		else
+			vk.lost.write_marker = NULL;
+	}
+	if (vk.lost.fault_info || vk.lost.write_marker || vk.lost.set_checkpoint)
+		host_logf(HOST_LOG_INFO, "vulkan: a lost device's diagnosis:%s%s%s", vk.lost.fault_info ? " its fault" : "",
+			vk.lost.write_marker ? " AMD's markers" : "", vk.lost.set_checkpoint ? " NVIDIA's checkpoints" : "");
 	if (vk.capabilities.ray_queries)
 	{
 		VkPhysicalDeviceAccelerationStructurePropertiesKHR structure_properties;

@@ -2516,6 +2516,7 @@ static VkAccelerationStructureKHR scene_build(VkCommandBuffer commands, struct r
 	info.scratchData.deviceAddress = scratch;
 	memset(&range, 0, sizeof(range));
 	range.primitiveCount = count;
+	xgpu_vulkan_breadcrumb(commands, 43, "the traced objects' top level");
 	vkCmdBuildAccelerationStructuresKHR(commands, 1, &info, &ranges);
 	if (structure_address)
 		*structure_address = address;
@@ -2942,6 +2943,7 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 		push.info = rt.info.address;
 		push.count = capture->job_count;
 		push.pad = 0;
+		xgpu_vulkan_breadcrumb(commands, 40, "the traced objects' skinning");
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.reset);
 		vkCmdPushConstants(commands, rt.reset_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 		vkCmdDispatch(commands, (capture->job_count + 63) / 64, 1, 1);
@@ -2957,6 +2959,7 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 	}
 	if (built)
 	{
+		xgpu_vulkan_breadcrumb(commands, 41, "the traced objects' builds");
 		vkCmdBuildAccelerationStructuresKHR(commands, built, infos, range_pointers);
 		barrier_global(commands, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
 			VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
@@ -2974,6 +2977,7 @@ static uint32_t objects_record(VkCommandBuffer commands, struct rt_slot *slot, c
 		mask.eye[1] = eye[1];
 		mask.eye[2] = eye[2];
 		mask.eye[3] = 0.0f;
+		xgpu_vulkan_breadcrumb(commands, 42, "the traced objects' instances");
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.mask);
 		vkCmdPushConstants(commands, rt.mask_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(mask), &mask);
 		vkCmdDispatch(commands, (objects + 63) / 64, 1, 1);

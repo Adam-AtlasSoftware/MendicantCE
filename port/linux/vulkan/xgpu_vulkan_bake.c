@@ -3491,6 +3491,7 @@ static void run(VkCommandBuffer commands, int pipeline, struct bake_state *b, Vk
 	push.values[1] = v1;
 	push.values[2] = v2;
 	push.values[3] = v3;
+	xgpu_vulkan_breadcrumb(commands, 60, "the bake's passes");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[pipeline]);
 	vkCmdPushConstants(commands, bake.pipeline_layouts[pipeline], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 	vkCmdDispatch(commands, groups, 1, 1);
@@ -3539,6 +3540,7 @@ static void run_compacted(VkCommandBuffer commands, int pipeline, struct bake_st
 	push.values[1] = v1;
 	push.values[2] = v2;
 	push.values[3] = v3;
+	xgpu_vulkan_breadcrumb(commands, 61, "the bake's texels");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[pipeline]);
 	vkCmdPushConstants(commands, bake.pipeline_layouts[pipeline], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 	vkCmdDispatchIndirect(commands, b->compact_args.buffer, 0);
@@ -6100,6 +6102,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		vkCmdPushConstants(commands, bake.pipeline_layouts[PIPELINE_RASTER], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
 			&push);
 	}
+	xgpu_vulkan_breadcrumb(commands, 62, "Rebaked's light pass");
 	vkCmdDispatch(commands, (description->width + 7) / 8, (description->height + 7) / 8, 1);
 	barrier(commands);
 	if (!bake_view)
