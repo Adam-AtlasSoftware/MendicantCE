@@ -96,7 +96,7 @@ with the most light there, their unshadowed light by linearly transformed
 cosines, only their visibility traced; 0 none), the specular antialiasing
 (HALO_PT_SPECULAR_AA: the roughness widened by the normal's variance over
 the pixel) and its most added alpha squared */
-#define ANALYTIC_DEFAULT 4
+#define ANALYTIC_DEFAULT 0
 /* ReSTIR DI's lamp candidates a pixel where the analytic lamps take the
 strongest (8 without them) */
 #define CANDIDATES_ANALYTIC 4

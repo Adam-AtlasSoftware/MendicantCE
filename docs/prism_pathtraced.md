@@ -163,7 +163,11 @@ unshadowed light is computed exactly and only their visibility is estimated (Hei
 "Combining Analytic Direct Illumination and Stochastic Shadows": the ratio estimator). `xgpu_vulkan_pt.glsl`'s
 `analytic_select`, `analytic_light`, `ltc_triangle`, `baked_lamps_at`.
 
-- **Which lights** (`analytic_select`; `HALO_PT_ANALYTIC` of them a pixel, 4 by default, at most 8): first the lamps
+**Off by default** (`HALO_PT_ANALYTIC=0`): measured at G4 and G5 it does not yet beat the stochastic lamps by the
+gates (below). `HALO_PT_ANALYTIC=4` turns it on (`HALO_PT_BAKED_VISIBILITY` and `HALO_PT_SPECULAR_AA`, on by default,
+act only on the analytic lamps).
+
+- **Which lights** (`analytic_select`; `HALO_PT_ANALYTIC` of them a pixel, at most 8): first the lamps
   the bake keeps for the tile of the pixel's texel (below) where they light the pixel; then, to fill the count (an
   object's pixel, a texel with fewer), the 8 lamps of the pixel's grid cell's seen list with the most light the bake
   found each gives the cell's points (the list's weights, words the cell's pixels share), ranked by their light at
@@ -194,7 +198,7 @@ unshadowed light is computed exactly and only their visibility is estimated (Hei
   lights stream past, weighted reservoir sampling: no arrays). So a static room lit by its lamps has its lamps'
   diffuse light without noise, in motion too, and a character still shadows the wall in front of a lamp.
 - **The rest.** ReSTIR DI takes the other lamps, fixtures and the dynamic lights as before (`HALO_PT_CANDIDATES`' default
-  is 4 candidates where the analytic lamps are on, 8 without: it pays for them), an analytic light's target nought
+  is 4 candidates where the analytic lamps are on, 8 without: it pays for part of them), an analytic light's target nought
   there, and the reflection's ray takes no light from an analytic lamp it meets (`analytic_triangle`): nothing is
   counted twice and the other lights' estimate stays unbiased. The reference does not change.
 - **The bake's lamp visibility** (`HALO_PT_BAKED_VISIBILITY`, on by default; `docs/prism_bake.md`, "The lamps'
@@ -212,6 +216,28 @@ unshadowed light is computed exactly and only their visibility is estimated (Hei
   reads moved b30's semi-glossy floor past the traced reflection's roughness (0.35) onto the probes and took its
   reflections' sheen (round 7's first try, G4's first pose). The G-buffer keeps one normal a pixel, so detail finer
   than a pixel (Toksvig's measure of a normal map's mip levels) is not seen.
+- **Measured (round 7; `v4_ltc_runs`).** `HALO_PT_ANALYTIC=4` (stage `stage_i`, BAKE_VERSION 21) against HEAD's
+  defaults (`stage_base`, d75c355d4), the gates' moving frames against R on the RTX 2060 (`r7/gates_base`,
+  `r7/gates_i`), frame times on the RTX 3070 Ti at 1080p (`time_time_g4_base3`, `time_time_g4_i`, made close
+  together):
+
+  | | G4 error / blotch / FLIP / flicker | G5 error / blotch / FLIP / flicker | G4 3070 Ti ms (light pass) |
+  | --- | --- | --- | --- |
+  | HEAD | 0.1767 / 0.0808 / 0.119 / 1.34 | 0.1403 / 0.0773 / 0.132 / 1.01 | 18.04 (11.16) |
+  | analytic, 4 | 0.1969 / 0.0829 / 0.117 / 1.33 | 0.1686 / 0.0794 / 0.140 / 0.99 | 20.73 (13.83) |
+
+  What the frames say: the lamps' diffuse light is clean (G4's floor in motion has fewer of the specular streaks;
+  the wall's tile seam in HEAD's moving frames is gone, `r7/strip_g4_*_base_i.png`), the frames' mean is nearer R's
+  (G4's poses 16.8, 23.3, 15.8 of R's 17.8, 24.2, 19.9 against HEAD's 16.6, 22.6, 14.2); but the interiors' worst
+  speckle, the semi-glossy walls' white dots (G4's left wall), is not from the analytic lamps: those pixels already
+  have 4 to 8 analytic lamps (`HALO_PT_DEBUG_ANALYTIC`), a grazing view keeps their specular light stochastic (the
+  fit), and the dots stay when the reflection's ray is not traced there (`HALO_PT_RAY_ROUGHNESS=0.3`): they are other
+  lamps' highlights (R's bright specular pools on that wall, which every live variant has at about two thirds of R's
+  light and as dots). A light-tree search along the mirror direction for those lamps cost 14 ms and did not find
+  them (removed). G5's p1 is darker than HEAD's on its large wall (not yet explained: the baked visibility, the
+  lamps chosen or the ratio's pick). The per-pixel error is up where the dark floor gets a little more light than R
+  (G4 p2's lower blocks +1 to +3 of 255). Remaining: the walls' specular dots (more lamps a tile, a grazing-view fit,
+  or the specular reservoir's reuse), G5's dark wall, the cost.
 - `HALO_PT_DEBUG_ANALYTIC=1` (a diagnosis) under `debug.gbuffer_view "pt_noisy"`: red the analytic lights' count over
   8, green the roughness, blue the bake's lamps among them over 8.
 
@@ -449,6 +475,8 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
   plan); the first-person view's shadow on the world.
 
 ## What is not done yet
+
+- **The analytic lamps by default** (in, off: "The analytic lamps", measured).
 
 - **ReSTIR DI's spatial reuse by default** (in, off: its cost and its blobs in motion, above).
 - **ReSTIR GI's spatial reuse** (its temporal reuse is in), the dynamic objects' occlusion of the baked light
