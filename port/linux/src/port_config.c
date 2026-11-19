@@ -925,6 +925,27 @@ static const struct config_setting config_settings[] =
 		"(its diffuse and specular light and the sun's shadows); \"off\" the\n"
 		"traced light as it is, one sample a pixel (for checking). Read each\n"
 		"frame." },
+	{ "display.prism_glow_lights", _config_real, "1.0", "HALO_PRISM_GLOW_LIGHTS", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\": how brightly what glows lights\n"
+		"its surroundings, 0 to 4 (1 the calibrated light, 0 none): plasma\n"
+		"bolts, needles and grenades, the energy sword, shields, muzzle flashes,\n"
+		"explosions and the self-illuminated parts of the objects, each a light\n"
+		"with traced shadows. Read each frame." },
+	{ "display.prism_dynamic_lights", _config_real, "0.4", "HALO_PRISM_DYNAMIC_LIGHTS", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\": how brightly the moving lights\n"
+		"light, 0 to 4, as far as their light is coloured (white lights, the\n"
+		"flashlight, keep theirs): plasma, needles, muzzle flashes, grenades,\n"
+		"explosions, and with display.prism_glow_lights what glows. 1 gives\n"
+		"each the whole of CE's light (its colour over its radius, which floods\n"
+		"a wall several metres across); 0.4 the calibrated light. Read each\n"
+		"frame." },
+	{ "display.prism_light_saturation", _config_real, "0.6", "HALO_PRISM_LIGHT_SATURATION", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\": how much of their colour the\n"
+		"moving lights keep, 0 (white, of the same brightness) to 1 (CE's\n"
+		"colours, a plasma bolt's pure green). Read each frame." },
 	{ "display.prism_raster_composition", _config_string, "\"ce\"", "HALO_PRISM_RASTER_COMPOSITION",
 		_environment_value, _platform_desktop,
 		"PRISM Raster: what composes the frame from the baked light. \"ce\" the\n"
@@ -4020,6 +4041,10 @@ static const struct config_setting config_settings[] =
 		"the lights' brightness, core, spill past white and wrap on models, the\n"
 		"glow's size (of the light's radius), brightness, softness (world\n"
 		"units) and least size; empty: the defaults." },
+	{ "debug.glow_inventory", _config_boolean, "false", "HALO_GLOW_INVENTORY", _environment_value, _platform_all,
+		"Log what glows: once per map, every light, object and effect tag with\n"
+		"its lights, self-illuminated shaders and particles; in play, each\n"
+		"light first seen with its owner and whether it was drawn." },
 	{ "debug.dynamic_lights_log", _config_boolean, "false", "HALO_DYNAMIC_LIGHTS_LOG", _environment_value, _platform_all,
 		"Log where the first projectile's light is drawn each frame (the\n"
 		"enhanced dynamic lights)." },
@@ -4461,7 +4486,8 @@ static const char *const config_display_order[] =
 	"=PRISM Rebaked (\"raster\") alone",
 	"display.prism_raster_composition", "display.prism_raster_objects",
 	"=PRISM Path Traced (\"pathtraced\") alone",
-	"display.pt_profile", "display.denoiser",
+	"display.pt_profile", "display.denoiser", "display.prism_glow_lights", "display.prism_dynamic_lights",
+	"display.prism_light_saturation",
 	"=Ray tracing: the traced scene (Classic with display.prism_rt on, PRISM Rebaked's traced object shadows,\n"
 		"PRISM Path Traced), Rebaked's object shadows, then Classic's ray tracer (display.prism_rt, off under\n"
 		"both PRISM modes) and its look",
@@ -4535,6 +4561,9 @@ static const struct
 	{ "display.prism_raster_object_shadows", "PRISM Rebaked (display.lighting \"raster\") alone" },
 	{ "display.pt_profile", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
 	{ "display.denoiser", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
+	{ "display.prism_glow_lights", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
+	{ "display.prism_dynamic_lights", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
+	{ "display.prism_light_saturation", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
 	{ "display.prism_rt_objects", "Classic with display.prism_rt on, PRISM Rebaked with its object shadows traced, "
 		"PRISM Path Traced" },
 	{ "display.prism_rt_cache", "Classic with display.prism_rt on, PRISM Rebaked with its object shadows traced, "

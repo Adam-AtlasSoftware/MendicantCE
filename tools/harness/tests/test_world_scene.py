@@ -1,7 +1,7 @@
 """display.ambient_occlusion "world"'s scene (port/linux/include/world_scene.h, port/linux/game/world_scene.c,
 docs/world-ao.md): the whole file against a small fake game. The static triangles' copy of a hand-built collision
 BSP; ids stable over frames and never another live object's; an object's instance following its node as drawn between
-the ticks; the light list (a light's cone and gel map from its definition)."""
+the ticks; the light list (a light's cone and gel map from its definition, a lens flare's light a glow)."""
 import re
 import sys
 from pathlib import Path
@@ -49,6 +49,10 @@ CONTROLS = [
     ("WORLD_SCENE_GEL_MAP))->index != NONE)", "WORLD_SCENE_GEL_MAP))->index == NONE)", "lights"),
     # ... or read at another offset of its definition
     ("#define WORLD_SCENE_GEL_MAP 0x64", "#define WORLD_SCENE_GEL_MAP 0x54", "lights"),
+    # a dynamic light taken for a lens flare's alone (a glow at display.prism_glow_lights) ...
+    ("if (definition && !(definition->flags & 1))", "if (definition)", "lights"),
+    # ... or a lens flare's light left out of the glows
+    ("if (definition && !(definition->flags & 1))", "if (0)", "lights"),
 ]
 
 

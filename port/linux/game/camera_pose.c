@@ -477,7 +477,10 @@ static short placed_object_count;
 /* the loaded tag of that name, in the first of the object groups that has it */
 static long camera_pose_object_tag(char const *name)
 {
-	static long const groups[] = { 'vehi', 'bipd', 'weap', 'eqip', 'scen', 'mach', 'ctrl', 'lifi', 'plac', 'ssce', 'garb' };
+	/* (and a projectile, held where it is put: a bolt's or a needle's glow
+	staged in a dark corridor for the glow runs' pictures) */
+	static long const groups[] = { 'vehi', 'bipd', 'weap', 'eqip', 'scen', 'mach', 'ctrl', 'lifi', 'plac', 'ssce', 'garb',
+		'proj' };
 	short i;
 
 	for (i = 0; i < (short)NUMBEROF(groups); i++)
@@ -517,6 +520,28 @@ void camera_pose_place_object(char const *line)
 	}
 	seat[0] = 0;
 	name[0] = 0;
+	/* ("player arm": the last placed object, a weapon or a grenade, put in
+	the first player's unit's hands or pouch, the weapon in place of the one
+	held: the glow runs' weapons fired down a corridor by a scripted input) */
+	if (line && !strcmp(line, "player arm"))
+	{
+		long player_index = data_next_index(player_data, NONE);
+		struct player_datum *player = player_index != NONE ? player_get(player_index) : NULL;
+		long placed = placed_object_count ? placed_objects[placed_object_count - 1] : NONE;
+		struct object_datum *object = placed != NONE ? object_try_and_get(placed) : NULL;
+
+		if (!player || player->unit_index == NONE || !object)
+		{
+			console_printf(FALSE, "debug_object_place: no player's unit, or no object placed to arm it with");
+			return;
+		}
+		if (object->object.type == _object_type_weapon)
+			unit_add_weapon_to_inventory(player->unit_index, placed, _unit_add_weapon_replace);
+		else if (object->object.type == _object_type_equipment)
+			unit_add_grenade_to_inventory(player->unit_index, placed);
+		platform_log("player arm: %s", tag_get_name(object->definition_index));
+		return;
+	}
 	/* ("player pose": the first player's unit's place and facing written to
 	the log as a camera path's pose, its eye 0.6 world units above its
 	origin: the quality gates' poses on a map with no scene of its own) */
@@ -610,7 +635,7 @@ flashlight where the camera is) */
 		 sscanf(line, "%f %f %f %f %f %f", &x, &y, &z, &yaw, &pitch, &roll) < 4))
 	{
 		console_printf(FALSE, "debug_object_place \"<tag> <x> <y> <z> <yaw> [<pitch> <roll>] [color <r> <g> <b>]\", \"<tag> seat <label>\", "
-			"\"player seat <label>\", \"player at <x> <y> <z> <yaw>\", or \"clear\"");
+			"\"player seat <label>\", \"player at <x> <y> <z> <yaw>\", \"player arm\", or \"clear\"");
 		return;
 	}
 	/* ("player seat <label>": the first player's own unit put in the last
@@ -706,8 +731,11 @@ flashlight where the camera is) */
 	if (object_index == NONE)
 	{
 		console_printf(FALSE, "debug_object_place: %s was not made", name);
+		platform_log("debug_object_place: %s was not made", name);
 		return;
 	}
+	platform_log("debug_object_place: %s at %.3f %.3f %.3f", name, (double)data.position.x, (double)data.position.y,
+		(double)data.position.z);
 	if (seat[0])
 	{
 		unit_scripting_enter_vehicle(object_index, placed_objects[placed_object_count - 1], seat);

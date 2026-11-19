@@ -303,6 +303,15 @@ static long fake_lights_alive[MAXIMUM_LIGHTS_PER_MAP];
 static struct data_array fake_light_data;
 struct data_array *light_data = &fake_light_data;
 
+/* (glow_lights.c's display.prism_glow_lights, by which PRISM Path Traced
+lights what CE draws as a lens flare alone: a value of its own here) */
+#define FAKE_GLOW_SCALE 0.75f
+
+real glow_lights_scale(void)
+{
+	return FAKE_GLOW_SCALE;
+}
+
 boolean dynamic_lights_drawn_get(long index, long *light, real_point3d *position, real *radius)
 {
 	if (index < 0 || index >= MAXIMUM_LIGHTS_PER_MAP || !fake_lights_drawn[index].light)
@@ -605,15 +614,17 @@ static void follows_case(void)
 
 static void lights_case(void)
 {
-	/* (a light definition as the tag has it: its cone first, its gel map's
-	reference at 0x64; tag_schema_render.c's light_definition) */
+	/* (a light definition as the tag has it: its flags (bit 0 dynamic) and
+	cone first, its gel map's reference at 0x64; tag_schema_render.c's
+	light_definition. The spot is a dynamic light; the omni CE draws as its
+	lens flare alone) */
 	static struct
 	{
 		struct world_scene_light_definition cone;
 		byte other[0x64 - sizeof(struct world_scene_light_definition)];
 		struct tag_reference gel_map;
 		byte rest[0x40];
-	} spot = { { 0, 1.0f, 0.0f, 0.0f, 0.5f, 0.6f, 0.0f, 0.9f, 0.8f }, { 0 }, { 0, NULL, 0, 0x00e10007 }, { 0 } },
+	} spot = { { 1, 1.0f, 0.0f, 0.0f, 0.5f, 0.6f, 0.0f, 0.9f, 0.8f }, { 0 }, { 0, NULL, 0, 0x00e10007 }, { 0 } },
 	  omni = { { 0, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, -1.0f }, { 0 }, { 0, NULL, 0, NONE }, { 0 } };
 	struct scenario_light_fixture_datum fixtures[2];
 	struct world_scene_light const *lights;
@@ -661,6 +672,8 @@ static void lights_case(void)
 		lights[0].position[0] == 4.0f && lights[0].radius == 3.0f && lights[0].direction[2] == -1.0f &&
 		lights[0].color[0] == 0.5f && (lights[0].flags & WORLD_SCENE_LIGHT_DYNAMIC), "the live light");
 	CHECK(lights[0].gel == WORLD_SCENE_GEL, "the live light's gel map: %g", lights[0].gel);
+	CHECK(lights[0].intensity == 1.0f && !(lights[0].flags & WORLD_SCENE_LIGHT_GLOW),
+		"the dynamic light taken as a glow: intensity %g, flags 0x%x", lights[0].intensity, lights[0].flags);
 	CHECK(lights[1].gel == 1.0f, "the fixture's gel: %g", lights[1].gel);
 	/* the spot without its gel map: its light whole */
 	spot.gel_map.index = NONE;
@@ -669,6 +682,15 @@ static void lights_case(void)
 	CHECK(world_scene_light_count() == 2 && lights[0].id == alive && lights[0].gel == 1.0f,
 		"no gel map, but the light is let through by %g", lights[0].gel);
 	spot.gel_map.index = 0x00e10007;
+	/* the spot as a lens flare's light alone (no dynamic flag): a glow, at
+	display.prism_glow_lights */
+	spot.cone.flags = 0;
+	world_scene_frame_begin();
+	lights = world_scene_lights();
+	CHECK(world_scene_light_count() == 2 && lights[0].id == alive && (lights[0].flags & WORLD_SCENE_LIGHT_GLOW) &&
+		lights[0].intensity == FAKE_GLOW_SCALE, "a lens flare's light not a glow: intensity %g, flags 0x%x",
+		lights[0].intensity, lights[0].flags);
+	spot.cone.flags = 1;
 	CHECK(lights[1].id == (WORLD_SCENE_ID_STATIC_BIT | 0) && (lights[1].flags & WORLD_SCENE_LIGHT_FIXTURE) &&
 		lights[1].position[0] == 1.0f && lights[1].color[1] == 1.0f && lights[1].intensity == 2.0f &&
 		lights[1].type == 1 && fabsf(lights[1].cone_cosine - cosf(1.0f)) < 1e-6f, "the fixture");

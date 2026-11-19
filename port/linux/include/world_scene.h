@@ -96,6 +96,9 @@ enum
 	/* a dynamic light, as the rasterizer took it the frame before (the last
 	window's) */
 	WORLD_SCENE_LIGHT_DYNAMIC = 1 << 1,
+	/* (and a light CE draws as its lens flare alone, no dynamic flag, which
+	PRISM Path Traced lights with: glow_lights.c) */
+	WORLD_SCENE_LIGHT_GLOW = 1 << 2,
 };
 
 /* a light of the world light list (world space, linear colour) */
@@ -145,6 +148,7 @@ struct world_scene_instance const *world_scene_instance_find(long id);
 /* port: the dynamic lights the rasterizer drew listed alone, where world AO
 is off (PRISM v4's SCENE_LIGHTS) */
 void world_scene_lights_refresh(void);
+void world_scene_lights_relist(void);
 long world_scene_light_count(void);
 struct world_scene_light const *world_scene_lights(void);
 

@@ -47,6 +47,8 @@ unsigned long config_changes(void);
 
 /* object_lights.c (port) */
 long light_port_glow_definition_get(void);
+/* glow_lights.c */
+boolean glow_lights_all(void);
 boolean light_port_glow_set(long light_index, long object_index, real_rgb_color const *color, real radius);
 /* port/linux/game/overshield_effect.c */
 real overshield_effect_flare(long unit_index);
@@ -114,7 +116,8 @@ static boolean shield_glow_enabled(
 		char const *intensity = config_string("display.shield_glow_intensity");
 
 		changes = config_changes();
-		enabled = config_boolean("display.shield_glow") != 0;
+		/* (and in PRISM Path Traced, where what glows lights: glow_lights.c) */
+		enabled = config_boolean("display.shield_glow") != 0 || glow_lights_all();
 		shield_glow_scale = intensity && !strcmp(intensity, "light_show") ? 3.f : 1.f;
 	}
 	return enabled;

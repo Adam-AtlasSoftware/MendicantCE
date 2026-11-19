@@ -185,6 +185,11 @@ symbols in this file:
 #include "units/units.h"
 #include "cache/cache_files.h" /* port: (tag_iterator: light_port_glow_definition_get) */
 void shield_glow_update(void); /* port: port/linux/game/shield_glow.c */
+/* port: port/linux/game/glow_lights.c */
+boolean glow_lights_all(void);
+real glow_lights_share(short object_type);
+void glow_lights_seen(long definition_index, long object_index, boolean dynamic, boolean drawn, real radius,
+	real_rgb_color const *color, real_point3d const *position);
 /* port: port/linux/game/dynamic_lights.c (display.dynamic_lights) */
 void dynamic_lights_note(long rasterizer_light_index, long flags, real cone_scale, real cone_offset,
 	real_point3d const *tick_position);
@@ -1308,6 +1313,11 @@ void lights_preprocess_scene(
 		(port/linux/game/dynamic_lights.c) */
 		projectile_lights = !TEST_FLAG(light->flags, _point_light_dynamic_bit) && object &&
 			object->object.type == _object_type_projectile && halo_dynamic_lights_enhanced();
+		/* port: in PRISM Path Traced, every light that glows lights, as the
+		enhanced dynamic lights light a projectile's: an effect's, a weapon's,
+		a vehicle's, a grenade's (port/linux/game/glow_lights.c) */
+		if (!TEST_FLAG(light->flags, _point_light_dynamic_bit) && glow_lights_all())
+			projectile_lights = TRUE;
 		if (light->color.red != 0.0f
 			|| light->color.green != 0.0f
 			|| light->color.blue != 0.0f)
@@ -1344,6 +1354,16 @@ void lights_preprocess_scene(
 					nowhere, at the tick's radius) */
 					light_parameters.radius = drawn_radius;
 					light_parameters.color = drawn_color;
+					/* port: (a glow PRISM Path Traced lights with, its share:
+					port/linux/game/glow_lights.c) */
+					if (!TEST_FLAG(light->flags, _point_light_dynamic_bit) && glow_lights_all())
+					{
+						real share = glow_lights_share(object ? object->object.type : NONE);
+
+						light_parameters.color.red *= share;
+						light_parameters.color.green *= share;
+						light_parameters.color.blue *= share;
+					}
 					if (!(drawn_radius > 0.0f) && light->radius > 0.0f)
 					{
 						light_parameters.radius = light->radius;
@@ -1533,6 +1553,12 @@ void lights_preprocess_scene(
 				light->radius = definition->radius;
 				lights_port.radius_writes++;
 			}
+
+			/* port: each light seen, with its owner (a projectile's flashes
+			where it strikes; debug.glow_inventory: port/linux/game/glow_lights.c) */
+			glow_lights_seen(light->definition_index, light->object_index,
+				TEST_FLAG(light->flags, _point_light_dynamic_bit), light->rasterizer_light_index != NONE,
+				light->radius, &drawn_color, &light->position);
 
 			/* port: not the lens flares of Forge's monitor in its own first
 			person view, which they would fill (port/linux/game/forge_monitor.c) */

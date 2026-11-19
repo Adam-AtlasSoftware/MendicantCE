@@ -650,6 +650,26 @@ vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
 {
     return dynamic_light_at(i * DYNAMIC_FLOATS, p, l, d);
 }
+/* a dynamic light's specular light: a light has a size (a plasma bolt, a
+muzzle flash, a grenade's glow are not points), DYNAMIC_SIZE of its reach
+and DYNAMIC_SIZE_MOST at most, so its highlight is a sphere light's: the
+lobe widened by the size over the distance (Karis 2013's representative
+point's roughness, its energy kept by (a / a')^2). As a point, a bolt over a
+polished floor drew a highlight as bright as the sun's in a pixel or two.
+At most a small one: the flashlight's reach (CE's whole sphere of its light,
+12 units) made it a sphere of 1.2 units, its highlight on the wall it
+pointed at spread to a seventh of itself, the wall hardly lit */
+const float DYNAMIC_SIZE = 0.1;
+const float DYNAMIC_SIZE_MOST = 0.08;
+vec3 dynamic_specular(Surface g, vec3 l, float d, uint i)
+{
+    float r = Floats(job.lights).v[i * DYNAMIC_FLOATS + 3u];
+    float a = g.roughness * g.roughness;
+    float a2 = min(a + 0.5 * min(DYNAMIC_SIZE * r, DYNAMIC_SIZE_MOST) / max(d, 1.0e-3), 1.0);
+    Surface w = g;
+    w.roughness = sqrt(a2);
+    return ggx(w, l) * (a / a2) * (a / a2) * PI;
+}
 
 /* ---------- the moving objects (port: the G-buffer pass's object draws of
 this frame, every one but the first-person view's, skinned as drawn and
@@ -853,7 +873,7 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         float dd;
         vec3 e = dynamic_light(index, g.point, ld, dd);
         dif = e * c;
-        spe = ggx(g, l) * e * PI;
+        spe = dynamic_specular(g, l, dd, index) * e;
         return dot(e, e) > 0.0;
     }
     return false;
@@ -960,7 +980,7 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
             float nl = dot(g.normal, l);
             if (nl <= 0.0 || dot(e, e) <= 0.0)
                 continue;
-            float target = luma(e * nl) + luma(ggx(g, l) * e * PI);
+            float target = luma(e * nl) + luma(dynamic_specular(g, l, d, i) * e);
             float w = target * (float(dynamics) / float(candidates));
             if (!(w > 0.0) || isinf(w))
                 continue;
@@ -1129,12 +1149,17 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
 }
 
 /* the dynamic lights at the pixel, apart from ReSTIR DI's reservoir:
-resampled importance over 4 of them (all where there are 4 or fewer) by
-their unshadowed diffuse and specular light, the kept one's shadow traced.
+resampled importance over every one of them (DYNAMIC_ALL at most: a
+light's test is its reach's, most are out of reach) by their unshadowed
+diffuse and specular light, the kept one's shadow traced. Every one, not
+4 at random: in a fight (thirty plasma bolts, muzzle flashes and glows
+across the room) 4 at random missed the one light near the pixel most
+frames, a bolt's pool on the floor a sparkle.
 Apart, since the last frame's reservoirs never hold one (their order
 changes from frame to frame) and the reuse's confidences (the canonical
 reservoir's 1 of up to 9) took the rest of a dynamic light's weight: a
 flashlight came in over many frames at a ninth of itself */
+const uint DYNAMIC_ALL = 64u;
 void dynamic_direct(Surface g, vec3 o, out vec3 diffuse, out vec3 specular)
 {
     diffuse = vec3(0.0);
@@ -1142,19 +1167,19 @@ void dynamic_direct(Surface g, vec3 o, out vec3 diffuse, out vec3 specular)
     uint n = uint(job.volume.z);
     if (n == 0u || job.lights == uvec2(0u))
         return;
-    uint candidates = min(n, 4u);
+    uint candidates = min(n, DYNAMIC_ALL);
     float sum = 0.0, target_kept = 0.0, d_kept = 0.0;
     vec3 kept_d = vec3(0.0), kept_s = vec3(0.0), l_kept = vec3(0.0);
     for (uint c = 0u; c < candidates; c++)
     {
-        uint i = n <= 4u ? c : min(uint(rnd() * float(n)), n - 1u);
+        uint i = n <= DYNAMIC_ALL ? c : min(uint(rnd() * float(n)), n - 1u);
         vec3 l;
         float d;
         vec3 e = dynamic_light(i, g.point, l, d);
         float nl = dot(g.normal, l);
         if (nl <= 0.0 || dot(e, e) <= 0.0)
             continue;
-        vec3 dif = e * nl, spe = ggx(g, l) * e * PI;
+        vec3 dif = e * nl, spe = dynamic_specular(g, l, d, i) * e;
         float target = luma(dif) + luma(spe);
         float w = target * (float(n) / float(candidates));
         if (!(w > 0.0) || isinf(w))
@@ -1419,7 +1444,7 @@ void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int d
             if (nl <= 0.0 || dot(e, e) <= 0.0 || !light_seen(o, KIND_DYNAMIC, l, d))
                 continue;
             vec3 dif = e * nl;
-            vec3 spe = ggx(g, l) * e * PI;
+            vec3 spe = dynamic_specular(g, l, d, i) * e;
             float target = luma(dif) + luma(spe);
             float w = target * (float(dynamics) / float(candidates));
             if (!(w > 0.0) || isinf(w))
@@ -2159,18 +2184,47 @@ flashlight's spot was a ring on the wall for 200 frames after it) */
 const uint LIGHTS_MOST = 64u;
 const float DYNAMIC_RESET = 0.1;
 const float DYNAMIC_LAG = 0.1;
+/* (each light tested once a subgroup: its lanes take a light each, its
+sphere against the box of the subgroup's points; only those that reach the
+box are evaluated, by every lane. Every light at every pixel, a fight's
+forty and their recent forty, cost the pass 1.8 ms at 1080p) */
+float dynamic_lights_luma(Surface g, uint first, uint n, vec3 least, vec3 most)
+{
+    Floats f = Floats(job.lights);
+    float sum = 0.0;
+    for (uint base = 0u; base < n; base += gl_SubgroupSize)
+    {
+        uint i = base + gl_SubgroupInvocationID;
+        bool reaches = false;
+        if (i < n)
+        {
+            uint at = (first + i) * DYNAMIC_FLOATS;
+            vec3 c = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
+            float r = f.v[at + 3u];
+            vec3 e = max(max(least - c, c - most), vec3(0.0));
+            reaches = r > 0.0 && dot(e, e) < r * r;
+        }
+        uvec4 mask = subgroupBallot(reaches);
+        while (mask != uvec4(0u))
+        {
+            uint lane = subgroupBallotFindLSB(mask);
+            mask[lane >> 5] &= ~(1u << (lane & 31u));
+            vec3 l;
+            float d;
+            sum += luma(dynamic_light_at((first + base + lane) * DYNAMIC_FLOATS, g.point, l, d)) *
+                max(dot(g.normal, l), 0.0);
+        }
+    }
+    return sum;
+}
 float dynamic_change(Surface g, float history_luma)
 {
     uint now_n = uint(job.volume.z), last_n = uint(job.volume.w);
     if (job.lights == uvec2(0u) || now_n + last_n == 0u)
         return 0.0;
-    float a = 0.0, b = 0.0;
-    vec3 l;
-    float d;
-    for (uint i = 0u; i < now_n; i++)
-        a += luma(dynamic_light_at(i * DYNAMIC_FLOATS, g.point, l, d)) * max(dot(g.normal, l), 0.0);
-    for (uint i = 0u; i < last_n; i++)
-        b += luma(dynamic_light_at((LIGHTS_MOST + i) * DYNAMIC_FLOATS, g.point, l, d)) * max(dot(g.normal, l), 0.0);
+    vec3 least = subgroupMin(g.point), most = subgroupMax(g.point);
+    float a = dynamic_lights_luma(g, 0u, now_n, least, most);
+    float b = dynamic_lights_luma(g, LIGHTS_MOST, last_n, least, most);
     float change = abs(a - b);
     return change / max(max(a, b) + max(history_luma - b, 0.0), 1.0e-4);
 }

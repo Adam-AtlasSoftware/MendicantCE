@@ -31,6 +31,8 @@ boolean prism_deferred_raster(void);
 /* display.lighting "pathtraced" (PRISM Path Traced, M3: every CE light off,
 the path tracer's light, xgpu_vulkan_pt.c) */
 boolean prism_deferred_pathtraced(void);
+/* display.lighting "raster" with display.prism_raster_composition "materials" */
+boolean prism_deferred_raster_materials(void);
 /* port: whether an object is one the bake's static scenery holds
 (prism_bake.c's scenery_static: a placement of scenery, a control or a light
 fixture, where it was placed), which the path tracer's moving objects leave
