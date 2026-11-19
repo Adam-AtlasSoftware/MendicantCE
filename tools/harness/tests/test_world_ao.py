@@ -15,7 +15,7 @@ CONTROLS = [
     # on whatever the setting says
     ('world_ao.mode = setting && !strcmp(setting, "world") ?', 'world_ao.mode = setting ?', "off"),
     # the frame's work done when it is off
-    ("\tif (!world_ao_mode())\n\t\treturn;\n\tworld_scene_frame_begin();", "\tworld_scene_frame_begin();", "off"),
+    ("\tif (!world_ao_mode())\n\t{\n\t\tprism_scene_lights_frame();", "\tif (0)\n\t{\n\t\tprism_scene_lights_frame();", "off"),
     # an object's slot taken from its shape's place, not its owner's slot
     ("owner = (int)world_ao.proxies[index].v[1][3];", "owner = (int)index;", "window"),
     # the reference found without the field faded in

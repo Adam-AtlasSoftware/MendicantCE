@@ -5005,7 +5005,7 @@ static const struct
 {
 	const char *name;
 	/* NULL ended; "" where empty is one */
-	const char *words[24];
+	const char *words[32];
 	/* what the game does with another, for the log (NULL: not said) */
 	const char *otherwise;
 } config_words[] =

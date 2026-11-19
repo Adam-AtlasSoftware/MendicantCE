@@ -45,7 +45,8 @@ def test_every_pack_has_its_step_and_its_mods_their_place_in_the_load_order():
     for pack in prism_packs.PACKS:
         for mod in pack.mods:
             assert mod in prism_packs.LOAD_ORDER
-    assert prism_packs.LOAD_ORDER[-1] == "prism_v2_tex_bold"
+    # (Bold the texture packs' last; PRISM v4's materials, made from them, over them all)
+    assert prism_packs.LOAD_ORDER[-2:] == ["prism_v2_tex_bold", "prism_v4_materials"]
 
 
 def test_the_load_order_keeps_the_players_mods(tmp_path):
