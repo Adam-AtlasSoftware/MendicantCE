@@ -1630,6 +1630,18 @@ PAGES = {
              "The sun's shadows of vehicles, characters and weapons. Traced: ray traced, on the ground, on each "
              "other and on themselves (a graphics card that traces rays). Classic's: the game's own, on the "
              "ground only.", "desktop"),
+            # (PRISM v4 M5, docs/prism_plugin.md: the 3D view drawn smaller and
+            # upscaled before the HUD, DLSS a plugin the player builds; the render
+            # scale and sharpness on PRISM PATH TRACING's page, for room)
+            ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
+             "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased. "
+             "FSR 3.1 is built in; DLSS is a plugin you build (docs/prism_plugin.md), used from the next start.",
+             "desktop"),
+            ("DENOISER", "display.denoiser",
+             [("PRISM", "prism"), ("DLSS RAY RECON.", "plugin:dlss"), ("OFF", "off")],
+             "What smooths PRISM Path Traced's light: PRISM's own filter, or DLSS Ray Reconstruction (a plugin "
+             "you build, used from the next start), which also brings the view to the screen's resolution.",
+             "desktop"),
         ],
     },
     PRISM_PT_PAGE[0]: {
@@ -1674,6 +1686,16 @@ PAGES = {
                                                      ("4", "4")],
              "How often light bounces before the cache takes over. By Quality: 1 at Low and Medium, 2 at High, "
              "3 at Ultra.", "desktop"),
+            # (PRISM v4 M5: display.upscaler's, on PRISM LIGHTING's page)
+            (SECTION, "UPSCALING"),
+            ("RENDER SCALE", "display.render_scale",
+             [("QUALITY", "0"), ("100%", "1"), ("77%", "0.77"), ("67%", "0.67"), ("58%", "0.58"), ("50%", "0.5"),
+              ("33%", "0.33")],
+             "How much of the screen's resolution the 3D view is drawn at, each way, under an upscaler. "
+             "Quality is 67%; less is faster and softer.", "desktop"),
+            ("SHARPNESS", "display.upscaler_sharpness",
+             [("OFF", "0"), ("LOW", "0.25"), ("MEDIUM", "0.5"), ("HIGH", "0.8")],
+             "How much the upscaled view is sharpened.", "desktop"),
         ],
     },
     STREAMER[0]: {

@@ -250,6 +250,20 @@ def test_frame_release_names_agree():
     assert "/download/OpenH1-Steam-Frame.zip" in workflow
 
 
+def test_frame_licences():
+    """the Steam Frame's package carries the licences the 64-bit ARM build's release would (linux_package.notices,
+    which every other release has beside it: display.upscaler's FidelityFX Super Resolution 3.1 and the JSON
+    tokenizer among them) and the project's own, each under its release name and from its file"""
+    import frame_package
+
+    assert frame_package.LICENSES["LICENSE.txt"] == "LICENSE"
+    for source, name in linux_package.notices("linux_arm64"):
+        assert frame_package.LICENSES.get(name) == str(source.relative_to(ROOT)), name
+    assert "fidelityfx-fsr3-LICENSE.txt" in frame_package.LICENSES and "jsmn-LICENSE.txt" in frame_package.LICENSES
+    for name, source in frame_package.LICENSES.items():
+        assert (ROOT / source).is_file(), name
+
+
 def test_frame_zip(tmp_path):
     """the Steam Frame's zip (frame_package.write_zip): its folder under the package's name, the programs 0755,
     the rest 0644, in name order"""

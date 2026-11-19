@@ -43,6 +43,8 @@ import zipfile
 from pathlib import Path
 from typing import List
 
+import linux_package
+
 ROOT = Path(__file__).resolve().parent.parent
 FRAME_DIR = ROOT / "port/linux/frame"
 NAME = "halo-vr-frame"
@@ -54,20 +56,13 @@ SYSTEM_LIBRARIES = {
     "libvulkan.so.1",
 }
 # (the package's name for each, from the repository: OpenH1's own, the AGPL,
-# and those of what it carries; as tools/ci_build.py;
-# SDL3's, from the build's folder, is added in main)
+# and those of what the 64-bit ARM build carries, the Linux releases' list
+# (tools/linux_package.py's notices, which tools/ci_build.py gives every
+# release), so that the two never part; SDL3's, from the build's folder, is
+# added in main)
 LICENSES = {
-    "LICENSE.txt": "LICENSE",
-    "mbedtls-LICENSE.txt": "port/third_party/mbedtls/LICENSE",
-    "miniupnpc-LICENSE.txt": "port/third_party/miniupnpc/LICENSE",
-    "CyborgInterfaceGothic-OFL.txt": "port/assets/fonts/CyborgInterfaceGothic-OFL.txt",
-    "Overpass-OFL.txt": "port/assets/fonts/Overpass-OFL.txt",
-    "Hack-LICENSE.txt": "port/assets/fonts/Hack-LICENSE.txt",
-    "OpenCE-OFL.txt": "port/assets/fonts/OpenCE-OFL.txt",
-    "expat-COPYING.txt": "port/third_party/expat/COPYING",
-    "opus-COPYING.txt": "port/third_party/opus/COPYING",
-    "ffmpeg-COPYING.LGPLv2.1.txt": "port/third_party/ffmpeg/COPYING.LGPLv2.1",
-    "lucide-LICENSE.txt": "port/assets/icons/lucide/LICENSE",
+    "LICENSE.txt": str(linux_package.PROJECT_LICENSE.relative_to(ROOT)),
+    **{name: str(source.relative_to(ROOT)) for source, name in linux_package.notices("linux_arm64")},
 }
 # the files an install never writes over (the player's)
 PLAYER_FILES = {"config.toml", "halo-vr.env", "debug.txt", "halo-vr.log", "maps"}

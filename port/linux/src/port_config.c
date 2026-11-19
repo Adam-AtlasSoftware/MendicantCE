@@ -209,11 +209,16 @@ static const struct config_setting config_settings[] =
 		"\"native\" draws at the window's resolution (fullscreen, the display's or\n"
 		"display.resolution); \"original\" draws the Xbox's 640x480 and scales it\n"
 		"up." },
-	{ "display.render_scale", _config_real, "0.0", "HALO_RENDER_SCALE", _environment_value, _platform_ios,
-		"iOS: the fraction of the screen's pixels the game draws, each way (0.25\n"
-		"to 1.0), which the display scales up: 0.67 draws less than half the\n"
-		"pixels, for a cooler phone and a steadier frame rate. 0: the device's,\n"
-		"0.67 on an iPhone of 3x pixels, else 1.0. Read at start." },
+	{ "display.render_scale", _config_real, "0.0", "HALO_RENDER_SCALE", _environment_value,
+		_platform_ios | _platform_desktop,
+		"The fraction of the screen's pixels drawn, each way. On the desktop\n"
+		"(Vulkan), with display.upscaler on: the 3D view's (0.33 to 1.0; 0 is\n"
+		"0.67, the upscaler's Quality), which the upscaler brings to the\n"
+		"screen's before the HUD is drawn; without an upscaler nothing. Read\n"
+		"each frame. iOS: the whole game's (0.25 to 1.0), which the display\n"
+		"scales up: 0.67 draws less than half the pixels, for a cooler phone\n"
+		"and a steadier frame rate; 0: the device's, 0.67 on an iPhone of 3x\n"
+		"pixels, else 1.0. Read at start there." },
 	{ "display.window_size", _config_string, "\"\"", "HALO_WINDOW_SIZE", _environment_value, _platform_desktop,
 		"The window's size, \"<width>x<height>\" (\"1920x1080\"), 640x480 or more (it\n"
 		"can be resized). Empty: display.window_scale's." },
@@ -742,9 +747,11 @@ static const struct config_setting config_settings[] =
 		"traces a bounce only for the objects. Read each frame." },
 	{ "display.denoiser", _config_string, "\"prism\"", "HALO_DENOISER", _environment_value, _platform_desktop,
 		"With display.lighting \"pathtraced\": \"prism\" the in-tree denoiser\n"
-		"(its diffuse and specular light and the sun's shadows); \"off\" the\n"
-		"traced light as it is, one sample a pixel (for checking). Read each\n"
-		"frame." },
+		"(its diffuse and specular light and the sun's shadows);\n"
+		"\"plugin:<name>\", a plugin you built that denoises (NRD) or denoises\n"
+		"and upscales (DLSS Ray Reconstruction: \"plugin:dlss\"), opened as the\n"
+		"game starts; \"off\" the traced light as it is, one sample a pixel\n"
+		"(for checking). Read each frame." },
 	{ "display.prism_raster_composition", _config_string, "\"ce\"", "HALO_PRISM_RASTER_COMPOSITION",
 		_environment_value, _platform_desktop,
 		"PRISM Raster: what composes the frame from the baked light. \"ce\" the\n"
@@ -789,6 +796,19 @@ static const struct config_setting config_settings[] =
 		"the one made from CE's shader as the map loads; false: every shader's\n"
 		"made from CE's. Needs a graphics card that draws display.prism_materials'\n"
 		"materials. Read each frame." },
+	{ "display.upscaler", _config_string, "\"off\"", "HALO_UPSCALER", _environment_value, _platform_desktop,
+		"PRISM v4: the 3D view drawn smaller (display.render_scale) and brought\n"
+		"to the screen's pixels before the HUD is drawn, the upscaler its\n"
+		"anti-aliasing: \"off\" (none: the view at the screen's pixels);\n"
+		"\"fsr3\", AMD's FidelityFX Super Resolution 3.1, built in; or\n"
+		"\"plugin:<name>\", a plugin you built (docs/prism_plugin.md: plugins\n"
+		"in the data folder's plugins, such as DLSS's: \"plugin:dlss\"), opened\n"
+		"as the game starts; one that cannot be opened is FSR 3.1. One player's\n"
+		"window only (split screen draws without). Vulkan on the desktop." },
+	{ "display.upscaler_sharpness", _config_real, "0.0", "HALO_UPSCALER_SHARPNESS", _environment_value,
+		_platform_desktop,
+		"With display.upscaler on: how much the upscaled view is sharpened,\n"
+		"0 (none) to 1." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\": \"auto\" bakes each level's light in the background while\n"
@@ -4858,6 +4878,12 @@ static void config_check_words(void)
 				free(value->string);
 				value->string = strdup(renamed);
 			}
+		}
+		/* (a plugin's name, "plugin:<name>": display.upscaler's and
+		display.denoiser's, whichever plugin the player built) */
+		if (!strncmp(value->string, "plugin:", 7) && value->string[7])
+		{
+			continue;
 		}
 		for (word = 0; words[word] && !config_word_is(value->string, strlen(value->string), words[word]); word++)
 		{

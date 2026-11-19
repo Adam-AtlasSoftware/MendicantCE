@@ -141,6 +141,17 @@ struct xgpu_vulkan_options
 	NULL: no curve (the VR build's). */
 	int (*gamma_prepare)(void);
 	struct xgpu_vulkan_image *(*gamma)(struct xgpu_vulkan_image *image, float power);
+	/* PRISM's renderer plugins (xgpu_vulkan_upscale.c, docs/prism_plugin.md):
+	the instance extensions they ask for, added where the loader has them;
+	the device extensions they ask for of the device chosen (at most most of
+	them: the count), added where the device has them; one the loader or the
+	device lacks told (plugin_missing: device 0 the instance's, 1 the
+	device's, 2 one the driver made no device with: the device is then made
+	without them), which turns its plugin off. NULL, 0: none. */
+	const char *const *plugin_instance_extensions;
+	uint32_t plugin_instance_extension_count;
+	uint32_t (*plugin_device_extensions)(VkPhysicalDevice physical, const char **names, uint32_t most);
+	void (*plugin_missing)(const char *extension, int device);
 };
 
 /* 1 on success: a device that has what the backend needs (logged if not) */
@@ -826,6 +837,35 @@ uint64_t xgpu_vulkan_fence(void);
 /* returns once the GPU has done the submission of that number and those
 before (the visibility tests' counts of the frames they end are written) */
 void xgpu_vulkan_wait(uint64_t fence);
+
+/* display.upscaler (xgpu_vulkan_upscale.c): from now on, the draws into
+targets of width x height pixels (the view's, its G-buffer's, its passes'
+of its size) moved by x, y pixels (the jitter, each within half a pixel:
+the viewport's corner moved, the scissor not); 0, 0, 0, 0 none (as before
+any) */
+void xgpu_vulkan_set_jitter(float x, float y, uint32_t width, uint32_t height);
+/* a rectangle (x0, y0, x1, y1) of an image's first level and layer
+stretched into one of another's, of formats a blit converts between (colour
+to colour, or the same depth and stencil format, whose blit is nearest), in
+the stream's order; 0 where it cannot be (logged by the caller) */
+int xgpu_vulkan_image_blit(struct xgpu_vulkan_image *source, const int32_t from[4],
+	struct xgpu_vulkan_image *destination, const int32_t to[4], int linear);
+/* the device's handles for PRISM's renderer plugins and the upscalers
+(xgpu_vulkan_upscale.c): 0 before the device is made */
+struct xgpu_vulkan_handles
+{
+	VkInstance instance;
+	VkPhysicalDevice physical;
+	VkDevice device;
+	PFN_vkGetInstanceProcAddr get_instance_proc;
+	PFN_vkGetDeviceProcAddr get_device_proc;
+	uint32_t queue_family;
+	VkQueue queue;
+	const VkPhysicalDeviceMemoryProperties *memory;
+	/* nanoseconds a timestamp's tick (0: no timestamps) */
+	float timestamp_period;
+};
+int xgpu_vulkan_handles(struct xgpu_vulkan_handles *handles);
 
 /* the window's size in pixels changed (any thread): the swapchain is made
 again */

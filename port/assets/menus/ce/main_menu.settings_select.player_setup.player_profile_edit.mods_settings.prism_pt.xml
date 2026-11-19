@@ -23,6 +23,9 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/op_prism_rt_materials" x="28" y="273" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/op_prism_rt_alpha" x="28" y="294" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/op_prism_rt_bounces" x="28" y="315" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/section_12" x="28" y="342" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/op_render_scale" x="28" y="362" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/op_upscaler_sharpness" x="28" y="383" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -145,6 +148,29 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/prism_rt_bounces_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="BY QUALITY|1|2|3|4" setting="display.prism_rt_bounces" values="0|1|2|3|4" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/section_12" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/section_12_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/section_12_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/labels" string_index="12" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/op_render_scale" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/render_scale_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/render_scale_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/render_scale_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/render_scale_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="QUALITY|100%|77%|67%|58%|50%|33%" setting="display.render_scale" values="0|1|0.77|0.67|0.58|0.5|0.33" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/op_upscaler_sharpness" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/upscaler_sharpness_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/upscaler_sharpness_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/upscaler_sharpness_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/upscaler_sharpness_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|LOW|MEDIUM|HIGH" setting="display.upscaler_sharpness" values="0|0.25|0.5|0.8" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/labels">
 		<string text="LOOK"/>
 		<string text="STYLE"/>
@@ -158,6 +184,9 @@
 		<string text="BOUNCED COLOUR"/>
 		<string text="SEE-THROUGH SHADOWS"/>
 		<string text="BOUNCES"/>
+		<string text="UPSCALING"/>
+		<string text="RENDER SCALE"/>
+		<string text="SHARPNESS"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/help_strings">
 		<string text=""/>
@@ -173,5 +202,8 @@
 		<string text="Surfaces': bounced light takes the colour of what it bounces off. Grey: one grey for all."/>
 		<string text="Leaves, fences and grates cast shadows through their holes."/>
 		<string text="How often light bounces before the cache takes over. By Quality: 1 at Low and Medium, 2 at High, 3 at Ultra."/>
+		<string text=""/>
+		<string text="How much of the screen's resolution the 3D view is drawn at, each way, under an upscaler. Quality is 67%; less is faster and softer."/>
+		<string text="How much the upscaled view is sharpened."/>
 	</strings>
 </menus>

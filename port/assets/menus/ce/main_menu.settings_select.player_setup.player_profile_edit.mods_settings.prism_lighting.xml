@@ -24,6 +24,8 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_tone_curve" x="28" y="299" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_raster_objects" x="28" y="320" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_prism_raster_object_shadows" x="28" y="341" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_upscaler" x="28" y="362" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_denoiser" x="28" y="383" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -151,6 +153,24 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_raster_object_shadows_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="TRACED|CLASSIC'S" setting="display.prism_raster_object_shadows" values="traced|classic" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_upscaler" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/upscaler_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/upscaler_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/upscaler_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/upscaler_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|FSR 3.1|DLSS" setting="display.upscaler" values="off|fsr3|plugin:dlss" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/op_denoiser" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/denoiser_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/denoiser_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/denoiser_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/denoiser_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="PRISM|DLSS RAY RECON.|OFF" setting="display.denoiser" values="prism|plugin:dlss|off" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/labels">
 		<string text="LIGHTING"/>
 		<string text="LIGHTING"/>
@@ -165,6 +185,8 @@
 		<string text="HIGHLIGHTS"/>
 		<string text="OBJECTS"/>
 		<string text="OBJECT SHADOWS"/>
+		<string text="UPSCALER"/>
+		<string text="DENOISER"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/help_strings">
 		<string text=""/>
@@ -181,5 +203,7 @@
 		<string text="How light past white is drawn. Style's: Filmic, which rolls it off gently. ACES: punchier, a film's curve. Clipped: held at white, as Classic did."/>
 		<string text="How characters, vehicles and weapons are lit. Baked Light: by the baked light where they are. Classic's: never darker than the game lit them."/>
 		<string text="The sun's shadows of vehicles, characters and weapons. Traced: ray traced, on the ground, on each other and on themselves (a graphics card that traces rays). Classic's: the game's own, on the ground only."/>
+		<string text="Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased. FSR 3.1 is built in; DLSS is a plugin you build (docs/prism_plugin.md), used from the next start."/>
+		<string text="What smooths PRISM Path Traced's light: PRISM's own filter, or DLSS Ray Reconstruction (a plugin you build, used from the next start), which also brings the view to the screen's resolution."/>
 	</strings>
 </menus>

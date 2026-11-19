@@ -38,7 +38,7 @@ port/linux/README.md.
 #include <stdint.h>
 
 #define XGPU_STREAM_MAGIC 0x53504758u /* "XGPS" */
-#define XGPU_STREAM_VERSION 37
+#define XGPU_STREAM_VERSION 38
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -329,6 +329,9 @@ enum
 	shader PRISM's material, SCENE_MATERIAL_MAPS, below;
 	docs/prism_materials.md) */
 	XGPU_STREAM_SCENE_MATERIAL_MAPS,
+	/* (PRISM v4 M5: display.upscaler's and display.denoiser's frame,
+	UPSCALE, below; docs/prism_plugin.md) */
+	XGPU_STREAM_UPSCALE,
 	XGPU_STREAM_RECORD_TYPES,
 };
 /* (the scene records' own count: they run from SCENE_MATERIAL to the end) */
@@ -2817,6 +2820,69 @@ struct xgpu_stream_prism_bake
 	char map_name[XGPU_BAKE_NAME];
 };
 
+/* UPSCALE (M5, docs/prism_plugin.md): display.upscaler's frame upscaling of
+a player's window's 3D view, and display.denoiser's plugin. The view is drawn
+smaller (display.render_scale) into the window's targets of their own at
+that scale, the HUD and the menus over it at the screen's. Phase
+XGPU_UPSCALE_BEGIN as the view's drawing begins (the view's targets named:
+the backend jitters the draws of the view's size from here on, by a sequence
+of its own); _OPAQUE once its opaque surfaces are drawn and before its
+transparent ones (the view's colour kept, which the reactive mask is found
+from); _END once the view is whole and tone mapped, before the HUD (the
+view upscaled into the output's targets, its colour and its depth, and the
+jitter stopped). The targets: the view's colour and depth (view, view_depth)
+and the output's (output, output_depth), each a TARGET_CREATE's number; the
+corners (left, top, right, bottom) of the window's view in the view's
+targets' pixels and in the output's. upscaler: XGPU_UPSCALE_UPSCALER_*;
+denoiser: XGPU_UPSCALE_DENOISER_*; flags: XGPU_UPSCALE_FLAG_*. END's camera
+this frame and last (SCENE_VIEW's layout: the eye and the near plane, the
+axis at the screen's middle and the far plane, its change a unit of the
+screen's x and y), sharpness (0 to 1), the frame's time (milliseconds) */
+enum
+{
+	XGPU_UPSCALE_BEGIN,
+	XGPU_UPSCALE_OPAQUE,
+	XGPU_UPSCALE_END,
+	XGPU_UPSCALE_PHASES,
+};
+enum
+{
+	/* (none: drawn at the screen's scale, not upscaled, the denoiser's alone) */
+	XGPU_UPSCALE_UPSCALER_NONE,
+	/* FidelityFX Super Resolution 3.1, the renderer's own */
+	XGPU_UPSCALE_UPSCALER_FSR3,
+	/* the plugin named as the game started (display.upscaler "plugin:<name>") */
+	XGPU_UPSCALE_UPSCALER_PLUGIN,
+	XGPU_UPSCALE_UPSCALERS,
+};
+enum
+{
+	/* the path tracer's own filter (display.prism_rt_denoiser's) */
+	XGPU_UPSCALE_DENOISER_PRISM,
+	/* the plugin named as the game started (display.denoiser "plugin:<name>") */
+	XGPU_UPSCALE_DENOISER_PLUGIN,
+	/* none (the traced light as it is: a diagnostic) */
+	XGPU_UPSCALE_DENOISER_OFF,
+	XGPU_UPSCALE_DENOISERS,
+};
+enum
+{
+	/* last frame's camera given, and the same view a frame before: the
+	upscaler's history kept */
+	XGPU_UPSCALE_FLAG_HISTORY = 1,
+};
+struct xgpu_stream_upscale
+{
+	uint32_t header;
+	uint32_t phase, upscaler, denoiser, flags;
+	uint32_t view, view_depth, output, output_depth;
+	int32_t view_corners[4];
+	int32_t output_corners[4];
+	float now[4][4];
+	float last[4][4];
+	float sharpness, frame_milliseconds, pad[2];
+};
+
 /* ---------- the layouts' sizes, alike on both sides */
 
 #define XGPU_STREAM_ASSERT_SIZE(type, size) _Static_assert(sizeof(type) == (size), #type "'s size")
@@ -2894,6 +2960,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_view, 16 + 128 + 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_material_maps, 20 + 4 * XGPU_SCENE_MATERIAL_MAPS +
 	4 * XGPU_SCENE_MATERIAL_MAP_SCALARS);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_upscale, 36 + 32 + 128 + 16);
 /* (the scene records' types still fit the header's 8 bits) */
 _Static_assert(XGPU_STREAM_SCENE_RECORD_TYPES <= 256, "the scene records' types fit a header");
 

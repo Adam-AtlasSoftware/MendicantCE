@@ -503,7 +503,9 @@ version (`AGPL-3.0-or-later`). It comes with no warranty. The full text is in
   alone is offered under the [MIT licence](LICENSES/MIT.txt) or
   `AGPL-3.0-or-later`, as the reader chooses, so that a plugin built against
   it need not be AGPL (`docs/prism_plugin.md`). No vendor's code is in the
-  tree.
+  tree but AMD's FidelityFX Super Resolution 3.1, which is MIT
+  (`port/third_party/fidelityfx-fsr3`); plugins such as DLSS's are built by
+  their players outside it.
 - **Third-party code, fonts and art** keep their own licences, which are
   next to them (`port/third_party`, `port/assets/fonts`,
   `port/assets/icons`, `port/assets/text_filter`). The release downloads and

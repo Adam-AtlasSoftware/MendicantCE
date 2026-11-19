@@ -66,6 +66,7 @@ its swapchain.
 #include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_pt.h"
 #include "xgpu_vulkan_scene.h"
+#include "xgpu_vulkan_upscale.h"
 #ifdef HALO_VR
 #include "host_vulkan_vr.h"
 #endif
@@ -3942,6 +3943,58 @@ static void stream_panini(void *context, const struct xgpu_stream_panini *record
 	targets_bind();
 }
 
+/* ---------- display.upscaler (xgpu_stream.h's UPSCALE; xgpu_vulkan_upscale.c)
+
+A player's window's view drawn smaller, jittered from BEGIN, its colour
+kept at OPAQUE, upscaled at END into the window's targets of the screen's
+scale: the targets' textures, of one layer and one sample (a view that is
+not is left as it is drawn), and the G-buffer's second target where its
+pass was drawn for the view this frame (its motion). */
+
+static struct xgpu_vulkan_image *upscale_image(uint32_t number, int depth)
+{
+	struct stream_target *target = number ? target_get(number) : NULL;
+
+	if (!target || target->depth != depth || target->layers > 1 || target->multisampled)
+		return NULL;
+	return target->image;
+}
+
+static void stream_upscale(void *context, const struct xgpu_stream_upscale *record)
+{
+	struct stream_target *view, *output, *output_depth;
+	int drawn;
+
+	(void)context;
+	if (stream.preparing)
+		return;
+	switch (record->phase)
+	{
+	case XGPU_UPSCALE_BEGIN:
+		xgpu_vulkan_upscale_begin(record, upscale_image(record->view, 0));
+		break;
+	case XGPU_UPSCALE_OPAQUE:
+		xgpu_vulkan_upscale_opaque(record, upscale_image(record->view, 0));
+		targets_bind();
+		break;
+	case XGPU_UPSCALE_END:
+		view = target_get(record->view);
+		drawn = view && gbuffer.drawn && gbuffer.color == record->view && gbuffer.width == view->width &&
+			gbuffer.height == view->height;
+		xgpu_vulkan_upscale_end(record, upscale_image(record->view, 0), upscale_image(record->view_depth, 1),
+			upscale_image(record->output, 0), upscale_image(record->output_depth, 1), drawn ? gbuffer.extras : NULL,
+			drawn ? gbuffer.words : NULL, drawn && deferred.color == record->view ? deferred.base : NULL);
+		output = target_get(record->output);
+		output_depth = target_get(record->output_depth);
+		if (output)
+			output->written++;
+		if (output_depth)
+			output_depth->written++;
+		targets_bind();
+		break;
+	}
+}
+
 /* ---------- display.ambient_occlusion "world" (docs/world-ao.md)
 
 The structure's distance field's slices (the decoder has checked their
@@ -4604,11 +4657,15 @@ static void stream_world_ao_prepass(void *context, const struct xgpu_stream_worl
 			prepass.history = last;
 		}
 		/* (display.prism_rt: the traced light read in the occlusion's place,
-		world AO's pass not drawn) */
+		world AO's pass not drawn; display.denoiser's plugin told first whether
+		the view has its G-buffer, drawn before this pass: a plugin that
+		denoises and upscales is given the light raw only with its guides,
+		xgpu_vulkan_upscale.c) */
 		{
-			struct xgpu_vulkan_image *traced = xgpu_vulkan_rt_window_end(prepass.inputs, prepass.width,
-				prepass.height, &uniforms);
+			struct xgpu_vulkan_image *traced;
 
+			xgpu_vulkan_upscale_gbuffer(gbuffer.drawn ? gbuffer.color : 0);
+			traced = xgpu_vulkan_rt_window_end(prepass.inputs, prepass.width, prepass.height, &uniforms);
 			if (traced)
 			{
 				xgpu_vulkan_world_ao_set_pixels(traced);
@@ -5600,6 +5657,8 @@ const struct host_render_backend *xgpu_vulkan_stream_backend(void)
 		backend.scene_view = stream_scene_view;
 		backend.prism_bake = stream_prism_bake;
 		backend.panini = stream_panini;
+		/* display.upscaler (xgpu_vulkan_upscale.c) */
+		backend.upscale = stream_upscale;
 		/* display.ambient_occlusion "world" (#578, docs/world-ao.md): the
 		field's 3D image (XGPU_SPIRV_BINDING_WORLD_SDF) and the window's block
 		(XGPU_SPIRV_BINDING_WORLD_AO), both in XGPU_SPIRV_SET_OCCLUSION */
