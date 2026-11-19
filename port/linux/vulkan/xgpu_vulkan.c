@@ -8951,6 +8951,20 @@ static uint64_t submit(VkSemaphore wait_semaphore, VkSemaphore signal_semaphore)
 	info.signalSemaphoreCount = signal_semaphore ? 2 : 1;
 	info.pSignalSemaphores = signals;
 	check(vkQueueSubmit(vk.queue, 1, &info, VK_NULL_HANDLE), "vkQueueSubmit");
+	/* (HALO_VULKAN_TEST_DEVICE_LOST=<n>: the n-th submission taken as one
+	the device was lost at, its report and what the next start does with
+	it tested. For testing only) */
+	{
+		static long long test_lost = -1;
+
+		if (test_lost < 0)
+			test_lost = getenv("HALO_VULKAN_TEST_DEVICE_LOST") ? atoll(getenv("HALO_VULKAN_TEST_DEVICE_LOST")) : 0;
+		if (test_lost > 0 && serial >= (uint64_t)test_lost)
+		{
+			host_logf(HOST_LOG_ERROR, "vulkan: vkQueueSubmit: VK_ERROR_DEVICE_LOST (-4) (HALO_VULKAN_TEST_DEVICE_LOST)");
+			device_lost_report();
+		}
+	}
 	vk.slot->ring_end = vk.ring_head;
 	vk.recording = 0;
 	vk.early_recording = 0;
