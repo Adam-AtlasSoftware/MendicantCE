@@ -2793,6 +2793,8 @@ static struct
 	/* (PRISM Path Traced's) */
 	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
 	{ "op_denoiser", LIGHTING_P, NULL, NULL },
+	{ "op_prism_dynamic_lights", LIGHTING_P, NULL, NULL },
+	{ "op_prism_light_saturation", LIGHTING_P, NULL, NULL },
 	/* (both PRISM modes' upscaler (Classic draws without one:
 	prism_upscale.c); its scale under Path Traced while one is on, for
 	room: Rebaked's page is full) */

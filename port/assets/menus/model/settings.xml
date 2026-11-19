@@ -1933,7 +1933,22 @@
 			<choice shown="OFF" value="off"/>
 			<choice shown="DLSS RR" value="dlss_rr"/>
 		</row>
-		<section key="section_22" title="IMAGE" when="desktop"/>
+		<row key="prism_dynamic_lights" kind="choice" setting="display.prism_dynamic_lights" label="COLOURED LIGHTS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="faint soft natural full" when="desktop">
+			<help>How bright plasma, needles, grenades, blasts and shield flares light their surroundings. Full: as bright as the game's own colours; white lights such as the flashlight keep their light.</help>
+			<choice shown="OFF" value="0"/>
+			<choice shown="FAINT" value="0.25"/>
+			<choice shown="SOFT" value="0.4"/>
+			<choice shown="NATURAL" value="0.6"/>
+			<choice shown="FULL" value="1"/>
+		</row>
+		<row key="prism_light_saturation" kind="choice" setting="display.prism_light_saturation" label="LIGHT COLOUR" crumb="VIDEO › LIGHTING SETTINGS" search_choices="pale muted rich pure" when="desktop">
+			<help>How deep the colour of the light they cast is. Pure: the game's own colours, plasma green and needle pink; Pale: nearer white, as a real glow's light is.</help>
+			<choice shown="PALE" value="0.4"/>
+			<choice shown="MUTED" value="0.6"/>
+			<choice shown="RICH" value="0.8"/>
+			<choice shown="PURE" value="1"/>
+		</row>
+		<section key="section_24" title="IMAGE" when="desktop"/>
 		<row key="prism_exposure" kind="choice" setting="display.prism_exposure" label="EXPOSURE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="eye fixed" when="desktop">
 			<help>How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is.</help>
 			<choice shown="DEFAULT" value="style"/>
@@ -1976,7 +1991,7 @@
 			<choice shown="ULTRA PERF." value="0.33"/>
 			<choice shown="NATIVE" value="1"/>
 		</row>
-		<section key="section_28" title="LIGHT BAKE" when="desktop"/>
+		<section key="section_30" title="LIGHT BAKE" when="desktop"/>
 		<row key="bake" kind="choice" setting="display.bake" label="BAKE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="while playing when asked never" when="desktop">
 			<help>While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM lightings read the bake.</help>
 			<choice shown="WHILE PLAYING" value="auto"/>

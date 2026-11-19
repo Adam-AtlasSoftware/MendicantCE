@@ -66,6 +66,8 @@ short render_sky_light_count(short sky_index);
 /* prism_rt.c's, world_ao.c's, world_scene.c's */
 int prism_rt_mode(void);
 int world_ao_mode(void);
+/* object_lights.c's (port) */
+short light_port_object_type(long light_index);
 /* port/linux/src/port_config.c */
 int config_boolean(const char *name);
 double config_real(const char *name);
@@ -111,6 +113,10 @@ light's share (CE's flares' colours are whole, saturated, made for a sprite
 seen at the light, their radius its flare's reach: as lights at that they
 washed whole walls neon green in a fight) */
 #define GLOW_FLARE_SHARE 0.4f
+/* a projectile's lens flare's light whole: a plasma or Banshee bolt is the
+light it flies by (at GLOW_FLARE_SHARE it hardly lit the corridor it crossed
+once a point light's reach was its power: xgpu_vulkan_pt.glsl) */
+#define GLOW_PROJECTILE_SHARE 1.0f
 
 /* a light as struct xgpu_stream_scene_light lays it out (20 words) */
 struct scene_light
@@ -549,7 +555,8 @@ static void scene_lights_send(
 		}
 		memcpy(light->radiance, drawn->color, 3 * sizeof(float));
 		light->radiance[3] = drawn->intensity * drawn->gel;
-		dynamic_look(light, drawn->flags & WORLD_SCENE_LIGHT_GLOW ? GLOW_FLARE_SHARE : 1.0f);
+		dynamic_look(light, !(drawn->flags & WORLD_SCENE_LIGHT_GLOW) ? 1.0f :
+			light_port_object_type(drawn->id) == _object_type_projectile ? GLOW_PROJECTILE_SHARE : GLOW_FLARE_SHARE);
 		light_finite(light);
 	}
 	/* (and the projectiles' strikes' flashes, glow_lights.c's, each a point
@@ -588,9 +595,10 @@ static void scene_lights_send(
 			light->position[3] = reach;
 			memcpy(light->radiance, glow->color, 3 * sizeof(float));
 			light->radiance[3] = (glow->strike ? 1.0f : GLOW_STRENGTH) * scale;
-			/* (a strike's flash is its projectile's light's: a lens flare's
-			share where that was one) */
-			dynamic_look(light, glow->strike && !glow->strike_dynamic ? GLOW_FLARE_SHARE : 1.0f);
+			/* (a strike's flash is its projectile's light's, whole: a
+			projectile's lens flare's light is, glow_lights.c's
+			GLOW_PROJECTILE_SHARE) */
+			dynamic_look(light, 1.0f);
 			light_finite(light);
 		}
 	}
