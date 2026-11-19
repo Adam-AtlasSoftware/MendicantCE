@@ -14,7 +14,8 @@ they are written back as those, and in `HALO_LIGHTING`).
 **Enhanced is not a lighting mode.** It is `display.graphics`, the quality preset (Settings > Video > Advanced
 Graphics > Quality: Xbox, Enhanced, PRISM Extras): anti-aliasing, texture filtering and model detail, which reach every
 mode, and Classic's lighting settings (shadow size, per-pixel model light, the enhanced dynamic lights; PRISM Extras
-adds the smoothed lightmaps, ambient occlusion, highlights and soft shadows), which reach Classic alone.
+adds the smoothed lightmaps, ambient occlusion, highlights and soft shadows), which reach Classic alone, but for the
+enhanced dynamic lights, which reach every mode (below).
 
 ## Where each setting is, and when it is shown
 
@@ -52,8 +53,15 @@ every page fits in every mode.
 hold, exposure, tone curve, lamps, sun size, bounced colour, bounces): none of it reaches the PRISM modes (the bake
 fixes the lamps, their brightness, the bounced colour and the sun's disc).
 
+**Dynamic Lights** (`display.dynamic_lights`, Classic or Enhanced) reaches every mode: under Classic it is how the game
+draws its lights (Lighting Settings, Classic Lighting); under both PRISM modes the game gives the bake's frame and the
+path tracer the lights it submits (world_scene's list, `docs/prism_pathtraced.md`), and Enhanced adds the plasma
+bolts' and needles' lights to them and draws their glows, so the row is on Advanced Graphics' Light Effects there
+(`dynamic_lights_prism`, R and P).
+
 **Every mode:** Advanced Graphics (Quality, Battery Saver, Render Resolution, Anti-Aliasing (no MSAA under the PRISM
-modes), Texture Filtering, Model Detail, Smooth Motion, Shield Glow, Glow Intensity, Tick Rate, Animations);
+modes), Texture Filtering, Model Detail, Smooth Motion, Dynamic Lights (R, P), Shield Glow, Glow Intensity, Tick Rate,
+Animations);
 Brightness (gamma, HDR); Mods > PRISM Graphics (World Geometry, Geometry Detail, Bloom, Tone Grade; Geometry Shadows
 with Classic's Sun shadows); Mods > PRISM Assets (textures, remodels, PBR materials, streaming; Material Detail and
 Surface Detail under Classic, Material Packs under the PRISM modes). Android has no Lighting choice: its light is

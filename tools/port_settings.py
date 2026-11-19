@@ -586,6 +586,9 @@ LIGHTING_MODE_ROWS = {
     "prism_raster_composition": "R", "prism_raster_objects": "R", "shadow_resolution_rebaked": "R",
     # (PRISM Path Traced's)
     "pt_profile": "P", "denoiser": "P",
+    # (the enhanced dynamic lights in both PRISM modes: which lights the game
+    # gives the bake's frame and the path tracer, and the plasma glows)
+    "dynamic_lights_prism": "RP",
     # (both PRISM modes: their exposure and tone curve, and the bake both read)
     "prism_exposure": "RP", "prism_exposure_bias": "RP", "prism_tone_curve": "RP", "bake": "RP",
     "bake_quality": "RP", "prism_sky_light": "RP", "bake_rebake": "RP", "bake_indicator": "RP",
@@ -1086,6 +1089,15 @@ PAGES = {
              "World: grounds characters, vehicles and scenery with soft shade where they meet the level and each "
              "other, worked out from the level's shape. The levels keep their own lighting.", "android",
              "ambient_occlusion_android"),
+            # (the desktop's under the PRISM modes: the game gives them the
+            # enhanced lights too (object_lights.c: the plasma bolts' and
+            # needles' lights, world_scene's list, which the bake's frame and
+            # the path tracer light by) and draws the glows (d3d8_device.c);
+            # under Classic the row is on Lighting Settings, CLASSIC LIGHTING)
+            ("DYNAMIC LIGHTS", "display.dynamic_lights", [("CLASSIC", "classic"), ("ENHANCED", "enhanced")],
+             "Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle "
+             "flash lights your own weapon. Classic: only the lights the Xbox had.", "desktop",
+             "dynamic_lights_prism"),
             ("SHIELD GLOW", "display.shield_glow", ON_OFF,
              "Shields light their surroundings as they flare, in the shield's own color. Online: the host's "
              "choice.", None),

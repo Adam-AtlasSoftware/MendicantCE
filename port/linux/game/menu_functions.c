@@ -2332,6 +2332,11 @@ static struct
 	/* (PRISM Path Traced's) */
 	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
 	{ "op_denoiser", LIGHTING_P, NULL, NULL },
+	/* (Advanced Graphics' Dynamic Lights: the enhanced dynamic lights under
+	both PRISM modes, which the game gives the plasma bolts' and needles'
+	lights that they light by, and whose glows it draws; Classic's row is
+	op_dynamic_lights, above) */
+	{ "op_dynamic_lights_prism", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	/* (both PRISM modes: their exposure and tone curve, and the bake that
 	both read: Rebaked's light, Path Traced's scene and bounced light) */
 	{ "op_prism_exposure", LIGHTING_R | LIGHTING_P, NULL, NULL },

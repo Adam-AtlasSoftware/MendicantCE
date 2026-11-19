@@ -25,11 +25,12 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_per_pixel_lighting_android" x="28" y="294" platform="android"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_dynamic_lights_android" x="28" y="315" platform="android"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_ambient_occlusion_android" x="28" y="336" platform="android"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_shield_glow" x="28" y="357"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_shield_glow_intensity" x="28" y="378"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_16" x="28" y="405"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_sim_rate" x="28" y="425"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_enhanced_animations" x="28" y="446"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_dynamic_lights_prism" x="28" y="357" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_shield_glow" x="28" y="378"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_shield_glow_intensity" x="28" y="399"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_17" x="28" y="426"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_sim_rate" x="28" y="446"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_enhanced_animations" x="28" y="467"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -170,11 +171,20 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/ambient_occlusion_android_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|WORLD" setting="display.ambient_occlusion" values="off|world" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_dynamic_lights_prism" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/dynamic_lights_prism_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/dynamic_lights_prism_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/dynamic_lights_prism_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/dynamic_lights_prism_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="CLASSIC|ENHANCED" setting="display.dynamic_lights" values="classic|enhanced" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_shield_glow" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="15" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.shield_glow" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -183,21 +193,21 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_intensity_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_intensity_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_intensity_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="15" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_intensity_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="16" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/shield_glow_intensity_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="DEFAULT|LIGHT SHOW" setting="display.shield_glow_intensity" values="default|light_show" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_16" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_16_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_17" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 120">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_17_title"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_16_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="16" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/section_17_title" type="text" controller="1" width="344" height="18" wide="0 120" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="17" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/op_sim_rate" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 120">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/sim_rate_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/sim_rate_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/sim_rate_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="17" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/sim_rate_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="18" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/sim_rate_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ORIGINAL (30)|60|120" setting="game.sim_rate" values="30|60|120" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -206,7 +216,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="18" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/labels" string_index="19" color="#FF2896FF" text_x="10" text_y="1" wide="0 120" font="ui\small_ui">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/enhanced_animations_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="CLASSIC|ENHANCED" setting="game.enhanced_animations" values="false|true" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="120 0">
 		<on event="created" run="port setting load"/>
@@ -226,6 +236,7 @@
 		<string text="SMOOTH LIGHTING"/>
 		<string text="DYNAMIC LIGHTS"/>
 		<string text="AMBIENT OCCLUSION"/>
+		<string text="DYNAMIC LIGHTS"/>
 		<string text="SHIELD GLOW"/>
 		<string text="GLOW INTENSITY"/>
 		<string text="GAME"/>
@@ -248,6 +259,7 @@
 		<string text="Lights characters and weapons smoothly, without the flat facets of the Xbox's lighting, at a small cost."/>
 		<string text="Enhanced: plasma bolts, muzzle flashes and blasts light their surroundings smoothly, with a glow. Classic lights them as the Xbox did."/>
 		<string text="World: grounds characters, vehicles and scenery with soft shade where they meet the level and each other, worked out from the level's shape. The levels keep their own lighting."/>
+		<string text="Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle flash lights your own weapon. Classic: only the lights the Xbox had."/>
 		<string text="Shields light their surroundings as they flare, in the shield's own color. Online: the host's choice."/>
 		<string text="Light Show: the shields' glow reaches three times as far, and is brighter. Online: the host's choice."/>
 		<string text=""/>
