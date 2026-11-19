@@ -23,40 +23,6 @@
 		<on event="start" run="port settings page cancel" back="true"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_specular" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_specular_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_reflections" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_reflections_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_shadows" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_shadows_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_shadow_resolution" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_shadow_resolution_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_shadow_softness" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_shadow_softness_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_lightmaps" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_lightmaps_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_ambient_occlusion_strength" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/ambient_occlusion_strength_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/op_prism_world_geometry" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_world_geometry_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>

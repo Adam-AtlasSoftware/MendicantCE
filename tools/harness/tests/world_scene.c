@@ -605,8 +605,16 @@ static void follows_case(void)
 
 static void lights_case(void)
 {
-	static struct world_scene_light_definition spot = { 0, 1.0f, 0.0f, 0.0f, 0.5f, 0.6f, 0.0f, 0.9f, 0.8f };
-	static struct world_scene_light_definition omni = { 0, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, -1.0f };
+	/* (a light definition as the tag has it: its cone first, its gel map's
+	reference at 0x64; tag_schema_render.c's light_definition) */
+	static struct
+	{
+		struct world_scene_light_definition cone;
+		byte other[0x64 - sizeof(struct world_scene_light_definition)];
+		struct tag_reference gel_map;
+		byte rest[0x40];
+	} spot = { { 0, 1.0f, 0.0f, 0.0f, 0.5f, 0.6f, 0.0f, 0.9f, 0.8f }, { 0 }, { 0, NULL, 0, 0x00e10007 }, { 0 } },
+	  omni = { { 0, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, -1.0f }, { 0 }, { 0, NULL, 0, NONE }, { 0 } };
 	struct scenario_light_fixture_datum fixtures[2];
 	struct world_scene_light const *lights;
 	long alive = (long)0x80010003, dead = (long)0x80020005;
@@ -652,6 +660,15 @@ static void lights_case(void)
 	CHECK(lights[0].id == alive && lights[0].type == 1 && lights[0].cone_cosine == 0.8f &&
 		lights[0].position[0] == 4.0f && lights[0].radius == 3.0f && lights[0].direction[2] == -1.0f &&
 		lights[0].color[0] == 0.5f && (lights[0].flags & WORLD_SCENE_LIGHT_DYNAMIC), "the live light");
+	CHECK(lights[0].gel == WORLD_SCENE_GEL, "the live light's gel map: %g", lights[0].gel);
+	CHECK(lights[1].gel == 1.0f, "the fixture's gel: %g", lights[1].gel);
+	/* the spot without its gel map: its light whole */
+	spot.gel_map.index = NONE;
+	world_scene_frame_begin();
+	lights = world_scene_lights();
+	CHECK(world_scene_light_count() == 2 && lights[0].id == alive && lights[0].gel == 1.0f,
+		"no gel map, but the light is let through by %g", lights[0].gel);
+	spot.gel_map.index = 0x00e10007;
 	CHECK(lights[1].id == (WORLD_SCENE_ID_STATIC_BIT | 0) && (lights[1].flags & WORLD_SCENE_LIGHT_FIXTURE) &&
 		lights[1].position[0] == 1.0f && lights[1].color[1] == 1.0f && lights[1].intensity == 2.0f &&
 		lights[1].type == 1 && fabsf(lights[1].cone_cosine - cosf(1.0f)) < 1e-6f, "the fixture");

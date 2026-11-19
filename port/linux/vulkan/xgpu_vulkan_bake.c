@@ -343,6 +343,10 @@ struct bake_plan
 	float *reflections;
 	int failed;
 	double seconds;
+	/* set (released) as the plan's thread ends: its join then waits for
+	nothing (pthread_tryjoin_np is glibc's alone; the Windows host's
+	pthreads have none) */
+	int done;
 };
 
 /* a tile the filter has made: its index, its file's words, its raster's */
@@ -1694,6 +1698,7 @@ done:
 	free(table.keys);
 	free(table.cells);
 	plan->seconds = now_seconds() - started;
+	__atomic_store_n(&plan->done, 1, __ATOMIC_RELEASE);
 	return NULL;
 }
 
@@ -1736,7 +1741,8 @@ static void folder_make(const char *path)
 		return;
 	for (index = 1; index <= length; index++)
 	{
-		if (path[index] == '/' || path[index] == 0)
+		/* (Windows's folders end at either slash) */
+		if (path[index] == '/' || path[index] == '\\' || path[index] == 0)
 		{
 			memcpy(partial, path, index);
 			partial[index] = 0;
@@ -5167,8 +5173,9 @@ bake still traces) */
 		if (b->thread_running)
 		{
 			/* (the thread's end: its plan whole) */
-			if (pthread_tryjoin_np(b->thread, NULL) != 0)
+			if (!__atomic_load_n(&b->plan.done, __ATOMIC_ACQUIRE))
 				break;
+			pthread_join(b->thread, NULL);
 			b->thread_running = 0;
 		}
 		if (b->plan.failed)
@@ -5470,9 +5477,8 @@ static void reach_file_write(uint64_t hash)
 		fwrite(bake.reach_summary, 4, 8, f) == 8 && fwrite(counts, 4, 2, f) == 2 &&
 		fwrite(bake.bricks, 8, counts[0], f) == counts[0] && (!counts[1] || fwrite(bake.tiers, 1, counts[1], f) == counts[1]);
 	ok = fclose(f) == 0 && ok;
-	if (ok)
-		rename(temporary, bake.reach_path);
-	else
+	/* (prism_bake_cache_commit: Windows's rename takes no file's place) */
+	if (!ok || prism_bake_cache_commit(temporary, bake.reach_path))
 		remove(temporary);
 }
 
@@ -5974,8 +5980,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	job.counts[2] = description->height;
 	job.coarse = b->bricks_coarse.address;
 	job.counts[3] = b->probes.buffer && b->volume.done ? b->coarse_entries : 0;
-	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on) */
-	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
+	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on;
+	in the frame whole alone (display.prism_raster_composition "materials"):
+	CE's composition takes CE's own dynamic lights' passes (its additions),
+	which would count them twice) */
+	lights = materials ? xgpu_vulkan_scene_light_table(&light_count, &serial) : NULL;
 	for (index = 0; lights && index < light_count && dynamic < RASTER_LIGHTS; index++)
 	{
 		const struct xgpu_stream_scene_light *l = &lights[index];

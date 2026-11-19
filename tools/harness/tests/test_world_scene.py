@@ -1,7 +1,7 @@
 """display.ambient_occlusion "world"'s scene (port/linux/include/world_scene.h, port/linux/game/world_scene.c,
 docs/world-ao.md): the whole file against a small fake game. The static triangles' copy of a hand-built collision
 BSP; ids stable over frames and never another live object's; an object's instance following its node as drawn between
-the ticks; the light list."""
+the ticks; the light list (a light's cone and gel map from its definition)."""
 import re
 import sys
 from pathlib import Path
@@ -45,15 +45,21 @@ CONTROLS = [
     ("|| !datum_try_and_get(light_data, light))", ")", "lights"),
     # a fixture of another BSP listed
     ("if (!TEST_FLAG(fixture->object.on_bsp_flags, world_scene.bsp_index))\n\t\t\tcontinue;", "", "lights"),
+    # a light's gel map not seen (its light let through whole) ...
+    ("WORLD_SCENE_GEL_MAP))->index != NONE)", "WORLD_SCENE_GEL_MAP))->index == NONE)", "lights"),
+    # ... or read at another offset of its definition
+    ("#define WORLD_SCENE_GEL_MAP 0x64", "#define WORLD_SCENE_GEL_MAP 0x54", "lights"),
 ]
 
 
 def game():
     header = read("source/physics/collision_bsp_definitions.h")
+    tags = read("source/tag_files/tag_groups.h")
     types = read("source/objects/object_types.h")
     objects = read("source/objects/objects.h")
     return "\n".join([enum_with(header, "MAXIMUM_EDGES_PER_COLLISION_SURFACE")] +
                      [structure(header, name) for name in ["collision_surface", "collision_edge", "collision_vertex"]] +
+                     [structure(tags, "tag_reference")] +
                      [enum_with(types, "_object_mask_all"),
                       enum_with(objects, "_object_invisible_bit")])
 

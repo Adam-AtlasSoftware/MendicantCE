@@ -4,7 +4,7 @@
 	<geometry row_x="28" row_width="344" row_height="20" row_step="21" section_height="18" section_step="20" section_gap="6" tab_top="104" page_top="80" rows_bottom="408" spinner_x="188" spinner_width="140" search_word_extra="123" search_results="14" search_crumbs="8" panel_bottom="400"/>
 	<geometry name="tall" row_x="28" row_width="344" row_height="24" row_step="25" section_height="20" section_step="22" section_gap="6" tab_top="78" page_top="50" rows_bottom="438" spinner_x="188" spinner_width="140" panel_bottom="438" scrolls="true" search_word_extra="123" search_results="14" search_crumbs="8"/>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/video_settings_screen" kind="settings" layout="tab" geometry="tall" tab="VIDEO">
-		<about>The window, the frame rate and the graphics.</about>
+		<about>The window, the frame rate, the lighting and the graphics.</about>
 		<section key="section_0" title="DISPLAY"/>
 		<row key="mode" kind="choice" setting="display.mode" label="WINDOW" crumb="VIDEO › DISPLAY" search="monitor" search_choices="fullscreen borderless windowed" when="computer">
 			<help>How the game takes the screen. Fullscreen sets the display to the game's resolution. Borderless covers it with a window that others open over. Windowed is a window to move and resize. F11 switches between the two.</help>
@@ -61,19 +61,13 @@
 		<row key="first_person" kind="link" label="FIRST PERSON ›" crumb="VIDEO › DISPLAY" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/first_person_screen">
 			<help>The vehicles' and scopes' fields of view, the Panini projection, how far you see, the reticle, a passenger's view, and your weapon, body and shields.</help>
 		</row>
-		<row key="movies" kind="choice" setting="display.movies" label="STARTUP MOVIES" crumb="VIDEO › DISPLAY" search="intro">
-			<help>Plays the Xbox's intro movie as the game starts, and its attract movies on an idle main menu. Any button skips the intro.</help>
-			<note>They are the bink folder of your Xbox disc image, copied with the maps. Without them, put the disc's bink folder beside your maps folder.</note>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
-		</row>
-		<section key="section_11" title="GRAPHICS"/>
-		<row key="graphics" kind="choice" setting="display.graphics" label="QUALITY" crumb="VIDEO › GRAPHICS" search="preset" search_choices="prism custom">
-			<help>Enhanced: smoother edges, sharper textures and shadows, smoother lighting. Classic looks as the Xbox did. PRISM: Enhanced with the levels' light smoothed and ambient occlusion.</help>
+		<section key="section_10" title="GRAPHICS"/>
+		<row key="graphics_android" kind="choice" setting="display.graphics" label="QUALITY" crumb="VIDEO › GRAPHICS" search_choices="xbox prism extras custom" when="android">
+			<help>Enhanced: smoother edges, sharper textures and shadows, smoother model light. Xbox: as the Xbox drew it. PRISM Extras: Enhanced with PRISM's finer Classic light. Its light settings are Lighting Classic's.</help>
 			<note>Changing one shows CUSTOM.</note>
 			<choice shown="ENHANCED" value="enhanced"/>
-			<choice shown="CLASSIC" value="classic"/>
-			<choice shown="PRISM" value="prism"/>
+			<choice shown="XBOX" value="classic"/>
+			<choice shown="PRISM EXTRAS" value="prism"/>
 			<choice shown="CUSTOM" value="custom"/>
 		</row>
 		<row key="high_res_text" kind="choice" setting="display.high_res_text" label="HIGH-RES TEXT" crumb="VIDEO › GRAPHICS">
@@ -81,17 +75,30 @@
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
-		<row key="battery_saver" kind="choice" setting="display.battery_saver" label="BATTERY SAVER" crumb="VIDEO › GRAPHICS">
+		<row key="battery_saver_android" kind="choice" setting="display.battery_saver" label="BATTERY SAVER" crumb="VIDEO › GRAPHICS" when="android">
 			<help>Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns it on while the device runs on its battery. Your own settings come back as it turns off.</help>
 			<choice shown="OFF" value="off"/>
 			<choice shown="ON" value="on"/>
 			<choice shown="AUTO" value="auto"/>
 		</row>
+		<row key="lighting" kind="choice" setting="display.lighting" label="LIGHTING" crumb="VIDEO › GRAPHICS" search_choices="prism rebaked path traced" when="desktop">
+			<help>How the world is lit. Classic: the game's own light. PRISM Rebaked: light baked on this computer (sun, sky, lamps, bounces). PRISM Path Traced: every light traced each frame. The PRISM lightings need a graphics card that traces rays.</help>
+			<note>Lighting Settings and Ray Tracing show what applies to the lighting chosen.</note>
+			<choice shown="CLASSIC" value="ce"/>
+			<choice shown="PRISM REBAKED" value="raster"/>
+			<choice shown="PATH TRACED" value="pathtraced"/>
+		</row>
+		<row key="lighting_settings" kind="link" label="LIGHTING SETTINGS ›" crumb="VIDEO › GRAPHICS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/lighting_settings_screen">
+			<help>The settings of the lighting chosen: Classic's shadows, lights and PRISM extras; PRISM Rebaked's and Path Traced's look, exposure and the light bake.</help>
+		</row>
+		<row key="ray_tracing" kind="link" label="RAY TRACING ›" crumb="VIDEO › GRAPHICS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/ray_tracing_settings_screen">
+			<help>The ray traced features of the lighting chosen: Classic's ray traced shadows and light, PRISM Rebaked's traced object shadows, and the shapes every mode traces.</help>
+		</row>
 		<row key="brightness_settings" kind="link" label="BRIGHTNESS ›" crumb="VIDEO › GRAPHICS" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/brightness_screen">
 			<help>How bright the picture is: its gamma, soft particles, and on an HDR display, HDR's look, how bright white and the HUD are, and the display's peak.</help>
 		</row>
 		<row key="advanced_graphics" kind="link" label="ADVANCED GRAPHICS ›" crumb="VIDEO › GRAPHICS" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/advanced_graphics_screen">
-			<help>Render resolution, anti-aliasing, texture filtering, model detail, shadows, the lighting and the shields' glow, smooth motion and the tick rate.</help>
+			<help>The quality preset, battery saver, render resolution, anti-aliasing, texture filtering, model detail, smooth motion, the shields' glow and the tick rate.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this tab's settings back to their defaults. Nothing changes until OK."/>
 		<button key="button_ok" kind="ok" run="port settings ok" help="Keeps your changes, on every tab, and applies them."/>
@@ -434,23 +441,28 @@
 		<row key="campaign_ai" kind="link" label="CAMPAIGN AI ›" crumb="PROFILES › PLAYER" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/campaign_ai/campaign_ai_screen">
 			<help>MENDICANT AI: the campaign's Marines and Covenant fight as units led through drills, and how well the AI aims and fires.</help>
 		</row>
-		<section key="section_7" title="STORAGE"/>
-		<row key="map_cache_megabytes" kind="choice" setting="game.map_cache_megabytes" label="MAP STORAGE" crumb="PROFILES › STORAGE" search="cache disk" search_choices="instant loading disk space saver">
+		<section key="section_7" title="GAME DATA"/>
+		<row key="map_cache_megabytes" kind="choice" setting="game.map_cache_megabytes" label="MAP STORAGE" crumb="PROFILES › GAME DATA" search="cache disk" search_choices="instant loading disk space saver">
 			<help>Instant Loading keeps every map unpacked, about 3.0 GB, so loads never wait. Disk Space Saver keeps at most 730 MB, saving 2.3 GB or more, little on most drives. A map it has not kept loads a second or more slower.</help>
 			<note>Switching back unpacks them in the background.</note>
 			<choice shown="INSTANT LOADING" value="0"/>
 			<choice shown="DISK SPACE SAVER" value="730"/>
 		</row>
-		<row key="clear_caches" kind="status" label="CLEAR CACHES" crumb="PROFILES › STORAGE" search="cache" run="port settings clear caches">
+		<row key="movies" kind="choice" setting="display.movies" label="STARTUP MOVIES" crumb="PROFILES › GAME DATA" search="intro">
+			<help>Plays the Xbox's intro movie as the game starts, and its attract movies on an idle main menu. Any button skips the intro.</help>
+			<note>They are the bink folder of your Xbox disc image, copied with the maps. Without them, put the disc's bink folder beside your maps folder.</note>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="clear_caches" kind="status" label="CLEAR CACHES" crumb="PROFILES › GAME DATA" search="cache" run="port settings clear caches">
 			<help>Deletes what the game keeps only to start and load faster: the unpacked maps, their prepared draws, the menus' pictures, the ambient occlusion's volumes and the GPU's pipelines, made again as you play.</help>
 			<note>Select it twice: the first asks, the second clears.</note>
 		</row>
-		<section key="section_10" title="HELP"/>
-		<row key="report" kind="link" label="REPORT A PROBLEM" crumb="PROFILES › HELP" search="bug crash" run="port settings report">
+		<section key="section_11" title="HELP AND ABOUT"/>
+		<row key="report" kind="link" label="REPORT A PROBLEM" crumb="PROFILES › HELP AND ABOUT" search="bug crash" run="port settings report">
 			<help>Saves a report (the log, your settings and GPU, the frame rate and a screenshot) and opens a GitHub issue filled in with it: say what happened, drag in the report's file, submit. F8 does the same in a game, its screenshot that moment.</help>
 		</row>
-		<section key="section_12" title="ABOUT"/>
-		<row key="about" kind="link" label="MENDICANTCE" crumb="PROFILES › ABOUT">
+		<row key="about" kind="link" label="MENDICANTCE" crumb="PROFILES › HELP AND ABOUT">
 			<help>Halo: Combat Evolved, the Xbox game, played from your own copy of its maps. MendicantCE is a free fan project: GOAT H1, modified. Source: github.com/Adam-AtlasSoftware/MendicantCE</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this tab's settings back to their defaults. Nothing changes until OK."/>
@@ -475,26 +487,17 @@
 			<help>The games recorded: watch one again from any player's view, or a free or cinematic camera.</help>
 		</row>
 		<row key="prism_graphics" kind="link" label="PRISM GRAPHICS ›" crumb="MODS › MODS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_settings_screen">
-			<help>Finer light, shadows and tone, and the remodels and rebaked light a data folder has. Video's Quality PRISM turns on the faithful ones.</help>
+			<help>The level remodelled from the data folder, bloom and the tone grade, with any lighting. The lighting's own settings are Video's.</help>
 		</row>
 		<row key="prism_assets" kind="link" label="PRISM ASSETS ›" crumb="MODS › MODS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_assets_settings_screen">
 			<help>The sharper textures, remodelled characters and materials mods ship, and how much of the graphics card they take.</help>
 		</row>
-		<row key="prism_ray_tracing" kind="link" label="PRISM RAY TRACING ›" crumb="MODS › MODS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_settings_screen">
-			<help>Traced sun shadows, occlusion and bounced light on graphics cards that trace rays, and a path-traced mode.</help>
-		</row>
-		<row key="prism_path_tracing" kind="link" label="PRISM PATH TRACING ›" crumb="MODS › MODS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/prism_pt_settings_screen">
-			<help>How the path-traced light looks: faithful to the game's lightmaps or lit by the traced lights alone, its lamps, exposure and highlights.</help>
-		</row>
-		<row key="prism_lighting" kind="link" label="PRISM LIGHTING ›" crumb="MODS › MODS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_lighting_settings_screen">
-			<help>PRISM Raster: each level lit by its own light baked on this computer, with sharp sun shadows. Rebake lightmaps, and how finely they are baked.</help>
-		</row>
-		<section key="section_10" title="GAME MAPS" when="computer"/>
+		<section key="section_7" title="GAME MAPS" when="computer"/>
 		<row key="add_maps" kind="status" label="ADD MAPS" crumb="MODS › GAME MAPS" search="iso ce installer extract" when="computer" run="port settings add maps">
 			<help>Your maps come from your Xbox disc image, which the game needs, and from Custom Edition's installer (halocesetup_en_1.00.exe), whose multiplayer maps are optional.</help>
 			<note>Select it twice: the maps screen opens the next time the game starts, to add either.</note>
 		</row>
-		<section key="section_12" title="MASTER CHIEF COLLECTION"/>
+		<section key="section_9" title="MASTER CHIEF COLLECTION"/>
 		<row key="mcc_packages" kind="link" label="MCC PACKAGES ›" crumb="MODS › MASTER CHIEF COLLECTION" open="main_menu/settings_select/player_setup/player_profile_edit/network_setup/mcc_packages/mcc_packages_screen">
 			<help>The Master Chief Collection's maps: finding them, their campaign missions and collections, and the copies downloaded from hosts.</help>
 		</row>
@@ -503,6 +506,21 @@
 		<button key="button_cancel" kind="cancel" run="port settings cancel" help="Leaves Settings without keeping any change."/>
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/advanced/advanced_graphics_screen" kind="settings" layout="page" geometry="tall" title="ADVANCED GRAPHICS">
+		<section key="section_0" title="PRESET AND IMAGE"/>
+		<row key="graphics" kind="choice" setting="display.graphics" label="QUALITY" crumb="VIDEO › ADVANCED GRAPHICS" search="preset" search_choices="xbox prism extras custom" when="desktop">
+			<help>Enhanced: smoother edges, sharper textures and shadows, smoother model light. Xbox: as the Xbox drew it. PRISM Extras: Enhanced with PRISM's finer Classic light. Its light settings are Lighting Classic's.</help>
+			<note>Changing one shows CUSTOM.</note>
+			<choice shown="ENHANCED" value="enhanced"/>
+			<choice shown="XBOX" value="classic"/>
+			<choice shown="PRISM EXTRAS" value="prism"/>
+			<choice shown="CUSTOM" value="custom"/>
+		</row>
+		<row key="battery_saver" kind="choice" setting="display.battery_saver" label="BATTERY SAVER" crumb="VIDEO › ADVANCED GRAPHICS" when="desktop">
+			<help>Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns it on while the device runs on its battery. Your own settings come back as it turns off.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="ON" value="on"/>
+			<choice shown="AUTO" value="auto"/>
+		</row>
 		<row key="render_resolution" kind="choice" setting="display.render_resolution" label="RENDER RESOLUTION" crumb="VIDEO › ADVANCED GRAPHICS" search_choices="xbox 640x480 full" when="computer">
 			<help>Full draws at your screen's resolution. Below 100% draws fewer pixels, scaled up sharply: a steadier frame rate. Above 100% draws more, scaled down: smoother, for over twice the work at 150%. Xbox draws 640x480.</help>
 			<choice shown="XBOX 640X480" value="original"/>
@@ -516,7 +534,7 @@
 			<choice shown="200%" value="2"/>
 		</row>
 		<row key="anti_aliasing" kind="choice" setting="display.anti_aliasing" label="ANTI-ALIASING" crumb="VIDEO › ADVANCED GRAPHICS" search="aa" search_choices="fxaa smaa msaa" when="desktop">
-			<help>Smooths jagged edges. FXAA and SMAA cost little; MSAA is sharper and costs more of the graphics card.</help>
+			<help>Smooths jagged edges. FXAA and SMAA cost little; MSAA is sharper and costs more of the graphics card. PRISM's lighting draws no MSAA.</help>
 			<choice shown="OFF" value="off"/>
 			<choice shown="FXAA" value="fxaa"/>
 			<choice shown="SMAA" value="smaa"/>
@@ -552,30 +570,35 @@
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
-		<section key="section_6" title="LIGHTING"/>
-		<row key="shadow_resolution" kind="choice" setting="display.shadow_resolution" label="SHADOW QUALITY" crumb="VIDEO › ADVANCED GRAPHICS" search="shadows" search_choices="xbox medium high ultra">
+		<section key="section_9" title="LIGHT EFFECTS"/>
+		<row key="shadow_resolution_android" kind="choice" setting="display.shadow_resolution" label="SHADOW QUALITY" crumb="VIDEO › ADVANCED GRAPHICS" search_choices="xbox medium high ultra" when="android">
 			<help>How sharp the shadows of characters, vehicles and weapons are. Xbox is the original's soft, blocky shadow; each step up is crisper, and costs a little more of the graphics card.</help>
 			<choice shown="XBOX" value="128"/>
 			<choice shown="MEDIUM" value="256"/>
 			<choice shown="HIGH" value="512"/>
 			<choice shown="ULTRA" value="1024"/>
 		</row>
-		<row key="per_pixel_lighting" kind="choice" setting="display.per_pixel_lighting" label="SMOOTH LIGHTING" crumb="VIDEO › ADVANCED GRAPHICS">
+		<row key="per_pixel_lighting_android" kind="choice" setting="display.per_pixel_lighting" label="SMOOTH LIGHTING" crumb="VIDEO › ADVANCED GRAPHICS" when="android">
 			<help>Lights characters and weapons smoothly, without the flat facets of the Xbox's lighting, at a small cost.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
-		<row key="dynamic_lights" kind="choice" setting="display.dynamic_lights" label="DYNAMIC LIGHTS" crumb="VIDEO › ADVANCED GRAPHICS" when="desktop android">
+		<row key="dynamic_lights_android" kind="choice" setting="display.dynamic_lights" label="DYNAMIC LIGHTS" crumb="VIDEO › ADVANCED GRAPHICS" when="android">
 			<help>Enhanced: plasma bolts, muzzle flashes and blasts light their surroundings smoothly, with a glow. Classic lights them as the Xbox did.</help>
 			<note>Classic for everyone in a Pro 2v2 game; yours again after it.</note>
 			<choice shown="CLASSIC" value="classic"/>
 			<choice shown="ENHANCED" value="enhanced"/>
 		</row>
-		<row key="ambient_occlusion" kind="choice" setting="display.ambient_occlusion" label="AMBIENT OCCLUSION" crumb="VIDEO › ADVANCED GRAPHICS" search="ao ssao" search_choices="world ray traced" when="desktop android">
+		<row key="ambient_occlusion_android" kind="choice" setting="display.ambient_occlusion" label="AMBIENT OCCLUSION" crumb="VIDEO › ADVANCED GRAPHICS" search_choices="world ray traced" when="android">
 			<help>World: soft shade where characters, vehicles and scenery meet the level and each other, from the level's shape; the levels keep their own lighting. Ray Traced: the shade of characters and vehicles traced by the graphics card, where it can (else World).</help>
 			<choice shown="OFF" value="off"/>
 			<choice shown="WORLD" value="world"/>
 			<choice shown="RAY TRACED" value="ray_traced"/>
+		</row>
+		<row key="dynamic_lights_prism" kind="choice" setting="display.dynamic_lights" label="DYNAMIC LIGHTS" crumb="VIDEO › ADVANCED GRAPHICS" when="desktop">
+			<help>Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle flash lights your own weapon. Classic: only the lights the Xbox had.</help>
+			<choice shown="CLASSIC" value="classic"/>
+			<choice shown="ENHANCED" value="enhanced"/>
 		</row>
 		<row key="shield_glow" kind="choice" setting="display.shield_glow" label="SHIELD GLOW" crumb="VIDEO › ADVANCED GRAPHICS">
 			<help>Shields light their surroundings as they flare, in the shield's own color. Online: the host's choice.</help>
@@ -589,7 +612,7 @@
 			<choice shown="DEFAULT" value="default"/>
 			<choice shown="LIGHT SHOW" value="light_show"/>
 		</row>
-		<section key="section_13" title="GAME"/>
+		<section key="section_17" title="GAME"/>
 		<row key="sim_rate" kind="choice" setting="game.sim_rate" label="TICK RATE" crumb="VIDEO › ADVANCED GRAPHICS" search="hz tickrate" search_choices="original">
 			<help>How often the world updates each second, in games on this device (campaign, split screen, bots). 60 and 120 respond faster and take more of the processor. Online games play at their host's tick rate: a GOAT H1 game's (GOAT H1 60 Tick), a Legacy game's 30.</help>
 			<choice shown="ORIGINAL (30)" value="30"/>
@@ -1672,51 +1695,7 @@
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_settings_screen" kind="settings" layout="page" geometry="tall" title="PRISM GRAPHICS">
-		<section key="section_0" title="SHADING" when="desktop"/>
-		<row key="prism_specular" kind="choice" setting="display.prism_specular" label="HIGHLIGHTS" crumb="MODS › PRISM GRAPHICS" search_choices="subtle full" when="desktop">
-			<help>Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is shiny. Off draws them as the Xbox did.</help>
-			<choice shown="OFF" value="off"/>
-			<choice shown="SUBTLE" value="subtle"/>
-			<choice shown="FULL" value="full"/>
-		</row>
-		<row key="prism_reflections" kind="choice" setting="display.prism_reflections" label="REFLECTIONS" crumb="MODS › PRISM GRAPHICS" search_choices="local" when="desktop">
-			<help>Local: shiny armour reflects the place it is in, from probes in the data folder; none come with the game. Without them, as Classic.</help>
-			<choice shown="CLASSIC" value="stock"/>
-			<choice shown="LOCAL" value="local"/>
-		</row>
-		<row key="prism_shadows" kind="choice" setting="display.prism_shadows" label="SHADOWS" crumb="MODS › PRISM GRAPHICS" search_choices="soft traced sun" when="desktop">
-			<help>Sun: the sky's sun casts real shadows of characters, vehicles and scenery onto the level and each other. Soft and Traced: characters shade themselves from the main light (need ambient occlusion World). Classic keeps the Xbox's shadows alone.</help>
-			<choice shown="CLASSIC" value="stock"/>
-			<choice shown="SOFT" value="soft"/>
-			<choice shown="TRACED" value="traced"/>
-			<choice shown="SUN" value="cascaded"/>
-		</row>
-		<row key="prism_shadow_resolution" kind="choice" setting="display.prism_shadow_resolution" label="SHADOW DETAIL" crumb="MODS › PRISM GRAPHICS" search_choices="low high ultra" when="desktop">
-			<help>How sharp the sun's shadows are, and how much of the graphics card they take.</help>
-			<choice shown="LOW" value="1024"/>
-			<choice shown="HIGH" value="2048"/>
-			<choice shown="ULTRA" value="4096"/>
-		</row>
-		<row key="prism_shadow_softness" kind="choice" setting="display.prism_shadow_softness" label="SHADOW SOFTNESS" crumb="MODS › PRISM GRAPHICS" search_choices="sharp natural soft" when="desktop">
-			<help>How fast the sun's shadows soften away from what casts them. A dim sun or moon softens them more.</help>
-			<choice shown="SHARP" value="0.5"/>
-			<choice shown="NATURAL" value="1"/>
-			<choice shown="SOFT" value="2"/>
-		</row>
-		<section key="section_6" title="LIGHTING" when="desktop"/>
-		<row key="prism_lightmaps" kind="choice" setting="display.prism_lightmaps" label="LIGHTMAPS" crumb="MODS › PRISM GRAPHICS" search_choices="stock smooth rebaked" when="desktop">
-			<help>Smooth: the levels' own light without its bands and blocky edges. Rebaked: pages baked from the level's lamps and sky where the data folder has them; none come with the game, otherwise Smooth.</help>
-			<choice shown="STOCK" value="stock"/>
-			<choice shown="SMOOTH" value="smooth"/>
-			<choice shown="REBAKED" value="rebaked"/>
-		</row>
-		<row key="ambient_occlusion_strength" kind="choice" setting="display.ambient_occlusion_strength" label="SHADE DEPTH" crumb="MODS › PRISM GRAPHICS" search_choices="light natural deep" when="desktop">
-			<help>How deep ambient occlusion World's shade is where characters, vehicles and scenery meet the level.</help>
-			<choice shown="LIGHT" value="0.5"/>
-			<choice shown="NATURAL" value="0.8"/>
-			<choice shown="DEEP" value="1"/>
-		</row>
-		<section key="section_9" title="BEYOND CE" when="desktop"/>
+		<section key="section_0" title="WORLD GEOMETRY" when="desktop"/>
 		<row key="prism_world_geometry" kind="choice" setting="display.prism_world_geometry" label="WORLD GEOMETRY" crumb="MODS › PRISM GRAPHICS" search_choices="xbox remodel" when="desktop">
 			<help>Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on the original.</help>
 			<choice shown="XBOX" value="stock"/>
@@ -1729,19 +1708,20 @@
 			<choice shown="HIGH" value="200"/>
 		</row>
 		<row key="prism_geometry_shadows" kind="choice" setting="display.prism_world_geometry_shadows" label="GEOMETRY SHADOWS" crumb="MODS › PRISM GRAPHICS" search_choices="xbox far full" when="desktop">
-			<help>The shape the sun's shadows are cast from with the remodel: Far, its lighter level (the rock's ledges still shade); Full, every detail; Xbox, the map's own (cheapest).</help>
+			<help>The shape Classic's sun shadows are cast from with the remodel: Far, its lighter level (the rock's ledges still shade); Full, every detail; Xbox, the map's own (cheapest).</help>
 			<choice shown="XBOX" value="stock"/>
 			<choice shown="FAR" value="far"/>
 			<choice shown="FULL" value="remodel"/>
 		</row>
+		<section key="section_4" title="POST EFFECTS" when="desktop"/>
 		<row key="prism_bloom" kind="choice" setting="display.prism_bloom" label="BLOOM" crumb="MODS › PRISM GRAPHICS" search_choices="glow full" when="desktop">
-			<help>A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; Glow is faint, Full wider. Nothing lit only to white glows.</help>
+			<help>A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; Glow is faint, Full wider. Nothing lit only to white glows. With any lighting.</help>
 			<choice shown="OFF" value="off"/>
 			<choice shown="GLOW" value="glow"/>
 			<choice shown="FULL" value="full"/>
 		</row>
-		<row key="prism_tone" kind="choice" setting="display.prism_tone" label="TONE" crumb="MODS › PRISM GRAPHICS" search_choices="prism vivid" when="desktop">
-			<help>Grades the picture by the light around each pixel: deeper local contrast, dark places lifted, richer colour. Off draws it as the game does; Vivid goes further.</help>
+		<row key="prism_tone" kind="choice" setting="display.prism_tone" label="TONE GRADE" crumb="MODS › PRISM GRAPHICS" search_choices="prism vivid" when="desktop">
+			<help>Grades the finished picture by the light around each pixel: deeper local contrast, dark places lifted, richer colour. Off draws it as the game does; Vivid goes further. With any lighting.</help>
 			<choice shown="OFF" value="off"/>
 			<choice shown="PRISM" value="prism"/>
 			<choice shown="VIVID" value="vivid"/>
@@ -1753,12 +1733,17 @@
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_assets_settings_screen" kind="settings" layout="page" geometry="tall" title="PRISM ASSETS">
 		<section key="section_0" title="MATERIALS" when="desktop"/>
 		<row key="prism_material_overlay" kind="choice" setting="display.prism_material_overlay" label="MATERIAL DETAIL" crumb="MODS › PRISM ASSETS" when="desktop">
-			<help>Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's material overlay. It changes only the light on them. Off draws them as the Xbox did.</help>
+			<help>Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's material overlay, in Classic's light. It changes only the light on them. Off draws them as the Xbox did.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
 		<row key="prism_surface_maps" kind="choice" setting="display.prism_surface_maps" label="SURFACE DETAIL" crumb="MODS › PRISM ASSETS" when="desktop">
-			<help>Lights characters, weapons and vehicles by the surface maps a mod carries for its remodels: their dents, seams and creases. Off draws them as the Xbox did.</help>
+			<help>Lights characters, weapons and vehicles by the surface maps a mod carries for its remodels, in Classic's light: their dents, seams and creases. Off draws them as the Xbox did.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="material_packs" kind="choice" setting="display.material_packs" label="MATERIAL PACKS" crumb="MODS › PRISM ASSETS" when="desktop">
+			<help>PRISM's lighting draws each surface by the material the material pack or a mod gives it: its colour without the painted light, its bumps, roughness and metal. Off: every material made from the game's shaders.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
@@ -1781,7 +1766,7 @@
 			<choice shown="STOCK" value="stock"/>
 			<choice shown="PBR" value="pbr"/>
 		</row>
-		<section key="section_6" title="MODELS AND STREAMING" when="desktop"/>
+		<section key="section_7" title="MODELS AND STREAMING" when="desktop"/>
 		<row key="prism_models" kind="choice" setting="display.prism_models" label="REMODELS" crumb="MODS › PRISM ASSETS" search_choices="stock max" when="desktop">
 			<help>Draws the remodelled characters, weapons and vehicles mods ship in place of the game's, on the game's own skeletons: animations, collision and aim are unchanged. Stock draws the game's own.</help>
 			<choice shown="STOCK" value="stock"/>
@@ -1837,167 +1822,273 @@
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
 	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_settings_screen" kind="settings" layout="page" geometry="tall" title="PRISM RAY TRACING">
-		<section key="section_0" title="RAY TRACING" when="desktop"/>
-		<row key="prism_rt" kind="choice" setting="display.prism_rt" label="RAY TRACING" crumb="MODS › PRISM RAY TRACING" search_choices="shadows gi path traced" when="desktop">
-			<help>Shadows: the sun's traced shadows and occlusion. GI: also light bounced about the characters. Path Traced: bounced light at every pixel. The level keeps its brightness. Off: the game's light.</help>
-			<choice shown="OFF" value="off"/>
-			<choice shown="SHADOWS" value="shadows"/>
-			<choice shown="GI" value="gi"/>
-			<choice shown="PATH TRACED" value="pathtraced"/>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/lighting_settings_screen" kind="settings" layout="page" geometry="tall" title="LIGHTING">
+		<section key="section_0" title="CLASSIC LIGHTING" when="desktop"/>
+		<row key="shadow_resolution" kind="choice" setting="display.shadow_resolution" label="SHADOW QUALITY" crumb="VIDEO › LIGHTING SETTINGS" search="shadows" search_choices="xbox medium high ultra" when="desktop">
+			<help>How sharp the shadows of characters, vehicles and weapons are. Xbox is the original's soft, blocky shadow; each step up is crisper, and costs a little more of the graphics card.</help>
+			<choice shown="XBOX" value="128"/>
+			<choice shown="MEDIUM" value="256"/>
+			<choice shown="HIGH" value="512"/>
+			<choice shown="ULTRA" value="1024"/>
 		</row>
-		<row key="prism_rt_quality" kind="choice" setting="display.prism_rt_quality" label="RAY TRACING QUALITY" crumb="MODS › PRISM RAY TRACING" search_choices="low medium high ultra" when="desktop">
-			<help>More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics card's time. Low suits the Steam Deck.</help>
-			<choice shown="LOW" value="low"/>
-			<choice shown="MEDIUM" value="medium"/>
-			<choice shown="HIGH" value="high"/>
-			<choice shown="ULTRA" value="ultra"/>
-		</row>
-		<row key="prism_rt_resolution" kind="choice" setting="display.prism_rt_resolution" label="RAY RESOLUTION" crumb="MODS › PRISM RAY TRACING" search_choices="half full" when="desktop">
-			<help>Half traces a ray for each block of four pixels, cheaper on the graphics card; Full traces each pixel. Auto: full, but at Low quality.</help>
-			<choice shown="AUTO" value="auto"/>
-			<choice shown="HALF" value="half"/>
-			<choice shown="FULL" value="full"/>
-		</row>
-		<row key="prism_rt_denoiser" kind="choice" setting="display.prism_rt_denoiser" label="DENOISER" crumb="MODS › PRISM RAY TRACING" search_choices="full temporal" when="desktop">
-			<help>How the rays are smoothed: Full by their neighbours and the frames before, Temporal by the frames before alone, Off as they are.</help>
-			<choice shown="FULL" value="spatiotemporal"/>
-			<choice shown="TEMPORAL" value="temporal"/>
-			<choice shown="OFF" value="off"/>
-		</row>
-		<row key="prism_rt_mood" kind="choice" setting="display.prism_rt_mood" label="LIGHT FREEDOM" crumb="MODS › PRISM RAY TRACING" search_choices="ce some full" when="desktop">
-			<help>How far the bounced light may move a character's light from the game's own. CE keeps it; Full lets it go up to a quarter brighter or darker.</help>
-			<choice shown="CE" value="0"/>
-			<choice shown="SOME" value="50"/>
-			<choice shown="FULL" value="100"/>
-		</row>
-		<row key="prism_rt_world" kind="choice" setting="display.prism_rt_world" label="TRACED LEVEL" crumb="MODS › PRISM RAY TRACING" search_choices="remodel far game" when="desktop">
-			<help>The level's shape the rays meet. Auto: the level as it is drawn, near and far. Far: the remodel's far level. Remodel: its near level, all of it. Game's: the map's own.</help>
-			<choice shown="AUTO" value="auto"/>
-			<choice shown="REMODEL" value="remodel"/>
-			<choice shown="FAR" value="far"/>
-			<choice shown="GAME'S" value="stock"/>
-		</row>
-		<row key="prism_rt_objects" kind="choice" setting="display.prism_rt_objects" label="TRACED MODELS" crumb="MODS › PRISM RAY TRACING" search_choices="as drawn game" when="desktop">
-			<help>As Drawn: the replacement models' shapes where they are drawn, within 40 units (the game's own past that, and far objects left out when there are too many). Game's: the game's own models, cheaper.</help>
-			<choice shown="AS DRAWN" value="auto"/>
-			<choice shown="GAME'S" value="low_lod"/>
-		</row>
-		<row key="prism_rt_cache" kind="choice" setting="display.prism_rt_cache" label="KEEP SHAPES" crumb="MODS › PRISM RAY TRACING" when="desktop">
-			<help>Keeps each object's traced shape from frame to frame, refitting only what moved: much less work. Off redoes them all each frame.</help>
+		<row key="per_pixel_lighting" kind="choice" setting="display.per_pixel_lighting" label="SMOOTH LIGHTING" crumb="VIDEO › LIGHTING SETTINGS" when="desktop">
+			<help>Lights characters and weapons smoothly, without the flat facets of the Xbox's lighting, at a small cost.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
-		<row key="prism_rt_sun" kind="choice" setting="display.prism_rt_sun" label="TRACED SUN" crumb="MODS › PRISM RAY TRACING" search_choices="all objects" when="desktop">
-			<help>All: the level's own sun shadows as sharp as the objects', every shadow as dark as the light rig says. Objects: only the objects' shadows traced.</help>
-			<choice shown="ALL" value="all"/>
-			<choice shown="OBJECTS" value="objects"/>
+		<row key="dynamic_lights" kind="choice" setting="display.dynamic_lights" label="DYNAMIC LIGHTS" crumb="VIDEO › LIGHTING SETTINGS" when="desktop">
+			<help>Enhanced: plasma bolts, muzzle flashes and blasts light their surroundings smoothly, with a glow. Classic lights them as the Xbox did.</help>
+			<note>Classic for everyone in a Pro 2v2 game; yours again after it.</note>
+			<choice shown="CLASSIC" value="classic"/>
+			<choice shown="ENHANCED" value="enhanced"/>
 		</row>
-		<section key="section_10" title="BAKED SHADOWS" when="desktop"/>
-		<row key="prism_baked_shadows" kind="choice" setting="display.prism_baked_shadows" label="BAKED SHADOWS" crumb="MODS › PRISM RAY TRACING" search_choices="sharp" when="desktop">
-			<help>Sharp: the sun's shadows in the levels' own baked light drawn as crisp as ray tracing's, from a sun map baked on this computer from your maps. Each place keeps its brightness. Off draws the lightmaps' own soft edges.</help>
+		<row key="ambient_occlusion" kind="choice" setting="display.ambient_occlusion" label="AMBIENT OCCLUSION" crumb="VIDEO › LIGHTING SETTINGS" search="ao ssao" search_choices="world ray traced" when="desktop">
+			<help>World: soft shade where characters, vehicles and scenery meet the level and each other, from the level's shape; the levels keep their own lighting. Ray Traced: the shade of characters and vehicles traced by the graphics card, where it can (else World).</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="WORLD" value="world"/>
+			<choice shown="RAY TRACED" value="ray_traced"/>
+		</row>
+		<row key="ambient_occlusion_strength" kind="choice" setting="display.ambient_occlusion_strength" label="SHADE DEPTH" crumb="VIDEO › LIGHTING SETTINGS" search_choices="light natural deep" when="desktop">
+			<help>How deep ambient occlusion World's shade is where characters, vehicles and scenery meet the level.</help>
+			<choice shown="LIGHT" value="0.5"/>
+			<choice shown="NATURAL" value="0.8"/>
+			<choice shown="DEEP" value="1"/>
+		</row>
+		<section key="section_6" title="PRISM EXTRAS FOR CLASSIC" when="desktop"/>
+		<row key="prism_lightmaps" kind="choice" setting="display.prism_lightmaps" label="LIGHTMAPS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="xbox smooth relit pages" when="desktop">
+			<help>Smooth: the levels' own light without its bands and blocky edges. Relit Pages: the relight pack's pages where the data folder has them (otherwise Smooth); not PRISM Rebaked, which is a Lighting of its own.</help>
+			<choice shown="XBOX" value="stock"/>
+			<choice shown="SMOOTH" value="smooth"/>
+			<choice shown="RELIT PAGES" value="rebaked"/>
+		</row>
+		<row key="prism_specular" kind="choice" setting="display.prism_specular" label="MODEL HIGHLIGHTS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="subtle full" when="desktop">
+			<help>Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is shiny. Off draws them as the Xbox did.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="SUBTLE" value="subtle"/>
+			<choice shown="FULL" value="full"/>
+		</row>
+		<row key="prism_reflections" kind="choice" setting="display.prism_reflections" label="MODEL REFLECTIONS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="local" when="desktop">
+			<help>Local: shiny armour reflects the place it is in, from probes in the data folder; none come with the game. Without them, as Classic.</help>
+			<choice shown="CLASSIC" value="stock"/>
+			<choice shown="LOCAL" value="local"/>
+		</row>
+		<row key="prism_shadows" kind="choice" setting="display.prism_shadows" label="SUN SHADOWS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="soft traced sun" when="desktop">
+			<help>Sun: the sky's sun casts real shadows of characters, vehicles and scenery onto the level and each other. Soft and Traced: characters shade themselves from the main light (need ambient occlusion World). Classic keeps the Xbox's shadows alone.</help>
+			<choice shown="CLASSIC" value="stock"/>
+			<choice shown="SOFT" value="soft"/>
+			<choice shown="TRACED" value="traced"/>
+			<choice shown="SUN" value="cascaded"/>
+		</row>
+		<row key="prism_shadow_resolution" kind="choice" setting="display.prism_shadow_resolution" label="SUN SHADOW DETAIL" crumb="VIDEO › LIGHTING SETTINGS" search_choices="low high ultra" when="desktop">
+			<help>How sharp Sun's shadows are, and how much of the graphics card they take.</help>
+			<choice shown="LOW" value="1024"/>
+			<choice shown="HIGH" value="2048"/>
+			<choice shown="ULTRA" value="4096"/>
+		</row>
+		<row key="prism_shadow_softness" kind="choice" setting="display.prism_shadow_softness" label="SUN SHADOW EDGES" crumb="VIDEO › LIGHTING SETTINGS" search_choices="sharp natural soft" when="desktop">
+			<help>How fast Sun's shadows soften away from what casts them. A dim sun or moon softens them more.</help>
+			<choice shown="SHARP" value="0.5"/>
+			<choice shown="NATURAL" value="1"/>
+			<choice shown="SOFT" value="2"/>
+		</row>
+		<row key="prism_baked_shadows" kind="choice" setting="display.prism_baked_shadows" label="BAKED SHADOWS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="sharp" when="desktop">
+			<help>Sharp: the sun's shadows in the levels' own baked light drawn crisp, from a sun map baked on this computer from your maps. Each place keeps its brightness. Off draws the lightmaps' own soft edges.</help>
 			<choice shown="OFF" value="off"/>
 			<choice shown="SHARP" value="sharp"/>
 		</row>
-		<row key="prism_baked_shadow_depth" kind="choice" setting="display.prism_baked_shadow_strength" label="BAKED SHADOW DEPTH" crumb="MODS › PRISM RAY TRACING" search_choices="light natural deep" when="desktop">
-			<help>How far Sharp baked shadows go: Light keeps some of the lightmaps' softness, Deep darkens the shaded side more.</help>
+		<row key="prism_baked_shadow_depth" kind="choice" setting="display.prism_baked_shadow_strength" label="SHADOW DEPTH" crumb="VIDEO › LIGHTING SETTINGS" search_choices="light natural deep" when="desktop">
+			<help>How far Baked Shadows' Sharp goes: Light keeps some of the lightmaps' softness, Deep darkens the shaded side more.</help>
 			<choice shown="LIGHT" value="0.5"/>
 			<choice shown="NATURAL" value="1"/>
 			<choice shown="DEEP" value="1.5"/>
 		</row>
-		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
-		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
-		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
-	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_lighting_settings_screen" kind="settings" layout="page" geometry="tall" title="PRISM LIGHTING">
-		<section key="section_0" title="LIGHTING" when="desktop"/>
-		<row key="lighting" kind="choice" setting="display.lighting" label="LIGHTING" crumb="MODS › PRISM LIGHTING" search_choices="prism raster" when="desktop">
-			<help>Classic: the game's own light. PRISM Raster: each level lit by its light baked on this computer (bounced light, lamps and the sky, the sun's shadows sharp), with no ray tracing while you play.</help>
-			<choice shown="CLASSIC" value="ce"/>
-			<choice shown="PRISM RASTER" value="raster"/>
+		<section key="section_15" title="REBAKED LIGHTING" when="desktop"/>
+		<row key="prism_raster_composition" kind="choice" setting="display.prism_raster_composition" label="COMPOSITION" crumb="VIDEO › LIGHTING SETTINGS" search_choices="game shaders prism materials" when="desktop">
+			<help>Game Shaders: the baked light takes the game's light's place under its own textures, highlights and reflections. PRISM Materials: every surface lit by PRISM's materials alone (darker where the game's reflections lit it).</help>
+			<choice shown="GAME SHADERS" value="ce"/>
+			<choice shown="PRISM MATERIALS" value="materials"/>
 		</row>
-		<section key="section_2" title="BAKE" when="desktop"/>
-		<row key="bake" kind="choice" setting="display.bake" label="BAKE" crumb="MODS › PRISM LIGHTING" search_choices="while playing when asked never" when="desktop">
-			<help>While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps.</help>
+		<row key="prism_raster_objects" kind="choice" setting="display.prism_raster_objects" label="OBJECT LIGHT" crumb="VIDEO › LIGHTING SETTINGS" search_choices="baked never darker" when="desktop">
+			<help>How characters, vehicles and weapons are lit. Baked: by the baked light where they are. Never Darker: the baked light, but never darker than Classic lit them.</help>
+			<choice shown="BAKED" value="volume"/>
+			<choice shown="NEVER DARKER" value="classic"/>
+		</row>
+		<row key="shadow_resolution_rebaked" kind="choice" setting="display.shadow_resolution" label="SHADOW QUALITY" crumb="VIDEO › LIGHTING SETTINGS" search_choices="xbox medium high ultra" when="desktop">
+			<help>How sharp the game's own object shadows are, which PRISM Rebaked draws while Ray Tracing's Object Shadows are Classic's.</help>
+			<choice shown="XBOX" value="128"/>
+			<choice shown="MEDIUM" value="256"/>
+			<choice shown="HIGH" value="512"/>
+			<choice shown="ULTRA" value="1024"/>
+		</row>
+		<section key="section_19" title="PATH TRACING" when="desktop"/>
+		<row key="pt_profile" kind="choice" setting="display.pt_profile" label="PROFILE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="quality performance" when="desktop">
+			<help>Quality: a bounce of light traced at every pixel. Performance: the bounced light read from the bake where the level has it, a bounce traced for the characters and vehicles alone; faster.</help>
+			<choice shown="QUALITY" value="quality"/>
+			<choice shown="PERFORMANCE" value="performance"/>
+		</row>
+		<row key="denoiser" kind="choice" setting="display.denoiser" label="DENOISER" crumb="VIDEO › LIGHTING SETTINGS" search_choices="prism" when="desktop">
+			<help>PRISM: the traced light smoothed over the frames before and the pixels about. Off: the light as traced, one sample a pixel, grainy (for checking).</help>
+			<choice shown="PRISM" value="prism"/>
+			<choice shown="OFF" value="off"/>
+		</row>
+		<section key="section_22" title="IMAGE" when="desktop"/>
+		<row key="prism_exposure" kind="choice" setting="display.prism_exposure" label="EXPOSURE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="eye fixed" when="desktop">
+			<help>How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is.</help>
+			<choice shown="DEFAULT" value="style"/>
+			<choice shown="EYE" value="auto"/>
+			<choice shown="CLASSIC'S" value="ce"/>
+			<choice shown="FIXED" value="fixed"/>
+		</row>
+		<row key="prism_exposure_bias" kind="choice" setting="display.prism_exposure_bias" label="EXPOSURE BIAS" crumb="VIDEO › LIGHTING SETTINGS" when="desktop">
+			<help>Brighter or darker than the exposure chooses, in stops: +1 twice as bright, -1 half.</help>
+			<choice shown="-2" value="-2"/>
+			<choice shown="-1.5" value="-1.5"/>
+			<choice shown="-1" value="-1"/>
+			<choice shown="-0.5" value="-0.5"/>
+			<choice shown="NONE" value="0"/>
+			<choice shown="+0.5" value="0.5"/>
+			<choice shown="+1" value="1"/>
+			<choice shown="+1.5" value="1.5"/>
+			<choice shown="+2" value="2"/>
+		</row>
+		<row key="prism_tone_curve" kind="choice" setting="display.prism_tone_curve" label="TONE CURVE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="filmic aces local clipped" when="desktop">
+			<help>How light past white is drawn. Default and Filmic: rolled off gently, nothing darker moved. ACES: punchier, a film's curve. Local: as Filmic here. Clipped: held at white, as Classic did.</help>
+			<choice shown="DEFAULT" value="style"/>
+			<choice shown="FILMIC" value="filmic"/>
+			<choice shown="ACES" value="aces"/>
+			<choice shown="LOCAL" value="local"/>
+			<choice shown="CLIPPED" value="ce"/>
+		</row>
+		<section key="section_26" title="LIGHT BAKE" when="desktop"/>
+		<row key="bake" kind="choice" setting="display.bake" label="BAKE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="while playing when asked never" when="desktop">
+			<help>While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM lightings read the bake.</help>
 			<choice shown="WHILE PLAYING" value="auto"/>
 			<choice shown="WHEN ASKED" value="ask"/>
 			<choice shown="NEVER" value="off"/>
 		</row>
-		<row key="bake_quality" kind="choice" setting="display.bake_quality" label="BAKE QUALITY" crumb="MODS › PRISM LIGHTING" search_choices="max ultra high draft" when="desktop">
+		<row key="bake_quality" kind="choice" setting="display.bake_quality" label="BAKE QUALITY" crumb="VIDEO › LIGHTING SETTINGS" search_choices="max ultra high draft" when="desktop">
 			<help>Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller.</help>
 			<choice shown="MAX" value="max"/>
 			<choice shown="ULTRA" value="ultra"/>
 			<choice shown="HIGH" value="high"/>
 			<choice shown="DRAFT" value="draft"/>
 		</row>
-		<row key="prism_sky_light" kind="choice" setting="display.prism_sky_light" label="SKY LIGHT" crumb="MODS › PRISM LIGHTING" search_choices="sky flat" when="desktop">
+		<row key="prism_sky_light" kind="choice" setting="display.prism_sky_light" label="SKY LIGHT" crumb="VIDEO › LIGHTING SETTINGS" search_choices="sky flat" when="desktop">
 			<help>Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes again.</help>
 			<choice shown="SKY" value="sky"/>
 			<choice shown="FLAT" value="flat"/>
 		</row>
-		<row key="bake_rebake" kind="choice" setting="display.bake_rebake" label="REBAKE LIGHTMAPS" crumb="MODS › PRISM LIGHTING" search_choices="asked" when="desktop">
+		<row key="bake_rebake" kind="choice" setting="display.bake_rebake" label="REBAKE LIGHTMAPS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="asked" when="desktop">
 			<help>Change this to bake the level you are playing again from nothing (needed after its geometry, materials or lights change; a finished bake is otherwise kept).</help>
 			<choice shown="—" value="0"/>
 			<choice shown="ASKED" value="1"/>
 		</row>
-		<row key="bake_indicator" kind="choice" setting="display.bake_indicator" label="PROGRESS ON SCREEN" crumb="MODS › PRISM LIGHTING" when="desktop">
+		<row key="bake_indicator" kind="choice" setting="display.bake_indicator" label="PROGRESS ON SCREEN" crumb="VIDEO › LIGHTING SETTINGS" when="desktop">
 			<help>Shows "Baking lightmaps 37%" at the top left while a level is baked.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
-		</row>
-		<section key="section_8" title="LOOK" when="desktop"/>
-		<row key="prism_exposure" kind="choice" setting="display.prism_exposure" label="EXPOSURE" crumb="MODS › PRISM LIGHTING" search_choices="style fixed game" when="desktop">
-			<help>PRISM Raster's brightness. Style's: Auto, which adapts as an eye does, a dark place staying darker than a bright one. Game's: the frame kept as bright as Classic's. Fixed: none.</help>
-			<choice shown="STYLE'S" value="style"/>
-			<choice shown="FIXED" value="fixed"/>
-			<choice shown="GAME'S" value="ce"/>
-			<choice shown="AUTO" value="auto"/>
-		</row>
-		<row key="prism_tone_curve" kind="choice" setting="display.prism_tone_curve" label="HIGHLIGHTS" crumb="MODS › PRISM LIGHTING" search_choices="style clipped filmic aces local" when="desktop">
-			<help>How light past white is drawn. Style's: Filmic, which rolls it off gently. ACES: punchier, a film's curve. Clipped: held at white, as Classic did.</help>
-			<choice shown="STYLE'S" value="style"/>
-			<choice shown="CLIPPED" value="ce"/>
-			<choice shown="FILMIC" value="filmic"/>
-			<choice shown="ACES" value="aces"/>
-			<choice shown="LOCAL" value="local"/>
-		</row>
-		<row key="prism_raster_objects" kind="choice" setting="display.prism_raster_objects" label="OBJECTS" crumb="MODS › PRISM LIGHTING" search_choices="baked light" when="desktop">
-			<help>How characters, vehicles and weapons are lit. Baked Light: by the baked light where they are. Classic's: never darker than the game lit them.</help>
-			<choice shown="BAKED LIGHT" value="volume"/>
-			<choice shown="CLASSIC'S" value="classic"/>
-		</row>
-		<row key="prism_object_shadows" kind="choice" setting="display.prism_raster_object_shadows" label="OBJECT SHADOWS" crumb="MODS › PRISM LIGHTING" search_choices="traced" when="desktop">
-			<help>The sun's shadows of vehicles, characters and weapons. Traced: ray traced, on the ground, on each other and on themselves (a graphics card that traces rays). Classic's: the game's own, on the ground only.</help>
-			<choice shown="TRACED" value="traced"/>
-			<choice shown="CLASSIC'S" value="classic"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
 		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
 	</screen>
-	<screen name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/prism_pt_settings_screen" kind="settings" layout="page" geometry="tall" title="PRISM PATH TRACING">
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/ray_tracing_settings_screen" kind="settings" layout="page" geometry="tall" title="RAY TRACING">
+		<section key="section_0" title="TRACED LIGHT AND SHADOWS" when="desktop"/>
+		<row key="prism_rt" kind="choice" setting="display.prism_rt" label="RAY TRACING" crumb="VIDEO › RAY TRACING" search_choices="shadows gi all lights" when="desktop">
+			<help>Over Classic's light. Shadows: the sun's traced shadows and occlusion. Shadows + GI: light bounced about the characters too. All Lights: every light traced, held to the level's brightness. PRISM's own path tracing is Lighting's PRISM Path Traced.</help>
+			<choice shown="OFF" value="off"/>
+			<choice shown="SHADOWS" value="shadows"/>
+			<choice shown="SHADOWS + GI" value="gi"/>
+			<choice shown="ALL LIGHTS" value="pathtraced"/>
+		</row>
+		<row key="prism_object_shadows" kind="choice" setting="display.prism_raster_object_shadows" label="OBJECT SHADOWS" crumb="VIDEO › RAY TRACING" search_choices="traced" when="desktop">
+			<help>The sun's shadows of vehicles, characters and weapons. Traced: ray traced, on the ground, on each other and on themselves. Classic's: the game's own, on the ground only.</help>
+			<choice shown="TRACED" value="traced"/>
+			<choice shown="CLASSIC'S" value="classic"/>
+		</row>
+		<row key="prism_rt_quality" kind="choice" setting="display.prism_rt_quality" label="QUALITY" crumb="VIDEO › RAY TRACING" search_choices="low medium high ultra" when="desktop">
+			<help>More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics card's time. Low suits the Steam Deck.</help>
+			<choice shown="LOW" value="low"/>
+			<choice shown="MEDIUM" value="medium"/>
+			<choice shown="HIGH" value="high"/>
+			<choice shown="ULTRA" value="ultra"/>
+		</row>
+		<row key="prism_rt_resolution" kind="choice" setting="display.prism_rt_resolution" label="RAY RESOLUTION" crumb="VIDEO › RAY TRACING" search_choices="half full" when="desktop">
+			<help>Half traces a ray for each block of four pixels, cheaper on the graphics card; Full traces each pixel. Auto: full, but at Low quality.</help>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="HALF" value="half"/>
+			<choice shown="FULL" value="full"/>
+		</row>
+		<row key="prism_rt_denoiser" kind="choice" setting="display.prism_rt_denoiser" label="DENOISER" crumb="VIDEO › RAY TRACING" search_choices="full temporal" when="desktop">
+			<help>How the rays are smoothed: Full by their neighbours and the frames before, Temporal by the frames before alone, Off as they are.</help>
+			<choice shown="FULL" value="spatiotemporal"/>
+			<choice shown="TEMPORAL" value="temporal"/>
+			<choice shown="OFF" value="off"/>
+		</row>
+		<row key="prism_rt_mood" kind="choice" setting="display.prism_rt_mood" label="LIGHT FREEDOM" crumb="VIDEO › RAY TRACING" search_choices="ce some full" when="desktop">
+			<help>How far the bounced light may move a character's light from the game's own. CE keeps it; Full lets it go up to a quarter brighter or darker.</help>
+			<choice shown="CE" value="0"/>
+			<choice shown="SOME" value="50"/>
+			<choice shown="FULL" value="100"/>
+		</row>
+		<row key="prism_rt_sun" kind="choice" setting="display.prism_rt_sun" label="TRACED SUN" crumb="VIDEO › RAY TRACING" search_choices="all objects" when="desktop">
+			<help>All: the level's own sun shadows as sharp as the objects', every shadow as dark as the light rig says. Objects: only the objects' shadows traced.</help>
+			<choice shown="ALL" value="all"/>
+			<choice shown="OBJECTS" value="objects"/>
+		</row>
+		<row key="prism_rt_world" kind="choice" setting="display.prism_rt_world" label="TRACED LEVEL" crumb="VIDEO › RAY TRACING" search_choices="remodel far game" when="desktop">
+			<help>The level's shape the rays meet. Auto: the level as it is drawn, near and far. Far: the remodel's far level. Remodel: its near level, all of it. Game's: the map's own.</help>
+			<choice shown="AUTO" value="auto"/>
+			<choice shown="REMODEL" value="remodel"/>
+			<choice shown="FAR" value="far"/>
+			<choice shown="GAME'S" value="stock"/>
+		</row>
+		<row key="traced_light_look" kind="link" label="TRACED LIGHT LOOK ›" crumb="VIDEO › RAY TRACING" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/look/traced_look_settings_screen">
+			<help>How Classic's ray traced light looks: held to the game's lightmaps or lit by the traced lights alone, its lamps, exposure and highlights.</help>
+		</row>
+		<section key="section_10" title="TRACED SCENE" when="desktop"/>
+		<row key="prism_rt_objects" kind="choice" setting="display.prism_rt_objects" label="TRACED MODELS" crumb="VIDEO › RAY TRACING" search_choices="as drawn game" when="desktop">
+			<help>As Drawn: the replacement models' shapes where they are drawn, within 40 units (the game's own past that, and far objects left out when there are too many). Game's: the game's own models, cheaper.</help>
+			<choice shown="AS DRAWN" value="auto"/>
+			<choice shown="GAME'S" value="low_lod"/>
+		</row>
+		<row key="prism_rt_cache" kind="choice" setting="display.prism_rt_cache" label="KEEP SHAPES" crumb="VIDEO › RAY TRACING" when="desktop">
+			<help>Keeps each object's traced shape from frame to frame, refitting only what moved: much less work. Off redoes them all each frame.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<row key="prism_rt_alpha" kind="choice" setting="display.prism_rt_alpha" label="CUTOUT SHADOWS" crumb="VIDEO › RAY TRACING" when="desktop">
+			<help>Leaves, fences and grates cast shadows through their holes. With PRISM's lightings it is in the bake: a change bakes again.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/look/traced_look_settings_screen" kind="settings" layout="page" geometry="tall" title="TRACED LIGHT LOOK">
 		<section key="section_0" title="LOOK" when="desktop"/>
-		<row key="prism_rt_style" kind="choice" setting="display.prism_rt_style" label="STYLE" crumb="MODS › PRISM PATH TRACING" search_choices="faithful remix" when="desktop">
+		<row key="prism_rt_style" kind="choice" setting="display.prism_rt_style" label="STYLE" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="faithful remix" when="desktop">
 			<help>Faithful keeps each place as bright as the game's lightmaps made it. Remix lights it by the traced lamps, sun and sky alone, with its own exposure and highlights.</help>
 			<choice shown="FAITHFUL" value="faithful"/>
 			<choice shown="REMIX" value="remix"/>
 		</row>
-		<row key="prism_rt_anchor" kind="choice" setting="display.prism_rt_anchor" label="HOLD TO GAME'S LIGHT" crumb="MODS › PRISM PATH TRACING" search_choices="style some full" when="desktop">
+		<row key="prism_rt_anchor" kind="choice" setting="display.prism_rt_anchor" label="LIGHTMAP HOLD" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="style some full" when="desktop">
 			<help>How closely each region of the traced light is held to the game's lightmaps. Style's: Full for Faithful, None for Remix.</help>
 			<choice shown="STYLE'S" value="-1"/>
 			<choice shown="NONE" value="0"/>
 			<choice shown="SOME" value="50"/>
 			<choice shown="FULL" value="100"/>
 		</row>
-		<row key="prism_exposure" kind="choice" setting="display.prism_exposure" label="EXPOSURE" crumb="MODS › PRISM PATH TRACING" search_choices="style fixed game" when="desktop">
-			<help>Fixed: the game's. Game's: follows the traced light, keeping the frame as bright as the game's. Auto: adapts freely, as an eye does.</help>
+		<row key="prism_exposure_traced" kind="choice" setting="display.prism_exposure" label="EXPOSURE" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="style fixed game" when="desktop">
+			<help>Fixed: the game's. Game's: follows the traced light, keeping the frame as bright as the game's. Auto: adapts freely, as an eye does. The same setting as PRISM's lightings' Exposure.</help>
 			<choice shown="STYLE'S" value="style"/>
 			<choice shown="FIXED" value="fixed"/>
 			<choice shown="GAME'S" value="ce"/>
 			<choice shown="AUTO" value="auto"/>
 		</row>
-		<row key="prism_tone_curve" kind="choice" setting="display.prism_tone_curve" label="HIGHLIGHTS" crumb="MODS › PRISM PATH TRACING" search_choices="style clipped filmic aces local" when="desktop">
-			<help>How light past white is drawn. Filmic rolls it off; Local also keeps a dark room readable beside a sunlit doorway. Needs HDR drawing.</help>
+		<row key="prism_tone_curve_traced" kind="choice" setting="display.prism_tone_curve" label="TONE CURVE" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="style clipped filmic aces local" when="desktop">
+			<help>How light past white is drawn. Filmic rolls it off; Local also keeps a dark room readable beside a sunlit doorway. Needs HDR drawing. The same setting as PRISM's lightings' Tone Curve.</help>
 			<choice shown="STYLE'S" value="style"/>
 			<choice shown="CLIPPED" value="ce"/>
 			<choice shown="FILMIC" value="filmic"/>
@@ -2005,37 +2096,32 @@
 			<choice shown="LOCAL" value="local"/>
 		</row>
 		<section key="section_5" title="LIGHTS" when="desktop"/>
-		<row key="prism_rt_emissive" kind="choice" setting="display.prism_rt_emissive" label="LAMPS" crumb="MODS › PRISM PATH TRACING" search_choices="style lights all glows" when="desktop">
+		<row key="prism_rt_emissive" kind="choice" setting="display.prism_rt_emissive" label="LAMPS" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="style lights all glows" when="desktop">
 			<help>Lights: the panels and lamps the level was lit by light it again. All Glows: screens and glowing parts too.</help>
 			<choice shown="STYLE'S" value="style"/>
 			<choice shown="OFF" value="off"/>
 			<choice shown="LIGHTS" value="lights"/>
 			<choice shown="ALL GLOWS" value="all"/>
 		</row>
-		<row key="prism_rt_emissive_scale" kind="choice" setting="display.prism_rt_emissive_scale" label="LAMP BRIGHTNESS" crumb="MODS › PRISM PATH TRACING" search_choices="half as fitted double" when="desktop">
+		<row key="prism_rt_emissive_scale" kind="choice" setting="display.prism_rt_emissive_scale" label="LAMP BRIGHTNESS" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="half as fitted double" when="desktop">
 			<help>The lamps' brightness against the brightness fitted to the game's lightmaps.</help>
 			<choice shown="HALF" value="0.5"/>
 			<choice shown="AS FITTED" value="1.0"/>
 			<choice shown="DOUBLE" value="2.0"/>
 		</row>
-		<row key="prism_sun_size" kind="choice" setting="display.prism_sun_size" label="SUN SIZE" crumb="MODS › PRISM PATH TRACING" search_choices="game real soft" when="desktop">
+		<row key="prism_sun_size" kind="choice" setting="display.prism_sun_size" label="SUN SIZE" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="game real soft" when="desktop">
 			<help>The sun's disc its shadows' edges soften by: the sky's own, the real sun's, or a softer one.</help>
 			<choice shown="AUTO" value="auto"/>
 			<choice shown="GAME'S" value="ce"/>
 			<choice shown="REAL" value="real"/>
 			<choice shown="SOFT" value="soft"/>
 		</row>
-		<row key="prism_rt_materials" kind="choice" setting="display.prism_rt_materials" label="BOUNCED COLOUR" crumb="MODS › PRISM PATH TRACING" search_choices="surfaces grey" when="desktop">
+		<row key="prism_rt_materials" kind="choice" setting="display.prism_rt_materials" label="BOUNCED COLOUR" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="surfaces grey" when="desktop">
 			<help>Surfaces': bounced light takes the colour of what it bounces off. Grey: one grey for all.</help>
 			<choice shown="SURFACES'" value="average"/>
 			<choice shown="GREY" value="grey"/>
 		</row>
-		<row key="prism_rt_alpha" kind="choice" setting="display.prism_rt_alpha" label="SEE-THROUGH SHADOWS" crumb="MODS › PRISM PATH TRACING" when="desktop">
-			<help>Leaves, fences and grates cast shadows through their holes.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
-		</row>
-		<row key="prism_rt_bounces" kind="choice" setting="display.prism_rt_bounces" label="BOUNCES" crumb="MODS › PRISM PATH TRACING" search_choices="by quality" when="desktop">
+		<row key="prism_rt_bounces" kind="choice" setting="display.prism_rt_bounces" label="BOUNCES" crumb="VIDEO › RAY TRACING › TRACED LIGHT LOOK" search_choices="by quality" when="desktop">
 			<help>How often light bounces before the cache takes over. By Quality: 1 at Low and Medium, 2 at High, 3 at Ultra.</help>
 			<choice shown="BY QUALITY" value="0"/>
 			<choice shown="1" value="1"/>

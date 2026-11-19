@@ -98,9 +98,68 @@ def inner(width):
     return Box("inner", area.x0 + margin, 0, area.x1 - margin, 480, ())
 
 
-def layout(root, width, platforms=DESKTOP, every=None):
+def _settings_rows_packed(children, platforms, mode):
+    """a Settings list's children (widget, x, y, platform) as menu_functions.c's settings_rows_pack places them each
+    frame: the rows shown (of the platforms; of the lighting mode, as lighting_rows_show shows them by the mode
+    alone, the most it shows; one of the rows in the same place at most, as video_rows_show; none of VR's hidden
+    ones in the headset; with a profile, as the tests lay it out, not CREATE PROFILE: settings_row_profile) a step
+    apart from the first's place, a section's title over its rows (none for a section with no row shown), a gap
+    above a section after rows; the rows and titles hidden left out. Its other children as they are."""
+    def key(name):
+        return name.rsplit("/", 1)[-1][len("op_"):]
+
+    def row(name):
+        return name.rsplit("/", 1)[-1].startswith("op_")
+
+    def section(name):
+        return name.rsplit("/", 1)[-1].startswith("section_")
+
+    listed = [child for child in children if row(child[0]) or section(child[0])]
+    if not listed:
+        return children
+    shown, previous_shown = set(), False
+    for name, _, _, platform in listed:
+        if section(name):
+            previous_shown = False
+            continue
+        visible = _platform_shown(platform, platforms)
+        if "vr" in platforms and key(name) in port_settings.SETTINGS_NOT_IN_VR:
+            visible = False
+        if key(name) == "create_profile":
+            visible = False
+        if mode and mode not in port_settings.LIGHTING_MODE_ROWS.get(key(name), mode):
+            visible = False
+        if visible and previous_shown and key(name) in port_settings.SETTINGS_SAME_PLACE | {"window_size"}:
+            continue
+        previous_shown = visible
+        if visible:
+            shown.add(name)
+    y, rows_above, packed = listed[0][2], False, {}
+    for index, (name, x, _, platform) in enumerate(listed):
+        if section(name):
+            following = []
+            for other in listed[index + 1:]:
+                if section(other[0]):
+                    break
+                following.append(other[0])
+            if not _platform_shown(platform, platforms) or not shown.intersection(following):
+                continue
+            y += port_settings.SETTINGS_SECTION_GAP if rows_above else 0
+            packed[name] = (name, x, y, platform)
+            y += port_settings.SETTINGS_SECTION_STEP
+        elif name in shown:
+            packed[name] = (name, x, y, platform)
+            y += port_settings.SETTINGS_ROW_STEP
+            rows_above = True
+    return [packed.get(child[0], child) for child in children
+            if child[0] in packed or not (row(child[0]) or section(child[0]))]
+
+
+def layout(root, width, platforms=DESKTOP, every=None, mode=None):
     """the widgets under a screen (root) as drawn on a screen this wide: a Box each, in drawing order (a list's
-    description after its children); of the menu files', or of every (widgets_of's)"""
+    description after its children); of the menu files', or of every (widgets_of's). A Settings tab's or page's
+    rows are packed as the engine packs them (_settings_rows_packed): with a lighting mode
+    (port_settings.LIGHTING_MODES), its rows; None: every mode's, the most a list can have."""
     extra = port_settings.wide_extra_of(width)
     every = every or widgets()
     boxes = []
@@ -121,7 +180,10 @@ def layout(root, width, platforms=DESKTOP, every=None):
                                                                                                              past)
         bottom = top + int(attributes.get("height", 480))
         boxes.append(Box(name.rsplit("/", 1)[-1], x + left, y + top, x + right, y + bottom, path))
-        for child, child_x, child_y, platform in widget.children:
+        children = widget.children
+        if name.startswith(port_settings.PE + "/") and name.endswith("/options_menu"):
+            children = _settings_rows_packed(children, platforms, mode)
+        for child, child_x, child_y, platform in children:
             if _platform_shown(platform, platforms):
                 walk(child, x + child_x, y + child_y, path + (name.rsplit("/", 1)[-1],))
         if attributes.get("description"):

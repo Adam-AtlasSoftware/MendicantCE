@@ -108,10 +108,18 @@ def test_settings_layout(aspect, folder, root, tab, platforms):
     """Each of Settings' tabs and pages: its rows from the screen's left (wider on a wide screen, each label before
     its value, the values in the rows), the panel beside them to its right (its words and pictures in it), the tabs
     spread across it, apart, between LB's and RB's prompts, DEFAULTS at its left and OK and CANCEL at its right;
-    all on the screen, none over another; 21:9 as 16:9."""
-    width = WIDTHS[aspect]
+    all on the screen, none over another; 21:9 as 16:9. In each lighting mode, the rows packed as the engine packs
+    them (menu_functions.c's settings_rows_pack after lighting_rows_show): the files' places are every mode's rows
+    and every platform's, which the list does not show at once."""
+    for mode in port_settings.LIGHTING_MODES:
+        _check_settings_layout(WIDTHS[aspect], root, tab, platforms, mode)
+
+
+def _check_settings_layout(width, root, tab, platforms, mode):
+    """a Settings tab or page as drawn with a lighting mode's rows (port_settings.LIGHTING_MODES), packed as the
+    engine packs them"""
     area = inner(width)
-    boxes = layout(root, width, platforms)
+    boxes = layout(root, width, platforms, mode=mode)
     rows = [box for box in boxes if box.name.startswith("op_") and box.path[-1] == "options_menu"]
     sections = [box for box in boxes if re.fullmatch(r"section_\d+", box.name)]
     panel = one(boxes, "tab_panel" if tab else "page_panel")
@@ -137,6 +145,7 @@ def test_settings_layout(aspect, folder, root, tab, platforms):
     for box in buttons:
         assert box.inside(area), box
     _check_apart(buttons, "buttons")
+    _check_apart(rows + sections + buttons, "rows")
     assert buttons[0].x0 < panel.x0 and buttons[2].x1 > panel.x0
     if tab:
         tabs = [box for box in boxes if box.path[-1:] == ("tabs",)]
@@ -150,11 +159,11 @@ def test_settings_layout(aspect, folder, root, tab, platforms):
     # 16:9's. The extra width the rows', and some of the panel's: the panel about a quarter of a 16:10 or 16:9
     # screen)
     if width >= port_settings.WIDE_WIDTH:
-        assert layout(root, width, platforms) == layout(root, port_settings.WIDE_WIDTH, platforms)
+        assert layout(root, width, platforms, mode=mode) == layout(root, port_settings.WIDE_WIDTH, platforms, mode=mode)
         assert rows[0].x0 - usable(width).x0 == 28 and usable(width).x1 - panel.x1 == 28
         assert (panel.x1 - panel.x0) / port_settings.WIDE_WIDTH < 0.25
     if width > 640:
-        narrow = layout(root, 640, platforms)
+        narrow = layout(root, 640, platforms, mode=mode)
         narrow_row, narrow_panel = one(narrow, rows[0].name), one(narrow, panel.name)
         less = port_settings.wide_scale(port_settings.SETTINGS_WIDE_PANEL_LESS, port_settings.wide_extra_of(width))
         assert rows[0].x1 - rows[0].x0 - (narrow_row.x1 - narrow_row.x0) == port_settings.wide_extra_of(width) + less

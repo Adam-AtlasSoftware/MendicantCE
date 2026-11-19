@@ -398,15 +398,6 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/header_prism_assets_settings">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/header_prism_assets_settings.png" width="512" height="64"/>
 	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/header_prism_lighting_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/header_prism_lighting_settings.png" width="512" height="64"/>
-	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/header_prism_pt_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/header_prism_pt_settings.png" width="512" height="64"/>
-	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/header_prism_rt_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/header_prism_rt_settings.png" width="512" height="64"/>
-	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account.png" width="512" height="64"/>
 	</bitmap>
@@ -1193,6 +1184,15 @@
 	<bitmap name="main_menu/campaign/badge_shape_100">
 		<frame png="ce/port/main_menu/campaign/badge_shape_100__0.png" width="100" height="100"/>
 		<frame png="ce/port/main_menu/campaign/badge_shape_100__1.png" width="100" height="100"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/header_lighting_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/header_lighting_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/header_ray_tracing_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/header_ray_tracing_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/look/header_traced_look_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/look/header_traced_look_settings.png" width="512" height="64"/>
 	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera.png" width="512" height="64"/>

@@ -55,7 +55,9 @@ def generated(fault=None, faulty_function=None):
         structure(source, "config_value"), structure(source, "config_text"),
     ]) + "\n"
     words = table(source, "config_words") + "\n#define NUMBER_OF_CONFIG_WORDS (sizeof(config_words) / sizeof(config_words[0]))\n"
-    text = table(source, "config_renamed_words") + "\n" + words
+    # (config_append_setting says which lighting modes a setting reaches: config_lighting_modes, with its words)
+    modes = "\n".join(re.findall(r"^#define LIGHTING_\w+ .*$", source, re.M)) + "\n" + table(source, "config_lighting_modes")
+    text = table(source, "config_renamed_words") + "\n" + words + "\n" + modes + "\n"
     # (the settings' index by name: its slots and its state, as the source has them)
     text += source[source.index("#define CONFIG_INDEX_SLOTS"):source.index("static int config_index_state;")]
     text += "static int config_index_state;\n"

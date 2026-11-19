@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from tools import port_settings
-from tools.port_settings import (PAGES, PAGE_TOP, SECTION, SETTINGS_NOT_IN_VR, SETTINGS_ROW_HEIGHT,
+from tools.port_settings import (LIGHTING_MODE_ROWS, LIGHTING_MODES, PAGES, PAGE_TOP, SECTION, SETTINGS_NOT_IN_VR,
+                                 SETTINGS_ROW_HEIGHT,
                                  SETTINGS_ROW_STEP, SETTINGS_ROWS_BOTTOM, SETTINGS_SAME_PLACE, SETTINGS_SECTION_GAP,
                                  SETTINGS_SECTION_STEP, SETTINGS_TOP)
 
@@ -39,10 +40,13 @@ def _profile_row(entry):
 LAYOUTS = {"classic": port_settings.SETTINGS_CLASSIC, "tall": port_settings.SETTINGS_TALL}
 
 
-def _rows_bottom(page, platforms, profile, layout=port_settings.SETTINGS_CLASSIC):
+def _rows_bottom(page, platforms, profile, layout=port_settings.SETTINGS_CLASSIC, mode=None):
     """where the last row shown ends, the rows packed as settings_rows_pack
     packs them: a step apart, a section's title over its rows (none for a
-    section with no row shown), a gap above a section after rows"""
+    section with no row shown), a gap above a section after rows; with a
+    lighting mode (LIGHTING_MODES), the rows of the other modes hidden, as
+    menu_functions.c's lighting_rows_show hides them (None: every row, the
+    most a page can show)"""
     y = layout.tab_top if "tab" in page else layout.page_top
     bottom, rows_above, section, previous_shown = y, False, False, False
     for entry in page["rows"]:
@@ -55,6 +59,8 @@ def _rows_bottom(page, platforms, profile, layout=port_settings.SETTINGS_CLASSIC
         elif not profile and _profile_row(entry):
             shown = False
         if "vr" in platforms and _key(entry) in SETTINGS_NOT_IN_VR:
+            shown = False
+        if mode and _key(entry) in LIGHTING_MODE_ROWS and mode not in LIGHTING_MODE_ROWS[_key(entry)]:
             shown = False
         # (one of the rows in the same place at most: Resolution's or Window
         # Size, the desktop's anti-aliasing or Android's)
@@ -82,10 +88,12 @@ def test_settings_rows_fit(folder, layout):
     page, geometry = PAGES[folder], LAYOUTS[layout]
     for build, platforms in BUILDS.items():
         for profile in (True, False):
-            bottom = _rows_bottom(page, platforms, profile, geometry)
-            assert bottom <= geometry.rows_bottom, \
-                f"{folder}'s rows end at {bottom} on {build}{'' if profile else ' with no profile'} in the " \
-                f"{layout} layout, past {geometry.rows_bottom}: move a row to a page with room"
+            for mode in LIGHTING_MODES:
+                bottom = _rows_bottom(page, platforms, profile, geometry, mode)
+                assert bottom <= geometry.rows_bottom, \
+                    f"{folder}'s rows end at {bottom} on {build}{'' if profile else ' with no profile'} with " \
+                    f"lighting {mode} in the {layout} layout, past {geometry.rows_bottom}: move a row to a page " \
+                    f"with room"
 
 
 def test_rows_bottom_counts_a_page_that_overflows():
@@ -584,3 +592,47 @@ def test_output_depth_row_negative_control():
     assert _output_depth_row_problems(PAGES, FUNCTIONS, MODEL, lit) == ["not dimmed while HDR draws"]
     assert _output_depth_row_problems(PAGES, FUNCTIONS, MODEL.replace('enabled="!hdr_drawn"', "")) == [
         "the model's row lacks its conditions"]
+
+
+def _menu_functions():
+    return (Path(__file__).resolve().parent.parent / "port/linux/game/menu_functions.c").read_text()
+
+
+def test_lighting_rows_agree():
+    """menu_functions.c's lighting_rows shows each row in the modes
+    LIGHTING_MODE_ROWS packs it for, and names only rows a page has"""
+    table = _menu_functions().split("} const lighting_rows[] =", 1)[1].split("};", 1)[0]
+    modes = {}
+    for row, flags in re.findall(r'\{ "op_(\w+)", ([A-Z_| ]+),', table):
+        modes.setdefault(row, set()).update(flag.strip()[-1] for flag in flags.split("|"))
+    assert modes == {key: set(value) for key, value in LIGHTING_MODE_ROWS.items()}
+    keys = {_key(entry) for page in PAGES.values() for entry in page["rows"] if entry[0] != SECTION}
+    assert set(LIGHTING_MODE_ROWS) <= keys
+
+
+def test_lighting_choice():
+    """Video's Lighting offers exactly Classic, PRISM Rebaked and PRISM Path
+    Traced, and the pages it opens are on the same tab"""
+    rows = {_key(entry): entry for entry in PAGES["video_settings"]["rows"] if entry[0] != SECTION}
+    assert [value for _, value in rows["lighting"][2]] == ["ce", "raster", "pathtraced"]
+    assert [shown for shown, _ in rows["lighting"][2]] == ["CLASSIC", "PRISM REBAKED", "PATH TRACED"]
+    assert {"lighting_settings", "ray_tracing"} <= set(rows)
+
+
+def test_lighting_pages_per_mode():
+    """each mode's Lighting Settings and Ray Tracing pages show only its own
+    rows: no bake under Classic, no Classic extras under the PRISM modes, no
+    path tracing outside Path Traced, none of Classic's ray tracer outside
+    Classic"""
+    def shown(folder, mode):
+        return {_key(entry) for entry in PAGES[folder]["rows"] if entry[0] != SECTION and
+                mode in LIGHTING_MODE_ROWS.get(_key(entry), "CRP")}
+    lighting, tracing = "video_settings/lighting", "video_settings/ray_tracing"
+    assert "bake" not in shown(lighting, "C") and "pt_profile" not in shown(lighting, "C")
+    assert "prism_lightmaps" not in shown(lighting, "R") | shown(lighting, "P")
+    assert "pt_profile" in shown(lighting, "P") and "pt_profile" not in shown(lighting, "R")
+    assert "prism_raster_composition" in shown(lighting, "R") and "prism_raster_composition" not in shown(lighting, "P")
+    assert "bake" in shown(lighting, "R") and "bake" in shown(lighting, "P")
+    assert "prism_rt" in shown(tracing, "C") and not {"prism_rt", "prism_rt_quality"} & shown(tracing, "P")
+    assert "prism_object_shadows" in shown(tracing, "R")
+    assert "prism_object_shadows" not in shown(tracing, "P") | shown(tracing, "C")

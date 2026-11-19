@@ -22,13 +22,10 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_theater" x="28" y="187"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_graphics" x="28" y="208" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_assets" x="28" y="229" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_ray_tracing" x="28" y="250" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_path_tracing" x="28" y="271" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_lighting" x="28" y="292" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_10" x="28" y="319" platform="computer"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" x="28" y="339" platform="computer"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_12" x="28" y="366"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" x="28" y="386"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7" x="28" y="256" platform="computer"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" x="28" y="276" platform="computer"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9" x="28" y="303"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" x="28" y="323"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" y="414"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" y="76"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs_search" y="76"/>
@@ -200,34 +197,10 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_ray_tracing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_rt/prism_rt_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_ray_tracing_label"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7" width="344" height="18" bitmap="main_menu/settings/section" platform="computer" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7_title"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_ray_tracing_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_path_tracing" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/prism_pt_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_pt/prism_pt_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_path_tracing_label"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_path_tracing_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_lighting" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_lighting_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting/prism_lighting_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting_label"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_lighting_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_10" width="344" height="18" bitmap="main_menu/settings/section" platform="computer" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_10_title"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_10_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="10" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="7" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="computer" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="a" run="port settings add maps"/>
@@ -236,14 +209,14 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_value" x="188" y="2"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_12" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_12_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9" width="344" height="18" bitmap="main_menu/settings/section" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9_title"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_12_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="12" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="9" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/network_setup/mcc_packages/mcc_packages_screen"/>
@@ -251,7 +224,7 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label" type="text" controller="1" width="332" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 244" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels">
 		<string text="MODS"/>
@@ -261,9 +234,6 @@
 		<string text="THEATER ›"/>
 		<string text="PRISM GRAPHICS ›"/>
 		<string text="PRISM ASSETS ›"/>
-		<string text="PRISM RAY TRACING ›"/>
-		<string text="PRISM PATH TRACING ›"/>
-		<string text="PRISM LIGHTING ›"/>
 		<string text="GAME MAPS"/>
 		<string text="ADD MAPS"/>
 		<string text="MASTER CHIEF COLLECTION"/>
@@ -276,11 +246,8 @@
 		<string text="Each mod is a folder in the mods folder, beside the maps folder, with its mod.toml and its tags. Mods are turned on and off from the main menu's Settings, not in a game."/>
 		<string text="Records each network game you play or host, from the next one on, to watch again in the Theater."/>
 		<string text="The games recorded: watch one again from any player's view, or a free or cinematic camera."/>
-		<string text="Finer light, shadows and tone, and the remodels and rebaked light a data folder has. Video's Quality PRISM turns on the faithful ones."/>
+		<string text="The level remodelled from the data folder, bloom and the tone grade, with any lighting. The lighting's own settings are Video's."/>
 		<string text="The sharper textures, remodelled characters and materials mods ship, and how much of the graphics card they take."/>
-		<string text="Traced sun shadows, occlusion and bounced light on graphics cards that trace rays, and a path-traced mode."/>
-		<string text="How the path-traced light looks: faithful to the game's lightmaps or lit by the traced lights alone, its lamps, exposure and highlights."/>
-		<string text="PRISM Raster: each level lit by its own light baked on this computer, with sharp sun shadows. Rebake lightmaps, and how finely they are baked."/>
 		<string text=""/>
 		<string text="Your maps come from your Xbox disc image, which the game needs, and from Custom Edition's installer (halocesetup_en_1.00.exe), whose multiplayer maps are optional.|Select it twice: the maps screen opens the next time the game starts, to add either."/>
 		<string text=""/>

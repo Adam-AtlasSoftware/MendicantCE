@@ -348,7 +348,10 @@ static const struct config_setting config_settings[] =
 		"top (display.prism_lightmaps \"smooth\", display.ambient_occlusion\n"
 		"\"world\", display.prism_surface_maps true, display.prism_specular\n"
 		"\"subtle\", display.prism_shadows \"soft\"; never what is beyond CE).\n"
-		"Each of those settings, set here, wins over it." },
+		"Each of those settings, set here, wins over it. A quality preset, not a\n"
+		"lighting mode (display.lighting is): its lighting settings are Classic's;\n"
+		"Settings > Video > Advanced Graphics > Quality (Xbox, Enhanced, PRISM\n"
+		"Extras)." },
 	{ "display.anti_aliasing", _config_string, GRAPHICS_ANTI_ALIASING, "HALO_ANTI_ALIASING", _environment_value,
 		_platform_all,
 		"Smoothing of jagged edges, which the Xbox did not have: \"off\"; \"fxaa\"\n"
@@ -907,7 +910,10 @@ static const struct config_setting config_settings[] =
 		"lamps and the dynamic lights traced each frame, the bounced light\n"
 		"from the bake, denoised); needs ray tracing and a bake of the level\n"
 		"(made while you play, display.bake). Read each frame. Vulkan only; no\n"
-		"anti-aliasing by multisampling." },
+		"anti-aliasing by multisampling. Settings > Video > Lighting: Classic\n"
+		"(\"ce\"), PRISM Rebaked (\"raster\"), PRISM Path Traced (\"pathtraced\");\n"
+		"\"classic\", \"rebaked\" and \"path_traced\" are read as those. Lighting\n"
+		"Settings and Ray Tracing there show what applies to the mode." },
 	{ "display.pt_profile", _config_string, "\"quality\"", "HALO_PT_PROFILE", _environment_value,
 		_platform_desktop,
 		"With display.lighting \"pathtraced\": \"quality\" traces a bounce at\n"
@@ -945,7 +951,7 @@ static const struct config_setting config_settings[] =
 		"projected shadows on the level alone. Read each frame." },
 	{ "display.prism_sky_light", _config_string, "\"sky\"", "HALO_PRISM_SKY_LIGHT", _environment_value,
 		_platform_desktop,
-		"PRISM Raster's bake (and the path tracer's reference), the light in\n"
+		"PRISM's bake (PRISM Rebaked's light and PRISM Path Traced's), the light in\n"
 		"Tool's units: the sky's ambient light. \"sky\" a light: the open sky's\n"
 		"radiance (the sky's ambient colour by its power), seen where a path\n"
 		"leaves the level and passed on by the bounces, so a point under the\n"
@@ -956,7 +962,7 @@ static const struct config_setting config_settings[] =
 	{ "display.material_packs", _config_boolean, "true", "HALO_MATERIAL_PACKS", _environment_value,
 		_platform_desktop,
 		"PRISM v4's materials from packs and mods (docs/prism_materials.md), with\n"
-		"display.lighting \"ce_deferred\" or \"raster\": where the material pack\n"
+		"display.lighting \"ce_deferred\", \"raster\" or \"pathtraced\": where the material pack\n"
 		"(made on this machine by prism_packs.py's v4_materials step) or a mod\n"
 		"gives a shader a material, the G-buffer draws its maps (its colour with\n"
 		"CE's painted light taken out, its bump, roughness and metal) in place of\n"
@@ -965,7 +971,8 @@ static const struct config_setting config_settings[] =
 		"materials. Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
 		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
-		"\"raster\": \"auto\" bakes each level's light in the background while\n"
+		"\"raster\" or \"pathtraced\" (both read the bake): \"auto\" bakes each\n"
+		"level's light in the background while\n"
 		"you play (a draft first, then refined, resumed where it stopped);\n"
 		"\"ask\" only when Settings' Rebake lightmaps asks (display.bake_rebake);\n"
 		"\"off\" never (a bake made before is still drawn)." },
@@ -1001,7 +1008,9 @@ static const struct config_setting config_settings[] =
 		"foreground (60 ms of each frame) and quit once its bake is done, for\n"
 		"measuring a bake's time and size." },
 	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
-		"PRISM: hardware ray tracing (docs/prism_rt.md), on graphics cards that\n"
+		"PRISM: hardware ray tracing over Classic's light (docs/prism_rt.md;\n"
+		"off under display.lighting \"raster\" and \"pathtraced\", which light the\n"
+		"frame themselves; its \"pathtraced\" is not PRISM Path Traced), on graphics cards that\n"
 		"have it: \"shadows\" the sun's shadows of everything on screen traced\n"
 		"(characters, vehicles, scenery and the level's own shapes), taking light\n"
 		"only where the level's lightmap had the sun, and traced ambient occlusion\n"
@@ -1123,7 +1132,8 @@ static const struct config_setting config_settings[] =
 		"high 2, ultra 3)." },
 	{ "display.prism_exposure", _config_string, "\"style\"", "HALO_PRISM_EXPOSURE", _environment_value,
 		_platform_desktop,
-		"PRISM's exposure (path tracing and PRISM Raster): \"fixed\" CE's;\n"
+		"PRISM's exposure (PRISM Rebaked, PRISM Path Traced, and Classic's ray\n"
+		"tracing): \"fixed\" CE's;\n"
 		"\"ce\" follows the traced or baked light so that the frame's middle\n"
 		"stays as bright as CE's (within display.prism_exposure_range); \"auto\"\n"
 		"adapts as an eye does (PRISM Raster's: toward a sunlit frame's level,\n"
@@ -4380,6 +4390,11 @@ static const struct
 	medium one; a file's true or false read as these words too) */
 	{ "input.gyro_smoothing", "true", "medium" },
 	{ "input.gyro_smoothing", "false", "off" },
+	/* (display.lighting's modes by the names Settings shows them by:
+	Classic, PRISM Rebaked, PRISM Path Traced) */
+	{ "display.lighting", "classic", "ce" },
+	{ "display.lighting", "rebaked", "raster" },
+	{ "display.lighting", "path_traced", "pathtraced" },
 	{ NULL, NULL, NULL },
 };
 
@@ -4406,6 +4421,165 @@ static const char *const config_retired_settings[] =
 	"display.show_fps",
 	"display.show_frame_rate",
 	NULL,
+};
+
+/* the [display] section of a new file, in groups: each group's title (a
+line starting "=": what it is and the lighting modes it reaches, Video's
+Lighting: Classic "ce", PRISM Rebaked "raster", PRISM Path Traced
+"pathtraced"), then its settings, as Settings has them
+(tools/port_settings.py, docs/prism_settings.md); a [display] setting
+named in none goes in the last group, in the table's order. A file keeps
+its own order: a setting it lacks is added at its section's end
+(config_add_missing) */
+static const char *const config_display_order[] =
+{
+	"=The window and the screen (every lighting mode)",
+	"display.mode", "display.fullscreen", "display.resolution", "display.refresh_rate", "display.window_size",
+	"display.window_scale", "display.vulkan_device", "display.render_scale", "display.orientation",
+	"display.picture_position", "display.picture_shape", "display.frame_style",
+	"=The frame rate (every lighting mode)",
+	"display.vsync", "display.max_fps", "display.low_latency", "display.battery_saver", "display.interpolation",
+	"display.direct_camera", "display.vrr", "display.vrr_cap_margin",
+	"=Brightness and HDR (every lighting mode)",
+	"display.gamma", "display.hdr", "display.hdr_mode", "display.hdr_paper_white_nits", "display.hdr_paper_white",
+	"display.hdr_ui_nits", "display.hdr_peak_nits", "display.hdr_gamut", "display.hdr_highlight_boost",
+	"display.hdr_sdr_curve", "display.output_depth",
+	"=Graphics quality (every lighting mode; display.graphics is a preset of these and of Classic's lighting\n"
+		"settings below, not a lighting mode)",
+	"display.graphics", "display.resolution_scaling", "display.supersampling", "display.anti_aliasing", "display.anisotropic_filtering",
+	"display.model_detail", "display.structure_culling", "display.astc_textures", "display.prepare_shaders",
+	"display.soft_particles", "display.dynamic_lights",
+	"=Lighting: Classic (\"ce\"), PRISM Rebaked (\"raster\") or PRISM Path Traced (\"pathtraced\")",
+	"display.lighting",
+	"=PRISM's image (PRISM Rebaked and PRISM Path Traced; Classic's ray tracing too)",
+	"display.prism_exposure", "display.prism_exposure_bias", "display.prism_exposure_range",
+	"display.prism_exposure_speed", "display.prism_tone_curve",
+	"=The light bake (PRISM Rebaked and PRISM Path Traced: both read it)",
+	"display.bake", "display.bake_quality", "display.prism_sky_light", "display.bake_rebake",
+	"display.bake_indicator", "display.bake_folder", "display.bake_budget", "display.material_packs",
+	"display.prism_rig",
+	"=PRISM Rebaked (\"raster\") alone",
+	"display.prism_raster_composition", "display.prism_raster_objects",
+	"=PRISM Path Traced (\"pathtraced\") alone",
+	"display.pt_profile", "display.denoiser",
+	"=Ray tracing: the traced scene (Classic with display.prism_rt on, PRISM Rebaked's traced object shadows,\n"
+		"PRISM Path Traced), Rebaked's object shadows, then Classic's ray tracer (display.prism_rt, off under\n"
+		"both PRISM modes) and its look",
+	"display.prism_rt_objects", "display.prism_rt_cache", "display.prism_rt_alpha",
+	"display.prism_raster_object_shadows",
+	"display.prism_rt", "display.prism_rt_quality", "display.prism_rt_resolution", "display.prism_rt_denoiser",
+	"display.prism_rt_mood", "display.prism_rt_sun", "display.prism_rt_world", "display.prism_rt_reflections",
+	"display.prism_rt_rate", "display.prism_rt_style", "display.prism_rt_anchor", "display.prism_rt_emissive",
+	"display.prism_rt_emissive_scale", "display.prism_sun_size", "display.prism_rt_materials",
+	"display.prism_rt_bounces",
+	"=Classic's lighting (\"ce\"; the PRISM modes light the frame themselves): its own, then PRISM's extras on it",
+	"display.shadow_resolution", "display.per_pixel_lighting",
+	"display.ambient_occlusion", "display.ambient_occlusion_strength", "display.prism_lightmaps",
+	"display.prism_lightmap_upsample", "display.prism_specular", "display.prism_reflections",
+	"display.prism_shadows", "display.prism_shadow_resolution", "display.prism_shadow_softness",
+	"display.prism_shadow_strength", "display.prism_baked_shadows", "display.prism_baked_shadow_strength",
+	"display.prism_material_overlay", "display.prism_overlay_strength", "display.prism_overlay_view",
+	"display.prism_surface_maps",
+	"=Post effects (every lighting mode)",
+	"display.prism_bloom", "display.prism_tone",
+	"=The remodelled level and the mods' assets (every lighting mode)",
+	"display.prism_world_geometry", "display.prism_world_geometry_detail", "display.prism_world_geometry_band",
+	"display.prism_world_geometry_shadows", "display.prism_world_geometry_occlusion",
+	"display.prism_world_geometry_facing", "display.prism_world_geometry_check",
+	"display.prism_world_geometry_batch", "display.prism_lod_hysteresis", "display.prism_textures",
+	"display.prism_texture_budget_mb", "display.prism_models", "display.prism_model_budget_mb",
+	"display.prism_secondary_motion", "display.prism_materials", "display.prism_texture_wait",
+	"display.prism_texture_fade", "display.prism_prefetch",
+	"=The view and the first person (every lighting mode)",
+	"display.fov", "display.vehicle_fov", "display.scale_scoped_fov", "display.panini",
+	"display.panini_vertical", "display.draw_distance", "display.viewmodel_fov", "display.viewmodel_offset_x",
+	"display.viewmodel_offset_y", "display.viewmodel_offset_z", "display.viewmodel_pitch",
+	"display.viewmodel_yaw", "display.viewmodel_roll", "display.lowered_reticle",
+	"display.lowered_reticle_amount", "display.viewmodel_visible", "display.passenger_third_person",
+	"display.first_person_legs", "display.player_shadow", "display.viewmodel_shield", "display.overshield_effect",
+	"display.overshield_layer_color", "display.shield_glow", "display.shield_glow_intensity",
+	"display.shield_color",
+	"=The HUD, the menus and the rest",
+	NULL,
+};
+
+/* the lighting modes a setting reaches, said under its comment (Video's
+Lighting; docs/prism_settings.md) */
+#define LIGHTING_CLASSIC "Classic (display.lighting \"ce\") alone"
+#define LIGHTING_CLASSIC_RT "Classic with display.prism_rt on (both PRISM modes turn it off)"
+#define LIGHTING_PRISM "PRISM Rebaked and PRISM Path Traced (both read the bake)"
+static const struct
+{
+	const char *name;
+	const char *modes;
+} config_lighting_modes[] =
+{
+	{ "display.graphics", "its edges, textures and models every mode; its lighting settings Classic's" },
+	{ "display.lighting", "chooses them" },
+	{ "display.prism_exposure", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
+	{ "display.prism_exposure_bias", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
+	{ "display.prism_exposure_range", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
+	{ "display.prism_exposure_speed", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
+	{ "display.prism_tone_curve", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
+	{ "display.bake", LIGHTING_PRISM },
+	{ "display.bake_quality", LIGHTING_PRISM },
+	{ "display.prism_sky_light", LIGHTING_PRISM },
+	{ "display.bake_rebake", LIGHTING_PRISM },
+	{ "display.bake_indicator", LIGHTING_PRISM },
+	{ "display.bake_folder", LIGHTING_PRISM },
+	{ "display.bake_budget", LIGHTING_PRISM },
+	{ "display.material_packs", LIGHTING_PRISM },
+	{ "display.prism_rig", "PRISM Rebaked and PRISM Path Traced (units), Classic's ray tracing (fitted)" },
+	{ "display.prism_raster_composition", "PRISM Rebaked (display.lighting \"raster\") alone" },
+	{ "display.prism_raster_objects", "PRISM Rebaked (display.lighting \"raster\") alone" },
+	{ "display.prism_raster_object_shadows", "PRISM Rebaked (display.lighting \"raster\") alone" },
+	{ "display.pt_profile", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
+	{ "display.denoiser", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
+	{ "display.prism_rt_objects", "Classic with display.prism_rt on, PRISM Rebaked with its object shadows traced, "
+		"PRISM Path Traced" },
+	{ "display.prism_rt_cache", "Classic with display.prism_rt on, PRISM Rebaked with its object shadows traced, "
+		"PRISM Path Traced" },
+	{ "display.prism_rt_alpha", "Classic with display.prism_rt on, PRISM Rebaked and PRISM Path Traced (in the "
+		"bake: a change bakes again)" },
+	{ "display.prism_rt", LIGHTING_CLASSIC },
+	{ "display.prism_rt_quality", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_resolution", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_denoiser", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_reflections", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_mood", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_world", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_rate", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_style", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_anchor", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_sun", LIGHTING_CLASSIC_RT },
+	{ "display.prism_sun_size", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_emissive", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_emissive_scale", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_materials", LIGHTING_CLASSIC_RT },
+	{ "display.prism_rt_bounces", LIGHTING_CLASSIC_RT },
+	{ "display.shadow_resolution", "Classic; PRISM Rebaked with its object shadows \"classic\"" },
+	{ "display.per_pixel_lighting", LIGHTING_CLASSIC },
+	{ "display.dynamic_lights", "every mode: Classic draws them itself; under PRISM Rebaked and PRISM Path Traced it "
+		"chooses the lights they light by (the plasma bolts' and needles') and draws their glows" },
+	{ "display.ambient_occlusion", LIGHTING_CLASSIC },
+	{ "display.ambient_occlusion_strength", LIGHTING_CLASSIC },
+	{ "display.prism_lightmaps", LIGHTING_CLASSIC },
+	{ "display.prism_lightmap_upsample", LIGHTING_CLASSIC },
+	{ "display.prism_specular", LIGHTING_CLASSIC },
+	{ "display.prism_reflections", LIGHTING_CLASSIC },
+	{ "display.prism_shadows", LIGHTING_CLASSIC },
+	{ "display.prism_shadow_resolution", LIGHTING_CLASSIC },
+	{ "display.prism_shadow_softness", LIGHTING_CLASSIC },
+	{ "display.prism_shadow_strength", LIGHTING_CLASSIC },
+	{ "display.prism_baked_shadows", LIGHTING_CLASSIC },
+	{ "display.prism_baked_shadow_strength", LIGHTING_CLASSIC },
+	{ "display.prism_material_overlay", LIGHTING_CLASSIC },
+	{ "display.prism_overlay_strength", LIGHTING_CLASSIC },
+	{ "display.prism_overlay_view", LIGHTING_CLASSIC },
+	{ "display.prism_surface_maps", LIGHTING_CLASSIC },
+	{ "display.prism_world_geometry_shadows", LIGHTING_CLASSIC },
+	{ "display.prism_world_geometry_occlusion", LIGHTING_CLASSIC },
+	{ NULL, NULL },
 };
 
 struct config_text
@@ -4492,6 +4666,7 @@ static void config_append_setting(struct config_text *text, const struct config_
 	const char *dot = strchr(setting->name, '.');
 	const char *line;
 	char buffer[256];
+	size_t index;
 
 	config_append(text, "\n");
 	for (line = setting->comment; *line;)
@@ -4526,8 +4701,103 @@ static void config_append_setting(struct config_text *text, const struct config_
 	}
 	config_append(text, buffer);
 #endif
+	for (index = 0; config_lighting_modes[index].name; index++)
+	{
+		if (!strcmp(config_lighting_modes[index].name, setting->name))
+		{
+			snprintf(buffer, sizeof(buffer), "# Lighting: %s.\n", config_lighting_modes[index].modes);
+			config_append(text, buffer);
+		}
+	}
 	snprintf(buffer, sizeof(buffer), "# %s = %s\n", dot + 1, config_default_of(setting));
 	config_append(text, buffer);
+}
+
+static long config_setting_index(const char *name);
+
+/* a group's title (config_display_order), its lines commented */
+static void config_append_group(struct config_text *text, const char *title)
+{
+	const char *line;
+	char buffer[256];
+
+	config_append(text, "\n# ----\n");
+	for (line = title; *line;)
+	{
+		size_t length = strcspn(line, "\n");
+
+		snprintf(buffer, sizeof(buffer), "# %.*s\n", (int)length, line);
+		config_append(text, buffer);
+		line += length;
+		if (*line)
+			line++;
+	}
+	config_append(text, "# ----\n");
+}
+
+/* whether the setting is this build's (and of [display], with a name in
+config_display_order) */
+static int config_display_listed(const char *name)
+{
+	size_t index;
+
+	for (index = 0; config_display_order[index]; index++)
+	{
+		if (!strcmp(config_display_order[index], name))
+			return 1;
+	}
+	return 0;
+}
+
+static int config_display_setting(const char *name)
+{
+	long setting = config_setting_index(name);
+
+	return setting >= 0 && (config_settings[setting].platforms & CONFIG_PLATFORM);
+}
+
+/* [display]'s settings, in config_display_order's groups (a group with none
+of this build's settings left out), those it does not name in the last */
+static void config_append_display(struct config_text *text)
+{
+	size_t index, other;
+
+	for (index = 0; config_display_order[index]; index++)
+	{
+		const char *entry = config_display_order[index];
+		int any = 0;
+
+		if (entry[0] != '=')
+		{
+			if (config_display_setting(entry))
+				config_append_setting(text, &config_settings[config_setting_index(entry)]);
+			continue;
+		}
+		for (other = index + 1; config_display_order[other] && config_display_order[other][0] != '='; other++)
+			any |= config_display_setting(config_display_order[other]);
+		/* (the last group: those named nowhere) */
+		if (!config_display_order[other])
+		{
+			for (other = 0; other < NUMBER_OF_CONFIG_SETTINGS; other++)
+			{
+				if (!strncmp(config_settings[other].name, "display.", 8) &&
+					(config_settings[other].platforms & CONFIG_PLATFORM) &&
+					!config_display_listed(config_settings[other].name))
+					any = 1;
+			}
+		}
+		if (!any)
+			continue;
+		config_append_group(text, entry + 1);
+	}
+	for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
+	{
+		const struct config_setting *setting = &config_settings[index];
+
+		if (!strncmp(setting->name, "display.", 8) && (setting->platforms & CONFIG_PLATFORM) &&
+			!config_display_listed(setting->name) && config_setting_index(setting->name) == (long)index)
+			config_append_setting(text, setting);
+	}
 }
 
 /* the file with every setting of this build at its default */
@@ -4576,6 +4846,11 @@ static char *config_default_text(void)
 		snprintf(section, sizeof(section), "%.*s", (int)length, setting->name);
 		snprintf(buffer, sizeof(buffer), "\n[%s]\n", section);
 		config_append(&text, buffer);
+		if (!strcmp(section, "display"))
+		{
+			config_append_display(&text);
+			continue;
+		}
 		for (other = index; other < NUMBER_OF_CONFIG_SETTINGS; other++)
 		{
 			if ((config_settings[other].platforms & CONFIG_PLATFORM) && config_settings[other].scope != _scope_profile &&

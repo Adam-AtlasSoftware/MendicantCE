@@ -54,11 +54,13 @@ a frame; the log: their means every 600 frames).
 /* ---------- constants */
 
 /* the job blocks' ring (each a frame's: the block, then its dynamic
-lights), the descriptor sets' */
+lights, then the recent ones (the history's), LIGHT_FLOATS each), the
+descriptor sets' */
 #define JOB_SLOTS 16u
-#define JOB_BYTES 4096u
+#define JOB_BYTES 8192u
 #define JOB_LIGHTS_OFFSET 1024u
 #define LIGHTS_MOST 64u
+#define LIGHT_FLOATS 12u
 /* the frame's counters (xgpu_vulkan_pt.glsl's Counters: the history's
 diagnostics), four words in the job's block before its lights */
 #define JOB_COUNTERS_OFFSET 960u
@@ -266,6 +268,14 @@ static struct
 	int tree_failed;
 	char ref_path[XGPU_RT_REFERENCE_PATH];
 	int logged_first, logged_no_bake;
+	/* the recent dynamic lights (the temporal pass's history cut where
+	they light the surface otherwise than this frame's): each one of the
+	frames before, by its id, where it was last frame, its colour the most
+	of its last frame's and its recent colour less a history's share a frame
+	(denoise.x: what the history may still hold of it), until that is gone */
+	float recent_lights[LIGHTS_MOST * LIGHT_FLOATS];
+	uint32_t recent_ids[LIGHTS_MOST];
+	uint32_t recent_count;
 } pt;
 
 /* ---------- memory */
@@ -1103,6 +1113,79 @@ static void stamp(VkCommandBuffer commands, uint32_t slot, uint32_t index)
 			pt.queries, slot * STAMPS + index);
 }
 
+/* the recent dynamic lights into the job (after this frame's, at
+LIGHTS_MOST), then this frame's taken into them: each recent one's colour
+less 1 / history of itself, this frame's colour where more, its place and
+cone this frame's; one gone below 1/500 of white left out, and all where the history is not kept. The
+count of the recent ones given to the job (those of the frames before alone: one this frame added is not
+in the job's copy) */
+static uint32_t recent_lights_take(float *lights, const uint32_t *ids, uint32_t count, int history, float frames)
+{
+	float keep = frames > 1.0f ? 1.0f - 1.0f / frames : 0.0f;
+	uint32_t index, at, kept = 0, given;
+
+	if (!history)
+		pt.recent_count = 0;
+	given = pt.recent_count;
+	memcpy(lights + LIGHTS_MOST * LIGHT_FLOATS, pt.recent_lights, pt.recent_count * LIGHT_FLOATS * sizeof(float));
+	for (index = 0; index < pt.recent_count; index++)
+	{
+		float *r = pt.recent_lights + index * LIGHT_FLOATS;
+
+		r[4] *= keep;
+		r[5] *= keep;
+		r[6] *= keep;
+	}
+	for (index = 0; index < count; index++)
+	{
+		const float *l = lights + index * LIGHT_FLOATS;
+		float *r;
+		int channel;
+
+		for (at = 0; at < pt.recent_count && pt.recent_ids[at] != ids[index]; at++);
+		if (at == pt.recent_count)
+		{
+			if (pt.recent_count == LIGHTS_MOST)
+			{
+				/* (no room: the dimmest recent one's place) */
+				uint32_t dimmest = 0;
+
+				for (at = 1; at < LIGHTS_MOST; at++)
+					if (pt.recent_lights[at * LIGHT_FLOATS + 4] + pt.recent_lights[at * LIGHT_FLOATS + 5] +
+						pt.recent_lights[at * LIGHT_FLOATS + 6] < pt.recent_lights[dimmest * LIGHT_FLOATS + 4] +
+						pt.recent_lights[dimmest * LIGHT_FLOATS + 5] + pt.recent_lights[dimmest * LIGHT_FLOATS + 6])
+						dimmest = at;
+				at = dimmest;
+			}
+			else
+				pt.recent_count++;
+			memset(pt.recent_lights + at * LIGHT_FLOATS, 0, LIGHT_FLOATS * sizeof(float));
+			pt.recent_ids[at] = ids[index];
+		}
+		r = pt.recent_lights + at * LIGHT_FLOATS;
+		for (channel = 4; channel < 7; channel++)
+			if (l[channel] > r[channel])
+				r[channel] = l[channel];
+		memcpy(r, l, 4 * sizeof(float));
+		memcpy(r + 7, l + 7, 5 * sizeof(float));
+	}
+	for (index = 0; index < pt.recent_count; index++)
+	{
+		const float *r = pt.recent_lights + index * LIGHT_FLOATS;
+
+		if (r[4] + r[5] + r[6] < 0.006f)
+			continue;
+		if (kept != index)
+		{
+			memmove(pt.recent_lights + kept * LIGHT_FLOATS, r, LIGHT_FLOATS * sizeof(float));
+			pt.recent_ids[kept] = pt.recent_ids[index];
+		}
+		kept++;
+	}
+	pt.recent_count = kept;
+	return given;
+}
+
 struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
 	const struct xgpu_stream_scene_view *view, uint32_t phase, int *whole)
@@ -1308,28 +1391,62 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			restir = getenv("HALO_PT_RESTIR") ? atoi(getenv("HALO_PT_RESTIR")) != 0 : 1;
 		job->extra[2] = restir ? 8.0f : 0.0f;
 	}
-	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on) */
+	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on:
+	the place and reach, the colour by its intensity, a spot's inner cone's
+	cosine (2 none), its axis and outer cone's cosine (2 a point light); then
+	the recent ones, volume.w of them, which the temporal pass's history is
+	cut by where they lit the surface otherwise) */
+	uint32_t ids[LIGHTS_MOST], recent;
 	dynamic_lights = (float *)((char *)slot_buffer->mapped + JOB_LIGHTS_OFFSET);
 	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
 	for (index = 0; lights && index < light_count && dynamic < LIGHTS_MOST; index++)
 	{
 		const struct xgpu_stream_scene_light *l = &lights[index];
-		float *to = dynamic_lights + dynamic * 12;
+		float *to = dynamic_lights + dynamic * LIGHT_FLOATS;
 
 		if (l->light_class != XGPU_SCENE_LIGHT_CLASS_DYNAMIC || !(l->flags & XGPU_SCENE_LIGHT_FLAG_ON) ||
-			(l->type != XGPU_SCENE_LIGHT_POINT && l->type != XGPU_SCENE_LIGHT_SPOT) || !(l->position[3] > 0.0f))
+			(l->type != XGPU_SCENE_LIGHT_POINT && l->type != XGPU_SCENE_LIGHT_SPOT) || !(l->position[3] > 0.0f) ||
+			!(l->radiance[3] * (l->radiance[0] + l->radiance[1] + l->radiance[2]) > 0.0f))
 			continue;
 		memcpy(to, l->position, 4 * sizeof(float));
 		to[4] = l->radiance[0] * l->radiance[3];
 		to[5] = l->radiance[1] * l->radiance[3];
 		to[6] = l->radiance[2] * l->radiance[3];
-		to[7] = 0.0f;
+		to[7] = l->type == XGPU_SCENE_LIGHT_SPOT && l->shape[0] > l->direction[3] ? l->shape[0] : 2.0f;
 		memcpy(to + 8, l->direction, 3 * sizeof(float));
 		to[11] = l->type == XGPU_SCENE_LIGHT_SPOT ? l->direction[3] : 2.0f;
+		ids[dynamic] = l->id;
 		dynamic++;
 	}
+	recent = recent_lights_take(dynamic_lights, ids, dynamic, (flags & FLAG_HISTORY) != 0, job->denoise[0]);
 	job->volume[2] = (float)dynamic;
-	job->lights = dynamic ? slot_buffer->address + JOB_LIGHTS_OFFSET : 0;
+	job->volume[3] = (float)recent;
+	job->lights = dynamic || recent ? slot_buffer->address + JOB_LIGHTS_OFFSET : 0;
+	/* (HALO_DYNAMIC_LIGHTS_LOG, debug.dynamic_lights_log: the frame's
+	dynamic lights where their count changed) */
+	{
+		static int log_on = -1;
+		static uint32_t logged = 0xffffffffu;
+
+		if (log_on < 0)
+		{
+			const char *value = getenv("HALO_DYNAMIC_LIGHTS_LOG");
+
+			log_on = value && (value[0] == '1' || value[0] == '2' || value[0] == 't' || value[0] == 'y');
+		}
+		if (log_on && dynamic != logged)
+		{
+			logged = dynamic;
+			host_logf(HOST_LOG_INFO, "prism pt: frame %u: %u dynamic lights of the table's %u", pt.frame + 1u,
+				dynamic, light_count);
+		}
+		/* (HALO_DYNAMIC_LIGHTS_LOG=2: the first one's numbers each frame) */
+		if (log_on && dynamic && getenv("HALO_DYNAMIC_LIGHTS_LOG")[0] == '2')
+			host_logf(HOST_LOG_INFO, "prism pt: frame %u: the first dynamic light at %.2f %.2f %.2f reach %.3f, "
+				"colour %.3f %.3f %.3f, cones %.3f %.3f", pt.frame + 1u, dynamic_lights[0], dynamic_lights[1],
+				dynamic_lights[2], dynamic_lights[3], dynamic_lights[4], dynamic_lights[5], dynamic_lights[6],
+				dynamic_lights[7], dynamic_lights[11]);
+	}
 	/* the images: this frame's histories at its parity, the last frame's at
 	the other */
 	now = pt.parity;

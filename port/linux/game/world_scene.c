@@ -298,16 +298,15 @@ struct world_scene_light_definition
 	real runtime_cosine_cutoff_angle;
 };
 
-/* a light's flags (world_scene_light's) */
-enum
-{
-	/* a light fixture of the scenario's, placed in the structure (its light
-	is in the lightmaps; no reach is known: radius 0) */
-	WORLD_SCENE_LIGHT_FIXTURE = 1 << 0,
-	/* a dynamic light, as the rasterizer took it the frame before (the last
-	window's) */
-	WORLD_SCENE_LIGHT_DYNAMIC = 1 << 1,
-};
+/* a light definition's gel map (tag_schema_render.c's light_definition:
+its offset), and the share of a light a gel lets through, by its peak: PRISM
+Path Traced's flashlight on a wall 1 to 2 units off (b30, the demo's fixed
+exposure and filmic curve) against CE's, the spot's 95th percentile about
+CE's (200 of 255) and a share at white about CE's (2%) (v4_int2_runs/calib4:
+0.10 and 0.15 either side; the 0.45 a median of the spot's pixels gave left
+a fifth of the spot white) */
+#define WORLD_SCENE_GEL_MAP 0x64
+#define WORLD_SCENE_GEL 0.12f
 
 /* what's kept of an object from frame to frame, by its absolute index */
 struct world_scene_history
@@ -506,7 +505,9 @@ static struct world_scene_light *world_scene_light_add(long id, short flags)
 	light->id = id;
 	light->flags = flags;
 	light->cone_cosine = -1.0f;
+	light->cone_inner_cosine = -1.0f;
 	light->intensity = 1.0f;
+	light->gel = 1.0f;
 	return light;
 }
 
@@ -598,7 +599,11 @@ static void world_scene_dynamic_lights(void)
 		{
 			light->type = 1;
 			light->cone_cosine = definition->runtime_cosine_cutoff_angle;
+			light->cone_inner_cosine = definition->runtime_cosine_falloff_angle;
 		}
+		/* (a gel map's: the light through it, its texture's mean) */
+		if (definition && ((struct tag_reference const *)((byte const *)definition + WORLD_SCENE_GEL_MAP))->index != NONE)
+			light->gel = WORLD_SCENE_GEL;
 	}
 }
 
@@ -640,6 +645,8 @@ static void world_scene_fixtures(void)
 		{
 			light->type = 1;
 			light->cone_cosine = (float)cos((double)fixture->cutoff_angle);
+			light->cone_inner_cosine = fixture->falloff_angle > 0.0f && fixture->falloff_angle < fixture->cutoff_angle ?
+				(float)cos((double)fixture->falloff_angle) : light->cone_cosine;
 		}
 	}
 }
