@@ -90,6 +90,37 @@ indirect light's clamp by default (0 none) */
 1.5 ms of the RTX 3070 Ti's light pass at G4, 1080p) */
 #define TREE_CONES_DEFAULT 0
 #define INDIRECT_CLAMP_DEFAULT 0.0f
+/* the a-trous steps by default (HALO_PT_ATROUS_STEPS), and whether four of
+them take strides 1, 2, 4 and 16 (HALO_PT_ATROUS_WIDE; else 1 to 8) */
+#define ATROUS_STEPS_DEFAULT 4
+#define ATROUS_WIDE_DEFAULT 1
+/* ReSTIR DI by default: the spatial neighbours a pixel
+(HALO_PT_RESTIR_SPATIAL), the initial candidates where they are reused
+(HALO_PT_CANDIDATES; 8 without them), their disc's radius in pixels
+(HALO_PT_RESTIR_RADIUS) */
+#define RESTIR_SPATIAL_DEFAULT 1
+#define CANDIDATES_SPATIAL_DEFAULT 4
+#define RESTIR_RADIUS_DEFAULT 16
+/* the light pass's specialization constants (xgpu_vulkan_pt.glsl's
+SPEC_*); whether half the level's 8 x 8 blocks (1) or half its pixels (2)
+take the bake's indirect light as their bounce by default
+(HALO_PT_BOUNCE_HALF, 0 none) */
+#define SPEC_COUNT 8u
+/* whether the sun's ray is left out in a tile the bake found all in shadow
+by default (HALO_PT_SUN_TILES) */
+#define SUN_TILES_DEFAULT 1
+#define BOUNCE_HALF_DEFAULT 0
+/* whether ReSTIR GI's temporal reuse is on by default (HALO_PT_RESTIR_GI) */
+#define RESTIR_GI_DEFAULT 0
+/* ReSTIR DI's reuse flags (xgpu_vulkan_pt.glsl's REUSE_*): the spatial
+reservoirs kept for the next frame, the temporal reuse by a permutation;
+the boiling filter's strength in hundredths above them, the disc's radius
+above that. By default: whether the permutation is on, the boiling
+filter's strength (0 none) */
+#define REUSE_FEEDBACK 1u
+#define REUSE_PERMUTE 2u
+#define RESTIR_PERMUTE_DEFAULT 0
+#define RESTIR_BOIL_DEFAULT 0.0f
 /* the passes timed, the timestamps a frame (a begin and each pass's end),
 the frames' slots of them */
 #define TIMED 5u
@@ -188,8 +219,10 @@ struct pt_job
 	VkDeviceAddress pages, charts, vpages, table, tiles, indirect, sun, masks;
 	VkDeviceAddress bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
 	VkDeviceAddress sums, stats, meter, counters, tree, lamps_out, objects, object_table;
-	/* the radiance cache (its cells; 0 off), a word kept for the alignment */
-	VkDeviceAddress cache, unused;
+	/* the radiance cache (its cells; 0 off); ReSTIR DI's reuse flags
+	(REUSE_*); a diagnosis's parts of the light pass left out (PARTS_*) */
+	VkDeviceAddress cache;
+	uint32_t reuse_flags, parts_off;
 	float camera[4][4];
 	float last_camera[4][4];
 	int32_t corners[4];
@@ -414,20 +447,68 @@ static VkShaderModule shader_make(const uint32_t *words, size_t count)
 	return module;
 }
 
+/* an option's variable: its integer, else the default */
+static int env_int(const char *name, int otherwise)
+{
+	const char *value = getenv(name);
+
+	return value && value[0] ? atoi(value) : otherwise;
+}
+
+/* the passes' specialization constants (xgpu_vulkan_pt.glsl's SPEC_*):
+the options whose code an off option leaves out of the light pass, read
+from the same variables and defaults as the job's fields (the radiance
+cache, the indirect clamp, the tree's emitter cones, the spatial
+neighbours, the parts diagnosis, the boiling filter, the bounce from the
+bake on half the blocks (HALO_PT_BOUNCE_HALF), the sun's ray left out in
+the bake's dark tiles (HALO_PT_SUN_TILES)) */
+static void spec_options(uint32_t values[SPEC_COUNT])
+{
+	const char *clamp = getenv("HALO_PT_INDIRECT_CLAMP");
+	const char *boil = getenv("HALO_PT_RESTIR_BOIL");
+	int spatial = env_int("HALO_PT_RESTIR_SPATIAL", RESTIR_SPATIAL_DEFAULT);
+
+	values[0] = env_int("HALO_PT_CACHE", CACHE_DEFAULT) != 0;
+	values[1] = (clamp ? (float)atof(clamp) : INDIRECT_CLAMP_DEFAULT) > 0.0f;
+	values[2] = env_int("HALO_PT_TREE_CONES", TREE_CONES_DEFAULT) != 0;
+	values[3] = (uint32_t)(spatial < 0 ? 0 : spatial > 4 ? 4 : spatial);
+	values[4] = env_int("HALO_PT_PARTS_OFF", 0) != 0 || env_int("HALO_PT_PARTS_CYCLE", 0) > 0;
+	values[5] = (boil ? (float)atof(boil) : RESTIR_BOIL_DEFAULT) > 0.0f;
+	values[6] = (uint32_t)env_int("HALO_PT_BOUNCE_HALF", BOUNCE_HALF_DEFAULT);
+	values[6] = values[6] > 2u ? 1u : values[6];
+	values[7] = env_int("HALO_PT_SUN_TILES", SUN_TILES_DEFAULT) != 0;
+}
+
 static int pipeline_make(int which, const uint32_t *words, size_t word_count)
 {
 	VkComputePipelineCreateInfo info;
+	VkSpecializationMapEntry entries[SPEC_COUNT];
+	VkSpecializationInfo specialization;
+	uint32_t values[SPEC_COUNT];
 	VkShaderModule module = shader_make(words, word_count);
 	VkResult result;
+	uint32_t index;
 
 	if (!module)
 		return 0;
+	spec_options(values);
+	for (index = 0; index < SPEC_COUNT; index++)
+	{
+		entries[index].constantID = index;
+		entries[index].offset = index * (uint32_t)sizeof(uint32_t);
+		entries[index].size = sizeof(uint32_t);
+	}
+	specialization.mapEntryCount = SPEC_COUNT;
+	specialization.pMapEntries = entries;
+	specialization.dataSize = sizeof(values);
+	specialization.pData = values;
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	info.stage.module = module;
 	info.stage.pName = "main";
+	info.stage.pSpecializationInfo = &specialization;
 	info.layout = pt.pipeline_layout;
 	result = vkCreateComputePipelines(pt.device.device, VK_NULL_HANDLE, 1, &info, NULL, &pt.pipelines[which]);
 	vkDestroyShaderModule(pt.device.device, module, NULL);
@@ -1154,6 +1235,29 @@ static void write_image(VkWriteDescriptorSet *write, VkDescriptorImageInfo *info
 	write->pImageInfo = info;
 }
 
+/* the a-trous steps a frame (HALO_PT_ATROUS_STEPS, 1 to 5; 4 by default) */
+static int atrous_steps(void)
+{
+	static int steps = -1;
+
+	if (steps < 0)
+	{
+		steps = env_int("HALO_PT_ATROUS_STEPS", ATROUS_STEPS_DEFAULT);
+		steps = steps < 1 ? 1 : steps > 5 ? 5 : steps;
+	}
+	return steps;
+}
+
+/* whether four a-trous steps skip stride 8 for 16 (HALO_PT_ATROUS_WIDE) */
+static int atrous_wide(void)
+{
+	static int wide = -1;
+
+	if (wide < 0)
+		wide = env_int("HALO_PT_ATROUS_WIDE", ATROUS_WIDE_DEFAULT) != 0;
+	return wide;
+}
+
 static void dispatch(VkCommandBuffer commands, int pass, VkDeviceAddress scene, VkDeviceAddress job, uint32_t p0,
 	uint32_t p1, uint32_t p2, uint32_t p3, uint32_t groups_x, uint32_t groups_y)
 {
@@ -1403,7 +1507,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		static int spatial = -1, traced_z = -1;
 
 		if (spatial < 0)
-			spatial = getenv("HALO_PT_RESTIR_SPATIAL") ? atoi(getenv("HALO_PT_RESTIR_SPATIAL")) : 0;
+			spatial = env_int("HALO_PT_RESTIR_SPATIAL", RESTIR_SPATIAL_DEFAULT);
 		spatial = spatial < 0 ? 0 : spatial > 4 ? 4 : spatial;
 		if (traced_z < 0)
 			traced_z = getenv("HALO_PT_RESTIR_Z") ? atoi(getenv("HALO_PT_RESTIR_Z")) != 0 : 1;
@@ -1411,6 +1515,55 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		traced from each, HALO_PT_RESTIR_Z=1; else by their own sample's
 		light here) */
 		job->settings[2] = (float)spatial + (traced_z && spatial ? 16.0f : 0.0f);
+	}
+	/* (ReSTIR DI's reuse flags: the spatial reservoirs kept for the next
+	frame, HALO_PT_RESTIR_FEEDBACK=1 (round 4's; by default the temporal
+	reservoir is kept, so no sample walks from pixel to pixel over the
+	frames); the temporal reuse by a permutation of the 4 x 4 about the
+	place, HALO_PT_RESTIR_PERMUTE; the boiling filter's strength,
+	HALO_PT_RESTIR_BOIL (0 to 1, 0 none)) */
+	{
+		static int feedback = -1, permute = -1;
+		static float boil = -1.0f;
+		int radius;
+
+		if (feedback < 0)
+			feedback = getenv("HALO_PT_RESTIR_FEEDBACK") ? atoi(getenv("HALO_PT_RESTIR_FEEDBACK")) != 0 : 0;
+		if (permute < 0)
+			permute = getenv("HALO_PT_RESTIR_PERMUTE") ? atoi(getenv("HALO_PT_RESTIR_PERMUTE")) != 0 :
+				RESTIR_PERMUTE_DEFAULT;
+		if (boil < 0.0f)
+		{
+			boil = getenv("HALO_PT_RESTIR_BOIL") ? (float)atof(getenv("HALO_PT_RESTIR_BOIL")) : RESTIR_BOIL_DEFAULT;
+			boil = boil < 0.0f ? 0.0f : boil > 1.0f ? 1.0f : boil;
+		}
+		/* (HALO_PT_RESTIR_RADIUS: the spatial neighbours' disc's radius in
+		pixels, 3 to 64; 16 by default) */
+		radius = env_int("HALO_PT_RESTIR_RADIUS", RESTIR_RADIUS_DEFAULT);
+		radius = radius < 3 ? 3 : radius > 64 ? 64 : radius;
+		job->reuse_flags = ((uint32_t)radius << 16) | (feedback ? REUSE_FEEDBACK : 0u) | (permute ? REUSE_PERMUTE : 0u) |
+			((uint32_t)(boil * 100.0f + 0.5f) << 8);
+	}
+	/* (a diagnosis of the light pass's cost: HALO_PT_PARTS_OFF, a mask of
+	its parts left out (1 the sun's ray, 2 the domes, 4 the spatial reuse, 8
+	the bounce, 16 the reflection's ray, 32 ReSTIR GI's reuse, 64 the spatial
+	neighbours' traced Z); HALO_PT_PARTS_CYCLE=<frames>: each
+	part left out alone in turn for that many frames, none first, so that
+	one run's timestamps give each part's cost at one pose) */
+	{
+		static int parts = -1, cycle = -1;
+
+		if (parts < 0)
+			parts = getenv("HALO_PT_PARTS_OFF") ? atoi(getenv("HALO_PT_PARTS_OFF")) : 0;
+		if (cycle < 0)
+			cycle = getenv("HALO_PT_PARTS_CYCLE") ? atoi(getenv("HALO_PT_PARTS_CYCLE")) : 0;
+		job->parts_off = (uint32_t)parts;
+		if (cycle > 0)
+		{
+			uint32_t turn = (pt.frame / (uint32_t)cycle) % 8u;
+
+			job->parts_off = turn ? 1u << (turn - 1u) : 0u;
+		}
 	}
 	job->settings[3] = 4.0f;
 	/* the histories: the slow one at most 32 frames, the fast 4, the fast
@@ -1424,7 +1577,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		static int restir_gi = -1;
 
 		if (restir_gi < 0)
-			restir_gi = getenv("HALO_PT_RESTIR_GI") ? atoi(getenv("HALO_PT_RESTIR_GI")) != 0 : 1;
+			restir_gi = env_int("HALO_PT_RESTIR_GI", RESTIR_GI_DEFAULT) != 0;
 		job->denoise[2] = restir_gi ? 20.0f : 0.0f;
 	}
 	/* the lamps' candidates a pixel; the reference's paths a pixel a frame;
@@ -1432,21 +1585,31 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	(HALO_PT_RESTIR 0: none, each pixel's own candidates alone) */
 	{
 		/* (HALO_PT_CANDIDATES: the live frames' lamp candidates a pixel, 1 to
-		8; the reference keeps 8) */
+		8; 8 by default, 4 where the spatial neighbours are reused (their
+		reservoirs bring the rest); the reference keeps 8) */
 		static int candidates = -1;
 
 		if (candidates < 0)
-			candidates = getenv("HALO_PT_CANDIDATES") ? atoi(getenv("HALO_PT_CANDIDATES")) : 8;
+			candidates = env_int("HALO_PT_CANDIDATES",
+				env_int("HALO_PT_RESTIR_SPATIAL", RESTIR_SPATIAL_DEFAULT) > 0 ? CANDIDATES_SPATIAL_DEFAULT : 8);
 		candidates = candidates < 1 ? 1 : candidates > 8 ? 8 : candidates;
 		job->extra[0] = reference ? 8.0f : (float)candidates;
 	}
 	job->extra[1] = (float)(pt.ref_paths ? pt.ref_paths : 1u);
 	{
 		static int restir = -1;
+		static float most = -1.0f;
 
 		if (restir < 0)
 			restir = getenv("HALO_PT_RESTIR") ? atoi(getenv("HALO_PT_RESTIR")) != 0 : 1;
-		job->extra[2] = restir ? 8.0f : 0.0f;
+		/* (HALO_PT_RESTIR_M: the reservoirs' confidence cap, 8 frames by
+		default) */
+		if (most < 0.0f)
+		{
+			most = getenv("HALO_PT_RESTIR_M") ? (float)atof(getenv("HALO_PT_RESTIR_M")) : 8.0f;
+			most = most < 1.0f ? 1.0f : most > 64.0f ? 64.0f : most;
+		}
+		job->extra[2] = restir ? most : 0.0f;
 	}
 	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on) */
 	dynamic_lights = (float *)((char *)slot_buffer->mapped + JOB_LIGHTS_OFFSET);
@@ -1639,15 +1802,20 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		{
 			/* (the pre-blur, HALO_PT_PREBLUR=1: the fix pass's first use, the
 			light as traced spread over a small disc before the histories
-			take it; else the fix pass copies the light as traced for the
-			temporal pass) */
+			take it; else the temporal pass reads the light as traced) */
 			static int preblur = -1;
 
 			if (preblur < 0)
 				preblur = getenv("HALO_PT_PREBLUR") ? atoi(getenv("HALO_PT_PREBLUR")) != 0 : 0;
-			dispatch(commands, PASS_FIX, scene, slot_buffer->address, preblur ? 1u : 2u, 0, 0, 0, groups_x, groups_y);
-			barrier(commands);
-			dispatch(commands, PASS_TEMPORAL, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
+			if (preblur)
+			{
+				dispatch(commands, PASS_FIX, scene, slot_buffer->address, 1u, 0, 0, 0, groups_x, groups_y);
+				barrier(commands);
+			}
+			/* (the temporal pass reads the pre-blur's b, else the light as
+			traced itself: no pass copies it) */
+			dispatch(commands, PASS_TEMPORAL, scene, slot_buffer->address, preblur ? 0u : 1u, 0, 0, 0, groups_x,
+				groups_y);
 			stamp(commands, time_slot, 2);
 			barrier(commands);
 			dispatch(commands, PASS_FIX, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
@@ -1655,11 +1823,17 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			barrier(commands);
 			/* (the fix wrote b: the steps from b to a and back; the specular's
 			the first three, its reach narrowed by its roughness) */
-			steps = 5;
+			steps = atrous_steps();
 			for (step = 0; step < steps; step++)
 			{
-				dispatch(commands, PASS_ATROUS, scene, slot_buffer->address, (uint32_t)step, (step & 1) == 0 ? 1u : 0u,
-					step < 3 ? 7u : 5u, 0, groups_x, groups_y);
+				/* (HALO_PT_ATROUS_WIDE: four steps at strides 1, 2, 4 and 16,
+				the five steps' reach for four's time: after the first three
+				the light is smooth over about 8 pixels, so the widest step's
+				taps 16 apart do not alias) */
+				uint32_t level = steps == 4 && atrous_wide() && step == 3 ? 4u : (uint32_t)step;
+
+				dispatch(commands, PASS_ATROUS, scene, slot_buffer->address, level, (step & 1) == 0 ? 1u : 0u,
+					level < 3 ? 7u : 5u, 0, groups_x, groups_y);
 				barrier(commands);
 			}
 			stamp(commands, time_slot, 4);

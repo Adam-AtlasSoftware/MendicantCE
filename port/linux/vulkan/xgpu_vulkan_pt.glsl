@@ -41,6 +41,22 @@ in Raster's form: the diffuse light by the base colour less the specular's
 share, the specular light, the emissive light. */
 
 //@common
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+/* the passes' options fixed when their pipelines are made (specialization
+constants, xgpu_vulkan_pt.c's spec_options: the same variables the job's
+fields take), so that an option that is off leaves no code in the light
+pass: its registers held whether or not it runs cost the pass about 0.8 ms
+of the RTX 3070 Ti's at G4 (round 7: the radiance cache's, the clamp's, the
+spatial reuse's). The job's fields still give each option's values */
+layout(constant_id = 0) const bool SPEC_CACHE = false;
+layout(constant_id = 1) const bool SPEC_CLAMP = false;
+layout(constant_id = 2) const bool SPEC_CONES = false;
+layout(constant_id = 3) const int SPEC_SPATIAL = 0;
+layout(constant_id = 4) const bool SPEC_DIAG = false;
+layout(constant_id = 5) const bool SPEC_BOIL = false;
+layout(constant_id = 6) const int SPEC_BOUNCE_HALF = 0;
+layout(constant_id = 7) const bool SPEC_SUN_TILES = false;
 
 const float PI = 3.14159265;
 
@@ -49,8 +65,10 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
     uvec2 pages, charts, vpages, table, tiles, indirect, sun, masks;
     uvec2 bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
     uvec2 sums, stats, meter, counters, tree, lamps_out, objects, object_table;
-    /* the radiance cache's cells (0: none), a word kept for the alignment */
-    uvec2 cache, unused_;
+    /* the radiance cache's cells (0: none); ReSTIR DI's reuse flags
+    (REUSE_*); a diagnosis's parts left out (PARTS_*, 0 in play) */
+    uvec2 cache;
+    uint reuse_flags, parts_off;
     vec4 camera[4];
     vec4 last_camera[4];
     ivec4 corners;
@@ -88,6 +106,25 @@ layout(buffer_reference, std430, buffer_reference_align = 16) buffer Counters
     uint v[4];
 };
 
+/* job.reuse_flags: the spatial reservoirs kept for the next frame (round
+4's, which spread a sample from pixel to pixel over the frames: the blobs in
+motion); the temporal reuse by a permutation of the 4 x 4 about the place; the spatial disc's radius in
+pixels in bits 16 to 23 (0: 16);
+the boiling filter's strength in hundredths (bits 8 to 15, 0 none) */
+const uint REUSE_FEEDBACK = 1u;
+const uint REUSE_PERMUTE = 2u;
+/* job.parts_off (a diagnosis of the light pass's cost, HALO_PT_PARTS_OFF):
+the sun's ray, the domes, ReSTIR DI's spatial reuse, the bounce, the
+reflection's ray, ReSTIR GI's reuse, the spatial neighbours' traced Z left
+out */
+const uint PARTS_SUN = 1u;
+const uint PARTS_DOMES = 2u;
+const uint PARTS_SPATIAL = 4u;
+const uint PARTS_BOUNCE = 8u;
+const uint PARTS_REFLECTION = 16u;
+const uint PARTS_GI_REUSE = 32u;
+const uint PARTS_Z = 64u;
+bool part_off(uint part) { return SPEC_DIAG && (job.parts_off & part) != 0u; }
 /* job.frame.y's flags */
 const uint FLAG_HISTORY = 1u;
 const uint FLAG_PERFORMANCE = 2u;
@@ -365,8 +402,12 @@ bool texel_of(uint vp, ivec2 x, out uvec2 w, out uint indirect_word)
         indirect_word = Uints(job.indirect).v[(physical - 1u) * 256u + l.y * 16u + l.x];
     return (w.y & 0xff000000u) != 0u || w.x != 0u || w.y != 0u;
 }
+/* (sun_of's last call: whether its tile is all in the sun's shadow, the
+bake's state 1: none of its 16 x 16 texels' samples saw the sun) */
+bool sun_tile_dark = false;
 float sun_of(uint vp, vec2 x)
 {
+    sun_tile_dark = false;
     Uints v = Uints(job.vpages);
     uint tiles_x = v.v[vp * 8u + 2u], tiles_y = v.v[vp * 8u + 3u];
     ivec2 t = ivec2(floor(x / 16.0));
@@ -376,7 +417,10 @@ float sun_of(uint vp, vec2 x)
     if (state == 0u)
         return -1.0;
     if (state < 3u)
+    {
+        sun_tile_dark = state == 1u;
         return state == 2u ? 1.0 : 0.0;
+    }
     vec2 m = clamp((x - vec2(t) * 16.0) * 4.0 - 0.5, vec2(0.0), vec2(63.0));
     ivec2 a = ivec2(floor(m));
     ivec2 b = min(a + 1, ivec2(63));
@@ -987,12 +1031,12 @@ pixel's) */
 /* (restir_reuse's last call: whether the reservoir's sample lit this pixel,
 in front of it and seen) */
 bool reuse_valid = false;
-void restir_reuse(ivec2 q, Surface g, vec3 o, inout int kind, inout uint index, inout vec3 y, inout float target_kept,
-    inout vec3 kept_d, inout vec3 kept_s, inout float w_total, inout float m_total)
+/* (whether the last frame's pixel q held this surface: the same instance,
+the normal, the plane (the level), an object's distance) */
+bool restir_same(ivec2 q, Surface g)
 {
-    reuse_valid = false;
     if (!inside(q))
-        return;
+        return false;
     uvec4 gl = imageLoad(guide_last, q);
     vec3 nl = unfold(unpackSnorm2x16(gl.y));
     float dl = uintBitsToFloat(gl.z);
@@ -1001,7 +1045,13 @@ void restir_reuse(ivec2 q, Surface g, vec3 o, inout int kind, inout uint index, 
         same = abs(dot(last_point(q, dl) - g.point, g.normal)) <= 0.02 + 0.004 * g.distance;
     else if (same)
         same = abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
-    if (!same)
+    return same;
+}
+void restir_reuse(ivec2 q, Surface g, vec3 o, inout int kind, inout uint index, inout vec3 y, inout float target_kept,
+    inout vec3 kept_d, inout vec3 kept_s, inout float w_total, inout float m_total)
+{
+    reuse_valid = false;
+    if (!restir_same(q, g))
         return;
     vec4 rp = imageLoad(reservoir_point_last, q);
     uvec4 ri = imageLoad(reservoir_info_last, q);
@@ -1032,6 +1082,38 @@ void restir_reuse(ivec2 q, Surface g, vec3 o, inout int kind, inout uint index, 
         }
     }
     m_total += max(m_last, 0.0);
+}
+/* the reservoir kept for the next frame (its sample, W, its confidence),
+after the boiling filter (RTXDI's): a reservoir whose W is far over the
+mean of the others' in its subgroup (32 pixels about it) is let go: a
+runaway reservoir, a reused sample whose target here fell far under its
+weight. (W alone: a lucky sample of a bright light has a large target too,
+so its W is not an outlier; comparing the estimate, W by its target, takes
+such samples away and with them the light they find: tools/test_prism_pt.py)
+Off by default (HALO_PT_RESTIR_BOIL): at G4 it let go of nothing */
+void restir_store(ivec2 pixel, int t_kind, uint t_index, vec3 t_y, float t_target, float t_w, float t_m)
+{
+    float t_big_w = t_kind != KIND_NONE && t_target > 0.0 ? t_w / (t_target * t_m) : 0.0;
+    uint boil = (job.reuse_flags >> 8) & 255u;
+    if (SPEC_BOIL && boil != 0u)
+    {
+        float strength = clamp(float(boil) / 100.0, 1.0e-3, 1.0);
+        float most = 10.0 / strength - 9.0;
+        float wv = t_big_w > 0.0 && !isinf(t_big_w) ? t_big_w : 0.0;
+        float sum_w = subgroupAdd(wv);
+        float count = subgroupAdd(wv > 0.0 ? 1.0 : 0.0);
+        /* (against the others' mean: in a subgroup of 32 a reservoir is at
+        most 32 times a mean that holds it, under the filter's 41 at its
+        usual strength 0.2, which RTXDI takes over a group of 256) */
+        if (wv > 0.0 && count > 1.5 && wv > most * (sum_w - wv) / (count - 1.0))
+        {
+            t_kind = KIND_NONE;
+            t_big_w = 0.0;
+            t_m = 0.0;
+        }
+    }
+    imageStore(reservoir_point_now, pixel, vec4(t_y, t_big_w));
+    imageStore(reservoir_info_now, pixel, uvec4(uint(t_kind) | (t_index << 2), floatBitsToUint(t_m), 0u, 0u));
 }
 void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse, out vec3 specular)
 {
@@ -1064,6 +1146,9 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     float m_total = 1.0;
     /* (the kept sample's weight sum, its target here) */
     float w_total = w_cur;
+    /* (whether the reservoir for the next frame is stored: the temporal
+    one, before the spatial neighbours, unless REUSE_FEEDBACK) */
+    bool stored = false;
     if (reuse && g.has_history && (job.frame.y & FLAG_HISTORY) != 0u)
     {
         /* (the last frame's pixel one of the 2 x 2 about the place, chosen
@@ -1075,7 +1160,33 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
         vec2 at_last = last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u);
         vec2 fl = floor(at_last), fr = at_last - fl;
         ivec2 q = ivec2(fl) + ivec2(rnd() < fr.x ? 1 : 0, rnd() < fr.y ? 1 : 0);
+        /* (permutation sampling (RTXDI's, after Wyman and Panteleev 2021):
+        the last frame's reservoir taken from a pixel of the 4 x 4 about the
+        place by a permutation the same over the frame and new each frame
+        (an offset, then each coordinate's low two bits flipped), so each of
+        the last frame's reservoirs goes to one pixel still, but a
+        reservoir's sample does not stay at one pixel frame after frame:
+        its run of frames is spread over the block and the histories take
+        it as noise to average, not a fixed spot; where that pixel is not
+        this surface's, the place's own) */
+        if ((job.reuse_flags & REUSE_PERMUTE) != 0u)
+        {
+            uint r = hash_u(job.frame.x * 0x9e3779b9u + 0x632be5abu);
+            ivec2 off = ivec2(int(r & 3u), int((r >> 2) & 3u));
+            ivec2 qp = ((q + off) ^ ivec2(3)) - off;
+            if (restir_same(qp, g))
+                q = qp;
+        }
         restir_reuse(q, g, o, kind, index, y, target_kept, kept_d, kept_s, w_total, m_total);
+        /* (the temporal reservoir, kept for the next frame unless
+        REUSE_FEEDBACK: the spatial neighbours' samples are this frame's
+        light alone, never passed on, so no sample walks from pixel to
+        pixel over the frames) */
+        if ((job.reuse_flags & REUSE_FEEDBACK) == 0u)
+        {
+            restir_store(pixel, kind, index, y, target_kept, w_total, m_total);
+            stored = true;
+        }
         /* (the spatiotemporal reuse, job.settings.z of them: the last
         frame's reservoirs at points of a disc of 2 to 16 pixels about the
         place, each this surface's by the same test, taken alike: a lamp
@@ -1084,14 +1195,17 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
         the grid's lists rank low) is not one pixel's luck) */
         /* (job.settings.z: the neighbours, 16 more where their confidence
         is counted by the kept sample's support traced from them) */
-        bool traced_z = job.settings.z >= 16.0;
-        int spatial = min(int(mod(job.settings.z, 16.0)), 4);
+        bool traced_z = job.settings.z >= 16.0 && !part_off(PARTS_Z);
+        int spatial = part_off(PARTS_SPATIAL) ? 0 : min(int(mod(job.settings.z, 16.0)), min(SPEC_SPATIAL, 4));
+        /* (the disc's radius: reuse_flags' bits 16 to 23, 16 pixels where 0) */
+        uint disc_bits = (job.reuse_flags >> 16) & 255u;
+        float disc = disc_bits >= 3u ? float(disc_bits) : 16.0;
         vec3 n_points[4], n_normals[4];
         float n_m[4];
         bool n_kept[4];
         for (int k = 0; k < spatial; k++)
         {
-            float a = 6.2831853 * rnd(), r = 2.0 + 14.0 * sqrt(rnd());
+            float a = 6.2831853 * rnd(), r = 2.0 + (disc - 2.0) * sqrt(rnd());
             ivec2 qs = ivec2(floor(at_last + r * vec2(cos(a), sin(a)) + 0.5));
             /* (a neighbour's confidence counted below, only where the kept
             sample could have been its: its m_total apart) */
@@ -1155,8 +1269,8 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
         diffuse = kept_d * big_w;
         specular = kept_s * big_w;
     }
-    imageStore(reservoir_point_now, pixel, vec4(y, big_w));
-    imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
+    if (!stored)
+        restir_store(pixel, kind, index, y, target_kept, w_total, m_total);
 }
 
 /* ---------- the lamps by a light tree as well as the grid (the live
@@ -1210,7 +1324,7 @@ float tree_importance(uint node, vec3 p, vec3 n)
         Lambertian lamps, nought past a right angle: Conty Estevez and Kulla
         2018's theta prime) */
         float cos_o = t.v[b + 15u];
-        if (cos_o > -0.99 && job.volume.w >= 16.0)
+        if (SPEC_CONES && cos_o > -0.99 && job.volume.w >= 16.0)
         {
             /* (cos(theta - theta_o - theta_u) by the angles' sums, no
             inverse trigonometry: theta past the two, else 1) */
@@ -2120,9 +2234,16 @@ void main()
 
     /* the sun: a ray near the eye and on the objects, the mask beyond */
     float v_sun = 0.0, blocker = 0.0, traced = 0.0;
-    if (s.sun.w > 0.0 && dot(g.normal, s.sun.xyz) > 0.0)
+    if (s.sun.w > 0.0 && dot(g.normal, s.sun.xyz) > 0.0 && !part_off(PARTS_SUN))
     {
-        if (!texel || bake_sun < 0.0 || g.distance < job.settings.x)
+        /* (the ray where the mask is not read (the performance profile's
+        far pixels read it), except in a tile the bake found all in shadow:
+        none of its texels' samples saw the sun, so the ray, the same
+        structure's to the same length, would not either; a moving object
+        only blocks. Round 7: most of an interior's sun rays, 0.85 ms of the
+        RTX 3070 Ti's light pass at G4 (HALO_PT_SUN_TILES=0: traced)) */
+        bool dark_tile = SPEC_SUN_TILES && texel && sun_tile_dark && bake_sun == 0.0;
+        if ((!texel || bake_sun < 0.0 || g.distance < job.settings.x) && !dark_tile)
         {
             seed_for(pixel, frame, 1u);
             v_sun = sun_ray(o, blocker);
@@ -2164,7 +2285,8 @@ void main()
         /* the domes, the lamps, the fixtures, the dynamic lights */
         vec3 m = vec3(0.0);
         seed_for(pixel, frame, 2u);
-        noisy_d += domes_at(o, g.normal, m);
+        if (!part_off(PARTS_DOMES))
+            noisy_d += domes_at(o, g.normal, m);
         vec3 ld, ls;
         seed_for(pixel, frame, 3u);
         lamps_mis = glossy;
@@ -2180,9 +2302,23 @@ void main()
     {
         /* the indirect light: the bake's at the pixel, else a bounce (its
         sample reused by ReSTIR GI where job.denoise.z gives it frames) */
-        if (performance && texel)
+        /* (SPEC_BOUNCE_HALF: on half the level's 8 x 8 blocks (1) or half
+        its pixels (2), a checkerboard of them turning each frame, a pixel with its texel takes
+        the bake's indirect light as its sample of the bounce, through the
+        denoiser like the traced one: the two estimate the same light (the
+        bounce's hit is lit from the same bake), so the histories average
+        them; by blocks whole subgroups leave the bounce's ray out) */
+        int cell = SPEC_BOUNCE_HALF == 2 ? 0 : 3;
+        bool bake_bounce = SPEC_BOUNCE_HALF != 0 && texel && !performance &&
+            (((pixel.x >> cell) + (pixel.y >> cell) + int(frame)) & 1) != 0;
+        if ((performance && texel) || part_off(PARTS_BOUNCE))
         {
-            clean_d += bake_indirect;
+            clean_d += texel ? bake_indirect : vec3(0.0);
+            imageStore(gi_data_now, pixel, vec4(0.0));
+        }
+        else if (bake_bounce)
+        {
+            noisy_d += bake_indirect;
             imageStore(gi_data_now, pixel, vec4(0.0));
         }
         else
@@ -2195,7 +2331,7 @@ void main()
             /* (the radiance cache: every fourth pixel's hit added to its
             cell; the cell's mean in the hit's place where it has its
             samples) */
-            if (job.cache != uvec2(0u) && hd > 0.0 && dot(hn, hn) > 0.0)
+            if (SPEC_CACHE && job.cache != uvec2(0u) && hd > 0.0 && dot(hn, hn) > 0.0)
             {
                 vec3 hp = o + d * hd;
                 float from_eye = length(hp - (g.point + g.eye * g.distance));
@@ -2205,12 +2341,14 @@ void main()
                 if (cell.w >= job.cache_settings.z)
                     bounce = cell.rgb;
             }
-            bounce = indirect_clamped(bounce);
+            if (SPEC_CLAMP)
+                bounce = indirect_clamped(bounce);
             seed_for(pixel, frame, 8u);
-            noisy_d += job.denoise.z > 0.0 ? restir_gi(pixel, g, o, d, hd, hn, bounce) : bounce;
+            noisy_d += job.denoise.z > 0.0 && !part_off(PARTS_GI_REUSE) ?
+                restir_gi(pixel, g, o, d, hd, hn, bounce) : bounce;
         }
         /* the reflections: a GGX ray below the roughness, else the probes */
-        if (g.roughness <= job.settings.y)
+        if (g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION))
         {
             vec3 weight;
             seed_for(pixel, frame, 5u);
@@ -2495,9 +2633,11 @@ void main()
         imageStore(sun_a, pixel, vec4(0.0));
         return;
     }
-    /* (this frame's samples, pre-blurred: the fix pass's pre-blur) */
-    vec4 nd = imageLoad(diff_b, pixel);
-    vec4 ns = imageLoad(spec_b, pixel);
+    /* (this frame's samples: pre-blurred by the fix pass's pre-blur into
+    diff_b and spec_b, parameters.x 0; else the light as traced, 1) */
+    bool raw = push.parameters.x == 1u;
+    vec4 nd = raw ? imageLoad(noisy_diffuse, pixel) : imageLoad(diff_b, pixel);
+    vec4 ns = raw ? imageLoad(noisy_specular, pixel) : imageLoad(spec_b, pixel);
     vec4 sr = imageLoad(sun_raw, pixel);
     vec4 hd, hs, hm, hms, hsun;
     float length_d;
@@ -2592,8 +2732,8 @@ void main()
             ivec2 q = pixel + 2 * ivec2(k < 3 ? k - 1 : k == 3 ? -1 : k == 4 ? 1 : k - 6, k < 3 ? -1 : k < 5 ? 0 : 1);
             if (!inside(q) || imageLoad(guide_now, q).x != here)
                 continue;
-            most_d = max(most_d, imageLoad(diff_b, q).a);
-            most_s = max(most_s, imageLoad(spec_b, q).a);
+            most_d = max(most_d, raw ? imageLoad(noisy_diffuse, q).a : imageLoad(diff_b, q).a);
+            most_s = max(most_s, raw ? imageLoad(noisy_specular, q).a : imageLoad(spec_b, q).a);
             any_ = true;
         }
         if (any_ && short_d)
@@ -2694,7 +2834,10 @@ void main()
     (a penumbra, the trees' cutouts) its 25 samples span 0 to 1 (all alike
     one frame in thousands where the light is 0.7) and the history
     accumulates as before) */
-    if (history)
+    /* (where both histories already equal this frame's visibility (an
+    interior's 0, an open lit ground's 1) the range cannot move them: the
+    5 x 5 not read) */
+    if (history && (slow_v != v || fast_v != v))
     {
         uint here = imageLoad(guide_now, pixel).x;
         float v_lo = v, v_hi = v;
@@ -2733,7 +2876,7 @@ weight), so that a pixel's first frames are not one sample's noise; the
 same written into this frame's history. Elsewhere passed on. The variance
 where it is unknown, from the 5 x 5 neighbourhood's luminance.
 parameters.x 1: the pre-blur instead (below), 2: the light as traced copied
-for the temporal pass (the pre-blur off) */
+to diff_b and spec_b (unused since the temporal pass reads it itself) */
 /* the pre-blur (ReLAX's pre-pass, from its published descriptions): before
 the temporal pass, the light as traced spread over a disc of PREBLUR_TAPS
 points about the pixel (a radius of PREBLUR_RADIUS pixels; the specular's
