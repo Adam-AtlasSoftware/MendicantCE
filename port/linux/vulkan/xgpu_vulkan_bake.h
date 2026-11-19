@@ -51,6 +51,10 @@ struct xgpu_vulkan_bake_lookup
 {
 	uint64_t scene;
 	uint64_t pages, charts, vpages, table, tiles, indirect, sun, masks, lightmaps;
+	/* PRISM Path Traced's baked lamp visibility: a word a texel (4 bits a
+	lamp) in the pool's physical tiles' order, and each physical tile's 8
+	lamps (0xffffffff none; 0 for both: none baked) */
+	uint64_t lamp_visibility, lamp_ids;
 	uint64_t bricks, coarse, probes;
 	uint64_t reflections, reflection_table, reflection_data;
 	uint32_t page_count, tiles_done, tiles_planned;

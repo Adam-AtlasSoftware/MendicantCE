@@ -35,7 +35,7 @@ base colour multiplies it) and its specular light `S`:
 | --- | --- | --- | --- | --- |
 | Sun | The sky's sun, direct | A ray to a point of its disc at every pixel (since round 3: the mask's texels missed thin sunlit edges far off, round 2's G3). `D` += sun × cos × v, `S` += GGX × the sun × v | A ray within 60 world units of the eye and on every object pixel; past 60 the baked sun mask (the level's pixels) | A ray to its disc at every pixel |
 | Domes | The sky's other lights, direct | One direction of each one's cone, its shadow traced (`domes_at`): `D` | The same | The same |
-| Lamps | The emitting triangles (light cards, lamp surfaces), direct | ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S`; on a pixel whose reflection is traced (roughness up to 0.35) the lamps' `S` shared with the reflection's GGX ray meeting a lamp's face (`lamp_met`) by multiple importance sampling: the power heuristic between the ray's density (GGX's visible normals) and 1 over the lamp's solid angle (`lamp_mis_nee`), the two weights summing to 1 at every direction | The same | Resampled importance over the same 8 candidates, each one's shadow traced and its visibility in its target (`lights_ris_seen`), no reservoir reused |
+| Lamps | The emitting triangles (light cards, lamp surfaces), direct | The 4 with the most light at the pixel analytic (their unshadowed light exact by linearly transformed cosines, their visibility the bake's and a ray against the moving objects, or one traced ray picked by their light: "The analytic lamps" below); the others by ReSTIR DI: a reservoir a pixel, its initial candidates 8 lamp points from the light-importance grid (`lamp_pick`: the cell's seen and near lists, the rest by power: every lamp can be picked), each by its unshadowed diffuse and specular light; the last frame's reservoir at the surface's place reused (below); the kept sample's shadow traced (`lamp_visible`: any surface before the lamp's point blocks it, another lamp's too, since `prism-v4-m2` b2e459b8b): `D` and `S`; on a pixel whose reflection is traced (roughness up to 0.35) the lamps' `S` shared with the reflection's GGX ray meeting a lamp's face (`lamp_met`) by multiple importance sampling: the power heuristic between the ray's density (GGX's visible normals) and 1 over the lamp's solid angle (`lamp_mis_nee`), the two weights summing to 1 at every direction | The same | Resampled importance over the same 8 candidates, each one's shadow traced and its visibility in its target (`lights_ris_seen`), no reservoir reused |
 | Fixtures | The scenario's light fixtures, direct | In the same reservoir (all of them, or 8 by count) | The same | The same (16) |
 | Dynamic lights | SCENE_LIGHTS' dynamic class (flashlight, plasma, muzzle flashes), direct | In the same reservoir (4), CE's falloff, its shadow traced; never reused from the last frame | The same | The same (16) |
 | The sky's floor | The units' rig's ambient, unoccluded, as Tool's: the sky's outdoor value in the structure's clusters with a sky, sky 0's indoor value in those with none (`prism-v4-m2` 4acaa7892, `XGPU_SCENE_INDOOR`) | A constant, `D`: the flag of the structure's triangle the pixel shows (a short stretch of the eye's ray about its point), an object's the structure below it (a ray down past the object) | The same | The same |
@@ -154,6 +154,64 @@ found safe:
   (G4: 18.7 against 17.3 ms), which is why it is not on.
 - `HALO_PT_CANDIDATES` (1 to 8, 8 by default): the live frames' initial lamp candidates a pixel.
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
+
+## The analytic lamps
+
+Round 6 found the interiors' speckle in the specular light, and the lamps' light in general comes from a pick among
+many small triangles. Since this round the lamps and fixtures with the most light at a pixel are not sampled: their
+unshadowed light is computed exactly and only their visibility is estimated (Heitz, Hill and McGuire 2018,
+"Combining Analytic Direct Illumination and Stochastic Shadows": the ratio estimator). `xgpu_vulkan_pt.glsl`'s
+`analytic_select`, `analytic_light`, `ltc_triangle`, `baked_lamps_at`.
+
+- **Which lights** (`analytic_select`; `HALO_PT_ANALYTIC` of them a pixel, 4 by default, at most 8): first the lamps
+  the bake keeps for the tile of the pixel's texel (below) where they light the pixel; then, to fill the count (an
+  object's pixel, a texel with fewer), the 8 lamps of the pixel's grid cell's seen list with the most light the bake
+  found each gives the cell's points (the list's weights, words the cell's pixels share), ranked by their light at
+  the pixel from their middle, and the fixtures where the level has at most 16. A pixel smoother than 0.1 keeps
+  ReSTIR DI and its reflection's ray for every lamp (a near mirror is where the fit below is poorest).
+- **Their unshadowed light, exact.** A lamp is a triangle of uniform radiance: its diffuse light is the clamped
+  cosine's integral over the triangle clipped to the horizon (Lambert's form factor, the arcs' sum; the clipped
+  polygon's edges summed as the triangle's are walked, with no array of corners), its specular light GGX's integral
+  by linearly transformed cosines (Heitz, Dupuy, Hill and Neubelt 2016): the triangle turned by the inverse of a
+  matrix that makes the clamped cosine into the lobe, integrated as the diffuse is, times the lobe's integral
+  (`F0 (A - B) + B`, Schlick's Fresnel). The matrices are our own fit to the lobe `ggx()` evaluates
+  (`tools/prism_ltc_fit.py`: 32 roughnesses by 32 view angles, Heitz et al.'s parameters (the lobe's mean direction's
+  frame by a scale and a skew), their error by Nelder and Mead's simplex, each matrix's mirror image made one sign so
+  that the table interpolates; no published table used), in `xgpu_vulkan_pt_ltc.h`, uploaded once (`job.ltc`).
+  `tools/test_prism_pt.py` checks the diffuse against Lambert's form factor by integration (2%) and the specular
+  against the lobe's integral over a lamp about the mirror direction (8%; 1 to 4% at the levels' roughnesses). At a
+  grazing view the fitted lobe's tails are too thin (a lamp off the highlight's peak 15 to 40% short at n.v 0.3), so
+  below n.v 0.5 only the analytic lights' diffuse light is analytic: their specular light stays ReSTIR DI's and the
+  reflection ray's (their target there the specular part alone). A fixture (a point) is `sample_light`'s unshadowed
+  light, exact already.
+- **Their visibility.** For the lights the bake's visibility does not cover, `V` is the shadow of one point of one
+  light, picked by its share of their unshadowed sum `U` (a lamp's point by solid angle, above the surface's horizon:
+  the clipped integral's part), so `U V`'s mean is each light's light by its seen share, summed. Where every light is
+  seen `U V` is `U` at every sample: no noise; only where some are hidden does `V` vary, and the denoiser averages it.
+  For the bake's lamps the light is `U` by the bake's visibility of each at the pixel's texel (static, no noise) and
+  one ray, picked by their share, is traced against the moving objects alone (`objects_blocked`; none where no
+  object is traced). The diffuse and the specular each have their pick (four streams, each one's pick made as the
+  lights stream past, weighted reservoir sampling: no arrays). So a static room lit by its lamps has its lamps'
+  diffuse light without noise, in motion too, and a character still shadows the wall in front of a lamp.
+- **The rest.** ReSTIR DI takes the other lamps, fixtures and the dynamic lights as before (`HALO_PT_CANDIDATES`' default
+  is 4 candidates where the analytic lamps are on, 8 without: it pays for them), an analytic light's target nought
+  there, and the reflection's ray takes no light from an analytic lamp it meets (`analytic_triangle`): nothing is
+  counted twice and the other lights' estimate stays unbiased. The reference does not change.
+- **The bake's lamp visibility** (`HALO_PT_BAKED_VISIBILITY`, on by default; `docs/prism_bake.md`, "The lamps'
+  visibility", BAKE_VERSION 20): each tile's 8 lamps and each texel's visibility of each (4 bits), through the level
+  and the static scenery. The pixel reads the lamps of the tile of its nearest texel and their visibility bilinear
+  over the 4 texels about its place (each texel's of its own tile's lamps, matched by lamp; a texel not baked left
+  out), as Raster reads the light.
+- **The specular antialiasing** (`HALO_PT_SPECULAR_AA`, on by default; `roughness_filtered`): the analytic lamps' lobe
+  is widened by the normal's variance over the pixel (Tokuyoshi and Kaplanyan 2019's geometric specular antialiasing,
+  after Kaplanyan et al. 2016): alpha squared plus twice the variance of a Gaussian of slopes, 1/(2 pi) of the
+  normal's screen differences squared, at most 0.18; the differences the G-buffer's neighbours' normals on the same
+  surface (the instance, the plane), one-sided. Only the analytic lamps' lobe: widening the roughness every pass
+  reads moved b30's semi-glossy floor past the traced reflection's roughness (0.35) onto the probes and took its
+  reflections' sheen (round 7's first try, G4's first pose). The G-buffer keeps one normal a pixel, so detail finer
+  than a pixel (Toksvig's measure of a normal map's mip levels) is not seen.
+- `HALO_PT_DEBUG_ANALYTIC=1` (a diagnosis) under `debug.gbuffer_view "pt_noisy"`: red the analytic lights' count over
+  8, green the roughness, blue the bake's lamps among them over 8.
 
 ## ReSTIR GI
 

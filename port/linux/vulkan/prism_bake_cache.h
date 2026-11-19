@@ -128,7 +128,10 @@ enum prism_bake_record_type
 	PRISM_BAKE_RECORD_PROBE = PRISM_BAKE_CACHE_FOURCC('P', 'R', 'O', 'B'),
 	PRISM_BAKE_RECORD_IMPORTANCE_GRID = PRISM_BAKE_CACHE_FOURCC('I', 'M', 'P', 'G'),
 	PRISM_BAKE_RECORD_REACHABLE = PRISM_BAKE_CACHE_FOURCC('R', 'E', 'A', 'C'),
-	PRISM_BAKE_RECORD_FOOTPRINTS = PRISM_BAKE_CACHE_FOURCC('F', 'O', 'O', 'T')
+	PRISM_BAKE_RECORD_FOOTPRINTS = PRISM_BAKE_CACHE_FOURCC('F', 'O', 'O', 'T'),
+	/* PRISM Path Traced's baked lamp visibility: a tile's 4 lamps and each
+	texel's visibility of them (its job a sun mask tile's at level 8) */
+	PRISM_BAKE_RECORD_LAMP_MASK_TILE = PRISM_BAKE_CACHE_FOURCC('L', 'M', 'S', 'K')
 };
 
 /* what a bake was made from: a change to any field makes it stale */

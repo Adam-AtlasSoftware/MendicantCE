@@ -40,6 +40,7 @@ a frame; the log: their means every 600 frames).
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_pt.h"
 #include "xgpu_vulkan_pt_shaders.h"
+#include "xgpu_vulkan_pt_ltc.h"
 #include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_scene.h"
@@ -90,6 +91,21 @@ indirect light's clamp by default (0 none) */
 1.5 ms of the RTX 3070 Ti's light pass at G4, 1080p) */
 #define TREE_CONES_DEFAULT 0
 #define INDIRECT_CLAMP_DEFAULT 0.0f
+/* the lamps shaded analytically a pixel (HALO_PT_ANALYTIC: the cell's lamps
+with the most light there, their unshadowed light by linearly transformed
+cosines, only their visibility traced; 0 none), the specular antialiasing
+(HALO_PT_SPECULAR_AA: the roughness widened by the normal's variance over
+the pixel) and its most added alpha squared */
+#define ANALYTIC_DEFAULT 4
+/* ReSTIR DI's lamp candidates a pixel where the analytic lamps take the
+strongest (8 without them) */
+#define CANDIDATES_ANALYTIC 4
+#define SPECULAR_AA_DEFAULT 1
+/* the analytic lamps' static shadows from the bake's lamp visibility
+(HALO_PT_BAKED_VISIBILITY), their rays then against the moving objects
+alone */
+#define BAKED_VISIBILITY_DEFAULT 1
+#define SPECULAR_AA_KAPPA 0.18f
 /* the passes timed, the timestamps a frame (a begin and each pass's end),
 the frames' slots of them */
 #define TIMED 5u
@@ -188,8 +204,12 @@ struct pt_job
 	VkDeviceAddress pages, charts, vpages, table, tiles, indirect, sun, masks;
 	VkDeviceAddress bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
 	VkDeviceAddress sums, stats, meter, counters, tree, lamps_out, objects, object_table;
-	/* the radiance cache (its cells; 0 off), a word kept for the alignment */
-	VkDeviceAddress cache, unused;
+	/* the radiance cache (its cells; 0 off), the analytic lamps' LTC table
+	(xgpu_vulkan_pt_ltc.h; 0 none) */
+	VkDeviceAddress cache, ltc;
+	/* the bake's lamp visibility (a word a texel) and its tiles' lamps
+	(xgpu_vulkan_bake_lookup's; 0 none: HALO_PT_BAKED_VISIBILITY=0) */
+	VkDeviceAddress lamp_visibility, lamp_ids;
 	float camera[4][4];
 	float last_camera[4][4];
 	int32_t corners[4];
@@ -208,6 +228,10 @@ struct pt_job
 	cache's cell at a unit's distance, the samples a cell needs before it is
 	read, the most it keeps */
 	float cache_settings[4];
+	/* the analytic lamps a pixel (0 none), the flags (1 the specular
+	antialiasing, 2 the baked lamp visibility), the antialiasing's most
+	added alpha squared, a word unused */
+	float analytic[4];
 };
 
 struct pt_push
@@ -283,6 +307,9 @@ static struct
 	/* the radiance cache's cells (made once; emptied for each bake's scene
 	generation) */
 	struct pt_buffer cache;
+	/* the LTC table of the analytic lamps (made once) */
+	struct pt_buffer ltc;
+	int ltc_made;
 	uint32_t cache_generation;
 	int cache_made;
 	uint64_t lamps_serial;
@@ -1346,6 +1373,50 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		if (cache_on && !reference && pt.cache.buffer)
 			job->cache = pt.cache.address;
 	}
+	/* (the analytic lamps (HALO_PT_ANALYTIC: how many a pixel, 0 none): the
+	lamps and fixtures with the most light at the pixel shaded by linearly
+	transformed cosines (Heitz et al. 2016; our own fit,
+	tools/prism_ltc_fit.py), their visibility alone traced (the ratio
+	estimator, Heitz et al. 2018); the specular antialiasing
+	(HALO_PT_SPECULAR_AA)) */
+	{
+		static int analytic = -1, specular_aa = -1, baked_visibility = -1;
+
+		if (analytic < 0)
+		{
+			analytic = getenv("HALO_PT_ANALYTIC") ? atoi(getenv("HALO_PT_ANALYTIC")) : ANALYTIC_DEFAULT;
+			analytic = analytic < 0 ? 0 : analytic > 8 ? 8 : analytic;
+			specular_aa = getenv("HALO_PT_SPECULAR_AA") ? atoi(getenv("HALO_PT_SPECULAR_AA")) != 0 :
+				SPECULAR_AA_DEFAULT;
+			baked_visibility = getenv("HALO_PT_BAKED_VISIBILITY") ? atoi(getenv("HALO_PT_BAKED_VISIBILITY")) != 0 :
+				BAKED_VISIBILITY_DEFAULT;
+		}
+		if (analytic && !pt.ltc_made)
+		{
+			pt.ltc_made = 1;
+			if (!buffer_make(sizeof(xgpu_vulkan_pt_ltc), 1, &pt.ltc))
+				host_logf(HOST_LOG_WARN, "prism pt: no memory for the analytic lamps' table: none");
+			else
+			{
+				memcpy(pt.ltc.mapped, xgpu_vulkan_pt_ltc, sizeof(xgpu_vulkan_pt_ltc));
+				host_logf(HOST_LOG_INFO, "prism pt: analytic lamps: %d a pixel, specular antialiasing %s, baked "
+					"visibility %s", analytic, specular_aa ? "on" : "off", baked_visibility ? "on" : "off");
+			}
+		}
+		if (analytic && !reference && pt.ltc.buffer)
+		{
+			job->ltc = pt.ltc.address;
+			job->analytic[0] = (float)analytic;
+			if (baked_visibility && lookup.lamp_visibility && lookup.lamp_ids)
+			{
+				job->lamp_visibility = lookup.lamp_visibility;
+				job->lamp_ids = lookup.lamp_ids;
+			}
+		}
+		job->analytic[1] = (float)(specular_aa && !reference ? 1 : 0);
+		job->analytic[2] = SPECULAR_AA_KAPPA;
+		job->analytic[3] = getenv("HALO_PT_DEBUG_ANALYTIC") && atoi(getenv("HALO_PT_DEBUG_ANALYTIC")) ? 1.0f : 0.0f;
+	}
 	/* (the moving objects: the G-buffer pass's object draws, their
 	structures built at its end, xgpu_vulkan_rt.c; HALO_PT_OBJECTS=0 none) */
 	{
@@ -1432,11 +1503,14 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	(HALO_PT_RESTIR 0: none, each pixel's own candidates alone) */
 	{
 		/* (HALO_PT_CANDIDATES: the live frames' lamp candidates a pixel, 1 to
-		8; the reference keeps 8) */
-		static int candidates = -1;
+		8, by default 8, or CANDIDATES_ANALYTIC where the analytic lamps take
+		the strongest; the reference keeps 8) */
+		static int asked = -2;
+		int candidates;
 
-		if (candidates < 0)
-			candidates = getenv("HALO_PT_CANDIDATES") ? atoi(getenv("HALO_PT_CANDIDATES")) : 8;
+		if (asked == -2)
+			asked = getenv("HALO_PT_CANDIDATES") ? atoi(getenv("HALO_PT_CANDIDATES")) : -1;
+		candidates = asked >= 0 ? asked : job->ltc ? CANDIDATES_ANALYTIC : 8;
 		candidates = candidates < 1 ? 1 : candidates > 8 ? 8 : candidates;
 		job->extra[0] = reference ? 8.0f : (float)candidates;
 	}
@@ -1716,7 +1790,7 @@ void xgpu_vulkan_pt_shutdown(void)
 		&pt.reservoir_info[1], &pt.gi_point[0], &pt.gi_point[1], &pt.gi_data[0], &pt.gi_data[1],
 	};
 	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
-		&pt.tree, &pt.cache };
+		&pt.tree, &pt.cache, &pt.ltc };
 
 	if (!pt.made)
 		return;

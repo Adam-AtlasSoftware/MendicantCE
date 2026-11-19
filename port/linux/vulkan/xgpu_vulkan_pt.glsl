@@ -49,8 +49,12 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
     uvec2 pages, charts, vpages, table, tiles, indirect, sun, masks;
     uvec2 bricks, coarse, probes, lightmaps, reflections, reflection_table, reflection_data, lights;
     uvec2 sums, stats, meter, counters, tree, lamps_out, objects, object_table;
-    /* the radiance cache's cells (0: none), a word kept for the alignment */
-    uvec2 cache, unused_;
+    /* the radiance cache's cells (0: none), the analytic lamps' LTC table
+    (0: none) */
+    uvec2 cache, ltc;
+    /* the bake's lamp visibility (a word a texel, a byte for each of its
+    tile's lamps) and each physical tile's 4 lamps (0: none) */
+    uvec2 lamp_visibility, lamp_ids;
     vec4 camera[4];
     vec4 last_camera[4];
     ivec4 corners;
@@ -69,6 +73,10 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
     cache's cell at a unit's distance, the samples a cell needs before it is
     read, the most it keeps */
     vec4 cache_settings;
+    /* the analytic lamps a pixel (0 none), the flags (1 the specular
+    antialiasing, 2 the baked lamp visibility), the antialiasing's most added
+    alpha squared, unused */
+    vec4 analytic;
 };
 Job job;
 /* (the light pass's lamps' specular light shared by multiple importance
@@ -231,6 +239,55 @@ vec2 last_pixel(vec3 point, vec2 pixel, vec2 motion, bool level)
     vec2 sxy = u.yz / u.x;
     vec4 c = vec4(job.last_corners);
     return vec2((sxy.x + 1.0) * 0.5 * (c.z - c.x) + c.x - 0.5, (sxy.y + 1.0) * 0.5 * (c.w - c.y) + c.y - 0.5);
+}
+
+/* the specular antialiasing (HALO_PT_SPECULAR_AA): the roughness widened
+by the normal's variance over the pixel's footprint, so that a glossy
+surface's highlight does not sparkle where its normal (a bump map's, a
+curve's) turns within a pixel. Tokuyoshi and Kaplanyan's geometric specular
+antialiasing (2019, after Kaplanyan et al. 2016's NDF filtering): the
+normal's screen derivatives give the variance of a Gaussian filter of
+slopes, 1/(2 pi) of their squared lengths' sum, added twice (as alpha
+squared) to the lobe's alpha squared, at most job.analytic.z. The
+derivatives are the G-buffer's neighbours' normals, each only where it is
+this surface (the same instance, its point near this pixel's plane: no
+widening across an edge), one-sided as the GPU's quad derivatives are */
+vec3 normal_of_words(uvec4 w, vec3 ray, uint instance)
+{
+    bool has_normal = ((w.z >> 28u) & 8u) != 0u;
+    vec3 n = has_normal ? unfold(unpackSnorm2x16(w.y)) : -ray;
+    if (dot(n, ray) > 0.0 && instance == 0u)
+        n = -n;
+    return n;
+}
+vec3 normal_step(ivec2 pixel, ivec2 step, vec3 n, uint instance, vec3 point)
+{
+    for (int k = 0; k < 2; k++)
+    {
+        ivec2 q = pixel + (k == 0 ? step : -step);
+        if (!inside(q))
+            continue;
+        uvec4 w = texelFetch(words, q, 0);
+        uvec4 x = texelFetch(extras, q, 0);
+        if ((w.w & 0x8000u) == 0u || (w.w >> 16) != instance || !(uintBitsToFloat(x.w) > 0.0))
+            continue;
+        vec3 ray = ray_of(job.camera, job.corners, vec2(q));
+        vec3 pq = job.camera[0].xyz + uintBitsToFloat(x.w) * ray;
+        if (abs(dot(pq - point, n)) > 0.02 + 0.01 * length(pq - point))
+            continue;
+        vec3 nq = normal_of_words(w, normalize(ray), instance);
+        return k == 0 ? nq - n : n - nq;
+    }
+    return vec3(0.0);
+}
+float roughness_filtered(ivec2 pixel, float roughness, vec3 n, uint instance, vec3 point)
+{
+    vec3 dx = normal_step(pixel, ivec2(1, 0), n, instance, point);
+    vec3 dy = normal_step(pixel, ivec2(0, 1), n, instance, point);
+    float variance = 0.15915494 * (dot(dx, dx) + dot(dy, dy));
+    float a2 = roughness * roughness * roughness * roughness;
+    a2 = clamp(a2 + min(2.0 * variance, job.analytic.z), 0.0, 1.0);
+    return sqrt(sqrt(a2));
 }
 
 Surface surface_at(ivec2 pixel)
@@ -442,6 +499,117 @@ bool bake_at(uint page, vec2 uv, vec3 n, out vec3 total, out vec3 indirect_light
     indirect_light /= weights;
     sun_v = sun_of(vp, ce * scale);
     return true;
+}
+
+/* the bake's lamp visibility at a level point (HALO_PT_BAKED_VISIBILITY;
+the baker's lampmask pass): the BAKED_SLOTS lamps of the tile of the texel
+nearest the point's place and each one's visibility there through the
+static level and scenery (4 bits), bilinear over the 4 texels about the
+place (each texel's of its own tile's lamps, matched by lamp; a texel not
+baked, or whose tile has not that lamp, left out); a lamp none of the 4
+has, 0xffffffff. False where there is none */
+const uint BAKED_SLOTS = 8u;
+uint physical_of(uint vp, ivec2 x, out uvec2 local)
+{
+    Uints v = Uints(job.vpages);
+    uint tiles_x = v.v[vp * 8u + 2u], tiles_y = v.v[vp * 8u + 3u];
+    local = uvec2(0u);
+    if (x.x < 0 || x.y < 0)
+        return 0u;
+    uvec2 t = uvec2(x) / 16u;
+    if (t.x >= tiles_x || t.y >= tiles_y)
+        return 0u;
+    local = uvec2(x) % 16u;
+    return Uints(job.table).v[v.v[vp * 8u + 4u] + t.y * tiles_x + t.x];
+}
+bool baked_lamps_at(uint page, vec2 uv, out uint ids[8], out float visibility[8])
+{
+    for (uint r = 0u; r < BAKED_SLOTS; r++)
+    {
+        ids[r] = 0xffffffffu;
+        visibility[r] = 0.0;
+    }
+    if (job.lamp_ids == uvec2(0u) || page == 0u || page > job.counts.x || job.pages == uvec2(0u))
+        return false;
+    Uints pg = Uints(job.pages);
+    uint offset = pg.v[(page - 1u) * 4u], pw = pg.v[(page - 1u) * 4u + 1u], ph = pg.v[(page - 1u) * 4u + 2u];
+    vec2 ce = uv * vec2(pw, ph);
+    ivec2 cell = clamp(ivec2(floor(ce)), ivec2(0), ivec2(pw, ph) - 1);
+    Uints cm = Uints(job.charts);
+    uint ci = offset + uint(cell.y) * pw + uint(cell.x);
+    uint vp1 = (cm.v[ci >> 1u] >> ((ci & 1u) * 16u)) & 0xffffu;
+    if (vp1 == 0u)
+        return false;
+    uint vp = vp1 - 1u;
+    float scale = float(Uints(job.vpages).v[vp * 8u + 1u]);
+    uvec2 local;
+    uint physical = physical_of(vp, ivec2(floor(ce * scale)), local);
+    if (physical == 0u)
+        return false;
+    Uints li = Uints(job.lamp_ids);
+    bool any_ = false;
+    for (uint r = 0u; r < BAKED_SLOTS; r++)
+    {
+        ids[r] = li.v[(physical - 1u) * BAKED_SLOTS + r];
+        any_ = any_ || ids[r] != 0xffffffffu;
+    }
+    if (!any_)
+        return false;
+    vec2 tx = ce * scale - 0.5;
+    ivec2 a = ivec2(floor(tx));
+    vec2 f = tx - vec2(a);
+    float weights[8];
+    for (uint r = 0u; r < BAKED_SLOTS; r++)
+        weights[r] = 0.0;
+    Uints lv = Uints(job.lamp_visibility);
+    for (int k = 0; k < 4; k++)
+    {
+        ivec2 o = ivec2(k & 1, k >> 1);
+        uvec2 tw;
+        uint iw;
+        if (!texel_of(vp, a + o, tw, iw) || unpackUnorm4x8(tw.y).w <= 0.0)
+            continue;
+        uint pk = physical_of(vp, a + o, local);
+        if (pk == 0u)
+            continue;
+        uint word = lv.v[(pk - 1u) * 256u + local.y * 16u + local.x];
+        /* (a texel inside the level (its high bit): no visibility of its own) */
+        if ((word & 0x80000000u) != 0u)
+            continue;
+        float wk = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+        if (pk == physical)
+        {
+            /* (the nearest's own tile: its slots are the lamps') */
+            for (uint r = 0u; r < BAKED_SLOTS; r++)
+            {
+                visibility[r] += wk * float((word >> (4u * r)) & 15u) / 15.0;
+                weights[r] += wk;
+            }
+            continue;
+        }
+        for (uint q = 0u; q < BAKED_SLOTS; q++)
+        {
+            uint id = li.v[(pk - 1u) * BAKED_SLOTS + q];
+            if (id == 0xffffffffu)
+                continue;
+            for (uint r = 0u; r < BAKED_SLOTS; r++)
+                if (ids[r] == id)
+                {
+                    visibility[r] += wk * float((word >> (4u * q)) & 15u) / 15.0;
+                    weights[r] += wk;
+                }
+        }
+    }
+    any_ = false;
+    for (uint r = 0u; r < BAKED_SLOTS; r++)
+    {
+        if (weights[r] > 1.0e-4)
+            visibility[r] /= weights[r];
+        else
+            ids[r] = 0xffffffffu;
+        any_ = any_ || ids[r] != 0xffffffffu;
+    }
+    return any_;
 }
 
 /* a cascade of the irradiance volume at p: the light over pi at the normal n
@@ -775,6 +943,33 @@ area: the cosine at the lamp over the distance squared folded in; a
 fixture's and a dynamic light's as they are), the diffuse and specular
 parts, their luminance the target. */
 const int KIND_LAMP = 0, KIND_FIXTURE = 1, KIND_DYNAMIC = 2, KIND_NONE = 3;
+/* the pixel's analytic lights (analytic_light, below): a lamp's index, a
+fixture's with ANALYTIC_FIXTURE; their light is all theirs, so ReSTIR DI
+and the reflection's ray take none of it (their target nought here: the
+rest of the lights' estimate stays unbiased) */
+const int ANALYTIC_MOST = 8;
+const uint ANALYTIC_FIXTURE = 0x80000000u;
+uint analytic_ids[ANALYTIC_MOST];
+/* (each one's static visibility from the bake, or -1: traced) */
+float analytic_baked[ANALYTIC_MOST];
+int analytic_count = 0;
+/* (whether their specular light is analytic too: not at a grazing view,
+where the fitted lobe's tails are too thin (its integral over a lamp off the
+peak 15 to 40% short); there ReSTIR DI and the reflection's ray take their
+specular light as before, their diffuse light analytic still) */
+bool analytic_spec = true;
+const float ANALYTIC_SPEC_NV = 0.5;
+bool analytic_has(uint key)
+{
+    for (int k = 0; k < ANALYTIC_MOST; k++)
+    {
+        if (k >= analytic_count)
+            break;
+        if (analytic_ids[k] == key)
+            return true;
+    }
+    return false;
+}
 bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec3 spe, out vec3 l, out float dist)
 {
     dif = vec3(0.0);
@@ -792,7 +987,8 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         return false;
     if (kind == KIND_LAMP)
     {
-        if (index >= s.counts.z)
+        bool taken = analytic_has(index);
+        if (index >= s.counts.z || (taken && analytic_spec))
             return false;
         Floats f = Floats(s.lamps);
         uint at = index * 16u;
@@ -807,18 +1003,21 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         parts(g, l, radiance * c, false, dif, spe);
         spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * ce / d2);
         float geometry = ce / d2;
-        dif *= geometry;
+        dif *= taken ? 0.0 : geometry;
         spe *= geometry;
         return true;
     }
     if (kind == KIND_FIXTURE)
     {
-        if (index >= uint(s.lamp.z))
+        bool taken = analytic_has(index | ANALYTIC_FIXTURE);
+        if (index >= uint(s.lamp.z) || (taken && analytic_spec))
             return false;
         vec3 lf;
         float df;
         vec3 e = fixture_light(index, g.point, vec3(0.0), lf, df);
         parts(g, l, e * c, false, dif, spe);
+        if (taken)
+            dif = vec3(0.0);
         return dot(e, e) > 0.0;
     }
     if (kind == KIND_DYNAMIC)
@@ -860,7 +1059,8 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
         {
             float probability;
             uint lamp = lamp_pick_live(p, g.normal, c, lamp_count, probability);
-            if (probability <= 0.0)
+            bool taken = analytic_has(lamp);
+            if (probability <= 0.0 || (taken && analytic_spec))
                 continue;
             uint at = lamp * 16u;
             vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
@@ -877,6 +1077,8 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
                 continue;
             vec3 dif, spe;
             parts(g, l, radiance * c_, false, dif, spe);
+            if (taken)
+                dif = vec3(0.0);
             spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * max(dot(ne, -l), 0.0) / max(d * d, 1.0e-8));
             float target = luma(dif) + luma(spe);
             float w = target * inverse_pdf / probability / float(lamp_count);
@@ -904,10 +1106,13 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
             vec3 l;
             float d;
             vec3 e = fixture_light(i, p, vec3(0.0), l, d);
-            if (dot(g.normal, l) <= 0.0 || dot(e, e) <= 0.0)
+            bool taken = analytic_has(i | ANALYTIC_FIXTURE);
+            if (dot(g.normal, l) <= 0.0 || dot(e, e) <= 0.0 || (taken && analytic_spec))
                 continue;
             vec3 dif, spe;
             parts(g, l, e * dot(g.normal, l), false, dif, spe);
+            if (taken)
+                dif = vec3(0.0);
             float target = luma(dif) + luma(spe);
             float w = target * (float(fixtures) / float(candidates));
             if (!(w > 0.0) || isinf(w))
@@ -1157,6 +1362,399 @@ void lights_restir(ivec2 pixel, Surface g, vec3 o, bool reuse, out vec3 diffuse,
     }
     imageStore(reservoir_point_now, pixel, vec4(y, big_w));
     imageStore(reservoir_info_now, pixel, uvec4(uint(kind) | (index << 2), floatBitsToUint(m_total), 0u, 0u));
+}
+
+
+/* ---------- the analytic lamps (HALO_PT_ANALYTIC, job.analytic.x a pixel)
+
+The lamps and fixtures with the most light at the pixel are shaded
+analytically and only their visibility is traced: Heitz, Hill and McGuire's
+ratio estimator ("Combining Analytic Direct Illumination and Stochastic
+Shadows", 2018). For each such light its unshadowed diffuse and specular
+light is exact: a lamp's (a triangle of uniform radiance) by its polygon's
+integral, the diffuse the clamped cosine's (Lambert's form factor) and the
+specular GGX's by linearly transformed cosines (Heitz, Dupuy, Hill and
+Neubelt 2016; the table our own fit to ggx(), tools/prism_ltc_fit.py), a
+fixture's (a point) as sample_light has it. Their sum U is then multiplied
+by a visibility V: a point of one of them, picked by its share of U (the
+diffuse's for the diffuse light, the specular's for the specular), its
+shadow traced. V's expectation is the lights' light shadowed over U (the
+estimator's ratio, exact where the pick follows the light), so where every
+light is seen (most of a lit room) the light is U itself, with no noise at
+all; only where some are hidden does V vary, and the denoiser averages it.
+ReSTIR DI's samples of the remaining lights stay as they were (these
+lights' target nought there), so nothing is counted twice. Which lights:
+the grid cell's seen and near lists and the first fixtures, each ranked by
+its light at the pixel from its middle (its solid angle by the diffuse and
+the GGX lobe there), the job.analytic.x best kept. */
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Ltc
+{
+    vec4 v[];
+};
+/* (xgpu_vulkan_pt_ltc.h's XGPU_VULKAN_PT_LTC_SIZE: its rows by roughness,
+its columns by sqrt(1 - cos theta_v), two vec4 an entry) */
+const uint LTC_SIZE = 32u;
+void ltc_fetch(float roughness, float nv, out vec4 m, out vec2 ab)
+{
+    Ltc table = Ltc(job.ltc);
+    float last = float(LTC_SIZE - 1u);
+    vec2 f = vec2(clamp(roughness, 0.0, 1.0), sqrt(clamp(1.0 - nv, 0.0, 1.0))) * last;
+    uvec2 i0 = uvec2(min(floor(f), vec2(last))), i1 = min(i0 + 1u, uvec2(LTC_SIZE - 1u));
+    vec2 w = f - vec2(i0);
+    uint e00 = (i0.x * LTC_SIZE + i0.y) * 2u, e01 = (i0.x * LTC_SIZE + i1.y) * 2u;
+    uint e10 = (i1.x * LTC_SIZE + i0.y) * 2u, e11 = (i1.x * LTC_SIZE + i1.y) * 2u;
+    m = mix(mix(table.v[e00], table.v[e01], w.y), mix(table.v[e10], table.v[e11], w.y), w.x);
+    vec4 b = mix(mix(table.v[e00 + 1u], table.v[e01 + 1u], w.y), mix(table.v[e10 + 1u], table.v[e11 + 1u], w.y), w.x);
+    ab = b.xy;
+}
+/* an edge's share of the clamped cosine's integral (the z of the arc's
+vector form factor: the angle between its ends along the normal of their
+plane) */
+float ltc_edge(vec3 a, vec3 b)
+{
+    float x = clamp(dot(a, b), -1.0, 1.0);
+    float s = sqrt(max(1.0 - x * x, 0.0));
+    float k = s > 1.0e-4 ? acos(x) / s : (x > 0.0 ? 1.0 + (1.0 - x) / 3.0 : 1.0e4);
+    return (a.x * b.y - a.y * b.x) * k;
+}
+/* the clamped cosine's integral over pi over the triangle q (points about
+the shading point, z its normal), clipped to the horizon: Lambert's form
+factor, 0 to 1. The clipped polygon's edges summed as the triangle's are
+walked (an edge wholly above, the part of one above, and the stretch of
+the horizon between where the triangle leaves it and comes back), with no
+array of corners (indexed by a count, it went to local memory) */
+float ltc_triangle(vec3 q0, vec3 q1, vec3 q2)
+{
+    vec3 n0 = normalize(q0), n1 = normalize(q1), n2 = normalize(q2);
+    bool u0 = q0.z > 0.0, u1 = q1.z > 0.0, u2 = q2.z > 0.0;
+    if (!u0 && !u1 && !u2)
+        return 0.0;
+    float sum = 0.0;
+    vec3 leave = vec3(0.0), enter = vec3(0.0);
+    bool crossed = false;
+    for (int i = 0; i < 3; i++)
+    {
+        vec3 a = i == 0 ? q0 : i == 1 ? q1 : q2, b = i == 0 ? q1 : i == 1 ? q2 : q0;
+        vec3 na = i == 0 ? n0 : i == 1 ? n1 : n2, nb = i == 0 ? n1 : i == 1 ? n2 : n0;
+        bool ua = i == 0 ? u0 : i == 1 ? u1 : u2, ub = i == 0 ? u1 : i == 1 ? u2 : u0;
+        if (ua && ub)
+            sum += ltc_edge(na, nb);
+        else if (ua != ub)
+        {
+            vec3 c = mix(a, b, a.z / (a.z - b.z));
+            c.z = 0.0;
+            float lc = length(c);
+            vec3 nc = lc > 1.0e-9 ? c / lc : na;
+            crossed = true;
+            if (ua)
+            {
+                sum += ltc_edge(na, nc);
+                leave = nc;
+            }
+            else
+            {
+                sum += ltc_edge(nc, nb);
+                enter = nc;
+            }
+        }
+    }
+    if (crossed)
+        sum += ltc_edge(leave, enter);
+    return min(abs(sum) * (0.5 / PI), 1.0);
+}
+/* a lamp's corners and radiance, its normal */
+void lamp_corners(uint lamp, out vec3 a0, out vec3 a1, out vec3 a2, out vec3 radiance)
+{
+    Floats f = Floats(s.lamps);
+    uint at = lamp * 16u;
+    a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
+    a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);
+    a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);
+    radiance = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x;
+}
+/* a lamp's light at the pixel from its middle (the ranking's: its solid
+angle by the diffuse and the GGX lobe toward it); 0 behind it */
+float lamp_rank(Surface g, uint lamp)
+{
+    if (lamp >= s.counts.z)
+        return 0.0;
+    vec3 a0, a1, a2, radiance;
+    lamp_corners(lamp, a0, a1, a2, radiance);
+    vec3 e = cross(a1 - a0, a2 - a0);
+    float twice = length(e);
+    if (twice <= 0.0 || dot(e, g.point - a0) <= 1.0e-6 * twice)
+        return 0.0;
+    vec3 to = (a0 + a1 + a2) * (1.0 / 3.0) - g.point;
+    float d2 = max(dot(to, to), 1.0e-6);
+    vec3 l = to * inversesqrt(d2);
+    float c = dot(g.normal, l);
+    /* (a lamp across the horizon: its middle may be under it, its light not) */
+    float solid = min(0.5 * twice * max(dot(e / twice, -l), 0.05) / d2, 2.0 * PI);
+    float diffuse = max(c, 0.05) / PI;
+    float specular = c > 0.0 ? luma(ggx(g, l)) / c : 0.0;
+    return luma(radiance) * solid * (diffuse + specular);
+}
+/* a fixture's light at the pixel (sample_light's, unshadowed) */
+bool fixture_parts(Surface g, uint i, out vec3 dif, out vec3 spe, out vec3 l, out float d)
+{
+    dif = vec3(0.0);
+    spe = vec3(0.0);
+    vec3 e = fixture_light(i, g.point, vec3(0.0), l, d);
+    float c = dot(g.normal, l);
+    if (c <= 0.0 || dot(e, e) <= 0.0)
+        return false;
+    parts(g, l, e * c, false, dif, spe);
+    return true;
+}
+/* the pixel's analytic lights: its cell's lists' lamps and the first 32
+fixtures, ranked, the best job.analytic.x kept in analytic_ids */
+void analytic_select(Surface g, uint baked_ids[8], float baked_visibility[8])
+{
+    analytic_count = 0;
+    analytic_spec = dot(g.normal, g.eye) >= ANALYTIC_SPEC_NV;
+    int most = min(int(job.analytic.x), ANALYTIC_MOST);
+    /* (a near mirror's highlight at a grazing view is where the fit is
+    poorest: such a pixel keeps ReSTIR DI and the reflection's ray) */
+    if (most <= 0 || job.ltc == uvec2(0u) || g.roughness < 0.1)
+        return;
+    /* (the bake's lamps for this texel first, where they light the pixel:
+    their static shadows known; where they fill the count, nothing ranked) */
+    for (uint r = 0u; r < BAKED_SLOTS && analytic_count < most; r++)
+    {
+        uint key = baked_ids[r];
+        if (key == 0xffffffffu || lamp_rank(g, key) <= 0.0)
+            continue;
+        analytic_ids[analytic_count] = key;
+        analytic_baked[analytic_count] = baked_visibility[r];
+        analytic_count++;
+    }
+    if (analytic_count >= most)
+        return;
+    /* (else the cell's seen lamps: its RANKED strongest by the light the
+    bake found each gives the cell's points (the list's weights, words the
+    cell's pixels share), then those ranked by their light at the pixel; the
+    first fixtures where the level has few) */
+    const int RANKED = 8;
+    float best[ANALYTIC_MOST];
+    uint ids[ANALYTIC_MOST];
+    float cw[RANKED];
+    uint cid[RANKED];
+    for (int k = 0; k < ANALYTIC_MOST; k++)
+    {
+        best[k] = 0.0;
+        ids[k] = 0u;
+    }
+    for (int k = 0; k < RANKED; k++)
+    {
+        cw[k] = 0.0;
+        cid[k] = 0xffffffffu;
+    }
+    bool lamps_on = s.counts.z > 0u && s.lamp.x > 0.0 && s.rig[10].w >= 0.5 && !term_off(2u);
+    int cell = lamps_on ? grid_cell(g.point) : -1;
+    if (cell >= 0)
+    {
+        Uints gr = Uints(s.grid);
+        uint seen_at = uint(cell), seen = min(gr.v[seen_at], 64u);
+        float below = 0.0;
+        for (uint i = 0u; i < seen; i++)
+        {
+            float cum = uintBitsToFloat(gr.v[seen_at + 2u + 2u * i]);
+            float w = cum - below;
+            below = cum;
+            if (!(w > cw[RANKED - 1]))
+                continue;
+            int at = RANKED - 1;
+            while (at > 0 && cw[at - 1] < w)
+            {
+                cw[at] = cw[at - 1];
+                cid[at] = cid[at - 1];
+                at--;
+            }
+            cw[at] = w;
+            cid[at] = gr.v[seen_at + 1u + 2u * i];
+        }
+    }
+    uint fixtures = !term_off(16u) && uint(s.lamp.z) <= 16u ? uint(s.lamp.z) : 0u;
+    for (uint i = 0u; i < uint(RANKED) + fixtures; i++)
+    {
+        uint key;
+        float r;
+        if (i < uint(RANKED))
+        {
+            key = cid[i];
+            if (key == 0xffffffffu)
+                continue;
+            r = lamp_rank(g, key);
+        }
+        else
+        {
+            uint f = i - uint(RANKED);
+            key = f | ANALYTIC_FIXTURE;
+            vec3 dif, spe, l;
+            float d;
+            r = fixture_parts(g, f, dif, spe, l, d) ? luma(dif) + luma(spe) : 0.0;
+        }
+        if (!(r > best[most - 1]) || isinf(r))
+            continue;
+        int at = most - 1;
+        while (at > 0 && best[at - 1] < r)
+        {
+            best[at] = best[at - 1];
+            ids[at] = ids[at - 1];
+            at--;
+        }
+        best[at] = r;
+        ids[at] = key;
+    }
+    for (int k = 0; k < ANALYTIC_MOST && analytic_count < most; k++)
+    {
+        if (!(best[k] > 0.0))
+            continue;
+        if (analytic_has(ids[k]))
+            continue;
+        analytic_ids[analytic_count] = ids[k];
+        analytic_baked[analytic_count] = -1.0;
+        analytic_count++;
+    }
+}
+/* one analytic light's visibility from o: a point of it (a lamp's by solid
+angle, above the surface's horizon: the clipped integral's part), its
+shadow traced */
+float analytic_visible(Surface g, vec3 o, uint key, bool objects_only)
+{
+    if ((key & ANALYTIC_FIXTURE) != 0u)
+    {
+        vec3 dif, spe, l;
+        float d;
+        fixture_parts(g, key & ~ANALYTIC_FIXTURE, dif, spe, l, d);
+        return blocked(o, l, max(d - 0.05, 0.0)) ? 0.0 : 1.0;
+    }
+    vec3 a0, a1, a2, radiance;
+    lamp_corners(key, a0, a1, a2, radiance);
+    vec3 ne = normalize(cross(a1 - a0, a2 - a0));
+    for (int attempt = 0; attempt < 4; attempt++)
+    {
+        vec3 l;
+        float d, inverse_pdf;
+        if (!lamp_direction(g.point, a0, a1, a2, ne, l, d, inverse_pdf) || dot(g.normal, l) <= 0.0)
+            continue;
+        if (objects_only)
+            return objects_blocked(o, l, max(d * 0.995 - 0.03, 0.0)) ? 0.0 : 1.0;
+        return lamp_visible(o, l, d) ? 1.0 : 0.0;
+    }
+    /* (no point above the horizon found: its light, if any, a sliver) */
+    return 1.0;
+}
+/* the analytic lights' light at the pixel: U's diffuse and specular parts
+by their visibilities */
+void analytic_light(Surface g, vec3 o, out vec3 diffuse, out vec3 specular)
+{
+    diffuse = vec3(0.0);
+    specular = vec3(0.0);
+    if (analytic_count == 0)
+        return;
+    vec3 n = g.normal;
+    float nv = clamp(dot(n, g.eye), 1.0e-3, 1.0);
+    vec3 t1 = g.eye - n * dot(n, g.eye);
+    if (dot(t1, t1) < 1.0e-10)
+        t1 = abs(n.x) < 0.9 ? cross(n, vec3(1.0, 0.0, 0.0)) : cross(n, vec3(0.0, 1.0, 0.0));
+    t1 = normalize(t1);
+    vec3 t2 = cross(n, t1);
+    mat3 to_frame = transpose(mat3(t1, t2, n));
+    vec4 m;
+    vec2 ab;
+    ltc_fetch(g.roughness, nv, m, ab);
+    /* (M's inverse, [[a, 0, b], [0, c, 0], [d, 0, 1]], by columns) */
+    mat3 m_inv = mat3(vec3(m.x, 0.0, m.w), vec3(0.0, m.z, 0.0), vec3(m.y, 0.0, 1.0));
+    vec3 f0 = f0_of(g);
+    vec3 scale = f0 * (ab.x - ab.y) + ab.y;
+    /* (four streams, each light into two of them: the diffuse and the
+    specular, of the lights the bake's visibility covers (their light by it)
+    or of those it does not; each stream's sum, and one light picked by its
+    share as the stream goes (weighted reservoir sampling: no arrays)) */
+    vec3 sums[4] = vec3[4](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
+    vec4 totals = vec4(0.0);
+    uvec4 picks = uvec4(0u);
+    for (int k = 0; k < ANALYTIC_MOST; k++)
+    {
+        if (k >= analytic_count)
+            break;
+        uint key = analytic_ids[k];
+        vec3 dif = vec3(0.0), spe = vec3(0.0);
+        if ((key & ANALYTIC_FIXTURE) != 0u)
+        {
+            vec3 l;
+            float d;
+            fixture_parts(g, key & ~ANALYTIC_FIXTURE, dif, spe, l, d);
+        }
+        else
+        {
+            vec3 a0, a1, a2, radiance;
+            lamp_corners(key, a0, a1, a2, radiance);
+            vec3 q0 = to_frame * (a0 - g.point), q1 = to_frame * (a1 - g.point), q2 = to_frame * (a2 - g.point);
+            dif = radiance * ltc_triangle(q0, q1, q2);
+            if (analytic_spec)
+                spe = radiance * scale * ltc_triangle(m_inv * q0, m_inv * q1, m_inv * q2);
+        }
+        if (any(isnan(dif)) || any(isinf(dif)))
+            dif = vec3(0.0);
+        if (any(isnan(spe)) || any(isinf(spe)) || !analytic_spec)
+            spe = vec3(0.0);
+        float vb = analytic_baked[k];
+        int base = vb >= 0.0 ? 2 : 0;
+        if (vb >= 0.0)
+        {
+            dif *= vb;
+            spe *= vb;
+        }
+        for (int part = 0; part < 2; part++)
+        {
+            vec3 c = part == 0 ? dif : spe;
+            float w = luma(c);
+            if (!(w > 0.0))
+                continue;
+            int stream = base + part;
+            sums[stream] += c;
+            totals[stream] += w;
+            if (rnd() * totals[stream] <= w)
+                picks[stream] = key;
+        }
+    }
+    /* (the visibility of each stream's pick: through everything for the
+    lights the bake does not cover, against the moving objects alone for
+    those it does (none where no object is traced)) */
+    for (int stream = 0; stream < 4; stream++)
+    {
+        if (!(totals[stream] > 0.0))
+            continue;
+        bool baked = stream >= 2;
+        float v = 1.0;
+        if (!baked || job.objects != uvec2(0u))
+            v = analytic_visible(g, o, picks[stream], baked);
+        if ((stream & 1) == 0)
+            diffuse += sums[stream] * v;
+        else
+            specular += sums[stream] * v;
+    }
+}
+/* whether triangle t of the level is one of the pixel's analytic lamps (the
+lamps' corners are their triangles', copied) */
+bool analytic_triangle(uint t)
+{
+    if (analytic_count == 0 || t >= s.counts.x + s.counts.y)
+        return false;
+    vec3 c0 = corner(t, 0u), c1 = corner(t, 1u);
+    for (int k = 0; k < analytic_count; k++)
+    {
+        uint key = analytic_ids[k];
+        if ((key & ANALYTIC_FIXTURE) != 0u)
+            continue;
+        vec3 a0, a1, a2, radiance;
+        lamp_corners(key, a0, a1, a2, radiance);
+        if (all(equal(a0, c0)) && all(equal(a1, c1)))
+            return true;
+    }
+    return false;
 }
 
 /* ---------- the lamps by a light tree as well as the grid (the live
@@ -2166,6 +2764,27 @@ void main()
         seed_for(pixel, frame, 2u);
         noisy_d += domes_at(o, g.normal, m);
         vec3 ld, ls;
+        /* (the analytic lights first: ReSTIR DI then takes the rest) */
+        uint baked_ids[8];
+        float baked_visibility[8];
+        for (int k = 0; k < 8; k++)
+        {
+            baked_ids[k] = 0xffffffffu;
+            baked_visibility[k] = 0.0;
+        }
+        if (level && texel && job.lamp_ids != uvec2(0u))
+            baked_lamps_at(g.page, g.lightmap, baked_ids, baked_visibility);
+        /* (the analytic lamps' lobe widened by the specular antialiasing:
+        only theirs, so the reflection's ray, its roughness test and ReSTIR
+        DI's multiple importance weights keep the G-buffer's roughness) */
+        Surface ga = g;
+        if ((uint(job.analytic.y) & 1u) != 0u)
+            ga.roughness = roughness_filtered(pixel, g.roughness, g.normal, g.instance, g.point);
+        analytic_select(ga, baked_ids, baked_visibility);
+        seed_for(pixel, frame, 9u);
+        analytic_light(ga, o, ld, ls);
+        noisy_d += ld;
+        noisy_s += ls;
         seed_for(pixel, frame, 3u);
         lamps_mis = glossy;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
@@ -2220,7 +2839,8 @@ void main()
             {
                 vec3 met = hit_light(o, r, 300.0, true, hd);
                 spec_hit = hd > 0.0 ? hd : 1000.0;
-                if (glossy && direct_on && hit_light_triangle != 0xffffffffu && hd > 0.0)
+                if (glossy && direct_on && hit_light_triangle != 0xffffffffu && hd > 0.0 &&
+                    !(analytic_spec && analytic_triangle(hit_light_triangle)))
                 {
                     vec3 lamp = lamp_met(hit_light_triangle, r);
                     if (dot(lamp, lamp) > 0.0)
@@ -2257,6 +2877,20 @@ void main()
         noisy_d = vec3(0.0);
     if (any(isnan(noisy_s)) || any(isinf(noisy_s)))
         noisy_s = vec3(0.0);
+    /* (HALO_PT_DEBUG_ANALYTIC, a diagnosis, under debug.gbuffer_view
+    "pt_noisy": red the analytic lights' count over 8, green the roughness,
+    blue the bake's lamps among them over 8) */
+    if (job.analytic.w > 0.5)
+    {
+        int nb = 0;
+        for (int k = 0; k < analytic_count; k++)
+            nb += analytic_baked[k] >= 0.0 ? 1 : 0;
+        noisy_d = vec3(float(analytic_count) / 8.0, g.roughness, float(nb) / 8.0);
+        imageStore(sun_raw, pixel, vec4(0.0));
+        imageStore(clean_diffuse, pixel, vec4(0.0));
+        imageStore(noisy_diffuse, pixel, vec4(noisy_d, luma(noisy_d)));
+        return;
+    }
     /* (the specular light kept as the light the reflection takes in: its
     split sum's share out, put back by composite) */
     vec3 demodulated = noisy_s / max(share, vec3(1.0e-3));

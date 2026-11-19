@@ -760,3 +760,139 @@ def test_the_light_trees_cone_holds_both_childrens_normals():
         for child_axis, child_cos in cones:
             gap = np.arccos(np.clip(np.dot(axis, child_axis), -1, 1)) + np.arccos(child_cos)
             assert gap <= np.arccos(np.clip(cos_o, -1, 1)) + 1e-4
+
+
+# ---------- the analytic lamps (HALO_PT_ANALYTIC): the LTC table, the polygon integral, the ratio estimator, and the
+# specular antialiasing
+
+def _ltc_table():
+    import re
+    text = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt_ltc.h").read_text()
+    size = int(re.search(r"XGPU_VULKAN_PT_LTC_SIZE (\d+)u", text).group(1))
+    body = text[text.index("{\n") + 2:text.index("};")]
+    values = np.array([float(x.rstrip(",").rstrip("f")) for x in body.split()])
+    return values.reshape(size, size, 8)
+
+
+def _ltc_fetch(table, roughness, nv):
+    """the GLSL's ltc_fetch: bilinear over roughness and sqrt(1 - cos theta_v)"""
+    last = table.shape[0] - 1
+    f = np.array([np.clip(roughness, 0, 1), np.sqrt(np.clip(1 - nv, 0, 1))]) * last
+    i0 = np.minimum(np.floor(f), last).astype(int)
+    i1 = np.minimum(i0 + 1, last)
+    w = f - i0
+    t = table
+    return ((1 - w[0]) * ((1 - w[1]) * t[i0[0], i0[1]] + w[1] * t[i0[0], i1[1]]) +
+            w[0] * ((1 - w[1]) * t[i1[0], i0[1]] + w[1] * t[i1[0], i1[1]]))
+
+
+def _ltc_triangle(q):
+    """the GLSL's ltc_triangle: the clamped cosine's integral over pi over a triangle (z the normal), clipped"""
+    corners = []
+    for i in range(3):
+        a, b = q[i], q[(i + 1) % 3]
+        if a[2] > 0:
+            corners.append(a)
+        if (a[2] > 0) != (b[2] > 0):
+            c = a + (b - a) * (a[2] / (a[2] - b[2]))
+            c[2] = max(c[2], 0.0)
+            corners.append(c)
+    if len(corners) < 3:
+        return 0.0
+    total = 0.0
+    for i in range(len(corners)):
+        a = corners[i] / np.linalg.norm(corners[i])
+        b = corners[(i + 1) % len(corners)] / np.linalg.norm(corners[(i + 1) % len(corners)])
+        x = np.clip(a @ b, -1, 1)
+        s = np.sqrt(max(1 - x * x, 0.0))
+        k = np.arccos(x) / s if s > 1e-4 else 1 + (1 - x) / 3
+        total += (a[0] * b[1] - a[1] * b[0]) * k
+    return min(abs(total) * 0.5 / np.pi, 1.0)
+
+
+def _lobe_over_triangle(q, roughness, nv, rng, n=200000):
+    """GGX's lobe times the cosine (tools/prism_ltc_fit.py's, ggx() without Fresnel) over a triangle, and the clamped
+    cosine over pi, by uniform points of its area"""
+    import prism_ltc_fit as fit
+    alpha = max(roughness, fit.MIN_ROUGHNESS) ** 2
+    v = np.array([np.sqrt(1 - nv * nv), 0, nv])
+    u1, u2 = np.sqrt(rng.random(n)), rng.random(n)
+    points = (1 - u1)[:, None] * q[0] + (u1 * (1 - u2))[:, None] * q[1] + (u1 * u2)[:, None] * q[2]
+    e = np.cross(q[1] - q[0], q[2] - q[0])
+    area = 0.5 * np.linalg.norm(e)
+    d2 = (points * points).sum(1)
+    l = points / np.sqrt(d2)[:, None]
+    w = np.abs(l @ (e / np.linalg.norm(e))) / d2 * area
+    lobe, _ = fit.ggx_cos(l, v, alpha)
+    return float((lobe * w).mean()), float((np.maximum(l[:, 2], 0) / np.pi * w).mean())
+
+
+def test_ltc_diffuse_is_lamberts_form_factor():
+    rng = np.random.default_rng(11)
+    for _ in range(30):
+        centre = np.array([rng.uniform(-2, 2), rng.uniform(-2, 2), rng.uniform(-0.5, 2.0)])
+        q = [centre + rng.normal(size=3) * 0.6 for _ in range(3)]
+        _, diffuse = _lobe_over_triangle(q, 0.5, 0.8, rng)
+        assert _ltc_triangle(q) == pytest.approx(diffuse, rel=0.02, abs=2e-5)
+
+
+def test_ltc_specular_matches_the_lobe_about_its_reflection():
+    # (a lamp about the mirror direction, where a highlight is: within 8% of the lobe's integral over it, for the
+    # roughnesses the analytic lamps take (0.1 and up) and the views they take it at, n.v 0.5 and up)
+    table = _ltc_table()
+    rng = np.random.default_rng(12)
+    for roughness in (0.12, 0.2, 0.35, 0.6, 0.9):
+        for nv in (0.95, 0.7, 0.5):
+            s = np.sqrt(1 - nv * nv)
+            centre = np.array([-s, 0, nv]) * 3.0
+            q = [centre + np.array(o) * 0.3 for o in ([1, 0, 0], [0, 1, 0], [-0.5, -0.5, 0.3])]
+            m = _ltc_fetch(table, roughness, nv)
+            m_inv = np.array([[m[0], 0, m[1]], [0, m[2], 0], [m[3], 0, 1]])
+            lobe, _ = _lobe_over_triangle(q, roughness, nv, rng)
+            assert _ltc_triangle([m_inv @ p for p in q]) * m[4] == pytest.approx(lobe, rel=0.08)
+
+
+def test_ltc_table_neighbours_agree_in_sign():
+    # (a row's sign is a mirror image the clamped cosine does not see; interpolated, mixed signs are garbage)
+    table = _ltc_table()
+    assert (table[:, :, 0] > 0).all() and (table[:, :, 2] > 0).all()
+    assert (table[:, :, 4] > 0).all() and (table[:, :, 4] <= 1.01).all()
+
+
+def test_the_ratio_estimator_is_the_shadowed_light_and_noiseless_where_all_is_seen():
+    # (analytic_light: U, the analytic lights' unshadowed sum, by the visibility of a point of one of them picked by
+    # its share of U: its mean is each light's U by its seen share, summed; where every light is seen, it is U at
+    # every sample)
+    rng = np.random.default_rng(13)
+    for _ in range(50):
+        count = rng.integers(1, 9)
+        light = rng.uniform(0.0, 2.0, count)
+        seen_share = rng.uniform(0.0, 1.0, count)
+        total = light.sum()
+        n = 40000
+        pick = rng.choice(count, size=n, p=light / total)
+        estimate = total * (rng.random(n) < seen_share[pick])
+        exact = (light * seen_share).sum()
+        assert estimate.mean() == pytest.approx(exact, rel=0.03, abs=0.01)
+    light = rng.uniform(0.1, 2.0, 6)
+    pick = rng.choice(6, size=1000, p=light / light.sum())
+    estimate = light.sum() * np.ones(1000)[pick]
+    assert np.ptp(estimate) == 0.0
+
+
+def _roughness_filtered(roughness, dx, dy, kappa=0.18):
+    """the GLSL's roughness_filtered (Tokuyoshi and Kaplanyan 2019)"""
+    variance = (dx @ dx + dy @ dy) / (2 * np.pi)
+    a2 = roughness ** 4
+    a2 = np.clip(a2 + min(2 * variance, kappa), 0, 1)
+    return np.sqrt(np.sqrt(a2))
+
+
+def test_specular_antialiasing_widens_with_the_normals_spread_and_is_bounded():
+    flat = _roughness_filtered(0.3, np.zeros(3), np.zeros(3))
+    assert flat == pytest.approx(0.3)
+    bumpy = [_roughness_filtered(0.3, np.array([d, 0, 0]), np.array([0, d, 0])) for d in (0.05, 0.2, 0.5, 2.0)]
+    assert all(b2 >= b1 for b1, b2 in zip(bumpy, bumpy[1:]))
+    # (at most kappa added to alpha squared: a mirror never becomes rougher than about 0.65)
+    assert bumpy[-1] == pytest.approx(0.18 ** 0.25 if 0.3 ** 4 < 1e-9 else (0.3 ** 4 + 0.18) ** 0.25)
+    assert _roughness_filtered(0.95, np.array([3, 0, 0]), np.zeros(3)) <= 1.0

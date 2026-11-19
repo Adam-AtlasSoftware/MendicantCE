@@ -80,7 +80,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 18u
+#define BAKE_VERSION 21u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -96,6 +96,14 @@ groups' sums of luminance: the robust mean's, prism_bake_filter.h) */
 #define BATCH_TILES 4096u
 /* the masks' tiles a batch */
 #define MASK_BATCH 256u
+/* PRISM Path Traced's baked lamp visibility: a tile's lamps, its words (its
+lamps, then a word a texel, 4 bits a lamp), its tiles a batch, each texel's
+points of each lamp, the readback's kind */
+#define LAMP_SLOTS 8u
+#define LAMP_TILE_WORDS (LAMP_SLOTS + TILE_TEXELS)
+#define LAMP_BATCH 256u
+#define LAMP_POINTS 24u
+#define LAMP_KIND 100
 /* the probes a batch */
 #define VOLUME_BATCH (64u * 4096u)
 /* a raster tile's words (2 a texel), the bake file's tile (4 a texel), the
@@ -226,6 +234,7 @@ enum
 	PIPELINE_COMPACT,
 	PIPELINE_REFLECTION,
 	PIPELINE_EXPOSURE,
+	PIPELINE_LAMPMASK,
 	PIPELINES
 };
 
@@ -253,6 +262,8 @@ struct bake_tile
 	uint16_t x, y;
 	uint32_t triangle_first, triangle_count;
 	uint8_t state, mask_state, masked;
+	/* its baked lamp visibility (0 to do, 2 done) */
+	uint8_t lamp_state;
 	uint32_t physical;
 	uint32_t sun;
 	uint64_t job;
@@ -399,6 +410,10 @@ struct bake_state
 	triangle's lightmap page and coordinates (4 words, by its kept index:
 	the info's word 7) */
 	struct bake_buffer pool_indirect, lightmaps;
+	/* PRISM Path Traced's baked lamp visibility: a word a texel in the
+	pool's order (4 bits for each of its tile's 8 lamps), each physical
+	tile's 8 lamps (0xffffffff none) */
+	struct bake_buffer pool_lamps, lamp_ids;
 	/* the final gather's: each kept triangle's atlas triangle (+1; 0 none), and
 	the cache's block (the virtual pages, the tile table, the pool, the atlas
 	triangles, that map) the lightmap's and the volume's passes read */
@@ -435,6 +450,10 @@ struct bake_state
 	uint32_t *mask_tiles;
 	uint32_t mask_tile_count, masks_done, masks_batched;
 	struct bake_buffer mask_ranges, mask_out;
+	/* the baked lamp visibility's tiles (after the masks, the same
+	buffers), the next, those done */
+	uint32_t *lamp_tiles;
+	uint32_t lamp_tile_count, lamps_done, lamps_batched;
 	/* the volume: its batches of probes (done: those written) */
 	struct prism_bake_batches volume;
 	int volume_loaded;
@@ -902,7 +921,8 @@ static int make(void)
 		!pipeline_make(PIPELINE_COMPACT, NULL, 0, xgpu_vulkan_bake_compact_words, xgpu_vulkan_bake_compact_count) ||
 		!pipeline_make(PIPELINE_REFLECTION, NULL, 0, xgpu_vulkan_bake_reflection_words,
 		xgpu_vulkan_bake_reflection_count) ||
-		!pipeline_make(PIPELINE_EXPOSURE, NULL, 0, xgpu_vulkan_bake_exposure_words, xgpu_vulkan_bake_exposure_count))
+		!pipeline_make(PIPELINE_EXPOSURE, NULL, 0, xgpu_vulkan_bake_exposure_words, xgpu_vulkan_bake_exposure_count) ||
+		!pipeline_make(PIPELINE_LAMPMASK, NULL, 0, xgpu_vulkan_bake_lampmask_words, xgpu_vulkan_bake_lampmask_count))
 	{
 		host_logf(HOST_LOG_WARN, "prism bake: its passes cannot be made: no bake");
 		return 0;
@@ -1768,7 +1788,7 @@ static void bake_free(struct bake_state *b)
 	{
 		&b->vertices, &b->info, &b->materials, &b->alpha, &b->lamps, &b->grid, &b->scene, &b->blas_storage[0],
 		&b->blas_storage[1], &b->blas_storage[2], &b->blas_storage[3], &b->fixtures_buffer, &b->tlas_storage, &b->instances, &b->pages, &b->charts, &b->vpages, &b->table, &b->pool,
-		&b->pool_indirect, &b->lightmaps, &b->sun, &b->masks, &b->bricks, &b->bricks_coarse, &b->reflection_points, &b->reflection_info,
+		&b->pool_indirect, &b->pool_lamps, &b->lamp_ids, &b->lightmaps, &b->sun, &b->masks, &b->bricks, &b->bricks_coarse, &b->reflection_points, &b->reflection_info,
 		&b->reflection_data, &b->reflection_table, &b->probes, &b->raster_job, &b->ranges, &b->triangles, &b->texels,
 		&b->accumulators, &b->states, &b->running, &b->tile_origins, &b->job, &b->cell_points, &b->cell_candidates,
 		&b->cell_weights, &b->mask_ranges, &b->mask_out, &b->probe_points, &b->probe_accumulators, &b->probe_states,
@@ -1798,6 +1818,7 @@ static void bake_free(struct bake_state *b)
 	free(b->sun_host);
 	free(b->weights_host);
 	free(b->mask_tiles);
+	free(b->lamp_tiles);
 	free(b->probe_host);
 	free(b);
 }
@@ -2551,6 +2572,8 @@ static int bake_upload(struct bake_state *b)
 		!buffer_filled(commands, NULL, (VkDeviceSize)plan->table_words * 4 + 16, &b->sun, 0) ||
 		!buffer_make((VkDeviceSize)plan->tile_count * RASTER_TILE_WORDS * 4 + 64, 0, 0, &b->pool) ||
 		!buffer_make((VkDeviceSize)plan->tile_count * TILE_TEXELS * 4 + 64, 0, 0, &b->pool_indirect) ||
+		!buffer_filled(commands, NULL, (VkDeviceSize)plan->tile_count * TILE_TEXELS * 4 + 64, &b->pool_lamps, 0) ||
+		!buffer_make((VkDeviceSize)plan->tile_count * LAMP_SLOTS * 4 + 64, 0, 0, &b->lamp_ids) ||
 		!buffer_filled(commands, NULL, (VkDeviceSize)b->mask_capacity * MASK_TEXELS + 64, &b->masks, 0) ||
 		!buffer_filled(commands, tridata, (VkDeviceSize)plan->atlas.triangle_count * 64 + 64, &b->triangles, 0) ||
 		!buffer_filled(commands, plan->tile_triangles, (VkDeviceSize)plan->tile_triangle_count * 4 + 16, &b->ranges, 0) ||
@@ -2587,6 +2610,8 @@ static int bake_upload(struct bake_state *b)
 		goto done;
 	vkCmdFillBuffer(commands, b->states.buffer, 0, VK_WHOLE_SIZE, 4u);
 	vkCmdFillBuffer(commands, b->running.buffer, 0, VK_WHOLE_SIZE, 0u);
+	/* (no tile's lamps known until baked) */
+	vkCmdFillBuffer(commands, b->lamp_ids.buffer, 0, VK_WHOLE_SIZE, 0xffffffffu);
 	barrier(commands);
 	for (index = 0; index < BATCH_TILES; index++)
 		b->batch.tiles[index] = 0xffffffffu;
@@ -4077,6 +4102,134 @@ static void mask_collect(VkCommandBuffer commands, struct bake_state *b, struct 
 	}
 }
 
+/* ---------- PRISM Path Traced's baked lamp visibility
+
+Each drawn tile's 8 lamps with the most light on it and each texel's
+visibility of each (the pass lampmask, xgpu_vulkan_bake_glsl.inc), after
+the sun mask, in its buffers: the path tracer's analytic lamps take their
+static shadows from it and trace rays for these lamps only against the
+moving objects (docs/prism_pathtraced.md). A record a tile: its 8 lamps
+alone where it has none (32 bytes), else them and its texels' words. */
+
+/* a tile's words put where the path tracer reads them (its physical tile) */
+static int lamp_upload(VkCommandBuffer commands, struct bake_state *b, struct bake_tile const *tile, const uint32_t *words,
+	int with_texels)
+{
+	if (!tile->physical || !b->lamp_ids.buffer)
+		return 1;
+	if (!upload(commands, &b->lamp_ids, (VkDeviceSize)(tile->physical - 1) * LAMP_SLOTS * 4, words, LAMP_SLOTS * 4))
+		return 0;
+	return !with_texels || upload(commands, &b->pool_lamps, (VkDeviceSize)(tile->physical - 1) * TILE_TEXELS * 4,
+		words + LAMP_SLOTS, TILE_TEXELS * 4);
+}
+
+/* a loaded tile's lamp record, where the file has it */
+static int lamp_load(VkCommandBuffer commands, struct bake_state *b, uint32_t tile_index)
+{
+	struct bake_tile *tile = &b->plan.tiles[tile_index];
+	struct prism_bake_record const *record = prism_bake_cache_find(&b->cache, PRISM_BAKE_RECORD_LAMP_MASK_TILE,
+		prism_bake_job_sun_mask_tile(tile->vpage, 8, tile->x, tile->y));
+	uint32_t words[LAMP_TILE_WORDS];
+
+	if (!record || (record->size != LAMP_SLOTS * 4 && record->size != sizeof(words)) ||
+		prism_bake_cache_read(&b->cache, record, words, record->size))
+		return 1;
+	if (!lamp_upload(commands, b, tile, words, record->size == sizeof(words)))
+		return 0;
+	tile->lamp_state = 2;
+	return 1;
+}
+
+static void lamp_frame(VkCommandBuffer commands, struct bake_state *b)
+{
+	uint32_t count = 0, index;
+	VkDeviceAddress job, addresses[8];
+	struct bake_readback *r;
+	float entry_words[8];
+
+	if (!b->lamp_tiles)
+	{
+		b->lamp_tiles = (uint32_t *)malloc(((size_t)b->plan.tile_count + 1) * 4);
+		if (!b->lamp_tiles)
+		{
+			bake_fail(b, "no memory for the baked lamp visibility");
+			return;
+		}
+		for (index = 0; index < b->plan.tile_count; index++)
+			if (b->plan.tiles[index].lamp_state == 0 && b->plan.tiles[index].physical && b->lamp_count)
+				b->lamp_tiles[b->lamp_tile_count++] = index;
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the lamps' visibility: %u of %u tiles", b->map, (int)b->bsp,
+			b->lamp_tile_count, b->plan.tile_count);
+	}
+	if (b->lamps_batched >= b->lamp_tile_count)
+		return;
+	for (index = 0; index < LAMP_BATCH && b->lamps_batched + index < b->lamp_tile_count; index++)
+	{
+		struct bake_tile const *tile = &b->plan.tiles[b->lamp_tiles[b->lamps_batched + index]];
+		uint32_t words[3] = { index, tile->triangle_first, tile->triangle_count };
+
+		entry_words[0] = (float)tile->x * (float)TILE;
+		entry_words[1] = (float)tile->y * (float)TILE;
+		memcpy(&entry_words[2], words, 12);
+		entry_words[5] = entry_words[6] = entry_words[7] = 0.0f;
+		if (!upload(commands, &b->tile_origins, (VkDeviceSize)index * 32, entry_words, 32))
+			break;
+		count++;
+	}
+	if (!count)
+		return;
+	r = readback_take((VkDeviceSize)count * LAMP_TILE_WORDS * 4, LAMP_KIND);
+	if (!r)
+		return;
+	barrier(commands);
+	addresses[0] = b->tile_origins.address;
+	addresses[1] = b->ranges.address;
+	addresses[2] = b->triangles.address;
+	addresses[3] = b->mask_ranges.address;
+	addresses[4] = b->states.address;
+	addresses[5] = 0;
+	addresses[6] = 0;
+	job = job_block(commands, b, 3, addresses, 7);
+	if (!job)
+		return;
+	run(commands, PIPELINE_SETUP, b, job, count, 0, 0, TILE_TEXELS, 0, 0, 0, 0, (count * TILE_TEXELS + 255) / 256);
+	barrier(commands);
+	addresses[0] = b->mask_ranges.address;
+	addresses[1] = b->mask_out.address;
+	job = job_block(commands, b, 4, addresses, 2);
+	if (!job)
+		return;
+	run(commands, PIPELINE_LAMPMASK, b, job, count, LAMP_POINTS, 0, b->frame++, 0, 0, 0, 0, count);
+	barrier(commands);
+	copy_region(commands, &b->mask_out, 0, &r->buffer, 0, (VkDeviceSize)count * LAMP_TILE_WORDS * 4);
+	for (index = 0; index < count; index++)
+		r->tiles[index] = b->lamp_tiles[b->lamps_batched + index];
+	r->finished = count;
+	b->lamps_batched += count;
+}
+
+static void lamp_collect(VkCommandBuffer commands, struct bake_state *b, struct bake_readback *r)
+{
+	uint32_t index;
+
+	for (index = 0; index < r->finished; index++)
+	{
+		struct bake_tile *tile = &b->plan.tiles[r->tiles[index]];
+		const uint32_t *words = (const uint32_t *)r->buffer.mapped + (size_t)index * LAMP_TILE_WORDS;
+		int lamps = 0;
+		uint32_t slot;
+
+		for (slot = 0; slot < LAMP_SLOTS; slot++)
+			lamps |= words[slot] != 0xffffffffu;
+
+		lamp_upload(commands, b, tile, words, lamps);
+		file_append(b, PRISM_BAKE_RECORD_LAMP_MASK_TILE, prism_bake_job_sun_mask_tile(tile->vpage, 8, tile->x, tile->y),
+			words, lamps ? LAMP_TILE_WORDS * 4 : LAMP_SLOTS * 4);
+		tile->lamp_state = 2;
+		b->lamps_done++;
+	}
+}
+
 /* the volume's brick of the plan's probes from index (BRICK_PROBES of
 them): its cascade (0 fine, 1 coarse) and its place (in its bricks: world
 units for the fine, COARSE_SPACING x 4 for the coarse) */
@@ -4587,12 +4740,13 @@ static void footprints_make(struct bake_state *b)
 /* ---------- a bake's file opened: resumed, or loaded whole */
 
 /* the plan's job ids (plan 1: the tiles, the grid, the bricks, the
-footprints; with masks: their tiles too) */
+footprints; with masks: their tiles too, and every tile's baked lamp
+visibility) */
 static int plan_write(struct bake_state *b, int with_masks)
 {
 	struct bake_plan *plan = &b->plan;
 	size_t count = (size_t)plan->tile_count + 2 + plan->probe_count / BRICK_PROBES + plan->reflection_count +
-		(with_masks ? plan->tile_count : 0), at = 0, index;
+		(with_masks ? 2 * (size_t)plan->tile_count : 0), at = 0, index;
 	uint64_t *jobs = (uint64_t *)malloc((count + 1) * sizeof(uint64_t));
 	int result;
 
@@ -4612,6 +4766,9 @@ static int plan_write(struct bake_state *b, int with_masks)
 
 		if (tile->mask_state >= 1)
 			jobs[at++] = prism_bake_job_sun_mask_tile(tile->vpage, 0, tile->x, tile->y);
+		/* (its baked lamp visibility, PRISM Path Traced's: every tile's) */
+		if (at < count)
+			jobs[at++] = prism_bake_job_sun_mask_tile(tile->vpage, 8, tile->x, tile->y);
 	}
 	result = b->writing ? prism_bake_cache_append_plan(&b->writer, jobs, at) : 0;
 	free(jobs);
@@ -4892,6 +5049,8 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 			return 0;
 		if (!tile_indirect(commands, b, cursor, file))
 			return 0;
+		if (!lamp_load(commands, b, cursor))
+			return 0;
 		tile->state = TILE_DONE;
 		b->tiles_done++;
 		loaded++;
@@ -5014,6 +5173,10 @@ static void readbacks_collect(VkCommandBuffer commands, struct bake_state *b)
 			case STEP_MASK:
 				if (b->step == STEP_MASK)
 					mask_collect(commands, b, r);
+				break;
+			case LAMP_KIND:
+				if (b->step == STEP_MASK)
+					lamp_collect(commands, b, r);
 				break;
 			case STEP_VOLUME:
 				if (b->step == STEP_VOLUME)
@@ -5256,12 +5419,19 @@ bake still traces) */
 			plan_write(b, 1);
 			break;
 		}
-		if (b->masks_done >= b->mask_tile_count)
+		if (b->masks_done < b->mask_tile_count)
 		{
-			b->step = STEP_VOLUME;
+			mask_frame(commands, b);
 			break;
 		}
-		mask_frame(commands, b);
+		/* (then the baked lamp visibility, PRISM Path Traced's) */
+		if (!b->lamp_tiles || b->lamps_done < b->lamp_tile_count)
+		{
+			lamp_frame(commands, b);
+			if (!b->lamp_tiles || b->lamps_done < b->lamp_tile_count)
+				break;
+		}
+		b->step = STEP_VOLUME;
 		break;
 	case STEP_VOLUME:
 		/* (the bricks the file has first, a frame's staging at a time) */
@@ -6106,6 +6276,8 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	lookup->table = b->table.address;
 	lookup->tiles = b->pool.address;
 	lookup->indirect = b->pool_indirect.address;
+	lookup->lamp_visibility = b->pool_lamps.address;
+	lookup->lamp_ids = b->lamp_ids.address;
 	lookup->sun = b->sun.address;
 	lookup->masks = b->masks.address;
 	lookup->lightmaps = b->lightmaps.address;

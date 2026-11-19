@@ -52,6 +52,15 @@ moments and variance-guided weights (Schied et al., 2017), the
 edge-avoiding a-trous wavelet (Dammertz et al., 2010) and Krzysztof
 Narkowicz's fit of the ACES curve (2016).
 
+PRISM Path Traced's analytic lamps (`port/linux/vulkan/xgpu_vulkan_pt.glsl`,
+`docs/prism_pathtraced.md`) are likewise written from published methods,
+with no code or data taken: linearly transformed cosines (Heitz, Dupuy, Hill
+and Neubelt, 2016), whose table (`xgpu_vulkan_pt_ltc.h`) is this fork's own
+fit to its GGX lobe (`tools/prism_ltc_fit.py`), not the authors' published
+fits; the ratio estimator of analytic direct light and stochastic shadows
+(Heitz, Hill and McGuire, 2018); and geometric specular antialiasing
+(Kaplanyan, Hill, Patney and Lefohn, 2016; Tokuyoshi and Kaplanyan, 2019).
+
 ## PRISM's pack tools
 
 `tools/prism_packs` (the pack tools, `docs/prism_packs.md`) is this fork's own code, AGPL-3.0-or-later,

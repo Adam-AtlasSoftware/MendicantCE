@@ -18,6 +18,8 @@ extern const uint32_t xgpu_vulkan_bake_lightmap_words[];
 extern const size_t xgpu_vulkan_bake_lightmap_count;
 extern const uint32_t xgpu_vulkan_bake_mask_words[];
 extern const size_t xgpu_vulkan_bake_mask_count;
+extern const uint32_t xgpu_vulkan_bake_lampmask_words[];
+extern const size_t xgpu_vulkan_bake_lampmask_count;
 extern const uint32_t xgpu_vulkan_bake_importance_words[];
 extern const size_t xgpu_vulkan_bake_importance_count;
 extern const uint32_t xgpu_vulkan_bake_volume_words[];
