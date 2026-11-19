@@ -243,7 +243,9 @@ Surface surface_at(ivec2 pixel)
     Surface g;
     uvec4 w = texelFetch(words, pixel, 0);
     uvec4 x = texelFetch(extras, pixel, 0);
-    g.present = (w.w & 0x8000u) != 0u && uintBitsToFloat(x.w) > 0.0;
+    /* (port: a distance that is not finite, a stray word, no surface: never
+    a ray's origin) */
+    g.present = (w.w & 0x8000u) != 0u && uintBitsToFloat(x.w) > 0.0 && (x.w & 0x7f800000u) != 0x7f800000u;
     g.instance = w.w >> 16;
     object_cull = g.instance == 0xffffu ? 12u : 28u;
     g.page = (x.z >> 17u) & 0x7fu;
@@ -695,13 +697,19 @@ float object_coverage(uint custom)
 }
 bool objects_blocked(vec3 o, vec3 d, float t_max)
 {
-    if (job.objects == uvec2(0u) || t_max <= OBJECT_NEAR)
+    if (job.objects == uvec2(0u) || !(t_max > OBJECT_NEAR) || !ray_ok(o, d, OBJECT_NEAR, t_max))
         return false;
+    uint candidates = 0u;
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), gl_RayFlagsTerminateOnFirstHitEXT, object_cull, o,
         OBJECT_NEAR, d, t_max);
     while (rayQueryProceedEXT(q))
     {
+        if (++candidates > CANDIDATES_MOST)
+        {
+            rayQueryTerminateEXT(q);
+            break;
+        }
         if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
             rnd() < object_coverage(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)))
             rayQueryConfirmIntersectionEXT(q);
@@ -714,12 +722,18 @@ float objects_hit(vec3 o, vec3 d, float t_max, out vec3 nh, out vec3 albedo)
 {
     nh = vec3(0.0);
     albedo = vec3(0.0);
-    if (job.objects == uvec2(0u) || t_max <= OBJECT_NEAR)
+    if (job.objects == uvec2(0u) || !(t_max > OBJECT_NEAR) || !ray_ok(o, d, OBJECT_NEAR, t_max))
         return -1.0;
+    uint candidates = 0u;
     rayQueryEXT q;
     rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), 0u, object_cull, o, OBJECT_NEAR, d, t_max);
     while (rayQueryProceedEXT(q))
     {
+        if (++candidates > CANDIDATES_MOST)
+        {
+            rayQueryTerminateEXT(q);
+            break;
+        }
         if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT &&
             rnd() < object_coverage(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)))
             rayQueryConfirmIntersectionEXT(q);

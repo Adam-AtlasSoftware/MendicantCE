@@ -96,6 +96,22 @@ over 2 pi, a0 = 1 - k . n0. */
 	"bool indoor(uint t) { return (Uints(s.info).v[t * 8u] & 0x20000u) != 0u; }\n" \
 	"float material_value(uint m, uint k) { return Floats(s.materials).v[m * 16u + k]; }\n" \
 	"\n" \
+	"/* (port: a ray the traversal is given only with a finite origin and\n" \
+	"direction, a direction of some length, and a reach that is not NaN and\n" \
+	"no shorter than its start: anything else is undefined for ray queries,\n" \
+	"which some drivers' traversal (a shader loop) never leaves. Bits, not\n" \
+	"isnan/isinf, which a compiler may take as never true) */\n" \
+	"bool finite2(vec2 v) { return all(notEqual(floatBitsToUint(v) & 0x7f800000u, uvec2(0x7f800000u))); }\n" \
+	"bool finite3(vec3 v) { return all(notEqual(floatBitsToUint(v) & 0x7f800000u, uvec3(0x7f800000u))); }\n" \
+	"bool ray_ok(vec3 o, vec3 d, float t_min, float t_max)\n" \
+	"{\n" \
+	"    return finite3(o) && finite3(d) && dot(d, d) > 1.0e-12 && (floatBitsToUint(t_max) & 0x7fffffffu) <= 0x7f800000u &&\n" \
+	"        t_max >= t_min;\n" \
+	"}\n" \
+	"/* (port: the candidates a ray's query tests, at most: past them it ends,\n" \
+	"its nearest kept so far its hit) */\n" \
+	"#define CANDIDATES_MOST 1024u\n" \
+	"\n" \
 	"bool alpha_kept(uint custom, uint primitive, vec2 b)\n" \
 	"{\n" \
 	"    /* (the static scenery's cutouts: a hit kept by its share of texels\n" \
@@ -112,21 +128,29 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    vec2 uv2 = uintBitsToFloat(uvec2(a.v[t * 8u + 5u], a.v[t * 8u + 6u]));\n" \
 	"    vec2 uv = uv0 * (1.0 - b.x - b.y) + uv1 * b.x + uv2 * b.y;\n" \
 	"    float w = material_value(m, 9u), h = material_value(m, 10u);\n" \
-	"    uvec2 texel = uvec2(clamp(fract(uv) * vec2(w, h), vec2(0.0), vec2(w, h) - 1.0));\n" \
-	"    uint at = uint(material_value(m, 8u)) + texel.y * uint(w) + texel.x;\n" \
+	"    /* (port: no alpha map's size, or a coordinate not finite: opaque, never\n" \
+	"    a texel read past its map) */\n" \
+	"    if (!(w >= 1.0 && h >= 1.0) || !finite2(uv))\n" \
+	"        return true;\n" \
+	"    uvec2 size = uvec2(w, h);\n" \
+	"    uvec2 texel = min(uvec2(fract(uv) * vec2(w, h)), size - 1u);\n" \
+	"    uint at = uint(material_value(m, 8u)) + texel.y * size.x + texel.x;\n" \
 	"    uint alpha = (Uints(s.alpha).v[at >> 2u] >> ((at & 3u) * 8u)) & 0xffu;\n" \
 	"    return float(alpha) * (1.0 / 255.0) > material_value(m, 7u);\n" \
 	"}\n" \
 	"\n" \
-	"#define ALPHA_PROCEED(q) while (rayQueryProceedEXT(q)) { \\\n" \
+	"#define ALPHA_PROCEED(q) { uint candidates = 0u; while (rayQueryProceedEXT(q)) { \\\n" \
+	"        if (++candidates > CANDIDATES_MOST) { rayQueryTerminateEXT(q); break; } \\\n" \
 	"        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT && \\\n" \
 	"            alpha_kept(rayQueryGetIntersectionInstanceCustomIndexEXT(q, false), \\\n" \
 	"            uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)), \\\n" \
 	"            rayQueryGetIntersectionBarycentricsEXT(q, false))) \\\n" \
-	"            rayQueryConfirmIntersectionEXT(q); }\n" \
+	"            rayQueryConfirmIntersectionEXT(q); } }\n" \
 	"\n" \
 	"bool blocked(vec3 o, vec3 d, float t_max)\n" \
 	"{\n" \
+	"    if (!ray_ok(o, d, 0.0, t_max))\n" \
+	"        return false;\n" \
 	"    rayQueryEXT q;\n" \
 	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), gl_RayFlagsTerminateOnFirstHitEXT, 15u, o, 0.0, d,\n" \
 	"        t_max);\n" \
@@ -138,12 +162,14 @@ over 2 pi, a0 = 1 - k . n0. */
 	"where it is a one-sided face's back: inside the level), its triangle */\n" \
 	"float hit(vec3 o, vec3 d, float t_max, out vec3 nh, out uint t, out vec2 bary)\n" \
 	"{\n" \
-	"    rayQueryEXT q;\n" \
-	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), 0u, 15u, o, 0.0, d, t_max);\n" \
-	"    ALPHA_PROCEED(q)\n" \
 	"    nh = vec3(0.0);\n" \
 	"    t = 0u;\n" \
 	"    bary = vec2(0.0);\n" \
+	"    if (!ray_ok(o, d, 0.0, t_max))\n" \
+	"        return -1.0;\n" \
+	"    rayQueryEXT q;\n" \
+	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), 0u, 15u, o, 0.0, d, t_max);\n" \
+	"    ALPHA_PROCEED(q)\n" \
 	"    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT)\n" \
 	"        return -1.0;\n" \
 	"    t = scene_triangle(rayQueryGetIntersectionInstanceCustomIndexEXT(q, true),\n" \
@@ -2020,14 +2046,20 @@ static const char raster_source[] =
 	"view's pixels leave out: xgpu_stream.h's XGPU_GBUFFER_FLAG_TRACE_ONLY) */\n"
 	"float objects_visibility(vec3 o, vec3 d, float t_max, uint cull)\n"
 	"{\n"
-	"    if (job.objects == uvec2(0u))\n"
+	"    if (job.objects == uvec2(0u) || !ray_ok(o, d, 0.02, t_max))\n"
 	"        return 1.0;\n"
 	"    float through = 1.0;\n"
+	"    uint candidates = 0u;\n"
 	"    rayQueryEXT q;\n"
 	"    rayQueryInitializeEXT(q, accelerationStructureEXT(job.objects), gl_RayFlagsTerminateOnFirstHitEXT, cull, o, 0.02,\n"
 	"        d, t_max);\n"
 	"    while (rayQueryProceedEXT(q))\n"
 	"    {\n"
+	"        if (++candidates > CANDIDATES_MOST)\n"
+	"        {\n"
+	"            rayQueryTerminateEXT(q);\n"
+	"            break;\n"
+	"        }\n"
 	"        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)\n"
 	"            continue;\n"
 	"        uint custom = rayQueryGetIntersectionInstanceCustomIndexEXT(q, false);\n"
