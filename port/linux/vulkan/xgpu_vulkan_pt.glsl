@@ -607,12 +607,14 @@ spot's inner cone's cosine (2 none), its axis and outer cone's cosine (2 a
 point light)), job.volume.z of them, then the recent ones (job.volume.w,
 the temporal pass's: xgpu_vulkan_pt.c's recent_lights_take). A point
 light's inverse square, windowed to none at its reach ((1 - (d/r)^4)^2, as
-Karis 2013), held within 0.4 r (CE's reach is a light's whole sphere of
-light, not its size: nearer, a wall at a flashlight's mouth went to 6 times
-CE's light and white), its intensity 0.3 r^2 x the colour: the one whose
-light over the sphere of radius r is what CE's 1 - d^2/r^2 gives (2/15 r^3
-x 4 pi), so a light's whole light is CE's, more than CE's near it (1.9 x at
-its middle, alike at 0.6 r) and less far off (tools/test_prism_pt.py). A
+Karis 2013), its intensity 0.3 r^2 x the colour (the one whose light over
+the sphere of radius r is what CE's 1 - d^2/r^2 gives, 2/15 r^3 x 4 pi),
+and never more than CE's own 1 - d^2/r^2 at that distance: CE's within
+0.6 r, the inverse square's tail past it (CE's reach is a light's whole
+sphere of light, not its size: held at 1.9 x CE's within 0.4 r, a wall
+1 to 2 units from the flashlight's mouth was a white disc, and it stayed
+white through most of CE's 24 frames' fade of the colour; tools/
+test_prism_pt.py). A
 spot's cone is CE's (rasterizer_set_model_lighting_point_light's): whole
 inside the inner cone, to none at the outer, linear in the cosine. Their
 shadows traced (light_seen). */
@@ -636,7 +638,7 @@ vec3 dynamic_light_at(uint at, vec3 p, out vec3 l, out float d)
     }
     float x2 = d2 / (r * r);
     float window = 1.0 - x2 * x2;
-    return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * window * window * 0.3 / max(x2, 0.16));
+    return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * min(window * window * 0.3 / max(x2, 1.0e-4), 1.0 - x2));
 }
 vec3 dynamic_light(uint i, vec3 p, out vec3 l, out float d)
 {
@@ -2150,6 +2152,7 @@ or fading keeps cutting the history until what it may hold of it is gone (a
 flashlight's spot was a ring on the wall for 200 frames after it) */
 const uint LIGHTS_MOST = 64u;
 const float DYNAMIC_RESET = 0.1;
+const float DYNAMIC_LAG = 0.1;
 float dynamic_change(Surface g, float history_luma)
 {
     uint now_n = uint(job.volume.z), last_n = uint(job.volume.w);
@@ -2413,14 +2416,20 @@ void main()
         /* (the histories cut by the dynamic lights' change here: a light
         switched on (the flashlight, a muzzle flash, a bolt going by) is
         whole in its first frame, not a firefly held to the history nor a
-        32nd of itself, and one switched off or moved on leaves no trail;
-        its share of the light 1, the frame's own alone) */
+        32nd of itself, one switched off or moved on leaves no trail, and
+        one fading or rising (CE ramps the flashlight's colour over 6 frames
+        on, 24 off) follows it: the history at most as long as keeps its lag
+        under DYNAMIC_LAG of the light (a change of that share of it a frame
+        held over that many frames; a history cut by (1 - 2 x share)^2 kept
+        about 21 frames of 27 as the flashlight came on, and the spot came
+        in over 12 frames and stayed whole through CE's fade)) */
         float cut = dynamic_change(g, hm.x);
-        if (cut > 0.02)
+        if (cut * job.denoise.x > DYNAMIC_LAG)
         {
-            dynamic_keep = (1.0 - min(2.0 * cut, 1.0)) * (1.0 - min(2.0 * cut, 1.0));
-            length_d = min(length_d, job.denoise.x * dynamic_keep);
-            hs.a = min(hs.a, job.denoise.x * dynamic_keep);
+            float most = DYNAMIC_LAG / cut;
+            dynamic_keep = most / job.denoise.x;
+            length_d = min(length_d, most);
+            hs.a = min(hs.a, most);
         }
     }
     /* (the counters, a level pixel in 16 that looks for its history: its

@@ -160,16 +160,17 @@ draws it (a light drawn reaching nowhere is sent off). Until `prism-v4-pt-dynlig
 world_scene's fixture bit (1) as the dynamic one (2), so the table's dynamic class was always empty, in Path Traced
 and in Raster alike (Raster's `dynamic_at` reads the same class).
 
-- **Shape and units.** A point light's inverse square, windowed to none at CE's reach r ((1 - (d/r)^4)^2), held
-  within 0.4 r (CE's reach is the light's whole sphere of light, not its size: held only within 0.2 r, a wall at the
-  flashlight's mouth took 6 times CE's light and went white), its intensity 0.3 r^2 times CE's colour: its light
-  over the sphere of radius r is what CE's 1 - d^2/r^2 gives, so a light's whole light is CE's in the light's units,
-  more than CE's near it (1.9 times at its middle, alike at 0.6 r) and less far off. A spot's cone is CE's: whole
+- **Shape and units.** A point light's inverse square, windowed to none at CE's reach r ((1 - (d/r)^4)^2), its
+  intensity 0.3 r^2 times CE's colour (the one whose light over the sphere of radius r is what CE's 1 - d^2/r^2
+  gives), and never more than CE's own 1 - d^2/r^2 at that distance: CE's within 0.6 r, the inverse square's tail
+  past it (its whole light about three quarters of CE's). Held at 1.9 times CE's within 0.4 r instead, a wall 1 to 2
+  units from the flashlight's mouth was a white disc, white through most of CE's fade. A spot's cone is CE's: whole
   inside the falloff angle, to none at the cutoff, linear in the cosine. A light with a gel map (the flashlight's
-  projected texture) is not drawn through it: its colour is taken at the gel's share, 0.45 (`WORLD_SCENE_GEL`,
-  world_scene.c), measured by pictures: CE's flashlight in ce_deferred's light target against the path tracer's
-  diffuse light at the same moment, the median per-pixel ratio 2.2 where neither is white
-  (`work/openh1_eval/v4_dynl_runs/calib`).
+  projected texture) is not drawn through it: its colour is taken at the gel's share, 0.12 (`WORLD_SCENE_GEL`,
+  world_scene.c), calibrated by the spot's peak, not its median: on b30's wall at 1 to 2 units, with the demo's
+  fixed exposure and filmic curve, the spot's 95th percentile about CE's (200 of 255) and its share at white about
+  CE's (2%), 0.10 and 0.15 either side (`work/openh1_eval/v4_int2_runs/calib4`, `tools/spotstats.py` there). The
+  0.45 of a median per-pixel ratio (`work/openh1_eval/v4_dynl_runs/calib`) left a fifth of the spot at white.
 - **Sampling and shadows.** Apart from ReSTIR DI's reservoir (`dynamic_direct`): resampled importance over 4 of
   them (all where there are 4 or fewer) by their unshadowed diffuse and specular light, one shadow ray for the kept
   one: by the level to the light's place, by the moving objects to 0.15 world units short of it (`DYNAMIC_OWNER`: a
@@ -184,8 +185,11 @@ and in Raster alike (Raster's `dynamic_at` reads the same class).
   recent colour less 1/32 of itself a frame (the slow history's own share: what the history may still hold of it),
   until that is under 1/500 of white. The temporal pass evaluates this frame's and the recent ones at the pixel's
   surface (unshadowed, diffuse) and cuts the diffuse and specular histories by the change's share of the light the
-  history holds besides theirs (`dynamic_change`; kept `(1 - 2 x share)^2` of `denoise.x`), and where that keeps
-  under a tenth (`DYNAMIC_RESET`) the histories start again at the frame's own pre-blurred light (four frames
+  history holds besides theirs (`dynamic_change`): the histories at most as long as keeps their lag under a tenth
+  of the light (`DYNAMIC_LAG`: a change of that share a frame, `0.1 / share` frames; a cut to `(1 - 2 x share)^2`
+  of `denoise.x` kept about 21 of 27 frames as the flashlight came on, the spot coming in over 12 frames, and
+  stayed whole through CE's 24-frame fade), and where that keeps under a tenth of `denoise.x` (`DYNAMIC_RESET`)
+  the histories start again at the frame's own pre-blurred light (four frames
   long, the variance the neighbours'; not the fix pass's wide gather, which made a flash over the level's sparse
   bright samples into blocks). So a light switched on is whole in its first frame (not held as a firefly against a
   long history, not a 32nd of itself); a muzzle flash's flicker keeps a few frames; one switched off, moved on or

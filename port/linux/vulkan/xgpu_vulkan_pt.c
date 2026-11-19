@@ -1116,14 +1116,17 @@ static void stamp(VkCommandBuffer commands, uint32_t slot, uint32_t index)
 /* the recent dynamic lights into the job (after this frame's, at
 LIGHTS_MOST), then this frame's taken into them: each recent one's colour
 less 1 / history of itself, this frame's colour where more, its place and
-cone this frame's; one gone below 1/500 of white left out, and all where the history is not kept */
-static void recent_lights_take(float *lights, const uint32_t *ids, uint32_t count, int history, float frames)
+cone this frame's; one gone below 1/500 of white left out, and all where the history is not kept. The
+count of the recent ones given to the job (those of the frames before alone: one this frame added is not
+in the job's copy) */
+static uint32_t recent_lights_take(float *lights, const uint32_t *ids, uint32_t count, int history, float frames)
 {
 	float keep = frames > 1.0f ? 1.0f - 1.0f / frames : 0.0f;
-	uint32_t index, at, kept = 0;
+	uint32_t index, at, kept = 0, given;
 
 	if (!history)
 		pt.recent_count = 0;
+	given = pt.recent_count;
 	memcpy(lights + LIGHTS_MOST * LIGHT_FLOATS, pt.recent_lights, pt.recent_count * LIGHT_FLOATS * sizeof(float));
 	for (index = 0; index < pt.recent_count; index++)
 	{
@@ -1180,6 +1183,7 @@ static void recent_lights_take(float *lights, const uint32_t *ids, uint32_t coun
 		kept++;
 	}
 	pt.recent_count = kept;
+	return given;
 }
 
 struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
@@ -1392,7 +1396,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	cosine (2 none), its axis and outer cone's cosine (2 a point light); then
 	the recent ones, volume.w of them, which the temporal pass's history is
 	cut by where they lit the surface otherwise) */
-	uint32_t ids[LIGHTS_MOST];
+	uint32_t ids[LIGHTS_MOST], recent;
 	dynamic_lights = (float *)((char *)slot_buffer->mapped + JOB_LIGHTS_OFFSET);
 	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
 	for (index = 0; lights && index < light_count && dynamic < LIGHTS_MOST; index++)
@@ -1414,10 +1418,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		ids[dynamic] = l->id;
 		dynamic++;
 	}
-	recent_lights_take(dynamic_lights, ids, dynamic, (flags & FLAG_HISTORY) != 0, job->denoise[0]);
+	recent = recent_lights_take(dynamic_lights, ids, dynamic, (flags & FLAG_HISTORY) != 0, job->denoise[0]);
 	job->volume[2] = (float)dynamic;
-	job->volume[3] = (float)pt.recent_count;
-	job->lights = dynamic || pt.recent_count ? slot_buffer->address + JOB_LIGHTS_OFFSET : 0;
+	job->volume[3] = (float)recent;
+	job->lights = dynamic || recent ? slot_buffer->address + JOB_LIGHTS_OFFSET : 0;
 	/* (HALO_DYNAMIC_LIGHTS_LOG, debug.dynamic_lights_log: the frame's
 	dynamic lights where their count changed) */
 	{

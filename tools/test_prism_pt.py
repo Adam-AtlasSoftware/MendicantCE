@@ -732,10 +732,16 @@ def test_preblur_spreads_a_lucky_sample_and_keeps_the_light():
 
 def _dynamic_falloff(x):
     """xgpu_vulkan_pt.glsl's dynamic_light_at at a distance x of the light's reach (a white point light): the
-    windowed inverse square, 0.3 r^2 / d^2, held within 0.4 r"""
+    windowed inverse square, 0.3 r^2 / d^2, never more than CE's 1 - d^2/r^2"""
     x2 = np.minimum(x * x, 1.0)
     window = (1.0 - x2 * x2) ** 2
-    return window * 0.3 / np.maximum(x2, 0.16)
+    return np.minimum(window * 0.3 / np.maximum(x2, 1.0e-4), 1.0 - x2)
+
+
+def _dynamic_keep(cut, frames=32.0, lag=0.1):
+    """the temporal pass's share of the history it keeps by the dynamic lights' change (DYNAMIC_LAG): the history
+    at most as long as holds its lag under `lag` of the light"""
+    return min(lag / cut, frames) / frames if cut * frames > lag else 1.0
 
 
 def _dynamic_change(now, last, history):
@@ -757,7 +763,7 @@ def test_the_dynamic_lights_flag_is_world_scenes_own():
     assert "if (!(drawn->flags & WORLD_SCENE_LIGHT_DYNAMIC) || drawn->type == 2)" in lights
     # (a gel-mapped light at the gel's share; Raster's frame by CE's composition takes CE's own passes instead)
     assert "light->radiance[3] = drawn->intensity * drawn->gel;" in lights
-    assert "#define WORLD_SCENE_GEL_MAP 0x64" in scene and "#define WORLD_SCENE_GEL 0.45f" in scene
+    assert "#define WORLD_SCENE_GEL_MAP 0x64" in scene and "#define WORLD_SCENE_GEL 0.12f" in scene
     bake = (ROOT / "port/linux/vulkan/xgpu_vulkan_bake.c").read_text()
     assert "lights = materials ? xgpu_vulkan_scene_light_table(&light_count, &serial) : NULL;" in bake
 
@@ -772,42 +778,48 @@ def test_the_dynamic_lights_layout_is_the_hosts():
     assert define["JOB_LIGHTS_OFFSET"] + 2 * define["LIGHTS_MOST"] * define["LIGHT_FLOATS"] * 4 <= define["JOB_BYTES"]
 
 
-def test_a_dynamic_lights_whole_light_is_ces_and_none_past_its_reach():
-    """the inverse square's light over the sphere of the light's reach is CE's 1 - d^2/r^2's (within the hold at
-    its centre), brighter near the light and less far off, and none at or past its reach"""
+def test_a_dynamic_lights_light_is_ces_near_it_its_inverse_squares_far_off_and_none_past_its_reach():
+    """CE's 1 - d^2/r^2 within 0.6 r (where the inverse square whose light over the sphere of its reach is CE's
+    would be up to 1.9 times CE's: a wall at the flashlight's mouth went white, and stayed white through CE's fade
+    of its colour), the inverse square's tail past it, never more than CE's, none at or past its reach"""
     x = np.linspace(0.0, 1.0, 200001)
     ce = 1.0 - x * x
     ours = _dynamic_falloff(x)
-    whole_ce = np.trapezoid(ce * x * x, x)
-    whole = np.trapezoid(ours * x * x, x)
-    assert abs(whole / whole_ce - 1.0) < 0.01
-    assert 2.0 > _dynamic_falloff(np.array([0.1]))[0] > 1.0 > _dynamic_falloff(np.array([0.7]))[0]
+    assert np.all(ours <= ce + 1.0e-12)
+    near = x <= 0.58
+    assert np.allclose(ours[near], ce[near])
+    assert _dynamic_falloff(np.array([0.0]))[0] == pytest.approx(1.0)
+    assert _dynamic_falloff(np.array([0.7]))[0] < 1.0 - 0.49
     assert _dynamic_falloff(np.array([0.9]))[0] < 1.0 - 0.81
     assert _dynamic_falloff(np.array([1.0]))[0] == 0.0
-    assert _dynamic_falloff(np.array([0.0]))[0] == pytest.approx(0.3 / 0.16)
+    # (its whole light about three quarters of CE's: the tail past 0.6 r)
+    whole_ce = np.trapezoid(ce * x * x, x)
+    assert 0.7 < np.trapezoid(ours * x * x, x) / whole_ce < 0.78
 
 
 def test_a_dynamic_light_switched_on_or_off_cuts_the_history_and_a_steady_one_does_not():
     """the temporal pass's cut: a flash over a dark wall is its frame's own (its whole history cut), its going
     leaves no trail; a steady light, or one small beside the room's light, keeps the history"""
-    keep = lambda cut: (1.0 - min(2.0 * cut, 1.0)) ** 2  # noqa: E731
+    keep = _dynamic_keep
     assert keep(_dynamic_change(2.0, 0.0, 0.05)) < 0.01           # on, over a dark wall
     assert keep(_dynamic_change(0.0, 2.0, 2.05)) < 0.01           # off: its own light in the history is not kept
     assert _dynamic_change(1.0, 1.0, 1.2) == 0.0                   # steady
-    assert keep(_dynamic_change(0.02, 0.0, 3.0)) > 0.97            # a small one in a lit room
+    assert keep(_dynamic_change(0.02, 0.0, 3.0)) > 0.45            # a small one in a lit room: half its history
+    assert keep(_dynamic_change(0.002, 0.0, 3.0)) == 1.0           # a far smaller one: all of it
     assert keep(_dynamic_change(0.96, 0.64, 0.1)) < 0.12            # a muzzle flash's flicker: a few frames' history
     # (a history taken whole over a light's switching on lags it by its length: the cut's frame shows it whole)
     history, n = 0.05, 32.0
     cut = _dynamic_change(2.0, 0.0, history)
-    n_cut = min(n, 32.0 * keep(cut)) + 1.0
+    n_cut = 1.0 if keep(cut) < 0.1 else min(n, 32.0 * keep(cut)) + 1.0  # (under DYNAMIC_RESET: begun again)
     shown = history + (2.05 - history) / n_cut
     assert shown > 0.95 * 2.05
     text = GLSL.read_text()
     assert "float cut = dynamic_change(g, hm.x);" in text
-    assert "dynamic_keep = (1.0 - min(2.0 * cut, 1.0)) * (1.0 - min(2.0 * cut, 1.0));" in text
-    assert "const float DYNAMIC_RESET = 0.1;" in text
+    assert "if (cut * job.denoise.x > DYNAMIC_LAG)" in text and "float most = DYNAMIC_LAG / cut;" in text
+    assert "const float DYNAMIC_RESET = 0.1;" in text and "const float DYNAMIC_LAG = 0.1;" in text
     assert "return change / max(max(a, b) + max(history_luma - b, 0.0), 1.0e-4);" in text
-    assert "return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * window * window * 0.3 / max(x2, 0.16));" in text
+    assert ("return vec3(f.v[at + 4u], f.v[at + 5u], f.v[at + 6u]) * (cone * min(window * window * 0.3 / max(x2, "
+            "1.0e-4), 1.0 - x2));") in text
 
 
 def test_the_dynamic_lights_are_sampled_apart_from_the_reused_reservoir_and_unbiased():
@@ -852,9 +864,8 @@ def _history_after_a_fade(envelope, frames=32.0, background=0.05, light=5.0, fad
         env = max(last, env * (1.0 - 1.0 / frames))
         b = env if envelope else last
         cut = _dynamic_change(now, b, history)
-        keep = (1.0 - min(2.0 * cut, 1.0)) ** 2
-        if cut > 0.02:
-            length = min(length, frames * keep)
+        keep = _dynamic_keep(cut, frames)
+        length = min(length, frames * keep)
         sample = background + now
         if keep < 0.1:
             history, length = sample, 4.0
@@ -870,8 +881,37 @@ def test_a_fading_light_leaves_no_ghost_in_the_history():
     """a light that fades (CE's flashlight off: 24 frames) changes little from frame to frame, so a cut by the last
     frame's light alone leaves the history holding it (the flashlight's spot a ring on the wall 200 frames after);
     by the recent envelope the history is the wall's own light within a few frames of its end"""
-    assert _history_after_a_fade(envelope=False) > 0.05 * 2.0
     assert _history_after_a_fade(envelope=True) < 0.05 * 1.1
+    assert _history_after_a_fade(envelope=False) < 0.05 * 1.1
     host = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
     assert "float keep = frames > 1.0f ? 1.0f - 1.0f / frames : 0.0f;" in host
-    assert "recent_lights_take(dynamic_lights, ids, dynamic, (flags & FLAG_HISTORY) != 0, job->denoise[0]);" in host
+    assert ("recent = recent_lights_take(dynamic_lights, ids, dynamic, (flags & FLAG_HISTORY) != 0, "
+            "job->denoise[0]);") in host
+    assert "job->volume[3] = (float)recent;" in host
+
+
+@pytest.mark.parametrize("share", [1.0, 0.5])
+def test_a_ramping_light_is_followed_by_the_history(share):
+    """CE ramps the flashlight's colour up over 6 frames and down over 24: the slow history at a pixel it lights
+    (alone, or half of the pixel's light) follows it within a fifth of its light at every frame of the ramps (the
+    cut by (1 - 2 x share)^2 kept 21 of 27 frames as it came on: the spot came in over 12 frames and stayed whole
+    through the fade)"""
+    frames, light = 32.0, 1.0
+    background = light * (1.0 - share) / share
+    history, length, env, last = background, frames, 0.0, 0.0
+    ramp = [min(1.0, (k + 1) / 6.0) for k in range(40)] + [max(0.0, 1.0 - (k + 1) / 24.0) for k in range(40)]
+    for now in ramp:
+        now *= light
+        env = max(last, env * (1.0 - 1.0 / frames))
+        cut = _dynamic_change(now, env, history)
+        keep = _dynamic_keep(cut, frames)
+        length = min(length, frames * keep)
+        sample = background + now
+        if keep < 0.1:
+            history, length = sample, 4.0
+        else:
+            n = min(length + 1.0, frames)
+            history += (sample - history) / n
+            length = n
+        assert abs(history - sample) < 0.2 * light
+        last = now

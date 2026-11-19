@@ -299,11 +299,14 @@ struct world_scene_light_definition
 };
 
 /* a light definition's gel map (tag_schema_render.c's light_definition:
-its offset), and the share of a light a gel lets through: CE's flashlight
-drawn through its gel against the same light with none (PRISM Path Traced's,
-the same moment and pixels: v4_dynl_runs/calib, the median ratio 1 / 2.2) */
+its offset), and the share of a light a gel lets through, by its peak: PRISM
+Path Traced's flashlight on a wall 1 to 2 units off (b30, the demo's fixed
+exposure and filmic curve) against CE's, the spot's 95th percentile about
+CE's (200 of 255) and a share at white about CE's (2%) (v4_int2_runs/calib4:
+0.10 and 0.15 either side; the 0.45 a median of the spot's pixels gave left
+a fifth of the spot white) */
 #define WORLD_SCENE_GEL_MAP 0x64
-#define WORLD_SCENE_GEL 0.45f
+#define WORLD_SCENE_GEL 0.12f
 
 /* what's kept of an object from frame to frame, by its absolute index */
 struct world_scene_history
