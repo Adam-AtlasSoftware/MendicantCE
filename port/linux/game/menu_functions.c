@@ -2793,6 +2793,8 @@ static struct
 	/* (PRISM Path Traced's) */
 	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
 	{ "op_denoiser", LIGHTING_P, NULL, NULL },
+	{ "op_prism_dynamic_lights", LIGHTING_P, NULL, NULL },
+	{ "op_prism_light_saturation", LIGHTING_P, NULL, NULL },
 	/* (Advanced Graphics' Dynamic Lights: the enhanced dynamic lights under
 	both PRISM modes, which the game gives the plasma bolts' and needles'
 	lights that they light by, and whose glows it draws; Classic's row is

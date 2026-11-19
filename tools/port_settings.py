@@ -863,7 +863,7 @@ LIGHTING_MODE_ROWS = {
     # (PRISM Rebaked's frame)
     "prism_raster_composition": "R", "prism_raster_objects": "R", "shadow_resolution_rebaked": "R",
     # (PRISM Path Traced's)
-    "pt_profile": "P", "denoiser": "P",
+    "pt_profile": "P", "denoiser": "P", "prism_dynamic_lights": "P", "prism_light_saturation": "P",
     # (the enhanced dynamic lights in both PRISM modes: which lights the game
     # gives the bake's frame and the path tracer, and the plasma glows)
     "dynamic_lights_prism": "RP",
@@ -2306,6 +2306,17 @@ PAGES = {
             ("DENOISER", "display.denoiser", [("PRISM", "prism"), ("OFF", "off")],
              "PRISM: the traced light smoothed over the frames before and the pixels about. Off: the light as "
              "traced, one sample a pixel, grainy (for checking).", "desktop"),
+            # (the moving lights' look: plasma, needles, grenades, muzzle
+            # flashes, the shields' flares; port/linux/game/prism_scene_lights.c's
+            # dynamic_look, docs/prism_pathtraced.md "What glows")
+            ("COLOURED LIGHTS", "display.prism_dynamic_lights",
+             [("OFF", "0"), ("FAINT", "0.25"), ("SOFT", "0.4"), ("NATURAL", "0.6"), ("FULL", "1")],
+             "How bright plasma, needles, grenades, blasts and shield flares light their surroundings. Full: as "
+             "bright as the game's own colours; white lights such as the flashlight keep their light.", "desktop"),
+            ("LIGHT COLOUR", "display.prism_light_saturation",
+             [("PALE", "0.4"), ("MUTED", "0.6"), ("RICH", "0.8"), ("PURE", "1")],
+             "How deep the colour of the light they cast is. Pure: the game's own colours, plasma green and needle "
+             "pink; Pale: nearer white, as a real glow's light is.", "desktop"),
             # (both PRISM modes' exposure and tone curve: the bake's meter and
             # step, shared, prism_rt.c's RT_FRAME settings)
             (SECTION, "IMAGE"),
