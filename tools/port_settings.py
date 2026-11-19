@@ -848,6 +848,13 @@ RAY_TRACING_PAGE = ("video_settings/ray_tracing", "ray_tracing_settings_screen")
 # (and the look of Classic's ray traced light, display.prism_rt's: docs/prism_rt.md
 # "The rig" and "Styles"; greyed out alike)
 TRACED_LOOK_PAGE = ("video_settings/ray_tracing/look", "traced_look_settings_screen")
+# (Lighting Settings' own pages, for room: Path Traced's COLOURED LIGHTS (the
+# moving lights' brightness and colour, docs/prism_pathtraced.md "What
+# glows"; not Advanced Graphics' LIGHT EFFECTS, which every mode has) and
+# both PRISM modes' UPSCALING (display.upscaler and its scale,
+# docs/prism_plugin.md))
+COLOURED_LIGHTS_PAGE = ("video_settings/lighting/coloured_lights", "coloured_lights_settings_screen")
+UPSCALING_PAGE = ("video_settings/lighting/upscaling", "upscaling_settings_screen")
 
 # ---------- the lighting modes (display.lighting): the rows that show only
 # in some of them, by key, menu_functions.c's lighting_rows (which also has
@@ -866,10 +873,12 @@ LIGHTING_MODE_ROWS = {
     # (PRISM Rebaked's frame)
     "prism_raster_composition": "R", "prism_raster_objects": "R", "shadow_resolution_rebaked": "R",
     # (PRISM Path Traced's)
-    "pt_profile": "P", "denoiser": "P", "prism_dynamic_lights": "P", "prism_light_saturation": "P",
-    # (the upscaler in both PRISM modes (prism_upscale.c: Classic draws
-    # without one); its scale under Path Traced while one is on, for room)
-    "upscaler": "RP", "upscaler_scale": "P",
+    "pt_profile": "P", "denoiser": "P",
+    # (and its COLOURED LIGHTS page: the moving lights' brightness and colour)
+    "coloured_lights": "P", "prism_dynamic_lights": "P", "prism_light_saturation": "P",
+    # (the UPSCALING page in both PRISM modes (prism_upscale.c: Classic draws
+    # without one): the upscaler, its scale while one is on)
+    "upscaling": "RP", "upscaler": "RP", "upscaler_scale": "RP",
     # (the enhanced dynamic lights in both PRISM modes: which lights the game
     # gives the bake's frame and the path tracer, and the plasma glows)
     "dynamic_lights_prism": "RP",
@@ -2319,17 +2328,11 @@ PAGES = {
              "from the next start. "
              "Off: the light as traced, grainy (for checking).|DLSS: a plugin you build (prism-plugins README).",
              "desktop"),
-            # (the moving lights' look: plasma, needles, grenades, muzzle
-            # flashes, the shields' flares; port/linux/game/prism_scene_lights.c's
-            # dynamic_look, docs/prism_pathtraced.md "What glows")
-            ("COLOURED LIGHTS", "display.prism_dynamic_lights",
-             [("OFF", "0"), ("FAINT", "0.25"), ("SOFT", "0.4"), ("NATURAL", "0.6"), ("FULL", "1")],
-             "How bright plasma, needles, grenades, blasts and shield flares light their surroundings. Full: as "
-             "bright as the game's own colours; white lights such as the flashlight keep their light.", "desktop"),
-            ("LIGHT COLOUR", "display.prism_light_saturation",
-             [("PALE", "0.4"), ("MUTED", "0.6"), ("RICH", "0.8"), ("PURE", "1")],
-             "How deep the colour of the light they cast is. Pure: the game's own colours, plasma green and needle "
-             "pink; Pale: nearer white, as a real glow's light is.", "desktop"),
+            # (the moving lights' look, a page of its own for room:
+            # COLOURED_LIGHTS_PAGE)
+            ("COLOURED LIGHTS ›", None, _page_screen(*COLOURED_LIGHTS_PAGE),
+             "How brightly plasma, needles, grenades, blasts and shield flares light their surroundings, and how "
+             "deep the colour of their light is.", "desktop", "coloured_lights"),
             # (both PRISM modes' exposure and tone curve: the bake's meter and
             # step, shared, prism_rt.c's RT_FRAME settings)
             (SECTION, "IMAGE"),
@@ -2345,25 +2348,11 @@ PAGES = {
              "How light past white is drawn. Default and Filmic: rolled off gently, nothing darker moved. ACES: "
              "punchier, a film's curve. Local: as Filmic here. Clipped: held at white, as Classic did.",
              "desktop"),
-            # (display.upscaler, docs/prism_plugin.md: the 3D view drawn smaller
-            # and brought to the window's resolution before the HUD, in both
-            # PRISM modes (prism_upscale.c: Classic draws without one); its
-            # scale (UPSCALE QUALITY) under Path Traced while one is on, for
-            # room (Rebaked's page is full: config.toml's display.upscaler_scale,
-            # Quality by default), display.upscaler_sharpness config.toml's
-            # alone. DLSS a plugin the player builds, its choice last and left
-            # out where it is not ready (menu_tags.c's spinner_expand))
-            ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
-             "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. "
-             "FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS: a plugin you build "
-             "(prism-plugins README).",
-             "desktop"),
-            ("UPSCALE QUALITY", "display.upscaler_scale",
-             [("QUALITY", "0"), ("BALANCED", "0.58"), ("PERFORMANCE", "0.5"), ("ULTRA PERF.", "0.33"),
-              ("NATIVE", "1")],
-             "How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each "
-             "way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone.",
-             "desktop"),
+            # (the upscaler and its scale, a page of its own for room:
+            # UPSCALING_PAGE)
+            ("UPSCALING ›", None, _page_screen(*UPSCALING_PAGE),
+             "Draws the 3D view smaller and brings it to the screen's resolution with FSR 3.1 or DLSS: faster. "
+             "The upscaler and how much of the resolution it starts from.", "desktop", "upscaling"),
             # (the in-game baker, docs/prism_bake.md, whose bake both PRISM
             # modes read: Rebaked's light, and Path Traced's scene, lamps and
             # bounced light)
@@ -2385,6 +2374,52 @@ PAGES = {
              "materials or lights change; a finished bake is otherwise kept).", "desktop"),
             ("PROGRESS ON SCREEN", "display.bake_indicator", ON_OFF,
              "Shows \"Baking lightmaps 37%\" at the top left while a level is baked.", "desktop"),
+        ],
+    },
+    COLOURED_LIGHTS_PAGE[0]: {
+        "screen": COLOURED_LIGHTS_PAGE[1], "title": "COLOURED LIGHTS",
+        "rows": [
+            # (Path Traced's moving lights, Lighting Settings' COLOURED LIGHTS
+            # opens it; the rows Path Traced's alone: LIGHTING_MODE_ROWS.
+            # Their keys and settings as they were on Lighting Settings)
+            (SECTION, "MOVING LIGHTS"),
+            # (the moving lights' look: plasma, needles, grenades, muzzle
+            # flashes, the shields' flares; port/linux/game/prism_scene_lights.c's
+            # dynamic_look, docs/prism_pathtraced.md "What glows")
+            ("BRIGHTNESS", "display.prism_dynamic_lights",
+             [("OFF", "0"), ("FAINT", "0.25"), ("SOFT", "0.4"), ("NATURAL", "0.6"), ("FULL", "1")],
+             "How bright plasma, needles, grenades, blasts and shield flares light their surroundings. Full: as "
+             "bright as the game's own colours; white lights such as the flashlight keep their light.", "desktop",
+             "prism_dynamic_lights"),
+            ("COLOUR", "display.prism_light_saturation",
+             [("PALE", "0.4"), ("MUTED", "0.6"), ("RICH", "0.8"), ("PURE", "1")],
+             "How deep the colour of the light they cast is. Pure: the game's own colours, plasma green and needle "
+             "pink; Pale: nearer white, as a real glow's light is.", "desktop", "prism_light_saturation"),
+        ],
+    },
+    UPSCALING_PAGE[0]: {
+        "screen": UPSCALING_PAGE[1], "title": "UPSCALING",
+        "rows": [
+            # (both PRISM modes', Lighting Settings' UPSCALING opens it)
+            (SECTION, "RESOLUTION"),
+            # (display.upscaler, docs/prism_plugin.md: the 3D view drawn smaller
+            # and brought to the window's resolution before the HUD, in both
+            # PRISM modes (prism_upscale.c: Classic draws without one); its
+            # scale (UPSCALE QUALITY) while one is on; display.upscaler_sharpness
+            # config.toml's alone. DLSS a plugin the player builds, its choice
+            # last and left out where it is not ready (menu_tags.c's
+            # spinner_expand))
+            ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
+             "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. "
+             "FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS: a plugin you build "
+             "(prism-plugins README).",
+             "desktop"),
+            ("UPSCALE QUALITY", "display.upscaler_scale",
+             [("QUALITY", "0"), ("BALANCED", "0.58"), ("PERFORMANCE", "0.5"), ("ULTRA PERF.", "0.33"),
+              ("NATIVE", "1")],
+             "How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each "
+             "way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone.",
+             "desktop"),
         ],
     },
     RAY_TRACING_PAGE[0]: {

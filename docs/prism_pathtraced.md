@@ -358,7 +358,7 @@ strikes of plasma and needles have particles alone. The inventory, tag by tag an
   flies by; its strike's flash alike). Calibrated on the setup4 fight at tick 260 (`cal260/`: 1, 0.6 and 0.4,
   saturation 1, 0.6 and 0.4); swept again with the point lights' new shape (`v4_glow2_runs/f_dev2`: 0.4 and 0.6,
   saturation 0.6, 0.8 and 1): the defaults kept, 0.8 and past it the plasma walls and needles' pools read neon.
-  Both are Lighting Settings rows under Path Traced (Coloured Lights, Light Colour).
+  Both are on Lighting Settings' Coloured Lights page under Path Traced (Brightness, Colour).
 - **The pixelated green patch** of the rejected 4K shot at tick 255 (`work/openh1_eval/v4_shot2_runs/final4k/
   crop255.jpg`): not a decal, contrail, sprite or clamp, and not Path Traced's. It is Classic's enhanced dynamic
   light (display.dynamic_lights "enhanced") on b30's floor under a plasma pistol's bolt, drawn in blocks of 2 to 8
@@ -600,10 +600,10 @@ scene changes.
 | `debug.gbuffer_view` | `"pt_diffuse"`, `"pt_specular"`, `"pt_sun"`, `"pt_direct"`, `"pt_indirect"`, `"pt_history"`, `"pt_noisy"` | The diffuse light (denoised), the specular, the sun's visibility, the direct or indirect light alone (each denoised), the history's length, the diffuse light as traced |
 | `debug.pt_reference` | frames | The reference, at most that many frames |
 
-Settings > Video > Lighting > PRISM Path Traced; Lighting Settings then shows Profile, Denoiser, Coloured Lights
-(`display.prism_dynamic_lights`: Off 0, Faint 0.25, Soft 0.4, Natural 0.6, Full 1) and Light Colour
-(`display.prism_light_saturation`: Pale 0.4, Muted 0.6, Rich 0.8, Pure 1; "What glows", the look), the image's Exposure,
-Exposure Bias and Tone Curve, and the Light Bake (this mode reads the bake); Ray Tracing shows the traced scene's rows
+Settings > Video > Lighting > PRISM Path Traced; Lighting Settings then shows Profile, Denoiser, Coloured Lights ›
+(a page: Brightness, `display.prism_dynamic_lights`: Off 0, Faint 0.25, Soft 0.4, Natural 0.6, Full 1, and Colour,
+`display.prism_light_saturation`: Pale 0.4, Muted 0.6, Rich 0.8, Pure 1; "What glows", the look), the image's Exposure,
+Exposure Bias, Tone Curve and Upscaling › (a page: Upscaler, Upscale Quality), and the Light Bake (this mode reads the bake); Ray Tracing shows the traced scene's rows
 (Traced Models, Keep Shapes, Cutout Shadows). None of `display.prism_rt`'s settings reaches this mode
 (docs/prism_settings.md).
 

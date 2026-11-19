@@ -169,6 +169,8 @@
 		<string text="PRISM GRAPHICS"/>
 		<string text="PRISM ASSETS"/>
 		<string text="LIGHTING"/>
+		<string text="COLOURED LIGHTS"/>
+		<string text="UPSCALING"/>
 		<string text="RAY TRACING"/>
 		<string text="TRACED LIGHT LOOK"/>
 		<string text="GAMEPLAY"/>

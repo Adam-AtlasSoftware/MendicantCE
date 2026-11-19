@@ -1933,22 +1933,10 @@
 			<choice shown="OFF" value="off"/>
 			<choice shown="DLSS RR" value="dlss_rr"/>
 		</row>
-		<row key="prism_dynamic_lights" kind="choice" setting="display.prism_dynamic_lights" label="COLOURED LIGHTS" crumb="VIDEO › LIGHTING SETTINGS" search_choices="faint soft natural full" when="desktop">
-			<help>How bright plasma, needles, grenades, blasts and shield flares light their surroundings. Full: as bright as the game's own colours; white lights such as the flashlight keep their light.</help>
-			<choice shown="OFF" value="0"/>
-			<choice shown="FAINT" value="0.25"/>
-			<choice shown="SOFT" value="0.4"/>
-			<choice shown="NATURAL" value="0.6"/>
-			<choice shown="FULL" value="1"/>
+		<row key="coloured_lights" kind="link" label="COLOURED LIGHTS ›" crumb="VIDEO › LIGHTING SETTINGS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/coloured_lights/coloured_lights_settings_screen">
+			<help>How brightly plasma, needles, grenades, blasts and shield flares light their surroundings, and how deep the colour of their light is.</help>
 		</row>
-		<row key="prism_light_saturation" kind="choice" setting="display.prism_light_saturation" label="LIGHT COLOUR" crumb="VIDEO › LIGHTING SETTINGS" search_choices="pale muted rich pure" when="desktop">
-			<help>How deep the colour of the light they cast is. Pure: the game's own colours, plasma green and needle pink; Pale: nearer white, as a real glow's light is.</help>
-			<choice shown="PALE" value="0.4"/>
-			<choice shown="MUTED" value="0.6"/>
-			<choice shown="RICH" value="0.8"/>
-			<choice shown="PURE" value="1"/>
-		</row>
-		<section key="section_24" title="IMAGE" when="desktop"/>
+		<section key="section_23" title="IMAGE" when="desktop"/>
 		<row key="prism_exposure" kind="choice" setting="display.prism_exposure" label="EXPOSURE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="eye fixed" when="desktop">
 			<help>How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is.</help>
 			<choice shown="DEFAULT" value="style"/>
@@ -1976,22 +1964,10 @@
 			<choice shown="LOCAL" value="local"/>
 			<choice shown="CLIPPED" value="ce"/>
 		</row>
-		<row key="upscaler" kind="choice" setting="display.upscaler" label="UPSCALER" crumb="VIDEO › LIGHTING SETTINGS" search_choices="fsr dlss" when="desktop">
-			<help>Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS, offered once installed, from the next start.</help>
-			<note>DLSS: a plugin you build (prism-plugins README).</note>
-			<choice shown="OFF" value="off"/>
-			<choice shown="FSR 3.1" value="fsr3"/>
-			<choice shown="DLSS" value="plugin:dlss"/>
+		<row key="upscaling" kind="link" label="UPSCALING ›" crumb="VIDEO › LIGHTING SETTINGS" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaling/upscaling_settings_screen">
+			<help>Draws the 3D view smaller and brings it to the screen's resolution with FSR 3.1 or DLSS: faster. The upscaler and how much of the resolution it starts from.</help>
 		</row>
-		<row key="upscaler_scale" kind="choice" setting="display.upscaler_scale" label="UPSCALE QUALITY" crumb="VIDEO › LIGHTING SETTINGS" search_choices="quality balanced performance ultra perf native" when="desktop">
-			<help>How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone.</help>
-			<choice shown="QUALITY" value="0"/>
-			<choice shown="BALANCED" value="0.58"/>
-			<choice shown="PERFORMANCE" value="0.5"/>
-			<choice shown="ULTRA PERF." value="0.33"/>
-			<choice shown="NATIVE" value="1"/>
-		</row>
-		<section key="section_30" title="LIGHT BAKE" when="desktop"/>
+		<section key="section_28" title="LIGHT BAKE" when="desktop"/>
 		<row key="bake" kind="choice" setting="display.bake" label="BAKE" crumb="VIDEO › LIGHTING SETTINGS" search_choices="while playing when asked never" when="desktop">
 			<help>While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM lightings read the bake.</help>
 			<choice shown="WHILE PLAYING" value="auto"/>
@@ -2019,6 +1995,48 @@
 			<help>Shows "Baking lightmaps 37%" at the top left while a level is baked.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/coloured_lights/coloured_lights_settings_screen" kind="settings" layout="page" geometry="tall" title="COLOURED LIGHTS">
+		<section key="section_0" title="MOVING LIGHTS" when="desktop"/>
+		<row key="prism_dynamic_lights" kind="choice" setting="display.prism_dynamic_lights" label="BRIGHTNESS" crumb="VIDEO › LIGHTING SETTINGS › COLOURED LIGHTS" search_choices="faint soft natural full" when="desktop">
+			<help>How bright plasma, needles, grenades, blasts and shield flares light their surroundings. Full: as bright as the game's own colours; white lights such as the flashlight keep their light.</help>
+			<choice shown="OFF" value="0"/>
+			<choice shown="FAINT" value="0.25"/>
+			<choice shown="SOFT" value="0.4"/>
+			<choice shown="NATURAL" value="0.6"/>
+			<choice shown="FULL" value="1"/>
+		</row>
+		<row key="prism_light_saturation" kind="choice" setting="display.prism_light_saturation" label="COLOUR" crumb="VIDEO › LIGHTING SETTINGS › COLOURED LIGHTS" search_choices="pale muted rich pure" when="desktop">
+			<help>How deep the colour of the light they cast is. Pure: the game's own colours, plasma green and needle pink; Pale: nearer white, as a real glow's light is.</help>
+			<choice shown="PALE" value="0.4"/>
+			<choice shown="MUTED" value="0.6"/>
+			<choice shown="RICH" value="0.8"/>
+			<choice shown="PURE" value="1"/>
+		</row>
+		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
+		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
+		<button key="button_cancel" kind="cancel" run="port settings page cancel" help="Goes back without these changes."/>
+	</screen>
+	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaling/upscaling_settings_screen" kind="settings" layout="page" geometry="tall" title="UPSCALING">
+		<section key="section_0" title="RESOLUTION" when="desktop"/>
+		<row key="upscaler" kind="choice" setting="display.upscaler" label="UPSCALER" crumb="VIDEO › LIGHTING SETTINGS › UPSCALING" search_choices="fsr dlss" when="desktop">
+			<help>Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS, offered once installed, from the next start.</help>
+			<note>DLSS: a plugin you build (prism-plugins README).</note>
+			<choice shown="OFF" value="off"/>
+			<choice shown="FSR 3.1" value="fsr3"/>
+			<choice shown="DLSS" value="plugin:dlss"/>
+		</row>
+		<row key="upscaler_scale" kind="choice" setting="display.upscaler_scale" label="UPSCALE QUALITY" crumb="VIDEO › LIGHTING SETTINGS › UPSCALING" search_choices="quality balanced performance ultra perf native" when="desktop">
+			<help>How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone.</help>
+			<choice shown="QUALITY" value="0"/>
+			<choice shown="BALANCED" value="0.58"/>
+			<choice shown="PERFORMANCE" value="0.5"/>
+			<choice shown="ULTRA PERF." value="0.33"/>
+			<choice shown="NATIVE" value="1"/>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

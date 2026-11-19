@@ -1197,4 +1197,10 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera.png" width="512" height="64"/>
 	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/coloured_lights/header_coloured_lights_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/coloured_lights/header_coloured_lights_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaling/header_upscaling_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaling/header_upscaling_settings.png" width="512" height="64"/>
+	</bitmap>
 </menus>

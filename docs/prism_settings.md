@@ -34,9 +34,16 @@ every page fits in every mode.
 | Classic Lighting | Shadow Quality, Smooth Lighting, Dynamic Lights, Ambient Occlusion, Shade Depth (with World) | C |
 | PRISM Extras for Classic | Lightmaps, Model Highlights, Model Reflections, Sun Shadows, Sun Shadow Detail and Edges (with Sun), Baked Shadows, Shadow Depth (with Sharp) | C |
 | Rebaked Lighting | Composition, Object Light, Shadow Quality (while Object Shadows are Classic's) | R |
-| Path Tracing | Profile, Denoiser | P |
-| Image | Exposure, Exposure Bias, Tone Curve | R, P |
+| Path Tracing | Profile, Denoiser, Coloured Lights › | P |
+| Image | Exposure, Exposure Bias, Tone Curve, Upscaling › | R, P |
 | Light Bake | Bake, Bake Quality, Sky Light, Rebake Lightmaps, Progress on Screen | R, P (Path Traced reads the bake) |
+
+Two pages open from it, for room (a page is packed to fit the 4:3 and 16:9 layouts in every mode):
+
+| Page | Rows | Shown |
+| --- | --- | --- |
+| Coloured Lights › | Brightness (`display.prism_dynamic_lights`), Colour (`display.prism_light_saturation`): how brightly plasma, needles, grenades, blasts and shield flares light their surroundings, and how deep their light's colour is | P |
+| Upscaling › | Upscaler (`display.upscaler`: Off, FSR 3.1, DLSS once its plugin is ready), Upscale Quality (`display.upscaler_scale`, while an upscaler is on) | R, P |
 
 **Ray Tracing:**
 
