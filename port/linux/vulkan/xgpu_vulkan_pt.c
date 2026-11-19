@@ -94,6 +94,9 @@ indirect light's clamp by default (0 none) */
 them take strides 1, 2, 4 and 16 (HALO_PT_ATROUS_WIDE; else 1 to 8) */
 #define ATROUS_STEPS_DEFAULT 4
 #define ATROUS_WIDE_DEFAULT 1
+/* whether the temporal pass holds a moving eye's glossy specular history to
+this frame's 3 x 3 by default (HALO_PT_SPEC_HOLD) */
+#define SPEC_HOLD_DEFAULT 1
 /* ReSTIR DI by default: the spatial neighbours a pixel
 (HALO_PT_RESTIR_SPATIAL), the initial candidates where they are reused
 (HALO_PT_CANDIDATES; 8 without them), their disc's radius in pixels
@@ -117,6 +120,9 @@ reservoirs kept for the next frame, the temporal reuse by a permutation;
 the boiling filter's strength in hundredths above them, the disc's radius
 above that. By default: whether the permutation is on, the boiling
 filter's strength (0 none) */
+/* (diagnoses, not for play: FEEDBACK brings back round 6's blobs in motion,
+and PERMUTE is biased, a reservoir from another pixel counted without its
+support there: G4's first pose 0.0957 to 0.1583, darker) */
 #define REUSE_FEEDBACK 1u
 #define REUSE_PERMUTE 2u
 #define RESTIR_PERMUTE_DEFAULT 0
@@ -1248,6 +1254,16 @@ static int atrous_steps(void)
 	return steps;
 }
 
+/* the temporal pass's hold of the specular history (HALO_PT_SPEC_HOLD) */
+static uint32_t spec_hold(void)
+{
+	static int hold = -1;
+
+	if (hold < 0)
+		hold = env_int("HALO_PT_SPEC_HOLD", SPEC_HOLD_DEFAULT) != 0;
+	return (uint32_t)hold;
+}
+
 /* whether four a-trous steps skip stride 8 for 16 (HALO_PT_ATROUS_WIDE) */
 static int atrous_wide(void)
 {
@@ -1814,7 +1830,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			}
 			/* (the temporal pass reads the pre-blur's b, else the light as
 			traced itself: no pass copies it) */
-			dispatch(commands, PASS_TEMPORAL, scene, slot_buffer->address, preblur ? 0u : 1u, 0, 0, 0, groups_x,
+			dispatch(commands, PASS_TEMPORAL, scene, slot_buffer->address, preblur ? 0u : 1u, spec_hold(), 0, 0, groups_x,
 				groups_y);
 			stamp(commands, time_slot, 2);
 			barrier(commands);

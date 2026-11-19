@@ -2656,6 +2656,30 @@ void main()
         }
         else if (amount > 0.0)
             hs.a = mix(hs.a, min(hs.a, 2.0), amount);
+        /* (the hold, push.parameters.y (HALO_PT_SPEC_HOLD, on by default
+        since round 8): while the eye moves, a glossy surface's specular history no brighter than the
+        brightest of this frame's samples over the 3 x 3 on the same
+        surface, as a TAA's clamp: a glint the history carries where nothing
+        about it now reflects one is a reflection that moved on, which the
+        reprojection's taps smeared out (round 7's radial streaks of wall
+        glints as the eye moves forward). A lamp's highlight still there is
+        among this frame's samples (ReSTIR finds the lamp most frames) */
+        vec3 moved = job.camera[0].xyz - job.last_camera[0].xyz;
+        if (push.parameters.y != 0u && g.roughness < 0.6 && dot(moved, moved) > 1.0e-8)
+        {
+            uint here = imageLoad(guide_now, pixel).x;
+            float top = ns.a;
+            for (int k = 0; k < 9; k++)
+            {
+                ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
+                if (k == 4 || !inside(q) || imageLoad(guide_now, q).x != here)
+                    continue;
+                top = max(top, raw ? imageLoad(noisy_specular, q).a : imageLoad(spec_b, q).a);
+            }
+            float lh = luma(hs.rgb);
+            if (lh > top)
+                hs.rgb *= top / lh;
+        }
     }
     /* (the counters, a level pixel in 16 that looks for its history: its
     last frame's place in the view, the distance the last frame saw there its

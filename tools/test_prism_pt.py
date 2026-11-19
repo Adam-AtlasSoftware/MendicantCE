@@ -816,3 +816,14 @@ def test_the_light_passs_specialization_constants_match_the_hosts():
     assert ids == list(range(count)), (ids, count)
     filled = sorted(set(int(i) for i in re.findall(r"\tvalues\[(\d+)\] = ", host)))
     assert filled == list(range(count)), filled
+
+
+
+def test_the_specular_hold_drops_a_glint_that_moved_on_and_keeps_a_highlight_still_there():
+    # (a glint the history carries over a wall whose samples now see nothing bright: held to them)
+    assert model.specular_hold(5.0, 0.02, [0.01] * 8) == 0.02
+    # (a lamp's highlight still there: one of the 3 x 3's samples finds it, the history kept)
+    assert model.specular_hold(5.0, 0.02, [0.01] * 7 + [9.0]) == 5.0
+    # (a still eye, or a rough surface: never held)
+    assert model.specular_hold(5.0, 0.02, [0.01] * 8, moving=False) == 5.0
+    assert model.specular_hold(5.0, 0.02, [0.01] * 8, roughness=0.8) == 5.0

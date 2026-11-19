@@ -669,3 +669,12 @@ def preblur(image, taps=12, radius=6.0, turn=0.0):
                     count += 1.0
             out[y, x] = total / count
     return out
+
+
+
+def specular_hold(history, here, neighbours, moving=True, roughness=0.3):
+    """the temporal pass's hold of the specular history (HALO_PT_SPEC_HOLD): while the eye moves, a glossy surface's
+    (roughness under 0.6) history luminance no brighter than the brightest of this frame's samples over the 3 x 3"""
+    if not moving or roughness >= 0.6:
+        return history
+    return min(history, max([here] + list(neighbours)))
