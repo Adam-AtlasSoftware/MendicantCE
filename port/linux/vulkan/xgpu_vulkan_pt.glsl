@@ -1619,8 +1619,12 @@ void analytic_select(Surface g, uint baked_ids[8], float baked_visibility[8])
 }
 /* one analytic light's visibility from o: a point of it (a lamp's by solid
 angle, above the surface's horizon: the clipped integral's part), its
-shadow traced */
-float analytic_visible(Surface g, vec3 o, uint key, bool objects_only)
+shadow traced. For the diffuse stream (cosine) the point is the clamped
+cosine's: a point by solid angle kept with the probability n.l, so that V's
+mean is the light's visibility weighed as its diffuse light is (by solid
+angle alone a lamp half hidden at a grazing angle counted as half seen; at
+most 8 tries, the last kept) */
+float analytic_visible(Surface g, vec3 o, uint key, bool objects_only, bool cosine)
 {
     if ((key & ANALYTIC_FIXTURE) != 0u)
     {
@@ -1632,11 +1636,13 @@ float analytic_visible(Surface g, vec3 o, uint key, bool objects_only)
     vec3 a0, a1, a2, radiance;
     lamp_corners(key, a0, a1, a2, radiance);
     vec3 ne = normalize(cross(a1 - a0, a2 - a0));
-    for (int attempt = 0; attempt < 4; attempt++)
+    for (int attempt = 0; attempt < 8; attempt++)
     {
         vec3 l;
         float d, inverse_pdf;
         if (!lamp_direction(g.point, a0, a1, a2, ne, l, d, inverse_pdf) || dot(g.normal, l) <= 0.0)
+            continue;
+        if (cosine && attempt < 7 && rnd() > dot(g.normal, l))
             continue;
         if (objects_only)
             return objects_blocked(o, l, max(d * 0.995 - 0.03, 0.0)) ? 0.0 : 1.0;
@@ -1730,7 +1736,7 @@ void analytic_light(Surface g, vec3 o, out vec3 diffuse, out vec3 specular)
         bool baked = stream >= 2;
         float v = 1.0;
         if (!baked || job.objects != uvec2(0u))
-            v = analytic_visible(g, o, picks[stream], baked);
+            v = analytic_visible(g, o, picks[stream], baked, (stream & 1) == 0);
         if ((stream & 1) == 0)
             diffuse += sums[stream] * v;
         else
@@ -2765,26 +2771,32 @@ void main()
         noisy_d += domes_at(o, g.normal, m);
         vec3 ld, ls;
         /* (the analytic lights first: ReSTIR DI then takes the rest) */
-        uint baked_ids[8];
-        float baked_visibility[8];
-        for (int k = 0; k < 8; k++)
+        /* (none of it where they are off, HALO_PT_ANALYTIC=0, the default:
+        that frame the one before them) */
+        analytic_count = 0;
+        if (job.analytic.x > 0.0)
         {
-            baked_ids[k] = 0xffffffffu;
-            baked_visibility[k] = 0.0;
+            uint baked_ids[8];
+            float baked_visibility[8];
+            for (int k = 0; k < 8; k++)
+            {
+                baked_ids[k] = 0xffffffffu;
+                baked_visibility[k] = 0.0;
+            }
+            if (level && texel && job.lamp_ids != uvec2(0u))
+                baked_lamps_at(g.page, g.lightmap, baked_ids, baked_visibility);
+            /* (the analytic lamps' lobe widened by the specular antialiasing:
+            only theirs, so the reflection's ray, its roughness test and ReSTIR
+            DI's multiple importance weights keep the G-buffer's roughness) */
+            Surface ga = g;
+            if ((uint(job.analytic.y) & 1u) != 0u)
+                ga.roughness = roughness_filtered(pixel, g.roughness, g.normal, g.instance, g.point);
+            analytic_select(ga, baked_ids, baked_visibility);
+            seed_for(pixel, frame, 9u);
+            analytic_light(ga, o, ld, ls);
+            noisy_d += ld;
+            noisy_s += ls;
         }
-        if (level && texel && job.lamp_ids != uvec2(0u))
-            baked_lamps_at(g.page, g.lightmap, baked_ids, baked_visibility);
-        /* (the analytic lamps' lobe widened by the specular antialiasing:
-        only theirs, so the reflection's ray, its roughness test and ReSTIR
-        DI's multiple importance weights keep the G-buffer's roughness) */
-        Surface ga = g;
-        if ((uint(job.analytic.y) & 1u) != 0u)
-            ga.roughness = roughness_filtered(pixel, g.roughness, g.normal, g.instance, g.point);
-        analytic_select(ga, baked_ids, baked_visibility);
-        seed_for(pixel, frame, 9u);
-        analytic_light(ga, o, ld, ls);
-        noisy_d += ld;
-        noisy_s += ls;
         seed_for(pixel, frame, 3u);
         lamps_mis = glossy;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);

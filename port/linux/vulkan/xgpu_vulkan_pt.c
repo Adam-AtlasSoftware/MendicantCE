@@ -1413,7 +1413,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 				job->lamp_ids = lookup.lamp_ids;
 			}
 		}
-		job->analytic[1] = (float)(specular_aa && !reference ? 1 : 0);
+		job->analytic[1] = (float)(specular_aa && analytic && !reference ? 1 : 0);
 		job->analytic[2] = SPECULAR_AA_KAPPA;
 		job->analytic[3] = getenv("HALO_PT_DEBUG_ANALYTIC") && atoi(getenv("HALO_PT_DEBUG_ANALYTIC")) ? 1.0f : 0.0f;
 	}

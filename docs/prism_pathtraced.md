@@ -165,7 +165,9 @@ unshadowed light is computed exactly and only their visibility is estimated (Hei
 
 **Off by default** (`HALO_PT_ANALYTIC=0`): measured at G4 and G5 it does not yet beat the stochastic lamps by the
 gates (below). `HALO_PT_ANALYTIC=4` turns it on (`HALO_PT_BAKED_VISIBILITY` and `HALO_PT_SPECULAR_AA`, on by default,
-act only on the analytic lamps).
+act only on the analytic lamps; with `HALO_PT_ANALYTIC=0` the shader skips the whole of it, and the bake makes no lamp
+visibility unless `HALO_BAKE_LAMP_VISIBILITY=1`, so the default frame and bake are the ones before it: BAKE_VERSION 18,
+round 8's G7 and G4 at the default loading d75c355d4's bakes unchanged).
 
 - **Which lights** (`analytic_select`; `HALO_PT_ANALYTIC` of them a pixel, at most 8): first the lamps
   the bake keeps for the tile of the pixel's texel (below) where they light the pixel; then, to fill the count (an
@@ -201,8 +203,9 @@ act only on the analytic lamps).
   is 4 candidates where the analytic lamps are on, 8 without: it pays for part of them), an analytic light's target nought
   there, and the reflection's ray takes no light from an analytic lamp it meets (`analytic_triangle`): nothing is
   counted twice and the other lights' estimate stays unbiased. The reference does not change.
-- **The bake's lamp visibility** (`HALO_PT_BAKED_VISIBILITY`, on by default; `docs/prism_bake.md`, "The lamps'
-  visibility", BAKE_VERSION 21): each tile's 7 lamps and each texel's visibility of each (4 bits), through the level
+- **The bake's lamp visibility** (`HALO_PT_BAKED_VISIBILITY`, on by default where the bake has it; made only by a bake
+  run with `HALO_BAKE_LAMP_VISIBILITY=1`; `docs/prism_bake.md`, "The lamps' visibility"; optional records, BAKE_VERSION
+  stays 18): each tile's 7 lamps and each texel's visibility of each (4 bits), through the level
   and the static scenery. The pixel reads the lamps of the tile of its nearest texel and their visibility bilinear
   over the 4 texels about its place (each texel's of its own tile's lamps, matched by lamp; a texel not baked, or
   inside the level, left out), as Raster reads the light. The inside flag matters at the foot of a wall: its

@@ -80,7 +80,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 /* ---------- constants */
 
 /* the bake file's maker (a change makes every bake stale) */
-#define BAKE_VERSION 21u
+#define BAKE_VERSION 18u
 /* a tile's texels, a mask's */
 #define TILE 16u
 #define TILE_TEXELS (TILE * TILE)
@@ -454,6 +454,10 @@ struct bake_state
 	buffers), the next, those done */
 	uint32_t *lamp_tiles;
 	uint32_t lamp_tile_count, lamps_done, lamps_batched;
+	/* whether this bake makes it (HALO_BAKE_LAMP_VISIBILITY=1; off by
+	default: only the analytic lamps, off by default, read it; its records
+	optional, so its absence makes no bake stale and needs no new version) */
+	int lamps_on;
 	/* the volume: its batches of probes (done: those written) */
 	struct prism_bake_batches volume;
 	int volume_loaded;
@@ -2041,6 +2045,7 @@ static struct bake_state *bake_begin(void)
 	them out, HALO_BAKE_FILTER_PASSES sets the passes: diagnostics) */
 	prism_bake_robust_defaults(&b->robust);
 	b->robust_on = getenv("HALO_BAKE_NO_ROBUST") == NULL;
+	b->lamps_on = getenv("HALO_BAKE_LAMP_VISIBILITY") && atoi(getenv("HALO_BAKE_LAMP_VISIBILITY")) != 0;
 	prism_bake_filter_defaults(&b->filter, (int)b->quality);
 	if (getenv("HALO_BAKE_FILTER_PASSES"))
 		b->filter.passes = atoi(getenv("HALO_BAKE_FILTER_PASSES"));
@@ -4767,7 +4772,7 @@ static int plan_write(struct bake_state *b, int with_masks)
 		if (tile->mask_state >= 1)
 			jobs[at++] = prism_bake_job_sun_mask_tile(tile->vpage, 0, tile->x, tile->y);
 		/* (its baked lamp visibility, PRISM Path Traced's: every tile's) */
-		if (at < count)
+		if (b->lamps_on && at < count)
 			jobs[at++] = prism_bake_job_sun_mask_tile(tile->vpage, 8, tile->x, tile->y);
 	}
 	result = b->writing ? prism_bake_cache_append_plan(&b->writer, jobs, at) : 0;
@@ -5425,7 +5430,7 @@ bake still traces) */
 			break;
 		}
 		/* (then the baked lamp visibility, PRISM Path Traced's) */
-		if (!b->lamp_tiles || b->lamps_done < b->lamp_tile_count)
+		if (b->lamps_on && (!b->lamp_tiles || b->lamps_done < b->lamp_tile_count))
 		{
 			lamp_frame(commands, b);
 			if (!b->lamp_tiles || b->lamps_done < b->lamp_tile_count)
