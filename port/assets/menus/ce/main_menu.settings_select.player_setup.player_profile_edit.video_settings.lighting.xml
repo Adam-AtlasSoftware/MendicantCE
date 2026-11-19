@@ -548,7 +548,7 @@
 		<string text="How sharp the game's own object shadows are, which PRISM Rebaked draws while Ray Tracing's Object Shadows are Classic's."/>
 		<string text=""/>
 		<string text="Quality: a bounce of light traced at every pixel. Performance: the bounced light read from the bake where the level has it, a bounce traced for the characters and vehicles alone; faster."/>
-		<string text="PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS Ray Reconstruction (offered once installed), which also brings the view to the screen's resolution; from the next start. Off: the light as traced, grainy (for checking).|DLSS: a plugin you build (prism-plugins README)."/>
+		<string text="PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS Ray Reconstruction (offered once installed), which also brings the view to the screen's resolution; from the next start. Off: the light as traced, grainy (for checking).|DLSS's plugin: the prism-plugins README."/>
 		<string text="How brightly plasma, needles, grenades, blasts and shield flares light their surroundings, and how deep the colour of their light is."/>
 		<string text=""/>
 		<string text="How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is."/>

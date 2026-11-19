@@ -69,7 +69,7 @@
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaling/help_strings">
 		<string text=""/>
 		<string text=""/>
-		<string text="Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS: a plugin you build (prism-plugins README)."/>
+		<string text="Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS's plugin: the prism-plugins README."/>
 		<string text="How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone."/>
 	</strings>
 </menus>

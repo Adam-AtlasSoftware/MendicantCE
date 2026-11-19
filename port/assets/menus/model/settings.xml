@@ -1928,7 +1928,7 @@
 		</row>
 		<row key="denoiser" kind="choice" setting="display.denoiser" label="DENOISER" crumb="VIDEO › LIGHTING SETTINGS" search_choices="prism dlss rr" when="desktop">
 			<help>PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS Ray Reconstruction (offered once installed), which also brings the view to the screen's resolution; from the next start. Off: the light as traced, grainy (for checking).</help>
-			<note>DLSS: a plugin you build (prism-plugins README).</note>
+			<note>DLSS's plugin: the prism-plugins README.</note>
 			<choice shown="PRISM" value="prism"/>
 			<choice shown="OFF" value="off"/>
 			<choice shown="DLSS RR" value="dlss_rr"/>
@@ -2025,7 +2025,7 @@
 		<section key="section_0" title="RESOLUTION" when="desktop"/>
 		<row key="upscaler" kind="choice" setting="display.upscaler" label="UPSCALER" crumb="VIDEO › LIGHTING SETTINGS › UPSCALING" search_choices="fsr dlss" when="desktop">
 			<help>Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS, offered once installed, from the next start.</help>
-			<note>DLSS: a plugin you build (prism-plugins README).</note>
+			<note>DLSS's plugin: the prism-plugins README.</note>
 			<choice shown="OFF" value="off"/>
 			<choice shown="FSR 3.1" value="fsr3"/>
 			<choice shown="DLSS" value="plugin:dlss"/>
