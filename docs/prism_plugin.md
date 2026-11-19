@@ -145,8 +145,17 @@ is drawn instead.
 Each has its environment variable (`HALO_UPSCALER`, `HALO_UPSCALER_SCALE`, `HALO_UPSCALER_SHARPNESS`,
 `HALO_DENOISER`) and the console's form (`prism_set "display.upscaler fsr3"`). `display.upscaler_scale` was
 `display.render_scale` on the M5 branch: GOAT H1's `display.render_scale` scales the whole frame (the HUD too), so the
-upscaler's share of the view has a setting of its own.
-A plugin is opened as the game starts: choosing one in the menus takes effect at the
+upscaler's share of the view has a setting of its own. Classic (`display.lighting` `"ce"`) draws without an upscaler
+(`prism_upscale.c`); `"ce_deferred"` and the PRISM lightings upscale.
+
+Settings (Video, Lighting Settings): UPSCALER under IMAGE in PRISM Rebaked and Path Traced, UPSCALE QUALITY
+(`display.upscaler_scale`: Quality, Balanced, Performance, Ultra Performance, Native) under Path Traced while an
+upscaler is on (Rebaked's page is full), DENOISER under PATH TRACING (PRISM, the default; Off; DLSS RR). The
+sharpness is config.toml's alone. The DLSS choices (UPSCALER's DLSS, DENOISER's DLSS RR, each last) are offered only
+where the plugin `dlss` is ready: in use this run, or found in the plugins folder, its ABI accepted and its
+`supported` passing on this card (`xgpu_vulkan_upscale_plugin_ready`, asked as the menus are made; menu_tags.c's
+spinner_expand leaves the choice out otherwise, and the rows' help says the plugin is one the player builds, see
+the prism-plugins README). A plugin is opened as the game starts: choosing one in the menus takes effect at the
 next start. Under an upscaler there is no multisampling or supersampling (`display.anti_aliasing`'s `msaa*` and
 `ssaa2x` are drawn as off) and no FXAA or SMAA after it: the upscaler is the view's anti-aliasing.
 

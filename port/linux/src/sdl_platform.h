@@ -126,6 +126,11 @@ Mac: Metal and ProMotion), PLATFORM_VRR_NOT_HERE where it has no meaning
 #define PLATFORM_VRR_SYSTEM 3
 #define PLATFORM_VRR_NOT_HERE 4
 int platform_vrr_detected(void);
+/* Settings' Lighting Settings (port/linux/game/menu_tags.c): whether PRISM's
+renderer plugin of that name ("dlss") is ready to be offered: in use, or
+found in the plugins folder and working on the graphics card (the desktop's
+Vulkan builds; 0 elsewhere) */
+int platform_prism_plugin_ready(char const *name);
 /* Settings > Audio's devices (port/linux/game/menu_tags.c): the names of
 the output (or, recording, input) devices SDL finds; how many. None on
 Android, which plays and records with the system's. */

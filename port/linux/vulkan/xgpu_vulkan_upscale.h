@@ -36,6 +36,12 @@ void xgpu_vulkan_upscale_plugins_create(void);
 void xgpu_vulkan_upscale_shutdown(void);
 /* the credits' text of the plugins in use, one line each (NULL: none) */
 const char *xgpu_vulkan_upscale_credits(void);
+/* whether the plugin of that name is ready for Settings to offer (its
+PRISM_CAP_* where it is, else 0): in use this run (made, not turned off),
+or, where none of that name was opened, found in the folder, its ABI
+accepted and its supported passing on the device made (asked once a name,
+then remembered; the library closed again). 0 before the device is made */
+uint32_t xgpu_vulkan_upscale_plugin_ready(const char *folder, const char *name);
 
 /* ---------- the view (xgpu_vulkan_stream.c's UPSCALE)
 

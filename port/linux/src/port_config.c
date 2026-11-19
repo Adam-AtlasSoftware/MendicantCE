@@ -1005,7 +1005,9 @@ static const struct config_setting config_settings[] =
 		"\"plugin:<name>\", a plugin you built (docs/prism_plugin.md: plugins\n"
 		"in the data folder's plugins, such as DLSS's: \"plugin:dlss\"), opened\n"
 		"as the game starts; one that cannot be opened is FSR 3.1. One player's\n"
-		"window only (split screen draws without). Vulkan on the desktop." },
+		"window only (split screen draws without), under the PRISM lightings\n"
+		"(Classic, display.lighting \"ce\", draws without). Vulkan on the\n"
+		"desktop." },
 	{ "display.upscaler_sharpness", _config_real, "0.0", "HALO_UPSCALER_SHARPNESS", _environment_value,
 		_platform_desktop,
 		"With display.upscaler on: how much the upscaled view is sharpened,\n"
@@ -4590,7 +4592,7 @@ static const struct
 	{ "display.prism_raster_object_shadows", "PRISM Rebaked (display.lighting \"raster\") alone" },
 	{ "display.pt_profile", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
 	{ "display.denoiser", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
-	{ "display.upscaler", "every mode's 3D view" },
+	{ "display.upscaler", "every mode's 3D view (Settings offers it under PRISM Rebaked and PRISM Path Traced)" },
 	{ "display.upscaler_scale", "every mode's 3D view, with display.upscaler on" },
 	{ "display.upscaler_sharpness", "every mode's 3D view, with display.upscaler on" },
 	{ "display.prism_glow_lights", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },

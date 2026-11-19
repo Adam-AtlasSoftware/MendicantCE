@@ -39,12 +39,14 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_exposure" x="28" y="582" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_exposure_bias" x="28" y="603" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_tone_curve" x="28" y="624" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26" x="28" y="651" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake" x="28" y="671" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_quality" x="28" y="692" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_sky_light" x="28" y="713" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_rebake" x="28" y="734" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_indicator" x="28" y="755" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler" x="28" y="645" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler_scale" x="28" y="666" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28" x="28" y="693" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake" x="28" y="713" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_quality" x="28" y="734" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_sky_light" x="28" y="755" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_rebake" x="28" y="776" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_indicator" x="28" y="797" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -362,18 +364,11 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_denoiser" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg1" x="251" y="1"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="21" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg0" type="text" controller="1" width="59" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="PRISM" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg1" type="text" controller="1" width="59" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="PRISM|OFF" setting="display.denoiser" values="prism|off" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="PRISM|OFF|DLSS RR" setting="display.denoiser" values="prism|off|dlss_rr" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_22" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_22_title"/>
@@ -407,16 +402,34 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_tone_curve_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="DEFAULT|FILMIC|ACES|LOCAL|CLIPPED" setting="display.prism_tone_curve" values="style|filmic|aces|local|ce" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26_title"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="26" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="26" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|FSR 3.1|DLSS" setting="display.upscaler" values="off|fsr3|plugin:dlss" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler_scale" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="27" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="QUALITY|BALANCED|PERFORMANCE|ULTRA PERF.|NATIVE" setting="display.upscaler_scale" values="0|0.58|0.5|0.33|1" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28_title"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="28" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="27" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="29" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="WHILE PLAYING|WHEN ASKED|NEVER" setting="display.bake" values="auto|ask|off" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
@@ -425,7 +438,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="28" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="30" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="MAX|ULTRA|HIGH|DRAFT" setting="display.bake_quality" values="max|ultra|high|draft" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
@@ -436,7 +449,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_seg1" x="242" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="29" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="31" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_seg0" type="text" controller="1" width="50" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="SKY" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -452,7 +465,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_seg1" x="254" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="30" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="32" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_seg0" type="text" controller="1" width="62" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="—" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -468,7 +481,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_seg1" x="240" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="31" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" string_index="33" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -505,6 +518,8 @@
 		<string text="EXPOSURE"/>
 		<string text="EXPOSURE BIAS"/>
 		<string text="TONE CURVE"/>
+		<string text="UPSCALER"/>
+		<string text="UPSCALE QUALITY"/>
 		<string text="LIGHT BAKE"/>
 		<string text="BAKE"/>
 		<string text="BAKE QUALITY"/>
@@ -535,11 +550,13 @@
 		<string text="How sharp the game's own object shadows are, which PRISM Rebaked draws while Ray Tracing's Object Shadows are Classic's."/>
 		<string text=""/>
 		<string text="Quality: a bounce of light traced at every pixel. Performance: the bounced light read from the bake where the level has it, a bounce traced for the characters and vehicles alone; faster."/>
-		<string text="PRISM: the traced light smoothed over the frames before and the pixels about. Off: the light as traced, one sample a pixel, grainy (for checking)."/>
+		<string text="PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS Ray Reconstruction, which also brings the view to the screen's resolution; from the next start. Off: the light as traced, grainy (for checking).|DLSS is a plugin you build yourself (see the prism-plugins README); its choices show once it is installed and works on this graphics card."/>
 		<string text=""/>
 		<string text="How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is."/>
 		<string text="Brighter or darker than the exposure chooses, in stops: +1 twice as bright, -1 half."/>
 		<string text="How light past white is drawn. Default and Filmic: rolled off gently, nothing darker moved. ACES: punchier, a film's curve. Local: as Filmic here. Clipped: held at white, as Classic did."/>
+		<string text="Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. FSR 3.1 is built in; DLSS from the next start.|DLSS is a plugin you build yourself (see the prism-plugins README); its choices show once it is installed and works on this graphics card."/>
+		<string text="How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone."/>
 		<string text=""/>
 		<string text="While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM lightings read the bake."/>
 		<string text="Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller."/>

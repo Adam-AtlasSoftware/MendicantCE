@@ -1724,6 +1724,9 @@ plugin display.upscaler and display.denoiser name ("plugin:<name>"'s name;
 empty: none) and the folder they are opened from, before the window opens
 (the plugins say what the instance and device need) */
 int host_vulkan_plugins_choose(const char *upscaler, const char *denoiser, const char *folder);
+/* (host_vulkan.c's) whether a plugin of that name is ready for Settings to
+offer: its PRISM_CAP_* (prism_plugin.h), else 0 */
+unsigned int host_vulkan_plugin_ready(const char *name);
 /* (host_vulkan.c's) debug.gpu_stats, debug.gpu_validation (or debug.gl_debug) */
 #define HOST_VULKAN_DEBUG_STATISTICS 1
 #define HOST_VULKAN_DEBUG_VALIDATION 2
@@ -2214,6 +2217,16 @@ static BOOL platform_vrr(void)
 	return on;
 #else
 	return FALSE;
+#endif
+}
+
+int platform_prism_plugin_ready(char const *name)
+{
+#if defined(HALO_METAL) || defined(HALO_ANDROID) || defined(HALO_VR) || !defined(HALO_VULKAN)
+	(void)name;
+	return 0;
+#else
+	return host_vulkan_plugin_ready(name) != 0;
 #endif
 }
 

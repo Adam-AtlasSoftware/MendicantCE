@@ -36,12 +36,14 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_exposure" x="28" y="634"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_exposure_bias" x="28" y="659"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_tone_curve" x="28" y="684"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26" x="28" y="715"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake" x="28" y="737"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_quality" x="28" y="762"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_sky_light" x="28" y="787"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_rebake" x="28" y="812"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_indicator" x="28" y="837"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler" x="28" y="709"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler_scale" x="28" y="734"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28" x="28" y="765"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake" x="28" y="787"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_quality" x="28" y="812"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_sky_light" x="28" y="837"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_rebake" x="28" y="862"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake_indicator" x="28" y="887"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/button_bar" x="0" y="448"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/button_bar" role="buttons" type="column_list" box="0 0 640 28" place="foot">
@@ -413,20 +415,12 @@
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_label" x="0" y="0"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_spinner" x="188" y="0"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg0" x="188" y="2"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg1" x="254" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="21" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg0" type="text" box="0 0 62 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="PRISM" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_seg1" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="OFF" scale="1 1.2"/>
-	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="PRISM|OFF" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="PRISM|OFF|DLSS RR" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_22" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_22_title" x="0" y="0"/>
@@ -467,11 +461,33 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_tone_curve_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="DEFAULT|FILMIC|ACES|LOCAL|CLIPPED" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26_title" x="0" y="0"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_spinner" x="188" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_26_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="26" scale="1 1.2"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="26" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="OFF|FSR 3.1|DLSS" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler_scale" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_spinner" x="188" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="27" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="QUALITY|BALANCED|PERFORMANCE|ULTRA PERF.|NATIVE" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28_title" x="0" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/section_28_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="28" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
@@ -479,7 +495,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_spinner" x="188" y="0"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="27" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="29" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="WHILE PLAYING|WHEN ASKED|NEVER" scale="1 1.2"/>
@@ -490,7 +506,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_spinner" x="188" y="0"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="28" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="30" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_quality_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="MAX|ULTRA|HIGH|DRAFT" scale="1 1.2"/>
@@ -503,7 +519,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="29" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="31" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_sky_light_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="SKY" scale="1 1.2"/>
@@ -522,7 +538,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="30" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="32" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_rebake_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="—" scale="1 1.2"/>
@@ -541,7 +557,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="31" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/labels" index="33" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/bake_indicator_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="ON" scale="1 1.2"/>

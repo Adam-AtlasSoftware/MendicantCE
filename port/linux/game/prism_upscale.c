@@ -20,7 +20,9 @@ backend jitters the view's draws, finds its motion (the G-buffer's, or the
 camera's from its depth), its reactive mask (from its colour before and
 after its transparent surfaces, OPAQUE) and upscales it.
 
-Only one player's window (not split screen's), not the VR build's, nor a
+Only under the PRISM lightings and display.lighting "ce_deferred" (Classic,
+"ce", draws without one), only one player's window (not split screen's),
+not the VR build's, nor a
 view the replay holds or a movie plays over; only the Vulkan backend of the
 desktop's builds (the record is ignored elsewhere, and the view would not be
 upscaled: none is drawn smaller there). With display.upscaler "off" (the
@@ -124,6 +126,13 @@ static void settings_read(
 		prism_upscale.upscaler = _upscaler_none;
 		prism_upscale.denoiser = _denoiser_prism;
 	}
+	/* (Classic, display.lighting "ce", draws without an upscaler: Settings
+	offers one under the PRISM modes alone, so that one chosen there never
+	stays on, unseen, in Classic's frame) */
+	else if (!strcmp(config_string("display.lighting"), "ce"))
+	{
+		prism_upscale.upscaler = _upscaler_none;
+	}
 	scale = (real)config_real("display.upscaler_scale");
 	if (!(scale > 0.0f))
 	{
@@ -144,7 +153,8 @@ static void settings_read(
 		if (prism_upscale.upscaler == _upscaler_none && strcmp(upscaler, "off"))
 		{
 			platform_log("upscaler: \"%s\" is %s, so off", upscaler,
-				UPSCALE_BUILT ? "unknown" : "not in this build");
+				!UPSCALE_BUILT ? "not in this build" : !strcmp(config_string("display.lighting"), "ce") ?
+				"for the PRISM lightings (Classic draws without one)" : "unknown");
 		}
 		else
 		{

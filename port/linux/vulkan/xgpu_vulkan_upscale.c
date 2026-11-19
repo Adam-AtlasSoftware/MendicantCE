@@ -466,6 +466,64 @@ const char *xgpu_vulkan_upscale_credits(void)
 	return up.credits[0] ? up.credits : NULL;
 }
 
+uint32_t xgpu_vulkan_upscale_plugin_ready(const char *folder, const char *name)
+{
+	/* (the names asked and their answers) */
+	static struct
+	{
+		char name[72];
+		uint32_t capabilities;
+	} asked[4];
+	static int asked_count;
+	struct xgpu_vulkan_handles handles;
+	struct xgpu_plugin *plugin;
+	uint32_t capabilities = 0;
+	int which;
+
+	if (!name || !name[0] || strlen(name) >= sizeof(asked[0].name))
+		return 0;
+	/* (one opened this run: its state now) */
+	for (which = 0; which < 2; which++)
+	{
+		if (up.plugins[which].library && !strcmp(up.plugins[which].name, name))
+			return up.plugins[which].created && !up.plugins[which].off ?
+				up.plugins[which].library->table->info.capabilities : 0;
+	}
+	for (which = 0; which < asked_count; which++)
+	{
+		if (!strcmp(asked[which].name, name))
+			return asked[which].capabilities;
+	}
+	if (!xgpu_vulkan_handles(&handles))
+		return 0;
+	plugin = xgpu_plugin_open(folder, name, plugin_log, NULL);
+	if (plugin)
+	{
+		const struct prism_plugin *table = plugin->table;
+
+		if (!table->supported(handles.physical))
+		{
+			const char *error = table->last_error(NULL);
+
+			host_logf(HOST_LOG_INFO, "prism plugin %s: not offered in Settings: it does not work on this "
+				"graphics card or driver%s%s", name, error && error[0] ? ": " : "", error ? error : "");
+		}
+		else
+		{
+			capabilities = table->info.capabilities;
+			host_logf(HOST_LOG_INFO, "prism plugin %s: offered in Settings (%s, %s)", name, table->info.vendor,
+				table->info.version);
+		}
+		xgpu_plugin_close(plugin);
+	}
+	if (asked_count < (int)(sizeof(asked) / sizeof(asked[0])))
+	{
+		snprintf(asked[asked_count].name, sizeof(asked[asked_count].name), "%s", name);
+		asked[asked_count++].capabilities = capabilities;
+	}
+	return capabilities;
+}
+
 /* ---------- made once */
 
 static int failed(const char *what)

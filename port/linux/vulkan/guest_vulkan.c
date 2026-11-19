@@ -14,3 +14,6 @@ int host_vulkan_vrr(void);
 /* display.upscaler's and display.denoiser's plugins' names and their folder,
 before the window opens (host_vulkan.c) */
 int host_vulkan_plugins_choose(const char *upscaler, const char *denoiser, const char *folder);
+/* whether the plugin of that name is ready to be offered in Settings (its
+PRISM_CAP_*, else 0; host_vulkan.c) */
+unsigned int host_vulkan_plugin_ready(const char *name);

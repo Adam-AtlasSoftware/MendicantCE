@@ -694,6 +694,17 @@ int host_vulkan_plugins_choose(uint32_t upscaler, uint32_t denoiser, uint32_t fo
 	return 1;
 }
 
+/* (a host import: the guest's sdl_platform.c, as Settings' menus are
+made; a guest address of a string) whether a plugin of that name is ready
+to be offered (its PRISM_CAP_*, else 0), from the folder
+host_vulkan_plugins_choose named: xgpu_vulkan_upscale_plugin_ready */
+uint32_t host_vulkan_plugin_ready(uint32_t name)
+{
+	const char *text = host_pointer(name);
+
+	return plugin_folder[0] && text ? xgpu_vulkan_upscale_plugin_ready(plugin_folder, text) : 0;
+}
+
 /* (a host import: the guest's sdl_platform.c, on its main thread; the
 folders are guest addresses of strings; again with the same window when
 display.vsync or battery saver changes, for its swap interval and

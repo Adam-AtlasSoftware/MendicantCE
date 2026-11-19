@@ -538,7 +538,10 @@ SEGMENT_NOT = {"display.vrr", "display.resolution", "display.window_size", "disp
                "audio.output_device", "audio.input_device",
                # (Lighting Settings' BAKE and Video's LIGHTING: their words do not
                # fit as segments)
-               "display.bake", "display.lighting"}
+               "display.bake", "display.lighting",
+               # (the plugins' choices, left out where the plugin is not ready:
+               # menu_tags.c's spinner_expand)
+               "display.denoiser", "display.upscaler"}
 
 # ---------- the tall layout (the menu engine's: docs/menu_engine.md, "Deliberate differences")
 #
@@ -864,6 +867,9 @@ LIGHTING_MODE_ROWS = {
     "prism_raster_composition": "R", "prism_raster_objects": "R", "shadow_resolution_rebaked": "R",
     # (PRISM Path Traced's)
     "pt_profile": "P", "denoiser": "P",
+    # (the upscaler in both PRISM modes (prism_upscale.c: Classic draws
+    # without one); its scale under Path Traced while one is on, for room)
+    "upscaler": "RP", "upscaler_scale": "P",
     # (the enhanced dynamic lights in both PRISM modes: which lights the game
     # gives the bake's frame and the path tracer, and the plasma glows)
     "dynamic_lights_prism": "RP",
@@ -2303,9 +2309,16 @@ PAGES = {
             ("PROFILE", "display.pt_profile", [("QUALITY", "quality"), ("PERFORMANCE", "performance")],
              "Quality: a bounce of light traced at every pixel. Performance: the bounced light read from the bake "
              "where the level has it, a bounce traced for the characters and vehicles alone; faster.", "desktop"),
-            ("DENOISER", "display.denoiser", [("PRISM", "prism"), ("OFF", "off")],
-             "PRISM: the traced light smoothed over the frames before and the pixels about. Off: the light as "
-             "traced, one sample a pixel, grainy (for checking).", "desktop"),
+            # (PRISM's own denoiser by default, DLSS Ray Reconstruction a choice
+            # (display.denoiser "dlss_rr": the plugin "dlss", docs/prism_plugin.md);
+            # its choice last, left out where the plugin is not ready:
+            # menu_tags.c's spinner_expand)
+            ("DENOISER", "display.denoiser", [("PRISM", "prism"), ("OFF", "off"), ("DLSS RR", "dlss_rr")],
+             "PRISM: the traced light smoothed over the frames before and the pixels about. DLSS RR: NVIDIA DLSS "
+             "Ray Reconstruction, which also brings the view to the screen's resolution; from the next start. "
+             "Off: the light as traced, grainy (for checking).|DLSS is a plugin you build yourself (see the "
+             "prism-plugins README); its choices show once it is installed and works on this graphics card.",
+             "desktop"),
             # (both PRISM modes' exposure and tone curve: the bake's meter and
             # step, shared, prism_rt.c's RT_FRAME settings)
             (SECTION, "IMAGE"),
@@ -2320,6 +2333,25 @@ PAGES = {
              [("DEFAULT", "style"), ("FILMIC", "filmic"), ("ACES", "aces"), ("LOCAL", "local"), ("CLIPPED", "ce")],
              "How light past white is drawn. Default and Filmic: rolled off gently, nothing darker moved. ACES: "
              "punchier, a film's curve. Local: as Filmic here. Clipped: held at white, as Classic did.",
+             "desktop"),
+            # (display.upscaler, docs/prism_plugin.md: the 3D view drawn smaller
+            # and brought to the window's resolution before the HUD, in both
+            # PRISM modes (prism_upscale.c: Classic draws without one); its
+            # scale (UPSCALE QUALITY) under Path Traced while one is on, for
+            # room (Rebaked's page is full: config.toml's display.upscaler_scale,
+            # Quality by default), display.upscaler_sharpness config.toml's
+            # alone. DLSS a plugin the player builds, its choice last and left
+            # out where it is not ready (menu_tags.c's spinner_expand))
+            ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
+             "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. "
+             "FSR 3.1 is built in; DLSS from the next start.|DLSS is a plugin you build yourself (see the "
+             "prism-plugins README); its choices show once it is installed and works on this graphics card.",
+             "desktop"),
+            ("UPSCALE QUALITY", "display.upscaler_scale",
+             [("QUALITY", "0"), ("BALANCED", "0.58"), ("PERFORMANCE", "0.5"), ("ULTRA PERF.", "0.33"),
+              ("NATIVE", "1")],
+             "How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each "
+             "way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone.",
              "desktop"),
             # (the in-game baker, docs/prism_bake.md, whose bake both PRISM
             # modes read: Rebaked's light, and Path Traced's scene, lamps and

@@ -2793,6 +2793,11 @@ static struct
 	/* (PRISM Path Traced's) */
 	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
 	{ "op_denoiser", LIGHTING_P, NULL, NULL },
+	/* (both PRISM modes' upscaler (Classic draws without one:
+	prism_upscale.c); its scale under Path Traced while one is on, for
+	room: Rebaked's page is full) */
+	{ "op_upscaler", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_upscaler_scale", LIGHTING_P, "display.upscaler", "!off" },
 	/* (Advanced Graphics' Dynamic Lights: the enhanced dynamic lights under
 	both PRISM modes, which the game gives the plasma bolts' and needles'
 	lights that they light by, and whose glows it draws; Classic's row is

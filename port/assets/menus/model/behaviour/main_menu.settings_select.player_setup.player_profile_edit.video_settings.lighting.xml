@@ -108,7 +108,6 @@
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_denoiser" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/denoiser_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_exposure" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_exposure_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
@@ -120,6 +119,14 @@
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_prism_tone_curve" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/prism_tone_curve_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_upscaler_scale" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaler_scale_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/op_bake" flags="pass_unhandled_to_focused_child"/>

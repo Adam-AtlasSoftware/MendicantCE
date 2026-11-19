@@ -75,6 +75,9 @@ int platform_window_sizes(long *widths, long *heights, int maximum);
 int platform_audio_devices(int recording, char (*names)[128], int maximum);
 /* (sdl_platform.h's PLATFORM_VRR_*) */
 int platform_vrr_detected(void);
+/* (sdl_platform.c's) whether PRISM's renderer plugin of that name is ready
+to be offered in Settings */
+int platform_prism_plugin_ready(char const *name);
 
 /* the game's network server (this machine hosts: network_game_globals.c) */
 void *global_network_game_server_get(void);
@@ -1471,6 +1474,16 @@ static long spinner_expand(char const *setting, boolean values, char const **pie
 				pieces[index] = vrr ? "AUTO: ON" : "AUTO: OFF";
 		}
 		return count;
+	}
+
+	/* (Lighting Settings' DENOISER and UPSCALER: their last choice the DLSS
+	plugin's (DLSS RR, DLSS), left out where the plugin is not ready to be
+	offered: one the player has not built, or that does not work on this
+	graphics card (sdl_platform.c's platform_prism_plugin_ready); the rows'
+	help says it is theirs to build. tools/port_settings.py puts it last) */
+	if (setting && (!strcmp(setting, "display.denoiser") || !strcmp(setting, "display.upscaler")))
+	{
+		return !platform_prism_plugin_ready("dlss") && count > 1 ? count - 1 : count;
 	}
 
 	if (setting && (!strcmp(setting, "audio.output_device") ||
