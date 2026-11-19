@@ -195,6 +195,15 @@ and in Raster alike (Raster's `dynamic_at` reads the same class).
 - **Diagnostics.** `debug.dynamic_lights_log` (`HALO_DYNAMIC_LIGHTS_LOG=1`) logs the dynamic lights at each step
   where their count changes: the guest's (the rasterizer's, world_scene's list, those sent) and the path tracer's
   (those in the frame's job).
+- **As measured** (`work/openh1_eval/v4_dynl_runs`, b30 BSP 1 at G4's place, the demo's settings and bakes, the
+  player put there, the flashlight on and off, a burst of the assault rifle: `tools/dyncap.py`): before, the light
+  table's dynamic class held the fixtures (world AO "world") or nothing, the path tracer's frames 0 dynamic lights
+  (`evidence/stage_counts.txt`); after, the flashlight and the muzzle flash light the walls and floor with the
+  player's traced shadow, none left after either (`evidence/flashlight_ab.png`, `evidence/muzzle_flash_ab.png`,
+  RTX 2060). Raster's "ce" composition is unchanged frame for frame. RTX 3070 Ti, 1080p, quality: the flashlight
+  on costs 0.35 ms (18.32 to 18.67 ms of the path tracer's, its light pass 12.17 to 12.47); with no dynamic light
+  nothing (G4: 16.90 ms before, 16.86 after). G4's gate measures as before (0.1769 / 0.0820 / 0.122 / 1.34);
+  Classic and the defaults byte-identical (identity.py frames, b30).
 
 ## The denoiser
 
