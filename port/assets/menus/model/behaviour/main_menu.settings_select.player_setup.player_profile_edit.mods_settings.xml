@@ -113,16 +113,6 @@
 		<on event="start" open="main_menu/theater/theater_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_graphics" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/prism_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_assets" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_assets_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/prism_assets_settings_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" flags="pass_unhandled_to_focused_child">
 		<on event="a" run="port settings add maps"/>
 		<on event="start" run="port settings add maps"/>

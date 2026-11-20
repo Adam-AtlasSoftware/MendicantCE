@@ -392,12 +392,6 @@
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/header_streaming">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/interface_settings/streaming/header_streaming.png" width="512" height="64"/>
 	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/header_prism_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism/header_prism_settings.png" width="512" height="64"/>
-	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/header_prism_assets_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets/header_prism_assets_settings.png" width="512" height="64"/>
-	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/network_setup/discord_account/header_discord_account.png" width="512" height="64"/>
 	</bitmap>
@@ -1185,22 +1179,43 @@
 		<frame png="ce/port/main_menu/campaign/badge_shape_100__0.png" width="100" height="100"/>
 		<frame png="ce/port/main_menu/campaign/badge_shape_100__1.png" width="100" height="100"/>
 	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/header_lighting_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/header_lighting_settings.png" width="512" height="64"/>
-	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/header_ray_tracing_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/header_ray_tracing_settings.png" width="512" height="64"/>
-	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/look/header_traced_look_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/ray_tracing/look/header_traced_look_settings.png" width="512" height="64"/>
-	</bitmap>
 	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera">
 		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/first_person/camera/header_camera.png" width="512" height="64"/>
 	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/coloured_lights/header_coloured_lights_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/coloured_lights/header_coloured_lights_settings.png" width="512" height="64"/>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/header_classic_lighting">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/header_classic_lighting.png" width="512" height="64"/>
 	</bitmap>
-	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaling/header_upscaling_settings">
-		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/lighting/upscaling/header_upscaling_settings.png" width="512" height="64"/>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/header_prism">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/header_prism.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/image/header_prism_image">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/image/header_prism_image.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/header_light_bake">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/header_light_bake.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/header_materials_textures">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/header_materials_textures.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/header_models_streaming">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/header_models_streaming.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/path_tracing/header_path_tracing">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/path_tracing/header_path_tracing.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing/header_ray_tracing_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing/header_ray_tracing_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing/look/header_traced_look_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing/look/header_traced_look_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/rebaked/header_rebaked_lighting">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/rebaked/header_rebaked_lighting.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/upscaling/header_upscaling_settings">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/upscaling/header_upscaling_settings.png" width="512" height="64"/>
+	</bitmap>
+	<bitmap name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/header_world_terrain">
+		<frame png="ce/port/main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/header_world_terrain.png" width="512" height="64"/>
 	</bitmap>
 </menus>

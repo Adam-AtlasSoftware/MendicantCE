@@ -106,8 +106,9 @@ These are long builds, all on your computer. Nothing runs on a server.
 
 ## The packs
 
-Names as `prism_packs.py` knows them, what each gives, and what turns it on in the game. Every row of PRISM
-ASSETS is in Settings > MODS tab > PRISM ASSETS; the mods can be turned on and off in MANAGE MODS. The tools
+Names as `prism_packs.py` knows them, what each gives, and what turns it on in the game. The assets' rows are in
+Settings > Video > PRISM > Materials & Textures and Models & Streaming; the mods can be turned on and off in Settings >
+Mods > MANAGE MODS. The tools
 write `mods/load_order.toml` with the packs in the order they were made for (Bold last).
 
 | Pack | Writes | Gives | Turn it on |

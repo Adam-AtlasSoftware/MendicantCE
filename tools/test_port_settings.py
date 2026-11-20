@@ -619,28 +619,61 @@ def test_lighting_rows_agree():
 
 
 def test_lighting_choice():
-    """Video's Lighting offers exactly Classic, PRISM Rebaked and PRISM Path
-    Traced, and the pages it opens are on the same tab"""
-    rows = {_key(entry): entry for entry in PAGES["video_settings"]["rows"] if entry[0] != SECTION}
-    assert [value for _, value in rows["lighting"][2]] == ["ce", "raster", "pathtraced"]
-    assert [shown for shown, _ in rows["lighting"][2]] == ["CLASSIC", "PRISM REBAKED", "PATH TRACED"]
-    assert {"lighting_settings", "ray_tracing"} <= set(rows)
+    """Video has one PRISM row and none of the lighting's; PRISM's page has the Lighting choice first, offering
+    exactly Classic, PRISM Rebaked and PRISM Path Traced, and opens every PRISM page"""
+    video = {_key(entry) for entry in PAGES["video_settings"]["rows"] if entry[0] != SECTION}
+    assert "prism_settings" in video and not {"lighting", "lighting_settings", "ray_tracing"} & video
+    prism = [entry for entry in PAGES["video_settings/prism"]["rows"] if entry[0] != SECTION]
+    assert _key(prism[0]) == "lighting"
+    assert [value for _, value in prism[0][2]] == ["ce", "raster", "pathtraced"]
+    assert [shown for shown, _ in prism[0][2]] == ["CLASSIC", "PRISM REBAKED", "PATH TRACED"]
+    # (every PRISM page is under PRISM's, and nothing else opens one: Video's PRISM row opens PRISM's page alone)
+    opened = {entry[2] for entry in prism if entry[1] is None}
+    pages = {port_settings._page_screen(folder, page["screen"]) for folder, page in PAGES.items()
+             if folder.startswith("video_settings/prism/") and folder.count("/") == 2}
+    assert pages and pages <= opened
+    for folder, page in PAGES.items():
+        if not folder.startswith("video_settings/prism"):
+            for entry in page["rows"]:
+                if entry[0] != SECTION and entry[1] is None and "/video_settings/prism" in str(entry[2]):
+                    assert (folder, _key(entry)) == ("video_settings", "prism_settings"), (folder, entry)
+                    assert entry[2] == port_settings._page_screen(*port_settings.PRISM_MENU)
+
+
+def test_prism_settings_all_under_prism():
+    """every lighting and PRISM setting's row is on a page under Video's PRISM (Android's own rows, its Advanced
+    Graphics', and Brightness's apart)"""
+    prism = ("display.lighting", "display.prism_", "display.pt_", "display.bake", "display.denoiser",
+             "display.upscaler", "display.material_packs", "display.terrain", "display.water")
+    for folder, page in PAGES.items():
+        for entry in page["rows"]:
+            if entry[0] == SECTION or not entry[1]:
+                continue
+            if entry[1].startswith(prism):
+                assert folder.startswith("video_settings/prism"), (folder, entry[1])
 
 
 def test_lighting_pages_per_mode():
-    """each mode's Lighting Settings and Ray Tracing pages show only its own
-    rows: no bake under Classic, no Classic extras under the PRISM modes, no
-    path tracing outside Path Traced, none of Classic's ray tracer outside
-    Classic"""
+    """each mode's pages show only its own rows: PRISM's links to Classic's, Rebaked's and Path Traced's own
+    lighting pages each in its mode; no bake, exposure or upscaler under Classic, no Classic extras under the PRISM
+    modes, none of Classic's ray tracer outside Classic, the material packs in both PRISM modes"""
     def shown(folder, mode):
         return {_key(entry) for entry in PAGES[folder]["rows"] if entry[0] != SECTION and
                 mode in LIGHTING_MODE_ROWS.get(_key(entry), "CRP")}
-    lighting, tracing = "video_settings/lighting", "video_settings/ray_tracing"
-    assert "bake" not in shown(lighting, "C") and "pt_profile" not in shown(lighting, "C")
-    assert "prism_lightmaps" not in shown(lighting, "R") | shown(lighting, "P")
-    assert "pt_profile" in shown(lighting, "P") and "pt_profile" not in shown(lighting, "R")
-    assert "prism_raster_composition" in shown(lighting, "R") and "prism_raster_composition" not in shown(lighting, "P")
-    assert "bake" in shown(lighting, "R") and "bake" in shown(lighting, "P")
+    prism = "video_settings/prism"
+    assert shown(prism, "C") >= {"lighting", "classic_lighting", "ray_tracing", "prism_image", "materials_textures"}
+    assert not {"rebaked_lighting", "path_tracing", "upscaling", "light_bake"} & shown(prism, "C")
+    assert "rebaked_lighting" in shown(prism, "R") and not {"classic_lighting", "path_tracing"} & shown(prism, "R")
+    assert "path_tracing" in shown(prism, "P") and not {"classic_lighting", "rebaked_lighting"} & shown(prism, "P")
+    assert {"upscaling", "light_bake"} <= shown(prism, "R") & shown(prism, "P")
+    assert not shown(f"{prism}/light_bake", "C") and "bake" in shown(f"{prism}/light_bake", "P")
+    assert shown(f"{prism}/image", "C") == {"prism_bloom", "prism_tone"}
+    assert "prism_exposure" in shown(f"{prism}/image", "R") & shown(f"{prism}/image", "P")
+    tracing = f"{prism}/ray_tracing"
     assert "prism_rt" in shown(tracing, "C") and not {"prism_rt", "prism_rt_quality"} & shown(tracing, "P")
-    assert "prism_object_shadows" in shown(tracing, "R")
-    assert "prism_object_shadows" not in shown(tracing, "P") | shown(tracing, "C")
+    assert "prism_object_shadows" in shown(f"{prism}/rebaked", "R")
+    materials = f"{prism}/materials"
+    assert "material_packs" in shown(materials, "R") & shown(materials, "P")
+    assert "prism_materials" in shown(materials, "P") and "prism_surface_maps" not in shown(materials, "P")
+    assert not {"terrain", "water"} & shown(f"{prism}/world", "C")
+    assert {"terrain", "terrain_layers", "water"} <= shown(f"{prism}/world", "P")

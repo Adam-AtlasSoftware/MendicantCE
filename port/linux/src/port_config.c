@@ -910,10 +910,10 @@ static const struct config_setting config_settings[] =
 		"lamps and the dynamic lights traced each frame, the bounced light\n"
 		"from the bake, denoised); needs ray tracing and a bake of the level\n"
 		"(made while you play, display.bake). Read each frame. Vulkan only; no\n"
-		"anti-aliasing by multisampling. Settings > Video > Lighting: Classic\n"
-		"(\"ce\"), PRISM Rebaked (\"raster\"), PRISM Path Traced (\"pathtraced\");\n"
-		"\"classic\", \"rebaked\" and \"path_traced\" are read as those. Lighting\n"
-		"Settings and Ray Tracing there show what applies to the mode." },
+		"anti-aliasing by multisampling. Settings > Video > PRISM > Lighting:\n"
+		"Classic (\"ce\"), PRISM Rebaked (\"raster\"), PRISM Path Traced\n"
+		"(\"pathtraced\"); \"classic\", \"rebaked\" and \"path_traced\" are read as\n"
+		"those. The rows under it show only what applies to the mode." },
 	{ "display.pt_profile", _config_string, "\"quality\"", "HALO_PT_PROFILE", _environment_value,
 		_platform_desktop,
 		"With display.lighting \"pathtraced\": \"quality\" traces a bounce at\n"

@@ -2679,9 +2679,10 @@ static void prism_rt_rows_show(struct widget_instance *list)
 	}
 }
 
-/* PRISM ASSETS' rows that the renderer's stores draw (the texture store, the
-mesh store, the materials: mod_textures.c, mod_meshes.c, mod_pbr.c): greyed
-out where the renderer has not the store, as ray tracing's rows are. The
+/* PRISM's Materials & Textures' and Models & Streaming's rows that the
+renderer's stores draw (the texture store, the mesh store, the materials:
+mod_textures.c, mod_meshes.c, mod_pbr.c): greyed out where the renderer has
+not the store, as ray tracing's rows are. The
 Windows build's renderer has neither store yet (port/linux/vulkan/
 xgpu_vulkan_store.c), nor has Metal's, a card without BC textures or the
 null renderer: the rows did nothing there, and nothing said so. (MATERIAL
@@ -2709,20 +2710,28 @@ static void prism_assets_rows_show(struct widget_instance *list)
 		{ "op_prism_secondary_motion", "prism_secondary_motion_spinner", 1 },
 	};
 	boolean available[3];
+	boolean asked = FALSE;
 	short index;
 
-	if (!named(list, rows[0].row, 0))
-		return;
-	available[0] = xgpu_backend_texture_store_available() != 0;
-	available[1] = xgpu_backend_mesh_store_available() != 0;
-	available[2] = d3d8_materials_drawn() != 0;
 	for (index = 0; index < (short)NUMBEROF(rows); index++)
 	{
 		struct widget_instance *row = named(list, rows[index].row, 0);
 		struct widget_instance *spinner = named(list, rows[index].spinner, 0);
-		boolean locked = !available[rows[index].store];
+		boolean locked;
 
-		if (!row || !spinner || spinner->disabled == locked)
+		if (!row || !spinner)
+			continue;
+		/* (the stores asked once, on a page that has one of the rows: they
+		are on two pages) */
+		if (!asked)
+		{
+			available[0] = xgpu_backend_texture_store_available() != 0;
+			available[1] = xgpu_backend_mesh_store_available() != 0;
+			available[2] = d3d8_materials_drawn() != 0;
+			asked = TRUE;
+		}
+		locked = !available[rows[index].store];
+		if (spinner->disabled == locked)
 			continue;
 		row->disabled = locked;
 		spinner->disabled = locked;
@@ -2739,10 +2748,10 @@ static boolean layout_has_bindings(void);
 static void layout_export_press(void);
 static boolean layout_files_panel(struct widget_instance *row, wchar_t const **help);
 
-/* Video's Lighting (display.lighting) and the rows that apply to the mode
-it shows: Lighting Settings', Ray Tracing's, PRISM Assets' and PRISM
-Graphics' rows of one mode or two are shown only with it (the value shown,
-before OK: a change on Video's tab shows on the pages it opens at once), and
+/* Video's PRISM page's Lighting (display.lighting) and the rows that apply
+to the mode it shows: PRISM's links and its pages' rows of one mode or two
+are shown only with it (the value shown, before OK: a change of Lighting
+shows on its page and the pages it opens at once), and
 some only while another row is at a value, as Frame Rate Limit follows VSync.
 A hidden row keeps its value, which Defaults leaves as it is
 (lighting_row_hidden). tools/port_settings.py's LIGHTING_MODE_ROWS has the
@@ -2770,7 +2779,12 @@ static struct
 	char const *value;
 } const lighting_rows[] =
 {
-	/* (Lighting Settings: Classic's own light and PRISM's extras on it, which
+	/* (PRISM's page: the way to each mode's own lighting page; its Image,
+	Ray Tracing and the world's and assets' pages show in every mode) */
+	{ "op_classic_lighting", LIGHTING_C, NULL, NULL },
+	{ "op_rebaked_lighting", LIGHTING_R, NULL, NULL },
+	{ "op_path_tracing", LIGHTING_P, NULL, NULL },
+	/* (Classic Lighting: Classic's own light and PRISM's extras on it, which
 	the bake's or the path tracer's light replaces in the PRISM modes) */
 	{ "op_shadow_resolution", LIGHTING_C, NULL, NULL },
 	{ "op_per_pixel_lighting", LIGHTING_C, NULL, NULL },
@@ -2785,41 +2799,42 @@ static struct
 	{ "op_prism_shadow_softness", LIGHTING_C, "display.prism_shadows", "cascaded" },
 	{ "op_prism_baked_shadows", LIGHTING_C, NULL, NULL },
 	{ "op_prism_baked_shadow_depth", LIGHTING_C, "display.prism_baked_shadows", "sharp" },
-	/* (PRISM Rebaked's frame; CE's projected object shadows, which it keeps
-	with its object shadows Classic's) */
+	/* (World & Terrain's: the remodel's shape for Classic's sun shadows) */
+	{ "op_prism_geometry_shadows", LIGHTING_C, "display.prism_shadows", "cascaded" },
+	/* (Rebaked Lighting: PRISM Rebaked's frame, its traced object shadows or
+	CE's projected ones (at CE's shadow quality), and the enhanced dynamic
+	lights, which the game gives the plasma bolts' and needles' lights that
+	the bake's frame lights by, and whose glows it draws) */
 	{ "op_prism_raster_composition", LIGHTING_R, NULL, NULL },
 	{ "op_prism_raster_objects", LIGHTING_R, NULL, NULL },
+	{ "op_prism_object_shadows", LIGHTING_R, NULL, NULL },
 	{ "op_shadow_resolution_rebaked", LIGHTING_R, "display.prism_raster_object_shadows", "classic" },
-	/* (PRISM Path Traced's) */
+	{ "op_dynamic_lights_prism", LIGHTING_R, NULL, NULL },
+	/* (Path Tracing: PRISM Path Traced's profile and denoiser, and its moving
+	lights: the enhanced dynamic lights, their brightness and colour) */
 	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
 	{ "op_denoiser", LIGHTING_P, NULL, NULL },
-	/* (and the way to its Coloured Lights page, the moving lights'
-	brightness and colour, whose rows show in every mode: only this link
-	opens it) */
-	{ "op_coloured_lights", LIGHTING_P, NULL, NULL },
-	/* (the way to both PRISM modes' Upscaling page (Classic draws without
-	an upscaler: prism_upscale.c); on it, the upscaler's scale while one is
-	on, whatever the mode, as only this link opens it) */
-	{ "op_upscaling", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
-	/* (Advanced Graphics' Dynamic Lights: the enhanced dynamic lights under
-	both PRISM modes, which the game gives the plasma bolts' and needles'
-	lights that they light by, and whose glows it draws; Classic's row is
-	op_dynamic_lights, above) */
-	{ "op_dynamic_lights_prism", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	/* (both PRISM modes: their exposure and tone curve, and the bake that
-	both read: Rebaked's light, Path Traced's scene and bounced light) */
+	{ "op_dynamic_lights_pt", LIGHTING_P, NULL, NULL },
+	{ "op_prism_dynamic_lights", LIGHTING_P, NULL, NULL },
+	{ "op_prism_light_saturation", LIGHTING_P, NULL, NULL },
+	/* (both PRISM modes: their exposure and tone curve (Image), the way to
+	their Upscaling page (Classic draws without an upscaler: prism_upscale.c;
+	on it, the upscaler's scale while one is on, whatever the mode, as only
+	this link opens it), and the bake that both read (Light Bake): Rebaked's
+	light, Path Traced's scene and bounced light) */
 	{ "op_prism_exposure", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_prism_exposure_bias", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_prism_tone_curve", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_upscaling", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
+	{ "op_light_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_quality", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_prism_sky_light", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_rebake", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_indicator", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	/* (Ray Tracing: Classic's ray tracer, display.prism_rt, which both PRISM
-	modes turn off (prism_rt.c), its settings only while it is on; PRISM
-	Rebaked's traced object shadows) */
+	modes turn off (prism_rt.c), its settings only while it is on) */
 	{ "op_prism_rt", LIGHTING_C, NULL, NULL },
 	{ "op_prism_rt_quality", LIGHTING_C, "display.prism_rt", "!off" },
 	{ "op_prism_rt_resolution", LIGHTING_C, "display.prism_rt", "!off" },
@@ -2828,7 +2843,6 @@ static struct
 	{ "op_prism_rt_sun", LIGHTING_C, "display.prism_rt", "!off" },
 	{ "op_prism_rt_world", LIGHTING_C, "display.prism_rt", "!off" },
 	{ "op_traced_light_look", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_object_shadows", LIGHTING_R, NULL, NULL },
 	/* (the traced scene: the objects' capture (xgpu_vulkan_rt.c), which Path
 	Traced takes always, Rebaked with its object shadows traced and Classic
 	with its ray tracer on; the see-through surfaces, in the bake's scene) */
@@ -2840,16 +2854,21 @@ static struct
 	{ "op_prism_rt_cache", LIGHTING_P, NULL, NULL },
 	{ "op_prism_rt_alpha", LIGHTING_C, "display.prism_rt", "!off" },
 	{ "op_prism_rt_alpha", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	/* (PRISM Assets: the model shaders' forward light, Classic's; the
-	material packs, the deferred modes') */
+	/* (Materials & Textures: the model shaders' forward light, Classic's;
+	the material packs, both PRISM modes' G-buffer's, which Rebaked composes
+	and the path tracer lights) */
 	{ "op_prism_material_overlay", LIGHTING_C, NULL, NULL },
 	{ "op_prism_surface_maps", LIGHTING_C, NULL, NULL },
 	{ "op_material_packs", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	/* (PRISM Graphics: the remodel's shape for Classic's sun shadows) */
-	{ "op_prism_geometry_shadows", LIGHTING_C, "display.prism_shadows", "cascaded" },
+	/* (World & Terrain: the terrain and water overhaul, both PRISM modes'
+	(prism_terrain_wanted)) */
+	{ "op_terrain", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_terrain_layers", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_terrain_tracks", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_water", LIGHTING_R | LIGHTING_P, NULL, NULL },
 };
 
-/* the mode Settings shows (Video's Lighting, changed or not) */
+/* the mode Settings shows (PRISM's Lighting, changed or not) */
 static unsigned char lighting_mode_shown(void)
 {
 	char text[64];
@@ -2975,6 +2994,11 @@ static struct
 {
 	{ "op_direct_camera", "direct_camera_spinner", "false", network_standard_direct_camera_allowed },
 	{ "op_dynamic_lights", "dynamic_lights_spinner", "classic", network_standard_enhanced_lights_allowed },
+	/* (the same setting's rows on PRISM's Rebaked Lighting and Path Tracing
+	pages) */
+	{ "op_dynamic_lights_prism", "dynamic_lights_prism_spinner", "classic",
+		network_standard_enhanced_lights_allowed },
+	{ "op_dynamic_lights_pt", "dynamic_lights_pt_spinner", "classic", network_standard_enhanced_lights_allowed },
 	{ "op_shield_glow", "shield_glow_spinner", "false", network_standard_enhanced_lights_allowed },
 	{ "op_shield_glow_intensity", "shield_glow_intensity_spinner", "default",
 		network_standard_enhanced_lights_allowed },

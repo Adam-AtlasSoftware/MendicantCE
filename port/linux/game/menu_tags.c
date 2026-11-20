@@ -1476,7 +1476,7 @@ static long spinner_expand(char const *setting, boolean values, char const **pie
 		return count;
 	}
 
-	/* (Lighting Settings' DENOISER and UPSCALER: their last choice the DLSS
+	/* (PRISM's Path Tracing's DENOISER and Upscaling's UPSCALER: their last choice the DLSS
 	plugin's (DLSS RR, DLSS), left out where the plugin is not ready to be
 	offered: one the player has not built, or that does not work on this
 	graphics card (sdl_platform.c's platform_prism_plugin_ready); the rows'

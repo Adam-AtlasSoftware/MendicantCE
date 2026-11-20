@@ -306,7 +306,7 @@ Check these on a Windows computer before a release.
 
 - PRISM's texture store, mesh store and materials (TEXTURE DETAIL, TEXTURE
   MEMORY, PBR MATERIALS, REMODELS, MODEL MEMORY and SECONDARY MOTION on
-  Settings > Mods > PRISM Assets; `display.prism_textures`,
+  Settings > Video > PRISM; `display.prism_textures`,
   `display.prism_models`, `display.prism_materials`) are not in the Windows
   build yet: the host reads their files with calls it has only on the other
   platforms (`port/linux/vulkan/xgpu_vulkan_store.c`,

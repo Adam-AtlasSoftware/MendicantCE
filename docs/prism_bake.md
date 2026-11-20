@@ -368,11 +368,12 @@ gather, `HALO_BAKE_EMITTERS_PASS` the level's emitting faces neither blocking no
 it (`bsp<n>.pbk.log`: the tiles as baked and the filter's words); `HALO_RASTER_EXPOSURE_LOG` logs Raster's exposure and its meter's medians each
 frame.
 
-Settings > Video > Lighting chooses Classic, PRISM Rebaked (`"raster"`) or PRISM Path Traced. Lighting Settings
-then has, under PRISM Rebaked, Composition, Object Light (and Shadow Quality while the object shadows are
-Classic's); under both PRISM modes, Exposure, Exposure Bias and Tone Curve, and the Light Bake: Bake (While
-Playing, When Asked, Never), Bake Quality, Sky Light, Rebake Lightmaps and Progress on Screen (Path Traced reads the
-bake too). Ray Tracing has Rebaked's Object Shadows and the traced scene's rows (docs/prism_settings.md). The bake
+Settings > Video > PRISM > Lighting chooses Classic, PRISM Rebaked (`"raster"`) or PRISM Path Traced. PRISM's page
+then opens, under PRISM Rebaked, Rebaked Lighting › (Composition, Object Light, Object Shadows, and Shadow Quality while
+the object shadows are Classic's, Dynamic Lights); under both PRISM modes, Image › (Exposure, Exposure Bias and Tone
+Curve), Upscaling › and Light Bake ›: Bake (While Playing, When Asked, Never), Bake Quality, Sky Light, Rebake
+Lightmaps and Progress on Screen (Path Traced reads the bake too). Ray Tracing has the traced scene's rows
+(docs/prism_settings.md). The bake
 needs ray queries; a GPU without them draws Raster with CE's
 light (D5).
 

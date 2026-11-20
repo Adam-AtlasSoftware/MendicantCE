@@ -148,9 +148,9 @@ Each has its environment variable (`HALO_UPSCALER`, `HALO_UPSCALER_SCALE`, `HALO
 upscaler's share of the view has a setting of its own. Classic (`display.lighting` `"ce"`) draws without an upscaler
 or a denoiser's plugin (`prism_upscale.c`); `"ce_deferred"` and the PRISM lightings upscale.
 
-Settings (Video, Lighting Settings): UPSCALING › under IMAGE in PRISM Rebaked and Path Traced, a page of UPSCALER and,
+Settings (Video, PRISM): UPSCALING › in PRISM Rebaked and Path Traced, a page of UPSCALER and,
 while an upscaler is on, UPSCALE QUALITY (`display.upscaler_scale`: Quality, Balanced, Performance, Ultra
-Performance, Native), in both modes; DENOISER under PATH TRACING (PRISM, the default; Off; DLSS RR). The
+Performance, Native), in both modes; DENOISER on PATH TRACING › (PRISM, the default; Off; DLSS RR). The
 sharpness is config.toml's alone. The DLSS choices (UPSCALER's DLSS, DENOISER's DLSS RR, each last) are offered only
 where the plugin `dlss` is ready: in use this run, or found in the plugins folder, its ABI accepted and its
 `supported` passing on this card (`xgpu_vulkan_upscale_plugin_ready`, asked as the menus are made; menu_tags.c's
