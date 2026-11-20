@@ -39,17 +39,18 @@ def bake_common() -> str:
     if not cc:
         raise SystemExit("no C preprocessor (cc) on PATH")
     probe = (f'#include "{BAKE}"\nstatic const char bake_common_source[] = BAKE_COMMON;\n'
-             'static const char exposure_common_source[] = EXPOSURE_COMMON;\n')
+             'static const char exposure_common_source[] = EXPOSURE_COMMON;\n'
+             'static const char terrain_common_source[] = TERRAIN_COMMON;\n')
     text = subprocess.run([cc, "-E", "-P", "-x", "c", "-"], input=probe, check=True, capture_output=True,
                           text=True).stdout
     found = {}
     for match in DECLARATION.finditer(text):
-        if match.group(1) in ("bake_common", "exposure_common"):
+        if match.group(1) in ("bake_common", "exposure_common", "terrain_common"):
             found[match.group(1)] = "".join(ast.literal_eval(s) for s in STRINGS.findall(match.group(2)))
-    for name in ("bake_common", "exposure_common"):
+    for name in ("bake_common", "exposure_common", "terrain_common"):
         if name not in found:
             raise SystemExit(f"{BAKE}: no {name.upper()}")
-    return objects_traced(found["bake_common"]) + found["exposure_common"]
+    return objects_traced(found["bake_common"]) + found["exposure_common"] + found["terrain_common"]
 
 
 # the moving objects (PRISM v4 M3, xgpu_vulkan_rt.c's objects for "pathtraced"): BAKE_COMMON's visibility tests

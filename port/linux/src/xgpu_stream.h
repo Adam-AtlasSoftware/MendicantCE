@@ -566,6 +566,17 @@ bits; its high 4 bits the flags */
 #define XGPU_GBUFFER_MODEL_CLEARCOAT 2u
 #define XGPU_GBUFFER_MODEL_SUBSURFACE 3u
 #define XGPU_GBUFFER_MODEL_EMISSIVE 4u
+/* (the terrain overhaul's ground (T2, T3): written only by its HQ layers'
+pass (xgpu_vulkan_terrain.c) on the level's classified pixels, so no
+material's own model is ever one of them; on these word 2's third byte is
+the class's specular scale times the layer's occlusion, which the light
+passes read back as the occlusion (docs/prism_terrain.md, T2): granular
+(sand: the back-scattering rough-diffuse lobe and glints), soil (dirt and
+mud: the lobe, weaker, no glints), snow (the wrapped, blue-weighted
+subsurface light, its screen-space diffusion in Path Traced, sparkle) */
+#define XGPU_GBUFFER_MODEL_GRANULAR 5u
+#define XGPU_GBUFFER_MODEL_SOIL 6u
+#define XGPU_GBUFFER_MODEL_SNOW 7u
 #define XGPU_GBUFFER_FLAG_LEVEL 1u
 #define XGPU_GBUFFER_FLAG_ALPHA_TESTED 2u
 #define XGPU_GBUFFER_FLAG_FIRST_PERSON 4u

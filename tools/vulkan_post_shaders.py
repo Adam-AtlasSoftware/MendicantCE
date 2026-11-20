@@ -590,7 +590,7 @@ taps hex_sample(int layer, vec2 uv, vec2 gx, vec2 gy, float turn, float contrast
 /* a layer at a point: from above, or from all three axes where the surface is steep (whiteout normals); the
 detail, the world normal and the roughness ratio */
 void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, float fine, out vec4 detail,
-	out vec3 normal, out float rough)
+	out vec3 normal, out float rough, out float ao)
 {
 	vec4 a = layer_a(layer), b = layer_b(layer);
 	float scale = a.x;
@@ -604,6 +604,7 @@ void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, floa
 	detail = vec4(0.0);
 	vec3 nsum = vec3(0.0);
 	rough = 0.0;
+	ao = 0.0;
 	if (blend.z > 0.01)
 	{
 		taps z = hex_sample(layer, vec2(p.x, -p.y) * scale, vec2(dpx.x, -dpx.y) * scale, vec2(dpy.x, -dpy.y) * scale,
@@ -628,6 +629,7 @@ void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, floa
 		detail += z.detail * blend.z;
 		nsum += tz * blend.z;
 		rough += z.surface.z * blend.z;
+		ao += z.surface.w * blend.z;
 	}
 	if (blend.x > 0.01)
 	{
@@ -638,6 +640,7 @@ void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, floa
 		detail += x.detail * blend.x;
 		nsum += vec3(tx.z * (n.x >= 0.0 ? 1.0 : -1.0), tx.x, tx.y) * blend.x;
 		rough += x.surface.z * blend.x;
+		ao += x.surface.w * blend.x;
 	}
 	if (blend.y > 0.01)
 	{
@@ -648,6 +651,7 @@ void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, floa
 		detail += y.detail * blend.y;
 		nsum += vec3(ty.x, ty.z * (n.y >= 0.0 ? 1.0 : -1.0), ty.y) * blend.y;
 		rough += y.surface.z * blend.y;
+		ao += y.surface.w * blend.y;
 	}
 	normal = normalize(nsum);
 	rough *= 2.0;
@@ -658,6 +662,57 @@ float oklab_l(vec3 c)
 	/* (Oklab's lightness of a grey of the colour's luminance: its cube root; near enough for the cues) */
 	vec3 lin = c * c;
 	return pow(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 0.0), 1.0 / 3.0);
+}
+
+/* the classes' physical table (design 3.3; T2, T3), by class (none, sand, dirt, mud, rock, snow, ice, water): the
+dry roughness (the layer's variation over it; negative: the material's own kept), the porosity (T6's wetness reads
+it; xgpu_vulkan_terrain.c's class_porosity is the same table), the light passes' model (XGPU_GBUFFER_MODEL_*; 0:
+the material's own kept) and the specular scale the model's pixels carry times the layer's occlusion
+(TERRAIN_COMMON's terrain_specular) */
+const float TERRAIN_ROUGHNESS[8] = float[8](-1.0, 0.85, 0.90, 0.70, 0.70, 0.60, -1.0, -1.0);
+const float TERRAIN_POROSITY[8] = float[8](0.0, 0.6, 0.7, 0.8, 0.3, 0.2, 0.0, 0.0);
+const uint TERRAIN_MODEL[8] = uint[8](0u, 5u, 6u, 0u, 0u, 7u, 0u, 0u);
+float terrain_specular(uint model)
+{
+	return model == 7u ? 0.45 : 0.5;
+}
+
+/* the words with a class's model, roughness and (where the model is the ground's) the specular byte: the
+class's scale times the occlusion */
+uvec4 classed(uvec4 w, uint cls, float r, float ao)
+{
+	uint model = TERRAIN_MODEL[cls];
+	uint z = w.z;
+	if (TERRAIN_ROUGHNESS[cls] >= 0.0)
+		z = (z & 0xffffff00u) | uint(clamp(r, 0.02, 1.0) * 255.0 + 0.5);
+	if (model != 0u)
+	{
+		z = (z & 0xf000ffffu) | (model << 24) | (uint(clamp(terrain_specular(model) * ao, 0.0, 1.0) * 255.0 + 0.5) << 16);
+		/* (the ground is never metal: the byte the light passes would read as metalness) */
+		z &= 0xffff00ffu;
+	}
+	return uvec4(w.x, w.y, z, w.w);
+}
+
+/* sand's wind ripples (design 3.4): crests across the map's wind (tangents.xy, its strength tangents.z), about 11 cm
+apart, an asymmetric profile (the stoss side long, the lee short), their line warped by the macro map, in patches of
+it (flat sand between); on near-level sand only, faded where the pixel's footprint nears the wavelength (no
+aliasing) and on slopes: the normal's tilt along the wind */
+vec2 ripple_tilt(vec3 p, vec3 n, float footprint)
+{
+	const float wavelength = 0.036;
+	float level = smoothstep(0.86, 0.97, n.z);
+	float sharp = 1.0 - smoothstep(wavelength * 0.08, wavelength * 0.3, footprint);
+	if (level * sharp <= 0.0)
+		return vec2(0.0);
+	vec2 wind = tangents.xy;
+	vec2 across = vec2(-wind.y, wind.x);
+	vec4 warp = texture(macro_texture, p.xy * (1.0 / 1.7));
+	float patches = smoothstep(0.3, 0.7, texture(macro_texture, p.xy * (1.0 / 9.0) + 0.37).b);
+	float phase = dot(p.xy, wind) / wavelength + (warp.r - 0.5) * 5.0 + sin(dot(p.xy, across) / (wavelength * 4.3)) * 0.6;
+	float x = fract(phase) * 6.2831853;
+	float slope = sin(x) + 0.35 * sin(2.0 * x);
+	return wind * (slope * 0.18 * tangents.z * level * sharp * patches);
 }
 
 void main()
@@ -671,17 +726,68 @@ void main()
 	int la = int(c.b & 15u) - 1, lb = int(c.b >> 4) - 1;
 	if (la < 0 && lb < 0)
 		discard;
+	uint ca = c.r, cb = c.g;
 	if (la < 0)
+	{
 		la = lb;
+		ca = cb;
+	}
 	if (lb < 0)
+	{
 		lb = la;
+		cb = ca;
+	}
+	ca = min(ca, 7u);
+	cb = min(cb, 7u);
 	uvec4 x = texelFetch(extras_texture, texel, 0);
 	float dist = uintBitsToFloat(x.w);
 	float fade = 1.0 - smoothstep(bounds.y, bounds.z, dist);
 	uint flags = (w.z >> 24) >> 4;
-	if (fade <= 0.0 || !(dist > 0.0) || (flags & 8u) == 0u)
+	if (!(dist > 0.0) || (flags & 8u) == 0u)
 		discard;
 	vec3 n = unfold(unpackSnorm2x16(w.y));
+	vec4 base = texelFetch(color_texture, texel, 0);
+	float weight = 0.0;
+	if (lb != la)
+	{
+		float lightness = oklab_l(base.rgb);
+		float span_l = cue(cb) - cue(ca);
+		weight = abs(span_l) > 0.08 ? clamp((lightness - cue(ca)) / span_l, 0.0, 1.0) : 0.5;
+		if (cb == 4u)
+			weight = max(weight, smoothstep(0.75, 0.5, abs(n.z)));
+		if (ca == 4u)
+			weight = min(weight, smoothstep(0.5, 0.75, abs(n.z)));
+	}
+	/* (snow on the rock's tops (T3): on a map with snow (gamut.x), the faces turned up of a material of rock alone,
+	where CE's lightmap light (the G-buffer's code: Tool's radiosity left overhangs and ledges under cover dark) says
+	the sky reaches; gamut.yzw the snow's colour. Never on a material that blends rock with another class: there the
+	rock's texels are CE's painted dirt in the snow (b40's brown streaks), which snow over them erased in hard-edged
+	pale patches) */
+	float snow_cover = 0.0;
+	bool rock_here = ca == 4u && cb == 4u;
+	if (gamut.x > 0.5 && rock_here)
+	{
+		float code = float(x.z >> 24) / 255.0;
+		float sky = code > 0.0 ? smoothstep(0.2, 0.42, code) : 1.0;
+		snow_cover = smoothstep(0.74, 0.9, n.z) * sky;
+	}
+	/* (beyond the HQ detail's reach: the class's model, roughness and colour of snow alone, so that the light
+	passes' response does not end where the detail does) */
+	if (fade <= 0.0)
+	{
+		uint far_class = weight >= 0.5 ? cb : ca;
+		vec3 far_color = base.rgb;
+		if (snow_cover > 0.0)
+		{
+			snow_cover = smoothstep(0.35, 0.65, snow_cover);
+			far_color = mix(far_color, gamut.yzw, snow_cover);
+			far_class = snow_cover > 0.5 ? 5u : far_class;
+		}
+		float rf = TERRAIN_ROUGHNESS[far_class];
+		result = vec4(far_color, base.a);
+		words_out = classed(w, far_class, rf >= 0.0 ? rf : float(w.z & 255u) / 255.0, 1.0);
+		return;
+	}
 	vec4 corners = view_corners;
 	vec2 span = max(corners.zw - corners.xy, vec2(1.0));
 	vec2 sxy = 2.0 * (gl_FragCoord.xy - corners.xy) / span - 1.0;
@@ -697,39 +803,32 @@ void main()
 	rn = abs(rn) < 0.05 ? (rn < 0.0 ? -0.05 : 0.05) : rn;
 	vec3 dpx = dist * (rx - ray * (dot(rx, plane) / rn));
 	vec3 dpy = dist * (ry - ray * (dot(ry, plane) / rn));
-	vec4 base = texelFetch(color_texture, texel, 0);
-	float weight = 0.0;
-	if (lb != la)
-	{
-		uint ca = c.r, cb = c.g;
-		float lightness = oklab_l(base.rgb);
-		float span_l = cue(cb) - cue(ca);
-		weight = abs(span_l) > 0.08 ? clamp((lightness - cue(ca)) / span_l, 0.0, 1.0) : 0.5;
-		if (cb == 4u)
-			weight = max(weight, smoothstep(0.75, 0.5, abs(n.z)));
-		if (ca == 4u)
-			weight = min(weight, smoothstep(0.5, 0.75, abs(n.z)));
-	}
 	vec4 detail, detail_b;
 	vec3 normal, normal_b;
-	float rough, rough_b;
+	float rough, rough_b, ao, ao_b;
 	/* (the surface (normal, roughness) only near, where it is drawn; one class alone where the other has
 	little of the pixel) */
 	float near = 1.0 - smoothstep(1.0, 6.0, dist);
 	bool surfaced = near > 0.0;
 	float fine = 1.0 - smoothstep(1.0, 12.0, dist);
+	uint cls = ca;
 	if (lb != la && weight >= 0.85)
+	{
 		la = lb;
-	layer_at(la, p, dpx, dpy, n, surfaced, fine, detail, normal, rough);
+		cls = cb;
+	}
+	layer_at(la, p, dpx, dpy, n, surfaced, fine, detail, normal, rough, ao);
 	if (lb != la && weight > 0.15)
 	{
-		layer_at(lb, p, dpx, dpy, n, surfaced, fine, detail_b, normal_b, rough_b);
+		layer_at(lb, p, dpx, dpy, n, surfaced, fine, detail_b, normal_b, rough_b, ao_b);
 		float hb = smoothstep(-0.25, 0.25, (detail_b.a + weight * 1.4) - (detail.a + (1.0 - weight) * 1.4));
 		detail = mix(detail, detail_b, hb);
 		normal = normalize(mix(normal, normal_b, hb));
 		rough = mix(rough, rough_b, hb);
+		ao = mix(ao, ao_b, hb);
 		weight = hb;
 		la = hb > 0.5 ? lb : la;
+		cls = hb > 0.5 ? cb : ca;
 	}
 	vec4 a = layer_a(la), b = layer_b(la);
 	vec4 macro = texture(macro_texture, p.xy * (1.0 / 24.0));
@@ -743,12 +842,30 @@ void main()
 	ratio = max(ratio, 0.3 * exp(min(ratio - 0.3, vec3(0.0)) / 0.3));
 	vec3 color = clamp(base.rgb * pow(ratio, vec3(1.0 / 2.2)), 0.0, 1.0);
 	normal = normalize(mix(n, normal, fade * near));
-	float r = float(w.z & 255u) / 255.0;
+	/* (sand's ripples, over the HQ normal and beyond its reach, as far as the footprint resolves them) */
+	if (cls == 1u && tangents.z > 0.0)
+		normal = normalize(normal - vec3(ripple_tilt(p, n, max(length(dpx), length(dpy))), 0.0) * fade);
+	float rd = TERRAIN_ROUGHNESS[cls];
+	float r = rd >= 0.0 ? rd : float(w.z & 255u) / 255.0;
 	r = clamp(r * mix(1.0, rough, b.x * fade * near), 0.02, 1.0);
+	float occlusion = mix(1.0, clamp(ao, 0.0, 1.0), fade * near);
+	if (snow_cover > 0.0)
+	{
+		/* (the snow settled where the rock's height is low among its faces turned up: its cracks and hollows first) */
+		snow_cover = smoothstep(0.3, 0.7, snow_cover + (0.5 - detail.a) * 0.6);
+		color = mix(color, gamut.yzw, snow_cover);
+		normal = normalize(mix(normal, n, snow_cover * 0.7));
+		r = mix(r, TERRAIN_ROUGHNESS[5], snow_cover);
+		occlusion = mix(occlusion, 1.0, snow_cover);
+		cls = snow_cover > 0.5 ? 5u : cls;
+	}
 	if (bounds.w > 0.5)
 		color = vec3(weight, fade, float(la) / 6.0);
 	result = vec4(color, base.a);
-	words_out = uvec4(w.x, packSnorm2x16(fold(normal)), (w.z & 0xffffff00u) | uint(r * 255.0 + 0.5), w.w);
+	uvec4 o = classed(w, cls, r, occlusion);
+	if (TERRAIN_ROUGHNESS[cls] < 0.0)
+		o.z = (o.z & 0xffffff00u) | uint(r * 255.0 + 0.5);
+	words_out = uvec4(w.x, packSnorm2x16(fold(normal)), o.z, w.w);
 }
 """
 # the same, where the device reads a target where it is drawn (dynamic rendering's local reads: Vulkan's
@@ -762,7 +879,7 @@ TERRAIN_LAYERS_LOCAL_SOURCE = TERRAIN_LAYERS_SOURCE.replace(
     "out vec4 result;\nlayout(location = 1) out uvec4 words_out;\n",
     "layout(location = 1) out vec4 base_out;\nlayout(location = 0) out uvec4 words_out;\n").replace(
     "\tuvec4 w = texelFetch(gbuffer_texture, texel, 0);\n", "\tuvec4 w = subpassLoad(words_input);\n").replace(
-    "\tresult = vec4(color, base.a);\n", "\tbase_out = vec4(color, base.a);\n")
+    "result = vec4(", "base_out = vec4(")
 assert TERRAIN_LAYERS_LOCAL_SOURCE.count("words_input") == 2 and "base_out" in TERRAIN_LAYERS_LOCAL_SOURCE
 # Vulkan's own program: the frame turned for a swapchain the display turns
 # (a phone held sideways: xgpu_vulkan_post_rotate). Each pixel takes the
