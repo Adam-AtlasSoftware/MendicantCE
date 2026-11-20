@@ -84,6 +84,9 @@ int host_update_make_directory(const char *path);
 int host_update_make_executable(const char *path);
 int host_update_launch(const char *path);
 int host_update_restart(const char *path);
+int host_update_child_start(const char *path, const char *environment);
+int host_update_child_state(int handle);
+void host_update_child_stop(int handle);
 /* (the macOS app's updater: updater.c's updater_poll, port/macos/host_app.m) */
 void host_app_playing(int playing);
 /* a dedicated server's signals, which the host owns (port/linux/src/
@@ -1047,6 +1050,21 @@ int update_make_executable(const char *path)
 int update_launch(const char *path)
 {
 	return host_update_launch(path);
+}
+
+int update_child_start(const char *path, const char *environment)
+{
+	return host_update_child_start(path, environment);
+}
+
+int update_child_state(int handle)
+{
+	return host_update_child_state(handle);
+}
+
+void update_child_stop(int handle)
+{
+	host_update_child_stop(handle);
 }
 
 int update_restart(const char *path)

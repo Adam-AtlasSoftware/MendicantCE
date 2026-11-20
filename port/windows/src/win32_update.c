@@ -419,3 +419,142 @@ int update_restart(const char *path)
 	(void)path;
 	return 0;
 }
+
+/* ---------- PRISM's light bake on the main menu: its worker (update.h) */
+
+#define UPDATE_CHILDREN 4
+
+static HANDLE update_children[UPDATE_CHILDREN];
+/* (the job every worker is in, ended with this process: its handle is
+closed only as the process ends) */
+static HANDLE update_child_job;
+
+/* whether the variable (NAME=value, wide) is one of the names of the
+additions (wide, each NUL ended, the list by another); Windows's names are
+alike in either case */
+static int update_child_overridden(const wchar_t *variable, const wchar_t *additions)
+{
+	const wchar_t *equals = wcschr(variable + 1, L'='), *entry;
+	size_t length = equals ? (size_t)(equals - variable) : wcslen(variable);
+
+	for (entry = additions; *entry; entry += wcslen(entry) + 1)
+	{
+		if (!_wcsnicmp(entry, variable, length) && entry[length] == L'=')
+			return 1;
+	}
+	return 0;
+}
+
+int update_child_start(const char *path, const char *environment)
+{
+	wchar_t wide[MAX_PATH * 2], command[MAX_PATH * 2 + 3];
+	wchar_t *additions = NULL, *block = NULL, *strings, *cursor;
+	const wchar_t *entry;
+	size_t bytes = 0, size = 0, used = 0, length;
+	const char *source;
+	STARTUPINFOW startup;
+	PROCESS_INFORMATION process;
+	int slot, result = 0;
+
+	for (slot = 0; slot < UPDATE_CHILDREN && update_children[slot]; slot++)
+		;
+	if (slot == UPDATE_CHILDREN || !wide_from_utf8(path, wide, MAX_PATH * 2))
+		return 0;
+	_snwprintf(command, MAX_PATH * 2 + 3, L"\"%ls\"", wide);
+	/* (the additions made wide) */
+	for (source = environment; *source; source += strlen(source) + 1)
+		bytes += strlen(source) + 1;
+	additions = calloc(bytes + 1, sizeof(wchar_t));
+	if (!additions)
+		return 0;
+	cursor = additions;
+	for (source = environment; *source; source += strlen(source) + 1)
+	{
+		int count = MultiByteToWideChar(CP_UTF8, 0, source, -1, cursor, (int)(bytes + 1 - (size_t)(cursor - additions)));
+
+		if (count <= 0)
+			goto done;
+		cursor += count;
+	}
+	*cursor = 0;
+	/* (this process's environment, less the names added, then the
+	additions: a block of NUL ended strings, ended by another) */
+	strings = GetEnvironmentStringsW();
+	if (!strings)
+		goto done;
+	for (entry = strings; *entry; entry += wcslen(entry) + 1)
+		size += wcslen(entry) + 1;
+	size += bytes + 2;
+	block = calloc(size, sizeof(wchar_t));
+	if (block)
+	{
+		for (entry = strings; *entry; entry += wcslen(entry) + 1)
+		{
+			length = wcslen(entry) + 1;
+			if (update_child_overridden(entry, additions))
+				continue;
+			memcpy(block + used, entry, length * sizeof(wchar_t));
+			used += length;
+		}
+		for (entry = additions; *entry; entry += wcslen(entry) + 1)
+		{
+			length = wcslen(entry) + 1;
+			memcpy(block + used, entry, length * sizeof(wchar_t));
+			used += length;
+		}
+		block[used] = 0;
+	}
+	FreeEnvironmentStringsW(strings);
+	if (!block)
+		goto done;
+	if (!update_child_job)
+	{
+		JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
+
+		update_child_job = CreateJobObjectW(NULL, NULL);
+		memset(&limits, 0, sizeof(limits));
+		limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+		if (update_child_job)
+			SetInformationJobObject(update_child_job, JobObjectExtendedLimitInformation, &limits, sizeof(limits));
+	}
+	memset(&startup, 0, sizeof(startup));
+	startup.cb = sizeof(startup);
+	/* (none of this process's handles; this process's working folder) */
+	if (CreateProcessW(wide, command, NULL, NULL, FALSE, CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED, block, NULL,
+		&startup, &process))
+	{
+		if (update_child_job)
+			AssignProcessToJobObject(update_child_job, process.hProcess);
+		ResumeThread(process.hThread);
+		CloseHandle(process.hThread);
+		update_children[slot] = process.hProcess;
+		result = slot + 1;
+	}
+done:
+	free(block);
+	free(additions);
+	return result;
+}
+
+int update_child_state(int handle)
+{
+	HANDLE process;
+	DWORD code = 255;
+
+	if (handle <= 0 || handle > UPDATE_CHILDREN || !update_children[handle - 1])
+		return 255;
+	process = update_children[handle - 1];
+	if (WaitForSingleObject(process, 0) == WAIT_TIMEOUT)
+		return -1;
+	if (!GetExitCodeProcess(process, &code))
+		code = 255;
+	CloseHandle(process);
+	update_children[handle - 1] = NULL;
+	return code > 255 ? 255 : (int)code;
+}
+
+void update_child_stop(int handle)
+{
+	if (handle > 0 && handle <= UPDATE_CHILDREN && update_children[handle - 1])
+		TerminateProcess(update_children[handle - 1], 143);
+}

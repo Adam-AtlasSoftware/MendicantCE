@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PRISM's light bake (docs/prism_bake.md): a setting the bake holds changed (Bake Quality, Sky Light, World
+Geometry, Cutout Shadows) under PRISM Rebaked or Path Traced (menu_functions.c's settings_pending_write). REBAKE (or
+B) keeps it: the main menu bakes every level again; UNDO puts the settings back as they were. -->
+<screen name="bake_rebake" back="bake keep">
+	<dialog title="REBAKE NEEDED" text="This change bakes every level's light again on the main menu. Wait for it before you play.">
+		<list focus="rebake">
+			<item id="rebake" label="REBAKE" do="bake keep"/>
+			<item id="undo" label="UNDO" do="bake undo"/>
+		</list>
+	</dialog>
+</screen>

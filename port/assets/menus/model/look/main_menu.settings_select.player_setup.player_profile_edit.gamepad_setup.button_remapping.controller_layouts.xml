@@ -48,7 +48,7 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_controller_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" index="1" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_controller_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_controller_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/op_edit_buttons" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
@@ -91,7 +91,7 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_export_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" index="5" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_export_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_export_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/op_layout_files" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
@@ -102,7 +102,7 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_files_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" index="6" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_files_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_files_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/op_layout_bindings" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
@@ -113,7 +113,7 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_bindings_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" index="7" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_bindings_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_bindings_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
 </model>

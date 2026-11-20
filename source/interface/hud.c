@@ -120,6 +120,7 @@ symbols in this file:
 #include "halo_keyboard.h" /* port: port/linux/src/xinput_sdl.c */
 #include "input_display.h" /* port: port/linux/game/input_display.c */
 #include "practice.h" /* port: port/linux/game/practice.c */
+void prism_bake_menu_draw(void); /* port: port/linux/game/prism_bake_menu.c */
 #include "text/font_group.h"
 #include "text/text_group.h"
 #include "units/unit_definitions.h"
@@ -1714,6 +1715,9 @@ void hud_draw_screen(
 		/* port: the PRACTICE mark, which Hide HUD does not hide
 		(port/linux/game/practice.c) */
 		practice_draw();
+		/* port: PRISM's light bake on the main menu, its line and bar
+		(port/linux/game/prism_bake_menu.c; nothing in a game) */
+		prism_bake_menu_draw();
 
 		if (!game_time_get_paused() &&
 			render.local_player_index == local_player_get_next(NONE))

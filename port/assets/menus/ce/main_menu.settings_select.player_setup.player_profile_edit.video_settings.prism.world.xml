@@ -197,7 +197,7 @@
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/help_strings">
 		<string text=""/>
 		<string text=""/>
-		<string text="Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on the original."/>
+		<string text="Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on the original. Under the PRISM lightings a change bakes every level again."/>
 		<string text="How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper on the graphics card."/>
 		<string text="Spreads where the remodel's surfaces change to their lighter far level over a band, one by one as you move, rather than a ring of them at once."/>
 		<string text="The shape Classic's sun shadows are cast from with the remodel: Far, its lighter level (the rock's ledges still shade); Full, every detail; Xbox, the map's own (cheapest)."/>

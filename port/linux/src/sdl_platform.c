@@ -2362,6 +2362,10 @@ void platform_video_drawable_size(int *width, int *height)
 	SDL_GetWindowSizeInPixels(platform_window, width, height);
 }
 
+/* port/linux/game/prism_bake_menu.c's: the main menu's frames a second while
+PRISM's light bake's worker bakes (0: none) */
+int prism_bake_menu_frame_cap(void);
+
 /* with vsync off, the time between frames display.max_fps asks for (0:
 twice the display's refresh rate), or 0 for no limit. A GPU never left idle
 can hang (Intel's Raptor Lake graphics, whose reset then takes the desktop
@@ -2418,6 +2422,16 @@ static Uint64 frame_interval_ns(void)
 		if (!rate || saving < rate)
 			rate = saving;
 	}
+#ifndef HALO_ANDROID
+	/* (the main menu while PRISM's light bake's worker bakes: its frames
+	held, the GPU the bake's; port/linux/game/prism_bake_menu.c) */
+	{
+		int cap = prism_bake_menu_frame_cap();
+
+		if (cap > 0 && (!rate || (float)cap < rate))
+			rate = (float)cap;
+	}
+#endif
 	return rate > 0.0f ? (Uint64)(1e9f / rate) : 0;
 }
 

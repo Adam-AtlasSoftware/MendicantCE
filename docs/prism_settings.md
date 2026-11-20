@@ -67,7 +67,8 @@ The pages it opens:
 | Image | Exposure | Exposure, Exposure Bias, Tone Curve | R, P |
 | | Post Effects | Bloom, Tone Grade | C, R, P |
 | Upscaling | Resolution | Upscaler (`display.upscaler`: Off, FSR 3.1, DLSS once its plugin is ready), Upscale Quality (while an upscaler is on) | R, P |
-| Light Bake | Light Bake | Bake, Bake Quality, Sky Light, Rebake Lightmaps, Progress on Screen | R, P |
+| Light Bake | Light Bake | Bake Quality, Sky Light (a change of either asks, then bakes every level again on the main menu) | R, P |
+| | Levels | Each campaign level's bake (Baked, Baking 37%, Loading, Part Baked, Not Baked, No Map, Failed), Rebake All (asks first) | R, P |
 | Materials & Textures | Materials | Material Packs (`display.material_packs`) | R, P |
 | | | PBR Materials (`display.prism_materials`) | C, R, P |
 | | | Material Detail, Surface Detail (the model shaders' forward light) | C |
@@ -96,6 +97,14 @@ under both PRISM modes the game gives the bake's frame and the path tracer the l
 `docs/prism_pathtraced.md`), and Enhanced adds the plasma bolts' and needles' lights to them and draws their glows. A
 Pro 2v2 game holds all three at Classic.
 
+**The light bake needs no asking** (`docs/prism_bake.md`, "The bake on the main menu"): under both PRISM modes the main
+menu bakes the campaign's levels that lack a bake of the settings chosen, as other games compile their shaders, with
+a line and a bar under the menu; a level started before its bake is done asks (PLAY NOW with Classic's light while it
+bakes in the background, or WAIT); a change of a setting the bake holds (Bake Quality, Sky Light, World Geometry,
+Cutout Shadows) asks (REBAKE or UNDO). Light Bake's old Bake (While Playing, When Asked, Never), Rebake Lightmaps and
+Progress on Screen rows are gone: `display.bake` `"ask"` is read as `"auto"` (and written so), `"off"` and
+`display.bake_indicator` stay config.toml's.
+
 The terrain overhaul's other settings (`display.terrain_quality`, `display.terrain_drifts`, `display.weather`,
 `display.terrain_pack_folder`) are config.toml's alone until they draw something (`docs/prism_terrain.md`).
 
@@ -110,4 +119,4 @@ A new file's `[display]` is written in groups, each titled with the modes it rea
 brightness, graphics quality, the lighting, PRISM's image, the light bake, Rebaked, Path Traced, ray tracing, Classic's
 lighting, post effects, the remodel and assets, the view, the rest), and each lighting setting's comment ends with
 the modes it reaches (`# Lighting: ...`). A file of an older version loads as it is, every value kept: a setting it
-lacks is added at its section's end. No key was renamed.
+lacks is added at its section's end. No key was renamed; `display.bake`'s `"ask"` is read as `"auto"`.

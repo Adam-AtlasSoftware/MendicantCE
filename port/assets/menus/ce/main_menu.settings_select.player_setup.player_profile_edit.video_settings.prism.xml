@@ -172,7 +172,7 @@
 		<string text="The traced features of the lighting chosen: Classic's ray traced shadows and light, and the shapes every lighting traces (models, cutouts)."/>
 		<string text="The PRISM lightings' exposure and tone curve, and the bloom and tone grade of every lighting."/>
 		<string text="Draws the 3D view smaller and brings it to the screen's resolution with FSR 3.1 or DLSS: faster. The upscaler and how much of the resolution it starts from."/>
-		<string text="The level's light baked on this computer, which both PRISM lightings read: when it bakes, its quality, the sky's light and the progress on screen."/>
+		<string text="The levels' light, baked on this computer on the main menu before you play, which both PRISM lightings read: its quality, the sky's light, and each level's bake."/>
 		<string text=""/>
 		<string text="The materials packs and mods give surfaces, and the sharper textures mods ship, with how much of the graphics card they take."/>
 		<string text="The remodelled characters, weapons and vehicles mods ship, and how the sharper assets are read in without popping."/>

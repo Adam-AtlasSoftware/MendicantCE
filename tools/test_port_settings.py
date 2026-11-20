@@ -666,7 +666,7 @@ def test_lighting_pages_per_mode():
     assert "rebaked_lighting" in shown(prism, "R") and not {"classic_lighting", "path_tracing"} & shown(prism, "R")
     assert "path_tracing" in shown(prism, "P") and not {"classic_lighting", "rebaked_lighting"} & shown(prism, "P")
     assert {"upscaling", "light_bake"} <= shown(prism, "R") & shown(prism, "P")
-    assert not shown(f"{prism}/light_bake", "C") and "bake" in shown(f"{prism}/light_bake", "P")
+    assert not shown(f"{prism}/light_bake", "C") and "bake_quality" in shown(f"{prism}/light_bake", "P")
     assert shown(f"{prism}/image", "C") == {"prism_bloom", "prism_tone"}
     assert "prism_exposure" in shown(f"{prism}/image", "R") & shown(f"{prism}/image", "P")
     tracing = f"{prism}/ray_tracing"
@@ -677,3 +677,33 @@ def test_lighting_pages_per_mode():
     assert "prism_materials" in shown(materials, "P") and "prism_surface_maps" not in shown(materials, "P")
     assert not {"terrain", "water"} & shown(f"{prism}/world", "C")
     assert {"terrain", "terrain_layers", "water"} <= shown(f"{prism}/world", "P")
+
+
+def test_light_bake_page():
+    """Light Bake (the main menu bakes the levels, prism_bake_menu.c): its quality and sky light, a row of each
+    campaign level's bake (a status row menu_functions.c's bake_rows_show fills), and REBAKE ALL; no choice of when
+    it bakes (display.bake "ask", gone) and no Rebake Lightmaps"""
+    page = PAGES["video_settings/prism/light_bake"]
+    keys = [_key(entry) for entry in page["rows"] if entry[0] != SECTION]
+    levels = ["a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40"]
+    assert keys == ["bake_quality", "prism_sky_light", *(f"bake_{level}" for level in levels), "bake_rebake_all"]
+    assert not {"bake", "bake_rebake", "bake_indicator"} & set(keys)
+    for key in keys[2:]:
+        assert key in port_settings.SETTINGS_STATUS_ROWS and LIGHTING_MODE_ROWS[key] == "RP"
+    rebake = [entry for entry in page["rows"] if entry[0] != SECTION and _key(entry) == "bake_rebake_all"][0]
+    assert rebake[-1] == "port settings bake rebake all"
+
+
+
+@pytest.mark.parametrize("aspect", sorted(port_settings.WIDE_SCREENS))
+def test_light_bake_level_values_fit(aspect):
+    """Light Bake's levels' values (the words prism_bake_menu.c's prism_bake_menu_level_words gives, each frame) fit
+    their status rows' value at every aspect (their names are the page's labels: test_tall_rows_words_fit)"""
+    extra = port_settings.wide_extra_of(port_settings.WIDE_SCREENS[aspect])
+    widgets = _tall_widgets()
+    base = f"{port_settings.PE}/video_settings/prism/light_bake"
+    for level in ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40"):
+        value = widgets[f"{base}/bake_{level}_value"]
+        for words in ("BAKING 99%", "PART BAKED", "NOT BAKED", "LOADING", "BAKED", "NO MAP", "FAILED", "NEXT"):
+            assert port_settings.small_ui_width(words) * _tall_scale(value, extra) <= _tall_width(value, extra), \
+                (aspect, level, words)

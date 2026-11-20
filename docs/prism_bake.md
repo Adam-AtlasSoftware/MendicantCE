@@ -19,6 +19,7 @@ on (`<data>/prism_bake`, or `display.bake_folder`).
 | The bake | The renderer, the same file and `xgpu_vulkan_bake_glsl.inc` | A slice of each frame's GPU work: the passes below, into the bake file |
 | PRISM Raster | The renderer, the same files | The light target lit from the bake before the deferred resolve (`xgpu_vulkan_post_deferred_resolve`'s relight) |
 | The indicator | The game, `port/linux/game/prism_bake_indicator.c` | "Baking lightmaps 37%" at the screen's top left while a level is baked |
+| The main menu's bake | The game, `port/linux/game/prism_bake_menu.c` | The campaign's levels baked on the main menu by a worker (the game again, hidden, `debug.bake_worker`), its progress under the menu, the note of the BSPs baked, the questions ("The bake on the main menu") |
 
 The bake reads what the renderer already has: SCENE_STATIC's level as drawn (its near level), display.prism_rt's
 materials (each environment shader's mean albedo, its alpha map, its glow; the light cards' and lamp surfaces'
@@ -321,7 +322,7 @@ quality and the threshold. While the bake runs a tile's result is as baked, with
 (`ATLX`) after it and its filtered texels (`ATLF`) once the filter has run; the finished file keeps the filtered texels
 as the tile's result and drops both. A file of
 another key is not resumed: the BSP is baked again (into `.new`) and replaces it when done (with `display.bake` `"off"`,
-or `"ask"` and not asked, nothing is made or baked: a whole bake of the key is drawn, else an unfinished log of it as
+nothing is made or baked: a whole bake of the key is drawn, else an unfinished log of it as
 far as it goes).
 
 The light is the map's, not the path tracer's look: the bake takes the sun's disc of `display.prism_sun_size` `"auto"`,
@@ -344,13 +345,14 @@ the first traced window) and the beach stayed CE's light 16 s coming out.
 | Setting | Values | |
 | --- | --- | --- |
 | `display.lighting` | `"ce"`, `"ce_deferred"`, `"raster"` | Raster is the third |
-| `display.bake` | `"auto"`, `"ask"`, `"off"` | Bake while playing (default), only when asked, never (a whole bake is still drawn) |
+| `display.bake` | `"auto"`, `"off"` | Bake on the main menu and while playing (default), never (a whole bake is still drawn); the older `"ask"` is read as `"auto"` |
 | `display.bake_quality` | `"max"`, `"ultra"`, `"high"`, `"draft"` | D4's `max` the default |
-| `display.bake_rebake` | an integer | Each change bakes the BSP drawn again from nothing (Settings' Rebake Lightmaps) |
+| `display.bake_rebake` | an integer | Each change bakes the BSP drawn again from nothing (the console's; Settings' Rebake All deletes every level's bake) |
 | `display.bake_folder` | a path | Empty: the data folder's `prism_bake` |
-| `display.bake_budget` | 0.25 to 200 ms | The GPU time a frame may give a background bake (30 in the menus, 60 with `debug.bake_exit`) |
+| `display.bake_budget` | 0.25 to 200 ms | The GPU time a frame may give a background bake (30 in the menus, 60 with `debug.bake_exit`, 40 in the main menu's worker) |
 | `display.bake_indicator` | `true`, `false` | The progress at the screen's top left |
 | `debug.bake_exit` | `true`, `false` | Bake in the foreground and quit once done: the measurements' runs |
+| `debug.bake_worker` | a map's name | The main menu's worker (below): that map loaded at once, each BSP baked in turn, then quit |
 | `debug.gbuffer_view` | `"bake_light"`, `"bake_sun"`, `"bake_texels"`, `"bake_volume"`, `"bake_total"` | Raster's views |
 | `display.prism_raster_composition` | `"ce"`, `"materials"` | CE's shaders compose Raster's light (default), or PRISM's own materials |
 | `display.prism_raster_objects` | `"volume"`, `"classic"` | Objects by the volume's light (default), or never lit under Classic |
@@ -371,11 +373,58 @@ frame.
 Settings > Video > PRISM > Lighting chooses Classic, PRISM Rebaked (`"raster"`) or PRISM Path Traced. PRISM's page
 then opens, under PRISM Rebaked, Rebaked Lighting › (Composition, Object Light, Object Shadows, and Shadow Quality while
 the object shadows are Classic's, Dynamic Lights); under both PRISM modes, Image › (Exposure, Exposure Bias and Tone
-Curve), Upscaling › and Light Bake ›: Bake (While Playing, When Asked, Never), Bake Quality, Sky Light, Rebake
-Lightmaps and Progress on Screen (Path Traced reads the bake too). Ray Tracing has the traced scene's rows
+Curve), Upscaling › and Light Bake ›: Bake Quality, Sky Light, each campaign level's bake and Rebake All (Path Traced
+reads the bake too; "The bake on the main menu", below). Ray Tracing has the traced scene's rows
 (docs/prism_settings.md). The bake
 needs ray queries; a GPU without them draws Raster with CE's
 light (D5).
+
+## The bake on the main menu
+
+The player never asks for a bake (`port/linux/game/prism_bake_menu.c`). With either PRISM lighting chosen, a card that
+traces rays and `display.bake` `"auto"`, the main menu bakes the campaign's levels whose maps there are and that lack
+a bake of the settings chosen, before they are played, as other games compile their shaders.
+
+- **A worker.** The baker bakes the level drawn, and the main menu draws none, so a level is baked by the game started
+  again as a process of its own (`update.h`'s `update_child_start`: fork and exec on Linux, `CreateProcessW` in a job
+  on Windows; ended with the game by Linux's parent death signal or the job), with `debug.bake_worker` its map. It is
+  hidden and silent: no sound, controllers, network, updates, crash reports, movies or menu pictures; its saves, log
+  (`debug.txt`) and pipeline cache its own, under the saves folder's `bake_worker`; it reads the same config.toml, so
+  its bake is of the same settings. It loads the map at once in place of `init.txt` (`console.c`), stops the game's
+  clock (`game_speed 0`), bakes each BSP in turn in the foreground at 40 ms of GPU time a frame (`scenario_switch_
+  structure_bsp` between frames, once the BSP before is `DONE`), writes its progress to the bake folder's
+  `menu_worker.txt` every half second (its BSP, of how many, the share and the seconds left, the baker's estimate),
+  and quits. One worker at a time; the main menu's frames are held to 30 a second while it bakes, so the GPU is the
+  bake's, and the bake goes on with the window out of focus.
+- **The order.** The level WAIT chose (below), the one played last (the bake folder's `last_played.txt`), the saved
+  game's, the one after the last finished (player 1's profile), then the campaign's.
+- **What is baked** is noted beside each map's bake, `<folder>/<map>/baked.txt`: the map's BSPs, and each BSP baked
+  with its key (`prism_bake_key`: the baker's version, `XGPU_BAKE_VERSION`, `display.bake_quality`,
+  `prism_sky_light`, `prism_rig`, `prism_world_geometry`, `prism_rt_alpha`), written by whichever process saw that
+  BSP's bake `DONE` (the worker, or a game played). A level is baked when all its BSPs carry the settings' key. The
+  baker checks the whole key as it loads a bake (the map, its geometry, its lights), so a bake the note calls good that
+  is not (a map or a remodel changed) is baked again as the level is played.
+- **Resumed.** The bake file is a log the baker resumes at its next unfinished job, so a worker ended (the game quit
+  or killed, a level started) loses only the work in flight; the next start goes on where it stopped. A worker that
+  fails, or writes no progress for four minutes, leaves its level until the next start (FAILED on Light Bake).
+- **On the main menu,** under the menu: "Baking PRISM light: The Silent Cartographer 37%", a bar, then "About 4 min
+  left - Level 1 of 10 - best played once it is done"; "PRISM light baked: every level is ready" for a few seconds once
+  done.
+- **A level started before its bake is done** (Campaign's Choose Mission and Choose Difficulty, Continue, Load Game:
+  `menu_functions.c`'s `campaign_start`) asks first (`screens/bake_play.xml`): PLAY NOW plays it with Classic's light
+  where its bake has nothing yet, the game's own baker going on with it in the background as it is played (the worker
+  is ended as the level starts); WAIT (and B) goes back, the main menu baking that level next.
+- **A setting the bake holds changed** (Bake Quality, Sky Light, World Geometry, Cutout Shadows) under a PRISM
+  lighting asks once it is written (`screens/bake_rebake.xml`): REBAKE (and B) keeps it, and the main menu bakes every
+  level again; UNDO writes the settings back.
+- **Light Bake** has Bake Quality, Sky Light, each campaign level's bake (BAKED, BAKING 37%, LOADING, PART BAKED,
+  NOT BAKED, NO MAP, FAILED) and REBAKE ALL, which asks (`screens/bake_rebake_all.xml`), then deletes every level's
+  bake and note for the main menu to bake them again from nothing. Its old Bake (While Playing, When Asked, Never),
+  Rebake Lightmaps and Progress on Screen rows are gone: `display.bake` `"ask"` is read as `"auto"` and written so;
+  `"off"`, `display.bake_rebake` and `display.bake_indicator` stay config.toml's (and the console's).
+
+The default quality is `max`, whose time is the darkest texels' (above, "Measurements"): its estimate on the main menu
+can be hours a level; `ultra` bakes a level in minutes.
 
 ## How Raster reads the bake
 

@@ -2914,6 +2914,10 @@ enum
 	/* the reach's inputs were all sent */
 	XGPU_BAKE_FLAG_REACH = 4,
 };
+/* the bake file's maker (xgpu_vulkan_bake.c's BAKE_VERSION: a change makes
+every bake stale), which the game's note of the BSPs baked holds too
+(port/linux/game/prism_bake.c's prism_bake_key) */
+#define XGPU_BAKE_VERSION 18u
 #define XGPU_BAKE_PATH 512u
 #define XGPU_BAKE_SLICE 65536u
 #define XGPU_BAKE_NAME 64u

@@ -63,6 +63,8 @@ Conventions carried over from the Xbox:
 #include <time.h>
 
 void d3d8_surface_initialize(D3DSurface *surface, D3DFORMAT format, unsigned long width, unsigned long height);
+/* port/linux/game/prism_bake_menu.c's: PRISM's light bake on the main menu, between frames */
+void prism_bake_menu_frame(void);
 void d3d8_surface_resize(D3DSurface *surface, D3DFORMAT format, unsigned long width, unsigned long height);
 
 
@@ -8146,6 +8148,10 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	clips nothing of the next frame: draw_bounds_state.h) */
 	draw_bounds_state_frame_end(&draw_bounds);
 	report_frame_presented();
+	/* (PRISM's light bake on the main menu, between frames: its worker
+	started and watched, the BSPs baked noted: port/linux/game/
+	prism_bake_menu.c) */
+	prism_bake_menu_frame();
 	/* (display.hdr: a frame begins with no 3D view drawn) */
 	inputs.hdr_view = FALSE;
 	inputs.hdr_category = -1;

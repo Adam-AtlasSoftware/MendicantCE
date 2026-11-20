@@ -118,6 +118,7 @@ their handlers open opens.
 #include "controller_layouts.h"
 #include "custom_edition_cache.h"
 #include "mcc_ui.h"
+#include "prism_bake_menu.h"
 #include "mcc_pause.h"
 #include "mcc_maps.h"
 #include "mcc_progress.h"
@@ -1323,10 +1324,44 @@ static void campaign_levels_read(struct player_profile const *profile)
 	campaign.saved_difficulty = campaign.saved_level != NONE ? difficulty : NONE;
 }
 
+/* PRISM's light bake's questions (prism_bake_menu.c), pop-ups opened between
+frames (pc_menu_bake_questions_open): the level started that is not baked
+yet (its map, difficulty and controller kept for PLAY NOW), a change of a
+setting the bake holds (the settings' words before it, for UNDO), Light
+Bake's REBAKE ALL */
+#define BAKE_UNDO_COUNT 8
+
+static struct
+{
+	char const *open;
+	char map[256];
+	short difficulty, controller;
+	boolean confirmed;
+	short undo_count;
+	char undo_name[BAKE_UNDO_COUNT][48];
+	char undo_value[BAKE_UNDO_COUNT][80];
+} bake_question;
+
 /* plays the map, at the difficulty (a saved game in it goes on: main.c's
-main_new_map, if its difficulty is this one) */
+main_new_map, if its difficulty is this one); with PRISM's light bake, a
+campaign level not baked yet asks first (PLAY NOW plays it, with Classic's
+light until its bake, which goes on as it plays, is done; WAIT bakes it
+first on the main menu) */
 static void campaign_start(char const *map_name, short difficulty, short controller)
 {
+	if (!bake_question.confirmed && player_spawn_count < 2 && prism_bake_menu_level_unbaked(map_name) &&
+		menu_screen_open_ready("bake_play"))
+	{
+		snprintf(bake_question.map, sizeof(bake_question.map), "%s", map_name);
+		bake_question.difficulty = difficulty;
+		bake_question.controller = controller;
+		bake_question.open = "bake_play";
+		prism_bake_menu_asked(map_name);
+		platform_log("menus: %s is not baked for PRISM yet: asked whether to play it now", map_name);
+		return;
+	}
+	bake_question.confirmed = FALSE;
+	prism_bake_menu_level_started(map_name);
 	if (player_spawn_count < 2)
 		player_ui_set_single_player_local_player_controller(0, controller);
 	main_set_map_name(map_name);
@@ -2828,11 +2863,19 @@ static struct
 	{ "op_upscaling", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
 	{ "op_light_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_quality", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_prism_sky_light", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_rebake", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_indicator", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_a10", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_a30", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_a50", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_b30", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_b40", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_c10", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_c20", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_c40", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_d20", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_d40", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_bake_rebake_all", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	/* (Ray Tracing: Classic's ray tracer, display.prism_rt, which both PRISM
 	modes turn off (prism_rt.c), its settings only while it is on) */
 	{ "op_prism_rt", LIGHTING_C, NULL, NULL },
@@ -3161,7 +3204,24 @@ static void settings_pending_write(boolean finish)
 	long profile_index = player_ui_get_edit_profile_index();
 
 	short pass, index;
+	short undo_count = 0;
 
+	/* (PRISM's light bake: a setting it holds changed, its word before kept
+	for the question's UNDO; asked once written, if a PRISM lighting reads
+	the bake then: screens/bake_rebake.xml, opened between frames) */
+	for (index = 0; index < settings_pending.count && undo_count < BAKE_UNDO_COUNT; index++)
+	{
+		struct settings_pending const *entry = &settings_pending.entries[index];
+		char before[80];
+
+		if (prism_bake_key_setting(entry->name) && setting_text(entry->name, before, sizeof(before), FALSE) &&
+			strcmp(before, entry->value))
+		{
+			snprintf(bake_question.undo_name[undo_count], sizeof(bake_question.undo_name[0]), "%s", entry->name);
+			snprintf(bake_question.undo_value[undo_count], sizeof(bake_question.undo_value[0]), "%s", before);
+			undo_count++;
+		}
+	}
 	for (pass = 0; pass < 2; pass++)
 	{
 		for (index = 0; index < settings_pending.count; index++)
@@ -3178,6 +3238,12 @@ static void settings_pending_write(boolean finish)
 	}
 	settings_pending_clear();
 	platform_display_apply();
+	if (undo_count && prism_bake_menu_wanted() && menu_screen_open_ready("bake_rebake"))
+	{
+		bake_question.undo_count = undo_count;
+		bake_question.open = "bake_rebake";
+		platform_log("menus: %d of the light bake's settings changed: asked to bake the levels again", (int)undo_count);
+	}
 	if (player_ui_get_edit_player_profile())
 	{
 		if (player_ui_edit_profile_is_dirty() && !player_ui_save_profile())
@@ -3348,6 +3414,15 @@ static boolean settings_function(char const *name, struct widget_instance *widge
 		halo_gyro_calibrate();
 		gyro_calibrated = FALSE;
 		ui_play_audio_feedback_sound(SOUND_CURSOR);
+	}
+	else if (!strcmp(name, "bake rebake all"))
+	{
+		/* (Light Bake's REBAKE ALL: asked, screens/bake_rebake_all.xml) */
+		if (menu_screen_open_ready("bake_rebake_all"))
+			bake_question.open = "bake_rebake_all";
+		else
+			prism_bake_menu_rebake_all();
+		ui_play_audio_feedback_sound(SOUND_FORWARD);
 	}
 	else if (!strcmp(name, "clear caches"))
 	{
@@ -4141,6 +4216,24 @@ static void discord_account_show(struct widget_instance *list)
 				}
 			}
 		}
+	}
+}
+
+/* each frame of Light Bake's list: each campaign level's row's value, its
+bake's state (prism_bake_menu.c: BAKED, BAKING 37%, NOT BAKED, NO MAP) */
+static void bake_rows_show(struct widget_instance *list)
+{
+	static char const *const maps[] = { "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40" };
+	char key[16], text[ROW_TEXT_LENGTH];
+	long index;
+
+	if (!settings_model_row(list, "bake_a10"))
+		return;
+	for (index = 0; index < (long)NUMBEROF(maps); index++)
+	{
+		snprintf(key, sizeof(key), "bake_%s", maps[index]);
+		if (prism_bake_menu_level_words(maps[index], text, sizeof(text)))
+			settings_status_set(list, key, text);
 	}
 }
 
@@ -5323,6 +5416,7 @@ static void settings_page_update(struct widget_instance *list)
 	clear_caches_show(list);
 	add_maps_show(list);
 	hdr_display_show(list);
+	bake_rows_show(list);
 	pad_editor_update(list);
 	controls_page_update(list);
 	graphics_preset_show(list);
@@ -7018,6 +7112,8 @@ item's "port update question" notes it (menu_screen.c) */
 void pc_menu_main_menu_shown(struct widget_instance *screen)
 {
 	update_question_note(screen);
+	/* (PRISM's light bake's line under it: prism_bake_menu.c) */
+	prism_bake_menu_main_shown();
 }
 
 /* between frames (not while the widgets are drawn, which opening a screen
@@ -17089,6 +17185,93 @@ boolean pc_menu_campaign_saved(char *level, char *difficulty, long size)
 	campaign_difficulty_name(saved_difficulty, text, ROW_TEXT_LENGTH);
 	text_utf8(text, difficulty, size);
 	return level[0] != 0;
+}
+
+/* ---------- PRISM's light bake's questions (prism_bake_menu.c) */
+
+/* prism_bake_menu.c's: the levels its bake takes first, the saved game's
+and the one after the last finished (player 1's profile), NONE for none */
+void pc_menu_bake_levels(short *saved, short *next)
+{
+	struct player_profile const *profile = profile_current();
+	char const *map_name;
+	short level, difficulty, highest_level, highest_difficulty;
+
+	*saved = *next = NONE;
+	if (player_ui_get_active_player_profile_index(0) != NONE &&
+		ui_widget_port_saved_game(&map_name, &level, &difficulty))
+	{
+		*saved = level;
+	}
+	if (profile)
+	{
+		player_profile_get_highest_completed_solo_level((struct player_profile *)profile, &highest_level,
+			&highest_difficulty);
+		*next = highest_level + 1 >= 0 && highest_level + 1 < NUMBER_OF_SINGLE_PLAYER_LEVELS ?
+			(short)(highest_level + 1) : NONE;
+	}
+}
+
+/* between frames (prism_bake_menu.c's frame): the question asked opened,
+a pop-up over the screen up */
+void pc_menu_bake_questions_open(void)
+{
+	char name[64];
+	char const *open = bake_question.open;
+
+	if (!open)
+		return;
+	bake_question.open = NULL;
+	snprintf(name, sizeof(name), "pc\\screens\\%s", open);
+	if (!ui_widget_load_by_name_or_tag(name, NONE, NULL, 0, NONE, NONE, NONE))
+		platform_log("menus: no screen %s for its question", name);
+}
+
+/* the questions' answers (menu_screen.c's "bake ..."), the question closed:
+PLAY NOW (the level started, its bake going on as it plays), WAIT (baked
+first on the main menu); REBAKE (the change kept: the main menu bakes every
+level again) or UNDO (the settings' words before it written back); Light
+Bake's REBAKE ALL */
+boolean pc_menu_bake_answer(short local_player_index, char const *name)
+{
+	(void)local_player_index;
+	if (!strcmp(name, "bake play"))
+	{
+		if (!bake_question.map[0])
+			return FALSE;
+		platform_log("menus: %s played before its light bake is done (PLAY NOW)", bake_question.map);
+		bake_question.confirmed = TRUE;
+		campaign_start(bake_question.map, bake_question.difficulty, bake_question.controller);
+		bake_question.map[0] = 0;
+	}
+	else if (!strcmp(name, "bake wait"))
+	{
+		platform_log("menus: %s baked first (WAIT)", bake_question.map);
+		prism_bake_menu_first(bake_question.map);
+		bake_question.map[0] = 0;
+	}
+	else if (!strcmp(name, "bake undo"))
+	{
+		short index;
+
+		for (index = 0; index < bake_question.undo_count; index++)
+		{
+			if (setting_write(bake_question.undo_name[index], bake_question.undo_value[index]))
+				platform_log("menus: %s = %s (UNDO: the light bake kept)", bake_question.undo_name[index],
+					bake_question.undo_value[index]);
+		}
+		bake_question.undo_count = 0;
+	}
+	else if (!strcmp(name, "bake keep"))
+	{
+		platform_log("menus: the light bake's settings kept: the main menu bakes the levels again");
+		bake_question.undo_count = 0;
+	}
+	else if (!strcmp(name, "bake rebake all"))
+		prism_bake_menu_rebake_all();
+	else
+		return FALSE;
+	return TRUE;
 }
 
 /* ---------- Host Controls: the pause menu's HOST CONTROLS, the host's */

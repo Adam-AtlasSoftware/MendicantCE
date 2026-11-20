@@ -36,7 +36,11 @@ Built with the host's ABI, as the other posix_*.c.
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #define UPDATE_USER_AGENT "halo-ce-universal-updater"
 #define MAXIMUM_REDIRECTS 8
@@ -919,4 +923,96 @@ int update_restart(const char *path)
 	pthread_sigmask(SIG_SETMASK, &signals, NULL);
 	execl(path, path, (char *)NULL);
 	return 0;
+}
+
+/* ---------- PRISM's light bake on the main menu: its worker (update.h) */
+
+extern char **environ;
+
+/* whether the variable (NAME=value) is one of environment's names */
+static int update_child_overridden(const char *variable, const char *environment)
+{
+	const char *equals = strchr(variable, '='), *entry;
+	size_t length = equals ? (size_t)(equals - variable) : strlen(variable);
+
+	for (entry = environment; *entry; entry += strlen(entry) + 1)
+	{
+		if (!strncmp(entry, variable, length) && entry[length] == '=')
+			return 1;
+	}
+	return 0;
+}
+
+int update_child_start(const char *path, const char *environment)
+{
+	size_t count = 0, index = 0;
+	const char *entry;
+	char **variables;
+	pid_t parent = getpid(), child;
+	struct rlimit limit;
+	int maximum = 4096;
+
+	/* (the child's environment made here: between fork and exec the child
+	may call only what is safe in a signal handler, and malloc is not) */
+	for (count = 0; environ && environ[count]; count++)
+		;
+	for (entry = environment; *entry; entry += strlen(entry) + 1)
+		count++;
+	variables = calloc(count + 1, sizeof(*variables));
+	if (!variables)
+		return 0;
+	for (count = 0; environ && environ[count]; count++)
+	{
+		if (!update_child_overridden(environ[count], environment))
+			variables[index++] = environ[count];
+	}
+	for (entry = environment; *entry; entry += strlen(entry) + 1)
+		variables[index++] = (char *)entry;
+	variables[index] = NULL;
+	if (getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY && limit.rlim_cur < 65536)
+		maximum = (int)limit.rlim_cur;
+	child = fork();
+	if (child == 0)
+	{
+		int descriptor;
+
+		/* (none of this process's files: its sockets hold the game's ports;
+		ended with it) */
+		for (descriptor = 3; descriptor < maximum; descriptor++)
+			close(descriptor);
+#ifdef __linux__
+		prctl(PR_SET_PDEATHSIG, SIGTERM);
+		if (getppid() != parent)
+			_exit(0);
+#else
+		(void)parent;
+#endif
+		execve(path, (char *[]){ (char *)path, NULL }, variables);
+		_exit(127);
+	}
+	free(variables);
+	return child > 0 ? (int)child : 0;
+}
+
+int update_child_state(int handle)
+{
+	int status = 0;
+	pid_t answer;
+
+	if (handle <= 0)
+		return 255;
+	answer = waitpid((pid_t)handle, &status, WNOHANG);
+	if (answer == 0)
+		return -1;
+	if (answer != (pid_t)handle)
+		return 255;
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status);
+	return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 255;
+}
+
+void update_child_stop(int handle)
+{
+	if (handle > 0)
+		kill((pid_t)handle, SIGTERM);
 }

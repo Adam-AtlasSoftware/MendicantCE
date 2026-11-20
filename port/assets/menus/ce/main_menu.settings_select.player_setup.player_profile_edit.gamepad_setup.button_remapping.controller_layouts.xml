@@ -54,7 +54,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_controller_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" string_index="1" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_controller_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_controller_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/op_edit_buttons" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="a" open="screens/controller_layout"/>
@@ -94,7 +94,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_export_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_export_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_export_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/op_layout_files" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_files_label"/>
@@ -102,7 +102,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_files_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_files_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_files_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/op_layout_bindings" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="a" open="screens/layout_bindings"/>
@@ -113,7 +113,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_bindings_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_bindings_value" type="text" controller="1" width="140" height="16" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/layout_bindings_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/button_remapping/controller_layouts/labels">
 		<string text="THIS CONTROLLER"/>

@@ -66,6 +66,10 @@ void pc_menu_browser_visit(char const *tab);
 int pc_menu_browser_visit_kind(void);
 void pc_menu_main_menu_shown(struct widget_instance *screen);
 boolean pc_menu_edit_leave(short local_player_index, boolean save);
+/* (PRISM's light bake's questions' answers: menu_functions.c's; their
+bindings: prism_bake_menu.c's) */
+boolean pc_menu_bake_answer(short local_player_index, char const *name);
+int prism_bake_menu_value(char const *name, char *value, unsigned long size);
 int halo_keyboard_prompts(void);
 long ui_widget_port_text_box_font(struct widget_instance *widget, short *width);
 short ui_widget_port_past_move(void);
@@ -303,6 +307,8 @@ static boolean screen_call_close(struct widget_instance *widget, struct event_re
 	boolean *deleted);
 static boolean screen_call_edit(struct widget_instance *widget, struct event_record *event, char const *name,
 	boolean *deleted);
+static boolean screen_call_bake(struct widget_instance *widget, struct event_record *event, char const *name,
+	boolean *deleted);
 static boolean screen_call_coop(struct widget_instance *widget, struct event_record *event, char const *name,
 	boolean *deleted);
 static boolean screen_call_add_player(struct widget_instance *widget, struct event_record *event, char const *name,
@@ -485,6 +491,15 @@ static struct screen_action const screen_actions[] =
 	/* (the question of a layout's bindings, screens/layout_bindings.xml:
 	USE THIS LAYOUT'S, and back) */
 	{ "layout bindings use", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_layout },
+	/* (PRISM's light bake's questions (prism_bake_menu.c): a level not baked
+	yet as it starts, screens/bake_play.xml's PLAY NOW and WAIT; a change of
+	a setting the bake holds, screens/bake_rebake.xml's REBAKE and UNDO;
+	Light Bake's REBAKE ALL, screens/bake_rebake_all.xml's REBAKE) */
+	{ "bake play", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_bake },
+	{ "bake wait", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_bake },
+	{ "bake keep", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_bake },
+	{ "bake undo", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_bake },
+	{ "bake rebake all", NULL, NULL, NULL, NULL, NULL, NULL, screen_call_bake },
 };
 
 static char const *const screen_action_names[] =
@@ -505,7 +520,7 @@ static char const *const screen_action_names[] =
 	"close", "close all", "pause leave", "open host controls", "pause end game", "pause chapters",
 	"pause friendly fire", "pause revert", "pause restart", "pause quit",
 	"layout name", "layout legend", "layout clear", "layout shape left", "layout shape right", "layout color left",
-	"layout color right", "layout bindings use",
+	"layout color right", "layout bindings use", "bake play", "bake wait", "bake keep", "bake undo", "bake rebake all",
 };
 
 /* a binding's value: the saved game's mission and difficulty (player 1's
@@ -545,7 +560,7 @@ static char const *const screen_binding_names[] =
 	"benchmark.failure", "benchmark.verdict", "benchmark.held", "benchmark.pacing",
 	"benchmark.settings", "benchmark.gpu", "benchmark.cpu", "benchmark.file", "benchmark.scenario",
 	"layout.controller", "layout.title", "layout.state", "layout.shape", "layout.color", "layout.about",
-	"layout.set", "layout.unset", "layout.bindings",
+	"layout.set", "layout.unset", "layout.bindings", "bake.level", "bake.left",
 };
 
 /* the row sources a table may name (menu_table.h), and their names */
@@ -616,6 +631,10 @@ static int screen_value(void *context, char const *name, char *value, unsigned l
 	/* (Controller Layout's: controller_layout_menu.inc) */
 	if (!strncmp(name, "layout.", 7))
 		return pc_menu_layout_value(name, value, size);
+	/* (PRISM's light bake's questions: prism_bake_menu.c's, "bake.level" and
+	"bake.left") */
+	if (!strncmp(name, "bake.", 5))
+		return prism_bake_menu_value(name, value, size);
 	/* (Stick Test's: the sticks' readings and drift, stick_test_menu.inc) */
 	if (!strncmp(name, "stick.", 6))
 		return pc_menu_stick_value(name, value, size);
@@ -722,6 +741,12 @@ static struct screen_place const screen_places[] =
 	question as an editor is left with changes, a screen of its own) */
 	{ "quit", "main_menu\\quit_select\\quit_screen", NULL, NULL },
 	{ "save_changes", "screens\\save_changes", NULL, NULL },
+	/* (PRISM's light bake's questions, pop-ups: a level not baked yet as it
+	starts, a change of a setting the bake holds, Light Bake's REBAKE ALL;
+	menu_functions.c's pc_menu_bake_questions_open opens them) */
+	{ "bake_play", "screens\\bake_play", NULL, NULL },
+	{ "bake_rebake", "screens\\bake_rebake", NULL, NULL },
+	{ "bake_rebake_all", "screens\\bake_rebake_all", NULL, NULL },
 	/* (the built-in benchmark's results, over the main menu as its match
 	ends: benchmark.c, menu_functions.c's pc_menu_benchmark_results_open) */
 	{ "benchmark", "screens\\benchmark", NULL, NULL },
@@ -1974,6 +1999,24 @@ static boolean screen_call_edit(struct widget_instance *widget, struct event_rec
 	menu_tags_back(widget, event, deleted);
 	*deleted = TRUE;
 	return pc_menu_edit_leave(local_player_index, save);
+}
+
+/* PRISM's light bake's questions' answers ("bake play", "bake wait",
+"bake keep", "bake undo", "bake rebake all"): the question closed, the
+screen under it up again, then the answer's (menu_functions.c's
+pc_menu_bake_answer: the level started, or baked first; the settings kept
+or put back; every level's bake deleted) */
+static boolean screen_call_bake(struct widget_instance *widget, struct event_record *event, char const *name,
+	boolean *deleted)
+{
+	short local_player_index = widget_instance_get_topmost_parent(widget)->local_player_index;
+	char answer[SCREEN_ACTION_LENGTH];
+
+	/* (the name kept first: it is the question's, let go of as it closes) */
+	snprintf(answer, sizeof(answer), "%s", name);
+	menu_tags_back(widget, event, deleted);
+	*deleted = TRUE;
+	return pc_menu_bake_answer(local_player_index, answer);
 }
 
 /* "close", "close all" and "pause leave": the screen closed (the pause

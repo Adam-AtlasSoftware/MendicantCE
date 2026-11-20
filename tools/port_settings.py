@@ -902,8 +902,9 @@ LIGHTING_MODE_ROWS = {
     # the bake both read (Light Bake))
     "prism_exposure": "RP", "prism_exposure_bias": "RP", "prism_tone_curve": "RP",
     "upscaling": "RP", "upscaler_scale": "CRP",
-    "light_bake": "RP", "bake": "RP", "bake_quality": "RP", "prism_sky_light": "RP", "bake_rebake": "RP",
-    "bake_indicator": "RP",
+    "light_bake": "RP", "bake_quality": "RP", "prism_sky_light": "RP",
+    **{f"bake_{level}": "RP" for level in ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40")},
+    "bake_rebake_all": "RP",
     # (Ray Tracing: Classic's ray tracer, display.prism_rt, off under both
     # PRISM modes (prism_rt.c); the traced scene, which PRISM Path Traced,
     # Rebaked's traced shadows and Classic's ray tracer take; the see-through
@@ -994,7 +995,11 @@ SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches", "add_maps",
                         "layout_controller", "layout_export", "layout_files", "layout_bindings",
-                        "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
+                        "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1)),
+                        # (Light Bake's levels, each its bake's state, and REBAKE ALL:
+                        # menu_functions.c's bake_rows_show, prism_bake_menu.c)
+                        *(f"bake_{level}" for level in ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40",
+                                                        "d20", "d40")), "bake_rebake_all"}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
 # the spinners' column's right end ("CODE ABC-DEF")
@@ -2152,8 +2157,8 @@ PAGES = {
              "Draws the 3D view smaller and brings it to the screen's resolution with FSR 3.1 or DLSS: faster. "
              "The upscaler and how much of the resolution it starts from.", "desktop", "upscaling"),
             ("LIGHT BAKE ›", None, _page_screen(*LIGHT_BAKE_PAGE),
-             "The level's light baked on this computer, which both PRISM lightings read: when it bakes, its "
-             "quality, the sky's light and the progress on screen.", "desktop", "light_bake"),
+             "The levels' light, baked on this computer on the main menu before you play, which both PRISM "
+             "lightings read: its quality, the sky's light, and each level's bake.", "desktop", "light_bake"),
             (SECTION, "WORLD AND ASSETS"),
             ("MATERIALS & TEXTURES ›", None, _page_screen(*MATERIALS_PAGE),
              "The materials packs and mods give surfaces, and the sharper textures mods ship, with how much of the "
@@ -2477,23 +2482,32 @@ PAGES = {
             # modes read: Rebaked's light, and Path Traced's scene, lamps and
             # bounced light; PRISM's page opens it under them alone)
             (SECTION, "LIGHT BAKE"),
-            ("BAKE", "display.bake", [("WHILE PLAYING", "auto"), ("WHEN ASKED", "ask"), ("NEVER", "off")],
-             "While Playing: a level's light is baked in the background as you play it, a quick draft first, "
-             "then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM "
-             "lightings read the bake.", "desktop"),
+            # (display.bake "auto": the main menu bakes the campaign's levels
+            # that need it, prism_bake_menu.c; no choice of when: "off" is
+            # config.toml's alone, and the older "ask" is read as "auto")
             ("BAKE QUALITY", "display.bake_quality",
              [("MAX", "max"), ("ULTRA", "ultra"), ("HIGH", "high"), ("DRAFT", "draft")],
              "Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and "
-             "large on disk. The others are quicker and smaller.", "desktop"),
+             "large on disk. The others are quicker and smaller. A change bakes every level again on the main "
+             "menu.", "desktop"),
             ("SKY LIGHT", "display.prism_sky_light", [("SKY", "sky"), ("FLAT", "flat")],
              "Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground "
              "fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the "
-             "same everywhere. A change bakes again.", "desktop"),
-            ("REBAKE LIGHTMAPS", "display.bake_rebake", [("—", "0"), ("ASKED", "1")],
-             "Change this to bake the level you are playing again from nothing (needed after its geometry, "
-             "materials or lights change; a finished bake is otherwise kept).", "desktop"),
-            ("PROGRESS ON SCREEN", "display.bake_indicator", ON_OFF,
-             "Shows \"Baking lightmaps 37%\" at the top left while a level is baked.", "desktop"),
+             "same everywhere. A change bakes every level again.", "desktop"),
+            # (each campaign level's bake: menu_functions.c's bake_rows_show
+            # writes its state each frame)
+            (SECTION, "LEVELS"),
+            *[(name, None, None,
+               "The main menu bakes each level's light before you play it, the level you play next first, and "
+               "picks up where it stopped. A level played before its bake is done shows Classic's light until "
+               "it is.", "desktop", f"bake_{level}")
+              for level, name in (("a10", "THE PILLAR OF AUTUMN"), ("a30", "HALO"), ("a50", "TRUTH & RECON."),
+                                  ("b30", "SILENT CARTOGRAPHER"), ("b40", "CONTROL ROOM"), ("c10", "343 GUILTY SPARK"),
+                                  ("c20", "THE LIBRARY"), ("c40", "TWO BETRAYALS"), ("d20", "KEYES"),
+                                  ("d40", "THE MAW"))],
+            ("REBAKE ALL", None, None,
+             "Deletes every level's bake: the main menu bakes them all again from nothing. Asks first.", "desktop",
+             "bake_rebake_all", "port settings bake rebake all"),
         ],
     },
     MATERIALS_PAGE[0]: {
@@ -2582,7 +2596,7 @@ PAGES = {
             ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
              "Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; "
              "none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on "
-             "the original.", "desktop"),
+             "the original. Under the PRISM lightings a change bakes every level again.", "desktop"),
             ("GEOMETRY DETAIL", "display.prism_world_geometry_detail", [("LOW", "50"), ("NORMAL", "100"),
                                                                         ("HIGH", "200")],
              "How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper "
@@ -3696,8 +3710,12 @@ def _settings_page(folder: str, page: dict, g: SettingsLayout = SETTINGS_CLASSIC
             extra += _widget(row, row_pairs, handlers + [f'<child widget="{base}/{key}_label"/>'] + value + arrows)
             extra += label_widget
             if status:
+                # (as tall as the row under its top: at a wide screen's text
+                # scale (1.2) small_ui's line is taller than 16, and a box
+                # shorter than its line draws none of it, CLEAR CACHES' and
+                # every status row's value gone past 4:3)
                 extra += _settings_text(f"{base}/{key}_value", [("width", SETTINGS_SPINNER_X + SETTINGS_SPINNER_WIDTH -
-                                                                 value_x), ("height", 16),
+                                                                 value_x), ("height", g.row_height - 2),
                                                                 ("color", SETTINGS_BLUE),
                                                                 ("align", "right" if named_row else "center"),
                                                                 ("text_y", caps_text_y(g.row_height, 2)),

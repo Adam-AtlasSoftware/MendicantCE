@@ -360,6 +360,10 @@ picture, the line, the words for no rows) -->
 	<!-- the screens a pop-up of its own opens as (menu_screen.c's screen_places): over the menus' scene, as
 	Quit's question is -->
 	<widget name="screens/save_changes" width="640" height="480" flags="pass_unhandled_to_focused_child"/>
+	<!-- (PRISM's light bake's questions: screens/bake_play.xml, bake_rebake.xml, bake_rebake_all.xml) -->
+	<widget name="screens/bake_play" width="640" height="480" flags="pass_unhandled_to_focused_child"/>
+	<widget name="screens/bake_rebake" width="640" height="480" flags="pass_unhandled_to_focused_child"/>
+	<widget name="screens/bake_rebake_all" width="640" height="480" flags="pass_unhandled_to_focused_child"/>
 	<!-- the screen it was opened from, behind it (an editor's), dimmed -->
 	<widget name="screens/dialog_dim" width="640" height="480" bitmap="ui\shell\bitmaps\semi_transparent_grey"/>
 	<!-- the box, cut above its bottom band (as tall as its words need), and its foot, that band (tools/port_settings.py's

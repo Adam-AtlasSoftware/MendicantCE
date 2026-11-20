@@ -14,11 +14,20 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/options_menu" type="column_list" width="640" height="480" flags="pass_unhandled_to_focused_child up_down_tabs_children" description="main_menu/settings/page_panel" source="tools/port_settings.py settings_files/_settings_page">
 		<data input="port settings page"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_0" x="28" y="80" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake" x="28" y="100" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_quality" x="28" y="121" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_prism_sky_light" x="28" y="142" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_rebake" x="28" y="163" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_indicator" x="28" y="184" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_quality" x="28" y="100" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_prism_sky_light" x="28" y="121" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3" x="28" y="148" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a10" x="28" y="168" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a30" x="28" y="189" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a50" x="28" y="210" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b30" x="28" y="231" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b40" x="28" y="252" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c10" x="28" y="273" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c20" x="28" y="294" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c40" x="28" y="315" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d20" x="28" y="336" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d40" x="28" y="357" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_rebake_all" x="28" y="378" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -46,20 +55,11 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_0_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_spinner" x="188"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="1" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="WHILE PLAYING|WHEN ASKED|NEVER" setting="display.bake" values="auto|ask|off" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_quality" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="2" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="1" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="MAX|ULTRA|HIGH|DRAFT" setting="display.bake_quality" values="max|ultra|high|draft" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
@@ -70,7 +70,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_seg1" x="242" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="3" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="2" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_seg0" type="text" controller="1" width="50" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="SKY" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -80,53 +80,135 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_rebake" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_seg1" x="254" y="1"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3_title"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="4" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="3" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_seg0" type="text" controller="1" width="62" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="—" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a10" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a10_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a10_value" x="188" y="2"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_seg1" type="text" controller="1" width="62" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ASKED" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a10_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="4" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="—|ASKED" setting="display.bake_rebake" values="0|1" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a10_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_indicator" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_seg1" x="240" y="1"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a30" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a30_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a30_value" x="188" y="2"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a30_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a30_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_seg1" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a50" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a50_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a50_value" x="188" y="2"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_indicator_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.bake_indicator" values="true|false" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a50_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="6" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a50_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b30" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b30_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b30_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b30_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b30_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b40" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b40_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b40_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b40_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b40_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c10" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c10_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c10_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c10_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c10_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c20" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c20_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c20_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c20_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c20_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c40" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c40_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c40_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c40_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c40_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d20" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d20_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d20_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d20_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d20_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d40" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d40_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d40_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d40_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d40_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_rebake_all" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="a" run="port settings bake rebake all"/>
+		<on event="start" run="port settings bake rebake all"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_all_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_all_value" x="188" y="2"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_all_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_all_value" type="text" controller="1" width="140" height="18" color="#FF2896FF" align="center" text_y="-1" text_flags="no_focus_test" wide="20 120" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels">
 		<string text="LIGHT BAKE"/>
-		<string text="BAKE"/>
 		<string text="BAKE QUALITY"/>
 		<string text="SKY LIGHT"/>
-		<string text="REBAKE LIGHTMAPS"/>
-		<string text="PROGRESS ON SCREEN"/>
+		<string text="LEVELS"/>
+		<string text="THE PILLAR OF AUTUMN"/>
+		<string text="HALO"/>
+		<string text="TRUTH &amp; RECON."/>
+		<string text="SILENT CARTOGRAPHER"/>
+		<string text="CONTROL ROOM"/>
+		<string text="343 GUILTY SPARK"/>
+		<string text="THE LIBRARY"/>
+		<string text="TWO BETRAYALS"/>
+		<string text="KEYES"/>
+		<string text="THE MAW"/>
+		<string text="REBAKE ALL"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/help_strings">
 		<string text=""/>
 		<string text=""/>
-		<string text="While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM lightings read the bake."/>
-		<string text="Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller."/>
-		<string text="Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes again."/>
-		<string text="Change this to bake the level you are playing again from nothing (needed after its geometry, materials or lights change; a finished bake is otherwise kept)."/>
-		<string text='Shows "Baking lightmaps 37%" at the top left while a level is baked.'/>
+		<string text="Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller. A change bakes every level again on the main menu."/>
+		<string text="Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes every level again."/>
+		<string text=""/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
+		<string text="Deletes every level's bake: the main menu bakes them all again from nothing. Asks first."/>
 	</strings>
 </menus>

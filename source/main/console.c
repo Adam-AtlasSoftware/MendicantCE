@@ -91,6 +91,8 @@ struct console_globals
 /* ---------- prototypes */
 
 static boolean console_process_command(const char *command);
+/* port: port/linux/game/prism_bake_menu.c's (the main menu's light bake's worker: its map) */
+char const *prism_bake_worker_map(void);
 
 static char *console_get_text_to_autocomplete(void);
 
@@ -407,6 +409,16 @@ void console_startup(
 	and none of them (a password) is kept in the console's history */
 	if (halo_server_mode())
 		return;
+	/* port: the main menu's light bake's worker (port/linux/game/
+	prism_bake_menu.c): its map loaded at once, the player's init.txt not
+	run */
+	if (prism_bake_worker_map())
+	{
+		snprintf(buffer, sizeof(buffer), "map_name %s", prism_bake_worker_map());
+		if (hs_compile_and_evaluate(buffer))
+			error(_error_log, "init: %s", buffer);
+		return;
+	}
 	if (!game_in_editor())
 	{
 		file = fopen("d:\\init.txt", "r");

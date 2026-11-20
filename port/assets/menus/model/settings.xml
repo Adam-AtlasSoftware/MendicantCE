@@ -1701,7 +1701,7 @@
 			<help>Draws the 3D view smaller and brings it to the screen's resolution with FSR 3.1 or DLSS: faster. The upscaler and how much of the resolution it starts from.</help>
 		</row>
 		<row key="light_bake" kind="link" label="LIGHT BAKE ›" crumb="VIDEO › PRISM" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/light_bake_screen">
-			<help>The level's light baked on this computer, which both PRISM lightings read: when it bakes, its quality, the sky's light and the progress on screen.</help>
+			<help>The levels' light, baked on this computer on the main menu before you play, which both PRISM lightings read: its quality, the sky's light, and each level's bake.</help>
 		</row>
 		<section key="section_9" title="WORLD AND ASSETS" when="desktop"/>
 		<row key="materials_textures" kind="link" label="MATERIALS &amp; TEXTURES ›" crumb="VIDEO › PRISM" when="desktop" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/materials_textures_screen">
@@ -2082,33 +2082,51 @@
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/light_bake_screen" kind="settings" layout="page" geometry="tall" title="LIGHT BAKE">
 		<section key="section_0" title="LIGHT BAKE" when="desktop"/>
-		<row key="bake" kind="choice" setting="display.bake" label="BAKE" crumb="VIDEO › PRISM › LIGHT BAKE" search_choices="while playing when asked never" when="desktop">
-			<help>While Playing: a level's light is baked in the background as you play it, a quick draft first, then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM lightings read the bake.</help>
-			<choice shown="WHILE PLAYING" value="auto"/>
-			<choice shown="WHEN ASKED" value="ask"/>
-			<choice shown="NEVER" value="off"/>
-		</row>
 		<row key="bake_quality" kind="choice" setting="display.bake_quality" label="BAKE QUALITY" crumb="VIDEO › PRISM › LIGHT BAKE" search_choices="max ultra high draft" when="desktop">
-			<help>Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller.</help>
+			<help>Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller. A change bakes every level again on the main menu.</help>
 			<choice shown="MAX" value="max"/>
 			<choice shown="ULTRA" value="ultra"/>
 			<choice shown="HIGH" value="high"/>
 			<choice shown="DRAFT" value="draft"/>
 		</row>
 		<row key="prism_sky_light" kind="choice" setting="display.prism_sky_light" label="SKY LIGHT" crumb="VIDEO › PRISM › LIGHT BAKE" search_choices="sky flat" when="desktop">
-			<help>Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes again.</help>
+			<help>Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes every level again.</help>
 			<choice shown="SKY" value="sky"/>
 			<choice shown="FLAT" value="flat"/>
 		</row>
-		<row key="bake_rebake" kind="choice" setting="display.bake_rebake" label="REBAKE LIGHTMAPS" crumb="VIDEO › PRISM › LIGHT BAKE" search_choices="asked" when="desktop">
-			<help>Change this to bake the level you are playing again from nothing (needed after its geometry, materials or lights change; a finished bake is otherwise kept).</help>
-			<choice shown="—" value="0"/>
-			<choice shown="ASKED" value="1"/>
+		<section key="section_3" title="LEVELS" when="desktop"/>
+		<row key="bake_a10" kind="status" label="THE PILLAR OF AUTUMN" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
 		</row>
-		<row key="bake_indicator" kind="choice" setting="display.bake_indicator" label="PROGRESS ON SCREEN" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>Shows "Baking lightmaps 37%" at the top left while a level is baked.</help>
-			<choice shown="ON" value="true"/>
-			<choice shown="OFF" value="false"/>
+		<row key="bake_a30" kind="status" label="HALO" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_a50" kind="status" label="TRUTH &amp; RECON." crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_b30" kind="status" label="SILENT CARTOGRAPHER" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_b40" kind="status" label="CONTROL ROOM" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_c10" kind="status" label="343 GUILTY SPARK" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_c20" kind="status" label="THE LIBRARY" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_c40" kind="status" label="TWO BETRAYALS" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_d20" kind="status" label="KEYES" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_d40" kind="status" label="THE MAW" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
+			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+		</row>
+		<row key="bake_rebake_all" kind="status" label="REBAKE ALL" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop" run="port settings bake rebake all">
+			<help>Deletes every level's bake: the main menu bakes them all again from nothing. Asks first.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>
@@ -2209,7 +2227,7 @@
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_terrain_screen" kind="settings" layout="page" geometry="tall" title="WORLD &amp; TERRAIN">
 		<section key="section_0" title="WORLD GEOMETRY" when="desktop"/>
 		<row key="prism_world_geometry" kind="choice" setting="display.prism_world_geometry" label="WORLD GEOMETRY" crumb="VIDEO › PRISM › WORLD &amp; TERRAIN" search_choices="xbox remodel" when="desktop">
-			<help>Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on the original.</help>
+			<help>Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on the original. Under the PRISM lightings a change bakes every level again.</help>
 			<choice shown="XBOX" value="stock"/>
 			<choice shown="REMODEL" value="remodel"/>
 		</row>
