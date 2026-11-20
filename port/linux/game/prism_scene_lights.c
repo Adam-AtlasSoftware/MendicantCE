@@ -42,6 +42,7 @@ objects' places.
 #include "devices/devices.h"
 #include "devices/device_light_fixtures.h"
 #include "tag_files/tag_files.h"
+#include "game/game_globals.h"
 #include "world_scene.h"
 #include "prism_deferred.h"
 #include "prism_scene_lights.h"
@@ -68,6 +69,7 @@ int prism_rt_mode(void);
 int world_ao_mode(void);
 /* object_lights.c's (port) */
 short light_port_object_type(long light_index);
+long light_port_object_definition(long light_index);
 /* port/linux/src/port_config.c */
 int config_boolean(const char *name);
 double config_real(const char *name);
@@ -117,6 +119,16 @@ washed whole walls neon green in a fight) */
 light it flies by (at GLOW_FLARE_SHARE it hardly lit the corridor it crossed
 once a point light's reach was its power: xgpu_vulkan_pt.glsl) */
 #define GLOW_PROJECTILE_SHARE 1.0f
+/* a grenade's own light in Path Traced (scene_light_grenade): CE's plasma
+grenade carries a light of 1 to 2 units, cyan, which as a light's power
+(xgpu_vulkan_pt.glsl's DYNAMIC_POWER r) lit a spot of floor under it and
+hardly the floor around it, nor a wall beside it, where a bolt that flies by
+lights the corridor it crosses. Its reach GRENADE_REACH times CE's, its light
+GRENADE_GAIN times (at 3 and 2.5 the wall beside it washed out white). Its
+detonation's own light (its effect's, reaching 10 units) is left as it is:
+it lights the room already */
+#define GRENADE_REACH 2.0f
+#define GRENADE_GAIN 1.5f
 
 /* a light as struct xgpu_stream_scene_light lays it out (20 words) */
 struct scene_light
@@ -359,6 +371,30 @@ static void dynamic_look(
 	light->radiance[3] *= (1.0f + (scene_lights.look_scale - 1.0f) * chroma) * share;
 }
 
+/* whether a light is on a grenade thrown (a projectile the game's globals
+name as a grenade's: the frag's, the plasma's), in Path Traced: its reach
+and light by GRENADE_REACH and GRENADE_GAIN */
+static boolean scene_light_grenade(
+	long light_index)
+{
+	struct game_globals *globals;
+	long definition_index, index;
+
+	if (!prism_deferred_pathtraced() || light_port_object_type(light_index) != _object_type_projectile)
+		return FALSE;
+	definition_index = light_port_object_definition(light_index);
+	globals = scenario_get_game_globals();
+	for (index = 0; globals && definition_index != NONE && index < globals->grenades.count; index++)
+	{
+		if (TAG_BLOCK_GET_ELEMENT(&globals->grenades, index, struct game_globals_grenade)->projectile.index ==
+			definition_index)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 /* ---------- public code */
 
 static void scene_lights_send(boolean window);
@@ -557,6 +593,11 @@ static void scene_lights_send(
 		light->radiance[3] = drawn->intensity * drawn->gel;
 		dynamic_look(light, !(drawn->flags & WORLD_SCENE_LIGHT_GLOW) ? 1.0f :
 			light_port_object_type(drawn->id) == _object_type_projectile ? GLOW_PROJECTILE_SHARE : GLOW_FLARE_SHARE);
+		if (scene_light_grenade(drawn->id))
+		{
+			light->position[3] *= GRENADE_REACH;
+			light->radiance[3] *= GRENADE_GAIN;
+		}
 		light_finite(light);
 	}
 	/* (and the projectiles' strikes' flashes, glow_lights.c's, each a point

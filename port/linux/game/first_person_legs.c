@@ -159,6 +159,15 @@ crouching) */
 /* ... its belly flattened onto the top of its hips to this of its height, a
 lid over them (first_person_legs_node_matrices) */
 #define FIRST_PERSON_LEGS_LID 0.05f
+/* looking down (first_person_legs_node_matrices), the body drawn is set back
+along its heading, from where the view looks FIRST_PERSON_LEGS_DOWN_FROM
+down (the sine of its pitch) to FIRST_PERSON_LEGS_DOWN_BACK world units
+looking straight down, eased: from over the front of its hips the eye looked
+straight down onto the lid over them, a dark disc that hid the legs and feet
+under it; set back, the hips leave the view under the eye and the legs and
+feet are seen before them */
+#define FIRST_PERSON_LEGS_DOWN_FROM 0.6f
+#define FIRST_PERSON_LEGS_DOWN_BACK 0.12f
 
 /* the flat screen's lower body's heading (first_person_legs_lower_turn),
 radians and per second: standing, it stays planted until the aim is more than
@@ -1667,7 +1676,8 @@ static boolean first_person_legs_place(
 	real_matrix4x3 const *nodes,
 	real_matrix4x3 *placed,
 	short *chest,
-	short *belly)
+	short *belly,
+	real_vector3d *heading)
 {
 	short pelvis = NONE, neck = NONE, head = NONE, thighs = 0;
 	short index;
@@ -1781,7 +1791,30 @@ static boolean first_person_legs_place(
 		for (index = 0; index < count; index++)
 			placed[index].position.z -= drop;
 	}
+	*heading = forward;
 	return TRUE;
+}
+
+/* looking down, the body placed (first_person_legs_place) set back along its
+heading (FIRST_PERSON_LEGS_DOWN_FROM, FIRST_PERSON_LEGS_DOWN_BACK), its legs
+and its shadow alike, so that the legs stand on their own shadow (and in the
+traced modes on the whole body traced, which is posed as the shadow is) */
+static void first_person_legs_down(
+	real_matrix4x3 *placed,
+	long count,
+	real_vector3d const *heading)
+{
+	real ease = (-global_window_parameters.camera.forward.k - FIRST_PERSON_LEGS_DOWN_FROM) /
+		(1.f - FIRST_PERSON_LEGS_DOWN_FROM);
+	long index;
+
+	ease = ease < 0.f ? 0.f : ease > 1.f ? 1.f : ease;
+	ease = ease * ease * (3.f - 2.f * ease) * FIRST_PERSON_LEGS_DOWN_BACK;
+	for (index = 0; index < count && ease > 0.f; index++)
+	{
+		placed[index].position.x -= heading->i * ease;
+		placed[index].position.y -= heading->j * ease;
+	}
 }
 
 /* the pose to draw the body with: in the VR mode, the VR mode's
@@ -1802,6 +1835,7 @@ real_matrix4x3 const *first_person_legs_node_matrices(
 	short chest, belly;
 	short index;
 	real lid;
+	real_vector3d heading;
 
 	if (!object || !nodes || !first_person_legs_model(object, &model, &count))
 		return NULL;
@@ -1816,7 +1850,8 @@ real_matrix4x3 const *first_person_legs_node_matrices(
 			return body;
 	}
 #endif
-	if (!first_person_legs_place(object_index, object, model, count, nodes, first_person_legs_matrices, &chest, &belly))
+	if (!first_person_legs_place(object_index, object, model, count, nodes, first_person_legs_matrices, &chest, &belly,
+		&heading))
 		return NULL;
 	for (index = 0; index < count; index++)
 	{
@@ -1838,6 +1873,7 @@ real_matrix4x3 const *first_person_legs_node_matrices(
 				(first_person_legs_matrices[index].position.z - lid) * FIRST_PERSON_LEGS_LID;
 		}
 	}
+	first_person_legs_down(first_person_legs_matrices, count, &heading);
 	return first_person_legs_matrices;
 }
 
@@ -1854,12 +1890,14 @@ real_matrix4x3 const *first_person_legs_shadow_node_matrices(
 	struct model const *model;
 	long count;
 	short chest, belly;
+	real_vector3d heading;
 
 	if (!object || !nodes || object->object.parent_object_index != NONE ||
 		!first_person_legs_model(object, &model, &count) ||
-		!first_person_legs_place(object_index, object, model, count, nodes, shadow, &chest, &belly))
+		!first_person_legs_place(object_index, object, model, count, nodes, shadow, &chest, &belly, &heading))
 	{
 		return NULL;
 	}
+	first_person_legs_down(shadow, count, &heading);
 	return shadow;
 }
