@@ -140,3 +140,17 @@ def test_detail_fade_waits_for_the_renderers_pack():
     # (every way out of the loader says what came of it: loaded, or not)
     assert loader.count("__atomic_store_n(&terrain.pack.state, -1") == 3
     assert loader.count("__atomic_store_n(&terrain.pack.state, 1") == 1
+    # (loaded is told only while the layers are drawn: the last whole frame's)
+    state = renderer.split("\nint xgpu_vulkan_terrain_pack_state", 1)[1].split("\n}\n", 1)[0]
+    assert "state == 1 && !__atomic_load_n(&terrain.drawn_shown" in state
+    assert "terrain.drawn_frame |= terrain.layers_drawn;" in renderer
+    end = renderer.split("void xgpu_vulkan_terrain_frame_end(void)", 1)[1].split("\n}\n", 1)[0]
+    assert "__atomic_store_n(&terrain.drawn_shown, terrain.drawn_frame" in end
+
+
+def test_named_layer_serves_both_slots_of_one_class():
+    """A shader whose two classes are one (d40's sand and sand) draws its named layer in both slots: the second
+    slot once fell back to the class's own layer (b30's beach sand, grain and all) over d40's paler texels"""
+    renderer = (ROOT / "port/linux/vulkan/xgpu_vulkan_terrain.c").read_text()
+    body = renderer.split("static unsigned pack_layer(", 1)[1].split("\n}\n", 1)[0]
+    assert "(which == 0 || material->classes[1] == material->classes[0])" in body

@@ -185,10 +185,10 @@ pixel:
 - detail transfer (design 3.2): CE's base colour times the detail in linear light, its lightness and a little of its
   own hue (the layer's chroma), by the layer's strength, the macro map and the fade (whole within 15 world units,
   none past 60). Its mean is 1, so CE's colour and the bake's mean albedo (`material_hash`) do not change: no rebake;
-- a strength past 1 (sand 3.0, d40's sand 1.5) would carry a scan's darkest grains past black: below 0.3 the
+- a strength past 1 (sand 3.0, cracked mud 1.2) would carry a scan's darkest grains past black: below 0.3 the
   detail's ratio rolls off toward 0 along an exponential that meets it there with its slope, so a pebble stays a
   dark grain;
-- the grain: a layer with a `grain` weight (sand 1.0, d40's sand 0.5) is looked up a second time from above, 3.71
+- the grain: a layer with a `grain` weight (sand 1.0; d40's sand has none) is looked up a second time from above, 3.71
   times finer and turned (one lookup: under the hex-tiled layer a grain's repeat does not show), and its mean-1 detail multiplied in (not its normal: a millimetre's relief), whole within 1
   world unit and gone by 12. One tile of a 1024 scan at 3.5 m is 3.4 mm a texel, magnified about three times at
   1 m, where sand read as soft blotches; the finer lookup gives it grain at about 1 mm, and from mid range its
@@ -197,7 +197,10 @@ pixel:
   6 world units (further off, the relief of a scan's grain reads as streaks in a low sun, and CE's own light is
   the ground's); the roughness: the G-buffer's times the layer's variation;
 - a material of two classes (CE's blended shaders) takes its second class by CE's colour's lightness against each
-  class's (and, with rock, by the slope), then by the two layers' heights.
+  class's (and, with rock, by the slope), then by the two layers' heights. The layer `classes.json` names is the
+  first class's, and the second's too where both classes are one (d40's sand and sand, d20's dirt and dirt): until
+  T1's last round the second slot fell back to the class's own layer, so d40's paler texels drew b30's beach sand at
+  strength 3 with its grain (the pale crust and dark pebbles seen at D2) and d20's took plain dirt.
 
 `debug.pass_times` labels it `TERRAIN`. `HALO_TERRAIN_LAYERS_VIEW=1` shows the second class's weight, the fade and
 the layer instead.
@@ -219,8 +222,9 @@ on, CE's ground is exactly its own. `debug.terrain_detail_fade` `false` turns it
 
 The game fades the maps only once the renderer says it loaded the pack: `prism_terrain.c` asks each frame through
 the host import `host_vulkan_terrain_pack` (`sdl_platform.c`'s `platform_prism_terrain_pack`, the renderer's
-`xgpu_vulkan_terrain_pack_state`: 1 loaded, -1 not there or not whole, 0 not tried yet for the folder FRAME
-brought) and logs a change. With no pack, or a `display.terrain_pack_folder` that holds none, CE's detail maps stay
+`xgpu_vulkan_terrain_pack_state`: 1 loaded and its layers drawn in the renderer's last whole frame, -1 not there
+or not whole, 0 not tried yet for the folder FRAME brought or loaded but not drawn: the class view, a frame the pass
+did not reach) and logs each answer once. With no pack, or a `display.terrain_pack_folder` that holds none, CE's detail maps stay
 whole, so the ground is never left blurred with nothing over it; other renderers answer -1.
 
 ### What is not done in T1
@@ -254,8 +258,8 @@ The 60 m view of every T1 pose (B1 to B3, N1 to N3, D1, D2, R1, R2) is within 1.
 32-pixel tile of one class; medians 0.04 to 0.30) of Classic;
 Classic stays byte-identical, PRISM Rebaked with `display.terrain` `"off"` or `display.terrain_layers` `"ce"` is the
 previous build's frame byte for byte, b30's bake still loads whole, and the game's simulation is the same with the
-terrain on and off (`determinism_compare.py --simulation`). (That check was run on T1's first round; the second round's game side changed only in
-which detail stages it marks and in reading the renderer's pack state, and was not re-run.)
+terrain on and off (`determinism_compare.py --simulation`, re-run on T1's final package).
 
-At d40's shoreline (D2) the 1 m view is busier than Classic's (std of Oklab L 3.9 against 2.0): the desert scan
-with its grain shows pale crust and dark pebbles CE's smooth sand does not have. Open: a softer d40 layer.
+d40's sand (`sand_desert`, Ground080) is at strength 1.0, chroma 0 and no grain: its scan is smooth, and with the
+second slot fixed (above) d40's shoreline (D2) at 1 m reads as CE's ground with fine relief (std of Oklab L 2.1
+against Classic's 2.0, was 3.9), its hue CE's.

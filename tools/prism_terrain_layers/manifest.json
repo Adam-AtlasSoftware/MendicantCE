@@ -141,12 +141,12 @@
     "checked": "2026-11-19"
    },
    "tile_metres": 2.0,
-   "strength": 1.5,
-   "chroma": 0.2,
+   "strength": 1.0,
+   "chroma": 0.0,
    "normal": 0.6,
    "roughness": 0.5,
    "height_contrast": 0.5,
-   "grain": 0.5,
+   "grain": 0.0,
    "lowpass": 0.125,
    "lit_limit": 0.6
   },

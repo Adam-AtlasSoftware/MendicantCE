@@ -137,6 +137,12 @@ static struct
 	/* (the pass drawn this frame for this window: BASE_TEXTURED, or the
 	resolve where that did not come; logged once) */
 	int layers_drawn, layers_logged;
+	/* (whether the pass was drawn in any window of this frame; of the last
+	whole frame, written atomically: the pack is reported loaded (1) only
+	while its layers are drawn, so CE's detail maps never fade under a
+	frame with no layers over them: the class view, Classic's frames, a
+	target the pass cannot draw to) */
+	int drawn_frame, drawn_shown;
 } terrain;
 
 /* ---------- classes */
@@ -371,6 +377,8 @@ void xgpu_vulkan_terrain_window(void)
 
 void xgpu_vulkan_terrain_frame_end(void)
 {
+	__atomic_store_n(&terrain.drawn_shown, terrain.drawn_frame, __ATOMIC_RELEASE);
+	terrain.drawn_frame = 0;
 	terrain.fresh = 0;
 	terrain.layers_drawn = 0;
 }
@@ -406,7 +414,11 @@ static unsigned pack_layer(const struct terrain_material *material, int which)
 	if (!terrain.pack.loaded || class_index == XGPU_TERRAIN_CLASS_NONE || class_index >= XGPU_TERRAIN_CLASSES ||
 		class_index == XGPU_TERRAIN_CLASS_WATER)
 		return 0;
-	if (which == 0 && material->layer < sizeof(terrain_layer_names) / sizeof(terrain_layer_names[0]))
+	/* (the named layer is the first class's, and the second's too where it
+	is the same class: d40's sand is sand and sand, and its second class
+	once drew b30's beach sand, grain and all, over d40's paler texels) */
+	if ((which == 0 || material->classes[1] == material->classes[0]) &&
+		material->layer < sizeof(terrain_layer_names) / sizeof(terrain_layer_names[0]))
 		named = terrain_layer_names[material->layer];
 	/* (the layer named, else its stem: "sand_desert" is sand's until the pack
 	has its own, else the class's) */
@@ -742,6 +754,7 @@ refused:
 int xgpu_vulkan_terrain_pack_state(const char *folder)
 {
 	char copy[XGPU_TERRAIN_PATH];
+	int state;
 
 	/* (the folder the game asks of is the one FRAME last brought: else not
 	known yet; the folder changes only with display.terrain_pack_folder, so
@@ -751,7 +764,12 @@ int xgpu_vulkan_terrain_pack_state(const char *folder)
 	snprintf(copy, sizeof(copy), "%s", folder);
 	if (strncmp(copy, terrain.pack.folder, sizeof(copy)))
 		return 0;
-	return __atomic_load_n(&terrain.pack.state, __ATOMIC_ACQUIRE);
+	state = __atomic_load_n(&terrain.pack.state, __ATOMIC_ACQUIRE);
+	/* (loaded, but its layers not drawn in the last whole frame: 0, as not
+	known yet, so nothing fades with nothing over it) */
+	if (state == 1 && !__atomic_load_n(&terrain.drawn_shown, __ATOMIC_ACQUIRE))
+		return 0;
+	return state;
 }
 
 void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
@@ -801,6 +819,7 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 	}
 	terrain.layers_drawn = xgpu_vulkan_post_terrain_layers(base, words, extras, terrain.class_image,
 		terrain.pack.detail, terrain.pack.surface, terrain.pack.macro, &values);
+	terrain.drawn_frame |= terrain.layers_drawn;
 	if (!terrain.layers_logged)
 	{
 		const struct xgpu_vulkan_image_description *b = xgpu_vulkan_image_description(base);

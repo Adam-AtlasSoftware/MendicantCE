@@ -116,10 +116,11 @@ static struct
 	folder's prism_terrain), sent with each FRAME */
 	char pack_folder[XGPU_TERRAIN_PATH];
 	/* (whether the renderer loaded its pack: platform_prism_terrain_pack,
-	asked each frame the HQ layers are asked for; 1 loaded, -1 not, 0 not
-	tried yet. CE's detail maps fade only where it is 1, since only then do
-	the layers stand in for them) */
-	int pack_state;
+	asked each frame the HQ layers are asked for; 1 loaded and its layers
+	drawn in the renderer's last frame, -1 not loaded, 0 not tried yet or not
+	drawn. CE's detail maps fade only where it is 1, since only then do the
+	layers stand in for them; the last answer logged beside it) */
+	int pack_state, pack_logged;
 	boolean detail_logged;
 } prism_terrain;
 
@@ -173,8 +174,11 @@ static void pack_state_read(
 {
 	int state = prism_terrain.layers_hq ? platform_prism_terrain_pack(prism_terrain.pack_folder) : 0;
 
-	if (state != prism_terrain.pack_state && state != 0)
+	/* (0 also while the pack is loaded but no layers were drawn in the last
+	frame, so the log names each answer once, not each return to it) */
+	if (state != prism_terrain.pack_logged && state != 0)
 	{
+		prism_terrain.pack_logged = state;
 		platform_log("prism terrain: the renderer %s the terrain pack in %s%s", state > 0 ? "loaded" : "did not load",
 			prism_terrain.pack_folder, state > 0 ? ": CE's fine detail maps fade near the camera" :
 			": CE's ground alone, its detail maps unfaded");
