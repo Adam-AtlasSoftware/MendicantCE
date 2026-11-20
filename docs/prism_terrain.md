@@ -265,6 +265,130 @@ d40's sand (`sand_desert`, Ground080) is at strength 1.0, chroma 0 and no grain:
 second slot fixed (above) d40's shoreline (D2) at 1 m reads as CE's ground with fine relief (std of Oklab L 2.1
 against Classic's 2.0, was 3.9), its hue CE's.
 
+## T2 and T3: the ground's light (sand, dirt, snow)
+
+T1 gave the ground its detail; T2 and T3 give it the light of a granular surface and of snow, in PRISM Rebaked and
+Path Traced alike (Classic and `display.terrain_layers` `"ce"` are untouched: the HQ layers' pass is what marks the
+pixels). Design sections 3.3 and 3.4.
+
+### The class table and the G-buffer's models
+
+`TERRAIN_LAYERS` (`tools/vulkan_post_shaders.py`) now writes, besides the HQ normal, each level pixel's class's
+physical row (`TERRAIN_ROUGHNESS`, `TERRAIN_POROSITY`, `TERRAIN_MODEL`; the porosity is `xgpu_vulkan_terrain.c`'s
+`class_porosity`, which T6's wetness will read):
+
+| Class | Dry roughness (the layer's variation over it) | Porosity | Model |
+| --- | --- | --- | --- |
+| sand | 0.85 | 0.6 | `XGPU_GBUFFER_MODEL_GRANULAR` (5) |
+| dirt | 0.90 | 0.7 | `XGPU_GBUFFER_MODEL_SOIL` (6) |
+| mud | 0.70 | 0.8 | the material's own |
+| rock | 0.70 | 0.3 | the material's own |
+| snow | 0.60 | 0.2 | `XGPU_GBUFFER_MODEL_SNOW` (7) |
+| ice, water | the material's own | 0 | the material's own |
+
+The three new models are written only by this pass and only on the level's pixels, so no material's own model is
+ever one of them; on their pixels word 2's metal byte is 0 (the ground is never metal) and its specular byte is the
+class's specular scale (0.5, snow 0.45) times the layer's occlusion, which the light passes divide back out
+(`TERRAIN_COMMON`'s `terrain_of`). Past the HQ detail's reach (`bounds.z`) the pass no longer discards: it writes the
+class's model, roughness (and the snow on rock, below) alone, so the response does not end where the detail does.
+
+`TERRAIN_COMMON` (`xgpu_vulkan_bake_glsl.inc`) holds the response; Rebaked's frame (`raster_source`) and the path
+tracer (`tools/vulkan_pt_shaders.py` appends it to `BAKE_COMMON`) both use it.
+
+### The fix first: prism-8's cold patches on sand
+
+At B1 1 m in Path Traced, prism-8's sand showed cold blue-grey patches: the scan's footprint craters (Ground054's
+normal) turn facets from the sun, whose cosine then fell to nothing while the blue sky and bounce stayed whole. Two
+changes, both physical: the sun's diffuse light on granular and soil pixels is wrapped (`terrain_sun`: sand 0.3,
+dirt 0.2, snow 0.5: a facet of grains passes light on past its cosine; Lambert's cosine elsewhere), and the open
+sky's, the floor's and the bounced light are scaled by the layer's occlusion (`terrain_ambient`: 85% of it, on sand
+and dirt), which the crevices' share of the sky is. The sun's visibility is traced wherever the wrapped term is
+not zero. A sand normal of 0.7 was tried against 1.0: the frames differ (mean 10/255) but the cold share is the
+same (5.6% both), so the normal stays 1.0 and its relief with it.
+
+B1 1 m, the share of the ground's pixels bluer than Oklab b -0.5 (`tools/cmpsheet.py`'s "cold"): Classic 5.7%
+(CE's own sand has blue-white texels, lower left), prism-8 Path Traced 8.3%, now 5.6%: the patches beyond CE's own
+are gone.
+
+### T2: the granular look
+
+- **Back-scattering lobe** (`terrain_sun`): on sand (and at 0.6 on dirt) the wrapped sun term is brightened looking
+  down-sun: a broad lobe (0.2 of the cosine between the eye and the sun) and the opposition surge about the
+  anti-solar point (shadow hiding, Hapke's B0 / (1 + tan(g/2) / h), B0 0.3, h 0.08). Looking into the sun it is
+  0.8 of Lambert's.
+- **Glints** (`terrain_glint`, sand and snow, design 3.4): a world-anchored grid of cells about twice the pixel's
+  footprint (two levels blended by the footprint's octave), each holding at most one facet (a share of the cells),
+  its normal drawn from the grains' GGX distribution (alpha 0.45, snow 0.7) about the shading normal; a facet
+  reflects the sun to the eye within a cone that widens with the level (its cell holds more grains), the facet's
+  share divided out, so the mean is the distribution's: the glints sit still where the camera does, sparkle where
+  the half vector crosses a facet as it moves, and fade to the smooth lobe by an octave of 6. A facet lights a
+  grain's spot in its cell (about 1.2 mm, snow 0.9 mm, or the pixel's footprint where that is larger, its light
+  gathered into it up to four times), not the whole cell: whole cells read as square confetti at 1 m. Seeds are in world
+  space and carry no frame's noise. In Path Traced they are added in the composite after the denoiser, by the
+  filtered sun visibility (so nothing for the denoiser to smear and nothing to flicker, and none in shade); in
+  Rebaked after the light, by the sun's visibility, divided by CE's base where the resolve multiplies by it. One
+  model only (a discrete-facet one in the manner of Deliot and Belcour's), not the cheaper Wang-Bowles one the
+  design names for `low`/`medium`: the tiers are T15's.
+- **Ripples** (`ripple_tilt`): on near-level sand (normal z above 0.86 to 0.97), crests about 11 cm apart across the
+  map's wind (an asymmetric profile: stoss long, lee short), their lines warped by the macro map, in patches of it,
+  faded where the footprint nears the wavelength and on slopes. Their direction is set from the map's checksum at
+  a new generation, then once from the first wind the records bring, and held (`ripple_set`): a turn toward the
+  wind over minutes (round 4) moved the lit sand of a still frame (B3's held frames: per-pixel std 0.42 against
+  prism-8's 0.012; held now 0.017). `HALO_TERRAIN_RIPPLES` scales their height (0 off), for checking.
+
+### T3: the snow look
+
+- **Subsurface**: snow's sun term wraps further (0.5) and what reaches a face turned from the sun is blue-weighted
+  (ice absorbs the red); its back-scattering lobe is weak (0.15).
+- **Diffusion** (Path Traced, `snow_diffused` in the composite): a screen-space pass of Burley's kind, an exponential
+  a channel (red 0.45 and green 0.7 of the blue's 2 cm reach), two opposite taps along x on one parity of the pixels
+  and along y on the other, on snow of the same plane only; none where the reach is under 0.75 pixel. Only the light
+  that varies is carried (the denoised light and the sun's; the clean sky and floor are even over a snowfield), and
+  the taps' sun visibility is read first: where it is the pixel's at both (inside a sunlit or a shaded field) nothing
+  more is read. So the sun's light crosses a shadow's edge, a ledge's or a print's rim, and costs little elsewhere
+  (four taps reading whole surfaces cost 0.22 ms at N1 1 m; this, 0.04).
+- **Hue**: snow's diffuse light keeps CE's blue-white (`terrain_snow_tint`, luminance kept): the traced frame's warm
+  sun took b40's snow from Classic's Oklab b -1.5 to -2.2 (x100) to -0.2 to -0.7; the tint (0.97, 1.0, 1.06 over its
+  luminance) puts it back near Classic's (0.95, 1.0, 1.1 overshot to -2.5 to -3.2).
+- **Sparkle**: the glints above, snow's: smaller cells (0.0025 world units), more of them held (0.3), rougher
+  facets, a lower F0 (ice's 0.018).
+- **Snow on the rock's tops**: on a map with snow (`gamut.x`: the class table names a snow material), the faces
+  turned up (normal z 0.74 to 0.9) of a material of rock alone (b40's and c40's stone) take snow where CE's lightmap
+  light (the G-buffer's code: Tool's radiosity left overhangs and ledges under cover dark) says the sky reaches,
+  settling first where the rock's height is low among them (cracks, hollows); the colour is CE's snow's blue-white
+  (`gamut.yzw`), the class becomes snow (its model and roughness), the normal mostly the surface's. Past the HQ reach
+  it is the class and colour alone. Never on a material that blends rock with another class: there the rock's texels
+  are CE's painted dirt in the snow (b40's brown streaks), which an earlier build covered in hard-edged pale patches
+  (`sheets/r7_N3_60m.jpg`).
+
+### Cost (RTX 2060, 1280x720, Path Traced `performance`, alone on the card)
+
+Medians of 300 frames a pose (`HALO_PT_TIMES_FILE`, `debug.pass_times`), prism-8 (two runs, averaged) against
+this build:
+
+| Site, pose | Path Traced passes (ms) | of them the composite | `TERRAIN` | T2/T3's own (composite + `TERRAIN`) |
+| --- | --- | --- | --- | --- |
+| B1 sand 1 m | 12.18 -> 12.11 | 0.29 -> 0.31 | 0.37 -> 0.44 | +0.08 |
+| B1 sand 10 m | 12.23 -> 12.35 | 0.29 -> 0.30 | 0.37 -> 0.44 | +0.08 |
+| B3 sand 1 m | 13.49 -> 13.52 | 0.29 -> 0.30 | 0.37 -> 0.41 | +0.06 |
+| B3 sand 10 m | 12.27 -> 12.42 | 0.28 -> 0.30 | 0.36 -> 0.41 | +0.07 |
+| N1 snow 1 m | 20.56 -> 20.63 | 0.28 -> 0.31 | 0.31 -> 0.36 | +0.08 |
+| N1 snow 10 m | 16.72 -> 16.95 | 0.28 -> 0.31 | 0.33 -> 0.39 | +0.09 |
+
+The light pass (the sun's wrapped term, the ground's ambient share) adds up to 0.15 ms at the 10 m poses, but it
+moves by about 0.1 ms between runs of builds that differ only in the HQ layers' pass (N1 10 m: 12.73 and 12.87), so
+the whole frame's change is +0.12 to +0.24 ms at 10 m and within the noise at 1 m: T2 within its +0.25 ms, T3's own
+work +0.09 ms (the frame's +0.07 at 1 m, up to +0.24 at 10 m with the light pass's noise).
+
+### What is not done
+
+- The glints are not written to the upscaler's reactive mask (`xgpu_vulkan_upscale.c` finds the mask from the
+  transparent surfaces' change): they are world-anchored and stable, and the held and panned frames show no
+  flicker without it.
+- Wet sand's and snow's changes (roughness 0.30, packed snow) wait for T6's wetness and T4's prints.
+- The ripples do not drift downwind in a strong wind.
+- One glint model on every tier (T15's tiers).
+
 ## T7 and T8: the water layer (Rebaked; Path Traced's traced rays)
 
 With `display.water` `"prism"` (the default) in a campaign in Rebaked or Path Traced, on a backend with ray tracing

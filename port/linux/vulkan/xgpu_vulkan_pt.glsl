@@ -237,6 +237,9 @@ struct Surface
     vec3 emissive;
     bool has_history;
     vec2 motion;
+    /* (the terrain overhaul's ground: its kind and its layer's occlusion,
+    TERRAIN_COMMON's) */
+    Terrain terrain;
 };
 
 vec3 ray_of(vec4 camera[4], ivec4 corners, vec2 pixel)
@@ -318,6 +321,7 @@ Surface surface_at(ivec2 pixel)
     g.emissive = g.instance == 0u ? em * g.albedo : em;
     g.has_history = (x.z & 0x10000u) != 0u;
     g.motion = unpackHalf2x16(x.x);
+    g.terrain = terrain_of(w);
     return g;
 }
 
@@ -1709,6 +1713,16 @@ void sun_parts(Surface g, out vec3 dif, out vec3 spe)
     float c = dot(g.normal, s.sun.xyz);
     dif = vec3(0.0);
     spe = vec3(0.0);
+    /* (the terrain overhaul's ground: its sun's diffuse factor, wrapped and
+    back-scattering, TERRAIN_COMMON's) */
+    if (g.terrain.kind != 0u)
+    {
+        if (s.sun.w <= 0.0)
+            return;
+        dif = s.rig[0].rgb * terrain_sun(g.terrain, g.normal, s.sun.xyz, g.eye);
+        spe = c > 0.0 ? ggx(g, s.sun.xyz) * s.rig[0].rgb * PI : vec3(0.0);
+        return;
+    }
     if (s.sun.w <= 0.0 || c <= 0.0)
         return;
     dif = s.rig[0].rgb * c;
@@ -2373,7 +2387,10 @@ void main()
 
     /* the sun: a ray near the eye and on the objects, the mask beyond */
     float v_sun = 0.0, blocker = 0.0, traced = 0.0;
-    if (s.sun.w > 0.0 && dot(g.normal, s.sun.xyz) > 0.0 && !part_off(PARTS_SUN))
+    /* (the ground's sun wraps past the cosine: its visibility wanted there too) */
+    bool sun_side = dot(g.normal, s.sun.xyz) > 0.0 || (g.terrain.kind != 0u &&
+        dot(terrain_sun(g.terrain, g.normal, s.sun.xyz, g.eye), vec3(1.0)) > 0.0);
+    if (s.sun.w > 0.0 && sun_side && !part_off(PARTS_SUN))
     {
         /* (the ray where the mask is not read (the performance profile's
         far pixels read it), except in a tile the bake found all in shadow:
@@ -2408,6 +2425,9 @@ void main()
 
     vec3 noisy_d = vec3(0.0), noisy_s = vec3(0.0), clean_d = vec3(0.0), clean_s = vec3(0.0);
     vec3 share = specular_share(g);
+    /* (the ground's share of the open sky's and the bounced light: its
+    layer's occlusion; 1 elsewhere) */
+    float ambient_share = terrain_ambient(g.terrain);
     /* (a pixel whose reflection is traced (under the profile's ray
     roughness): the lamps' specular light shared between ReSTIR DI and that
     ray meeting their faces by multiple importance sampling (lamp_mis_nee).
@@ -2430,7 +2450,7 @@ void main()
         vec3 m = vec3(0.0);
         seed_for(pixel, frame, 2u);
         if (!part_off(PARTS_DOMES))
-            noisy_d += domes_at(o, g.normal, m);
+            noisy_d += domes_at(o, g.normal, m) * ambient_share;
         vec3 ld, ls;
         seed_for(pixel, frame, 3u);
         lamps_mis = glossy;
@@ -2444,7 +2464,7 @@ void main()
         noisy_s += ls;
         /* the sky's floor (the units' rig: unoccluded, as the bake adds it;
         the indoor one in an indoor cluster) */
-        clean_d += floor_light(g);
+        clean_d += floor_light(g) * ambient_share;
     }
     if (indirect_on)
     {
@@ -2461,12 +2481,12 @@ void main()
             (((pixel.x >> cell) + (pixel.y >> cell) + int(frame)) & 1) != 0;
         if ((performance && texel) || part_off(PARTS_BOUNCE))
         {
-            clean_d += texel ? bake_indirect : vec3(0.0);
+            clean_d += texel ? bake_indirect * ambient_share : vec3(0.0);
             imageStore(gi_data_now, pixel, vec4(0.0));
         }
         else if (bake_bounce)
         {
-            noisy_d += bake_indirect;
+            noisy_d += bake_indirect * ambient_share;
             imageStore(gi_data_now, pixel, vec4(0.0));
         }
         else
@@ -2493,8 +2513,8 @@ void main()
             if (SPEC_CLAMP)
                 bounce = indirect_clamped(bounce);
             seed_for(pixel, frame, 8u);
-            noisy_d += job.denoise.z > 0.0 && !part_off(PARTS_GI_REUSE) ?
-                restir_gi(pixel, g, o, d, hd, hn, bounce) : bounce;
+            noisy_d += (job.denoise.z > 0.0 && !part_off(PARTS_GI_REUSE) ?
+                restir_gi(pixel, g, o, d, hd, hn, bounce) : bounce) * ambient_share;
         }
         /* the reflections: a GGX ray below the roughness, else the probes */
         if (g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION))
@@ -3563,6 +3583,66 @@ by the share specular_virtual's virtual motion takes (none past a roughness
 of 0.45: a wide lobe's reflection moves with the surface); none on the
 moving objects, where no ray was traced or the image was behind the last
 frame's camera */
+/* the terrain overhaul's snow (T3): its diffuse light carried under the
+surface (screen-space subsurface diffusion, Burley's kind of profile, an
+exponential a channel): two opposite taps at about the blue's mean free path
+(6 cm) in the pixels the footprint gives, along x on one parity of the
+pixels and along y on the other (the four directions over each pair of
+neighbours), on the same snow and plane only, each weighed by its world
+distance per channel (red 0.45, green 0.7 of the blue's reach: the light
+that went far comes back blue); none where the reach is under a pixel. Only
+the light that varies is carried (the denoised light and the sun's; the
+clean sky and floor are even over a snowfield): a tap reads its words, its
+distance and those two, its sun's diffuse factor the pixel's own (the same
+snow's plane) by the tap's filtered visibility, so the sun's light crosses a
+shadow's edge. The taps are fixed (no frame's noise to flicker) */
+vec3 snow_diffused(ivec2 pixel, Surface g, vec3 clean, vec3 own, vec3 sun_diffuse, float sun_v, bool raw,
+    uint source, float footprint)
+{
+    const float reach = 0.02;
+    float px = reach / max(footprint, 1.0e-6);
+    if (px < 0.75)
+        return clean + own;
+    int step = int(round(min(px, 8.0) * 0.7));
+    ivec2 axis = ((pixel.x + pixel.y) & 1) != 0 ? ivec2(step, 0) : ivec2(0, step);
+    if (step == 0)
+        return clean + own;
+    /* (the sun's visibility at the taps first: where it is the pixel's at
+    both, inside a sunlit or a shaded field, what would be carried is the
+    same light, and nothing more is read) */
+    ivec2 qa = pixel + axis, qb = pixel - axis;
+    float va = inside(qa) ? (raw ? imageLoad(sun_raw, qa) : source == 1u ? imageLoad(sun_b, qa) : imageLoad(sun_a, qa)).x :
+        sun_v;
+    float vb = inside(qb) ? (raw ? imageLoad(sun_raw, qb) : source == 1u ? imageLoad(sun_b, qb) : imageLoad(sun_a, qb)).x :
+        sun_v;
+    va = clamp(va, 0.0, 1.0);
+    vb = clamp(vb, 0.0, 1.0);
+    if (abs(va - sun_v) < 0.02 && abs(vb - sun_v) < 0.02)
+        return clean + own;
+    vec3 sum = own, weights = vec3(1.0);
+    for (int k = 0; k < 2; k++)
+    {
+        ivec2 q = k == 0 ? qa : qb;
+        if (!inside(q))
+            continue;
+        uvec4 wq = texelFetch(words, q, 0);
+        if (terrain_of(wq).kind != 3u)
+            continue;
+        float dq = uintBitsToFloat(texelFetch(extras, q, 0).w);
+        if (!(dq > 0.0))
+            continue;
+        vec3 point = job.camera[0].xyz + dq * ray_of(job.camera, job.corners, vec2(q));
+        if (abs(dot(point - g.point, g.normal)) > 0.01 + 0.002 * g.distance)
+            continue;
+        vec4 dd = raw ? imageLoad(noisy_diffuse, q) : source == 1u ? imageLoad(diff_b, q) : imageLoad(diff_a, q);
+        vec3 light = max(dd.rgb, vec3(0.0)) + sun_diffuse * clamp(k == 0 ? va : vb, 0.0, 1.0);
+        vec3 w = exp(-length(point - g.point) / (reach * vec3(0.45, 0.7, 1.0)));
+        sum += w * light;
+        weights += w;
+    }
+    return clean + sum / weights;
+}
+
 vec2 reflection_motion_change(ivec2 pixel, Surface g)
 {
     if (!g.present || g.instance != 0u)
@@ -3657,6 +3737,21 @@ void main()
         vec3 cs = imageLoad(clean_specular, pixel).rgb;
         diffuse_light = cd + max(dd.rgb, vec3(0.0)) + sd * v;
         specular_light = cs + max(ds.rgb, vec3(0.0)) * share + ss * v;
+        /* the terrain overhaul's ground after the denoiser (T2, T3): the sun's
+        glints by the filtered visibility (world-seeded: nothing for the
+        denoiser to smear or the frames to flicker), snow's light diffused
+        under its surface */
+        if (g.terrain.kind != 0u)
+        {
+            float footprint = length(g.point - job.camera[0].xyz) * 2.0 * length(job.camera[2].xyz) /
+                max(float(job.corners.z - job.corners.x), 1.0) / max(dot(g.normal, g.eye), 0.25);
+            if (s.sun.w > 0.0 && v > 0.0)
+                specular_light += terrain_glint(g.terrain, g.point, g.normal, g.eye, s.sun.xyz, footprint) * v *
+                    PI * s.rig[0].rgb;
+            if (g.terrain.kind == 3u)
+                diffuse_light = snow_diffused(pixel, g, cd, diffuse_light - cd, sd, v, raw, source, footprint) *
+                    terrain_snow_tint();
+        }
         if (view == 22u)
         {
             imageStore(frame_out, pixel, vec4(vec3(v), additions.a));

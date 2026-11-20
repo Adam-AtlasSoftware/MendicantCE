@@ -117,6 +117,16 @@ static struct
 	int classes_changed;
 	/* (the map's materials of the water class: an opaque water's, d40's) */
 	uint32_t water_materials;
+	/* (the map's materials of the snow class: T3's snow on the rock's tops is
+	laid on its maps alone) */
+	uint32_t snow_materials;
+	/* (sand's ripples' direction (T2): a unit vector across the crests'
+	lines, set from the map at a new generation, then once to the first wind
+	the generation's records bring (ripple_set) and held: the ground's ripples
+	never turn while they are seen (an earlier turn toward the wind over
+	minutes moved the lit sand of a still frame, B3's held pan)) */
+	float ripple_dir[2];
+	int ripple_set;
 	/* the last FRAME's flags (fresh while this frame's) */
 	uint32_t frame_flags;
 	int fresh, ever;
@@ -311,6 +321,14 @@ void xgpu_vulkan_terrain_record(const struct xgpu_stream_prism_terrain *record)
 				record->flags & XGPU_TERRAIN_FLAG_CAMPAIGN ? "campaign" : "not a campaign");
 			terrain.generation = record->generation;
 			events_forget();
+			{
+				uint32_t h = record->map_checksum * 2654435761u;
+				float angle = (float)(h >> 8) * (6.2831853f / 16777216.0f);
+
+				terrain.ripple_dir[0] = cosf(angle);
+				terrain.ripple_dir[1] = sinf(angle);
+				terrain.ripple_set = 0;
+			}
 		}
 		terrain.frame_flags = record->flags;
 		terrain.fresh = terrain.ever = 1;
@@ -328,6 +346,17 @@ void xgpu_vulkan_terrain_record(const struct xgpu_stream_prism_terrain *record)
 			}
 		}
 		terrain.seconds += record->real_seconds > 0.0f && record->real_seconds < 1.0f ? record->real_seconds : 0.0f;
+		{
+			/* (the ripples laid across the first wind the map brings) */
+			float wx = record->wind[0], wy = record->wind[1], speed = sqrtf(wx * wx + wy * wy);
+
+			if (!terrain.ripple_set && speed > 0.05f)
+			{
+				terrain.ripple_dir[0] = wx / speed;
+				terrain.ripple_dir[1] = wy / speed;
+				terrain.ripple_set = 1;
+			}
+		}
 		terrain.wader_count = 0;
 		/* (every 10 seconds: what came, for the log) */
 		if (terrain.seconds - terrain.logged_seconds >= 10.0f)
@@ -445,7 +474,7 @@ static unsigned pack_layer(const struct terrain_material *material, int which)
 static int classes_upload(void)
 {
 	static unsigned char texels[CLASS_TABLE_SIDE * CLASS_TABLE_SIDE * 4];
-	uint32_t material, water = 0;
+	uint32_t material, water = 0, snow = 0;
 
 	if (!terrain.class_image)
 	{
@@ -469,8 +498,12 @@ static int classes_upload(void)
 			if (terrain.materials[material].classes[0] == XGPU_TERRAIN_CLASS_WATER ||
 				terrain.materials[material].classes[1] == XGPU_TERRAIN_CLASS_WATER)
 				water++;
+			if (terrain.materials[material].classes[0] == XGPU_TERRAIN_CLASS_SNOW ||
+				terrain.materials[material].classes[1] == XGPU_TERRAIN_CLASS_SNOW)
+				snow++;
 		}
 		terrain.water_materials = water;
+		terrain.snow_materials = snow;
 		xgpu_vulkan_image_upload(terrain.class_image, 0, 0, 0, 0, 0, CLASS_TABLE_SIDE, CLASS_TABLE_SIDE, 1, texels,
 			CLASS_TABLE_SIDE * 4, sizeof(texels));
 		terrain.classes_changed = 0;
@@ -806,6 +839,16 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 		values.view_corners[index] = (float)view->corners[index];
 	for (index = 0; index < XGPU_TERRAIN_CLASSES; index++)
 		values.class_cue[index / 4][index % 4] = cues[index];
+	/* (T2: sand's ripples' direction and height, in the program's tangents;
+	T3: whether the map has snow, the rock's tops then snowed, and the snow's
+	colour (the base's encoding: CE's snow's blue-white), in its gamut) */
+	values.tangents[0] = terrain.ripple_dir[0];
+	values.tangents[1] = terrain.ripple_dir[1];
+	values.tangents[2] = getenv("HALO_TERRAIN_RIPPLES") ? (float)atof(getenv("HALO_TERRAIN_RIPPLES")) : 1.0f;
+	values.gamut[0] = terrain.snow_materials ? 1.0f : 0.0f;
+	values.gamut[1] = 0.86f;
+	values.gamut[2] = 0.89f;
+	values.gamut[3] = 0.93f;
 	for (index = 0; index < terrain.pack.layers; index++)
 	{
 		const float *v = terrain.pack.values[index];

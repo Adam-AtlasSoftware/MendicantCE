@@ -1810,6 +1810,148 @@ lit light after it (tone_curved: display.prism_tone_curve's). */
 	"    return brightest > 1.0e-5 ? c * (mapped / brightest) : c;\n" \
 	"}\n"
 
+/* the terrain overhaul's ground in the light passes (T2, T3; docs/prism_terrain.md): the material response
+of the classes the HQ layers' pass marks (XGPU_GBUFFER_MODEL_GRANULAR, SOIL, SNOW), which Raster's frame
+and the path tracer (tools/vulkan_pt_shaders.py takes it with BAKE_COMMON) share: the layer's occlusion on
+the open sky's and the bounced light, the sun's wrapped, back-scattering diffuse light, the glints */
+#define TERRAIN_COMMON \
+	"/* the class's specular scale, word 2's third byte over the occlusion (the HQ layers' pass's TERRAIN_SPECULAR) */\n" \
+	"float terrain_specular(uint kind)\n" \
+	"{\n" \
+	"    return kind == 3u ? 0.45 : 0.5;\n" \
+	"}\n" \
+	"/* a pixel's ground (the G-buffer's words): kind 0 none, 1 granular (sand), 2 soil (dirt, mud), 3 snow, by the\n" \
+	"model the HQ layers' pass wrote (XGPU_GBUFFER_MODEL_GRANULAR, SOIL, SNOW: the level's alone); its layer's\n" \
+	"occlusion */\n" \
+	"struct Terrain\n" \
+	"{\n" \
+	"    uint kind;\n" \
+	"    float ao;\n" \
+	"};\n" \
+	"Terrain terrain_of(uvec4 w)\n" \
+	"{\n" \
+	"    Terrain t;\n" \
+	"    t.kind = 0u;\n" \
+	"    t.ao = 1.0;\n" \
+	"    uint model = (w.z >> 24u) & 15u;\n" \
+	"    if ((w.w & 0x8000u) == 0u || (w.w >> 16u) != 0u || model < 5u || model > 7u)\n" \
+	"        return t;\n" \
+	"    t.kind = model - 4u;\n" \
+	"    t.ao = clamp(float((w.z >> 16u) & 255u) / 255.0 / terrain_specular(t.kind), 0.0, 1.0);\n" \
+	"    return t;\n" \
+	"}\n" \
+	"/* the share of the open sky's and the bounced light a ground's pixel takes: its layer's occlusion (the grains'\n" \
+	"crevices see little of the sky; the cold sky-lit patches of prism-8's sand up close came from the sky alone\n" \
+	"lighting facets the HQ normal turned from the sun) */\n" \
+	"float terrain_ambient(Terrain t)\n" \
+	"{\n" \
+	"    return t.kind == 1u || t.kind == 2u ? mix(1.0, t.ao, 0.85) : 1.0;\n" \
+	"}\n" \
+	"/* the sun's diffuse light at a ground's pixel, as a factor of the sun's colour (Lambert's cosine elsewhere):\n" \
+	"- wrapped (the light the grains pass on to a facet turned a little from the sun: a granular surface is not one\n" \
+	"  facet), more for snow, whose light crosses the snow;\n" \
+	"- the back-scattering lobe (design 3.3): brighter looking down-sun (a broad lobe, the grains' faces lit toward\n" \
+	"  the eye) with the opposition surge about the anti-solar point (shadow hiding, Hapke's B0 / (1 + tan(g/2) / h));\n" \
+	"- snow: what reaches a face turned from the sun through the snow is blue-weighted (ice absorbs the red) */\n" \
+	"vec3 terrain_sun(Terrain t, vec3 n, vec3 l, vec3 v)\n" \
+	"{\n" \
+	"    float c = dot(n, l);\n" \
+	"    float wrap = t.kind == 1u ? 0.3 : t.kind == 2u ? 0.2 : 0.5;\n" \
+	"    float lit = clamp((c + wrap) / (1.0 + wrap), 0.0, 1.0);\n" \
+	"    if (lit <= 0.0)\n" \
+	"        return vec3(0.0);\n" \
+	"    float cg = clamp(dot(v, l), -1.0, 1.0);\n" \
+	"    float half_tan = sqrt(max(1.0 - cg, 0.0) / max(1.0 + cg, 1.0e-3));\n" \
+	"    float strength = t.kind == 1u ? 1.0 : t.kind == 2u ? 0.6 : 0.15;\n" \
+	"    vec3 f = vec3(lit * (1.0 + strength * (0.2 * cg + 0.3 / (1.0 + half_tan / 0.08))));\n" \
+	"    if (t.kind == 3u)\n" \
+	"        f *= mix(vec3(1.0), vec3(0.82, 0.92, 1.0), 1.0 - smoothstep(-0.3, 0.4, c));\n" \
+	"    return f;\n" \
+	"}\n" \
+	"/* snow's diffuse light, its blue weighting (T3): the light that crossed the snow returns bluer, by the\n" \
+	"weighting CE's own snow shows (Classic N1 Oklab b -1.9; the traced frame's warm sun left it -0.6): luminance\n" \
+	"kept, so only the hue is CE's */\n" \
+	"vec3 terrain_snow_tint()\n" \
+	"{\n" \
+	"    return vec3(0.97, 1.0, 1.06) / dot(vec3(0.97, 1.0, 1.06), vec3(0.2126, 0.7152, 0.0722));\n" \
+	"}\n" \
+	"/* a hash of a cell (pcg4d, Jarzynski and Olano 2020): four uniforms */\n" \
+	"vec4 terrain_hash(ivec2 c, uint salt)\n" \
+	"{\n" \
+	"    uvec4 q = uvec4(uvec2(c), salt, salt ^ 0x9e3779b9u) * 1664525u + 1013904223u;\n" \
+	"    q.x += q.y * q.w;\n" \
+	"    q.y += q.z * q.x;\n" \
+	"    q.z += q.x * q.y;\n" \
+	"    q.w += q.y * q.z;\n" \
+	"    q ^= q >> 16u;\n" \
+	"    q.x += q.y * q.w;\n" \
+	"    q.y += q.z * q.x;\n" \
+	"    q.z += q.x * q.y;\n" \
+	"    q.w += q.y * q.z;\n" \
+	"    return vec4(q >> 8u) * (1.0 / 16777216.0);\n" \
+	"}\n" \
+	"/* the sun's glints on sand and snow (design 3.4), as a factor of the sun's colour (the sun's specular light's\n" \
+	"measure): a world-anchored grid of cells about the pixel's footprint (cell = footprint x 2, two levels blended by\n" \
+	"the footprint's octave), each holding at most one facet (a share of the cells), its normal drawn from the grains'\n" \
+	"GGX distribution about the shading normal; a facet reflects the sun to the eye within a cone that widens with the\n" \
+	"level (its cell holds more grains), the facet's share divided out, so the mean is the distribution's and the\n" \
+	"glints are steady where the camera is, sparkle where the half vector crosses a facet as it moves, and fade to the\n" \
+	"smooth lobe far off. Seeds in world space: no frame's noise, nothing to flicker. Snow: smaller, denser, more\n" \
+	"random facets of ice */\n" \
+	"float terrain_glint(Terrain t, vec3 p, vec3 n, vec3 v, vec3 l, float footprint)\n" \
+	"{\n" \
+	"    if (t.kind != 1u && t.kind != 3u)\n" \
+	"        return 0.0;\n" \
+	"    float nl = dot(n, l), nv = dot(n, v);\n" \
+	"    if (nl <= 0.0 || nv <= 0.0)\n" \
+	"        return 0.0;\n" \
+	"    bool snow = t.kind == 3u;\n" \
+	"    float cell = snow ? 0.0025 : 0.002, share = snow ? 0.3 : 0.12, cone = snow ? 0.05 : 0.06;\n" \
+	"    float alpha = snow ? 0.7 : 0.45, a2 = alpha * alpha;\n" \
+	"    float octave = log2(max(footprint * 2.0 / cell, 1.0));\n" \
+	"    float fade = 1.0 - smoothstep(4.0, 6.0, octave);\n" \
+	"    if (fade <= 0.0)\n" \
+	"        return 0.0;\n" \
+	"    vec3 h = normalize(l + v);\n" \
+	"    vec3 an = abs(n);\n" \
+	"    vec2 q = an.z >= max(an.x, an.y) ? p.xy : an.x >= an.y ? p.yz : p.xz;\n" \
+	"    vec3 tx = normalize(an.z < 0.9 ? cross(vec3(0.0, 0.0, 1.0), n) : cross(vec3(1.0, 0.0, 0.0), n));\n" \
+	"    vec3 ty = cross(n, tx);\n" \
+	"    float first = floor(octave), between = octave - first;\n" \
+	"    float d = 0.0;\n" \
+	"    for (int k = 0; k < 2; k++)\n" \
+	"    {\n" \
+	"        float level = first + float(k);\n" \
+	"        float size = cell * exp2(level);\n" \
+	"        float width = min(cone * exp2(level), 0.9);\n" \
+	"        float held = min(share * exp2(2.0 * level), 1.0);\n" \
+	"        ivec2 id = ivec2(floor(q / size));\n" \
+	"        vec4 r = terrain_hash(id, uint(level) + (snow ? 64u : 0u));\n" \
+	"        if (r.z >= held)\n" \
+	"            continue;\n" \
+	"        /* (the facet a grain's spot in its cell, not the whole cell: about a grain (sand 1.2 mm, snow 0.9 mm) or\n" \
+	"        the pixel's footprint where that is larger, its light gathered into it up to four times) */\n" \
+	"        vec2 centre = 0.2 + 0.6 * terrain_hash(id, uint(level) + 128u).xy;\n" \
+	"        float spot = max(snow ? 0.0003 : 0.0004, footprint * 0.75);\n" \
+	"        float off = length(fract(q / size) - centre) * size;\n" \
+	"        float covered = 1.0 - smoothstep(spot * 0.5, spot, off);\n" \
+	"        if (covered <= 0.0)\n" \
+	"            continue;\n" \
+	"        covered *= min(size * size / (3.14159265 * spot * spot * 0.6), 4.0);\n" \
+	"        float ct = sqrt((1.0 - r.x) / (1.0 + (a2 - 1.0) * r.x));\n" \
+	"        float st = sqrt(max(1.0 - ct * ct, 0.0));\n" \
+	"        float phi = 6.2831853 * r.y;\n" \
+	"        vec3 m = tx * (st * cos(phi)) + ty * (st * sin(phi)) + n * ct;\n" \
+	"        float x2 = 2.0 * max(1.0 - dot(h, m), 0.0);\n" \
+	"        d += (k == 0 ? 1.0 - between : between) * exp(-x2 / (width * width)) / (3.14159265 * width * width * held) *\n" \
+	"            (0.5 + r.w) * covered;\n" \
+	"    }\n" \
+	"    float visibility = 0.5 / max(nl * (nv * (1.0 - alpha) + alpha) + nv * (nl * (1.0 - alpha) + alpha), 1.0e-4);\n" \
+	"    float f0 = snow ? 0.018 : 0.045;\n" \
+	"    float fresnel = f0 + (1.0 - f0) * pow(1.0 - max(dot(v, h), 0.0), 5.0);\n" \
+	"    return min(d * visibility * fresnel * nl * fade * (snow ? 0.6 : 0.5), 6.0);\n" \
+	"}\n"
+
 /* the exposure step, a single invocation after the frame's pass: the push
 constants' scene the meter's address; parameters.x display.prism_exposure (0
 fixed, 1 "ce": the lit frame's median pinned to Classic's over the same
@@ -1883,6 +2025,7 @@ static const char exposure_source[] =
 static const char raster_source[] =
 	BAKE_COMMON
 	EXPOSURE_COMMON
+	TERRAIN_COMMON
 	"layout(local_size_x = 8, local_size_y = 8) in;\n"
 	"layout(set = 0, binding = 0) uniform usampler2D words;\n"
 	"layout(set = 0, binding = 1) uniform usampler2D extras;\n"
@@ -2324,9 +2467,19 @@ static const char raster_source[] =
 	"    }\n"
 	"    vec3 result = whole ? classic : old.rgb;\n"
 	"    vec3 raster_parts[3] = vec3[3](vec3(0.0), vec3(0.0), vec3(0.0));\n"
+	"    /* (the terrain overhaul's ground (T2, T3): its sun's diffuse factor, its\n"
+	"    share of the baked light (the layer's occlusion), its glints) */\n"
+	"    Terrain ground = terrain_of(w);\n"
 	"    if (lit.x >= 0.0)\n"
 	"    {\n"
 	"        float facing = max(dot(facing_normal, s.sun.xyz), 0.0);\n"
+	"        vec3 ground_sun = vec3(0.0);\n"
+	"        if (ground.kind != 0u)\n"
+	"        {\n"
+	"            ground_sun = terrain_sun(ground, facing_normal, s.sun.xyz, eye_dir);\n"
+	"            facing = max(ground_sun.r, max(ground_sun.g, ground_sun.b));\n"
+	"            lit *= terrain_ambient(ground);\n"
+	"        }\n"
 	"        /* (the moving objects' sun shadows: traced where the frame has their\n"
 	"        structure) */\n"
 	"        if (s.sun.w > 0.0 && sunv > 0.0 && facing > 0.0 && view == 0u)\n"
@@ -2346,10 +2499,21 @@ static const char raster_source[] =
 	"                sunv *= clamp(drawn / ce_light, 0.0, 1.0);\n"
 	"        }\n"
 	"        float v = s.sun.w > 0.0 ? max(sunv, 0.0) : 0.0;\n"
-	"        vec3 sunlight = s.rig[0].rgb * facing * v;\n"
+	"        vec3 sunlight = ground.kind != 0u ? s.rig[0].rgb * ground_sun * v : s.rig[0].rgb * facing * v;\n"
+	"        /* (the ground's glints, the sun's specular light's measure) */\n"
+	"        vec3 glints = vec3(0.0);\n"
+	"        if (ground.kind != 0u && v > 0.0)\n"
+	"        {\n"
+	"            float footprint = distance * length(ray) * 2.0 * length(job.camera[2].xyz) /\n"
+	"                max(c.z - c.x, 1.0) / max(dot(facing_normal, eye_dir), 0.25);\n"
+	"            glints = terrain_glint(ground, point, facing_normal, eye_dir, s.sun.xyz, footprint) * v *\n"
+	"                3.14159265 * s.rig[0].rgb;\n"
+	"        }\n"
 	"        vec3 emissive = vec3(unpackHalf2x16(x.y), unpackHalf2x16(x.z & 0xffffu).x);\n"
 	"        vec3 dynamic = dynamic_at(point + facing_normal * 0.02, facing_normal);\n"
 	"        vec3 diffuse = max(lit + sunlight, vec3(0.0));\n"
+	"        if (ground.kind == 3u)\n"
+	"            diffuse *= terrain_snow_tint();\n"
 	"        bool metered = view == 0u && job.exposure.z > 0.5 && (job.meter.x != 0u || job.meter.y != 0u);\n"
 	"        float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;\n"
 	"        int curve = int(job.exposure.y + 0.5);\n"
@@ -2388,6 +2552,8 @@ static const char raster_source[] =
 	"            vec3 specular = reflected * spec_share;\n"
 	"            /* (the sun's highlight: GGX, Smith's visibility, Schlick's\n"
 	"            Fresnel; the sun's irradiance pi times the rig's) */\n"
+	"            if (ground.kind != 0u)\n"
+	"                facing = max(dot(facing_normal, s.sun.xyz), 0.0);\n"
 	"            if (v > 0.0 && facing > 0.0)\n"
 	"            {\n"
 	"                vec3 hv = normalize(s.sun.xyz + eye_dir);\n"
@@ -2399,6 +2565,7 @@ static const char raster_source[] =
 	"                vec3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vh, 5.0);\n"
 	"                specular += min(distribution * visibility, 64.0) * fresnel * facing * v * 3.14159265 * s.rig[0].rgb;\n"
 	"            }\n"
+	"            specular += glints;\n"
 	"            vec3 kd = albedo * (1.0 - spec_share);\n"
 	"            /* (the exposure on the light; under the \"ce\" curve held at white\n"
 	"            as CE's page held its light (a colour past white by its\n"
@@ -2441,6 +2608,10 @@ static const char raster_source[] =
 	"            else if (view == 0u && curve != 0)\n"
 	"                light_ = tone_curved(light_, curve);\n"
 	"            result = light_ + (instance == 0u ? emissive : vec3(0.0));\n"
+	"            /* (the glints into the light the resolve multiplies by CE's base:\n"
+	"            divided by it, so that they come out the sun's reflection) */\n"
+	"            if (ground.kind != 0u)\n"
+	"                result += glints * (view == 0u ? exposure : 1.0) / max(base.rgb, vec3(0.05));\n"
 	"            if (instance != 0u)\n"
 	"            {\n"
 	"                result = light_ * unpackUnorm4x8(w.x).rgb + emissive;\n"
