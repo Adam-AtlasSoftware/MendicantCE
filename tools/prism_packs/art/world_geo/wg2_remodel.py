@@ -1077,7 +1077,9 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
                 continue
             est = auv * len(tile.tris) * 1.4
             # (floors first: where the eye goes and the light grazes)
-            floor_first = 0 if fn[t][2] / fl[t] > 0.7 else 1
+            # (facing up by CE's own vertex normals: the triangles' winding is not the side they face)
+            up = mm.normal[st[i]].astype(np.float64).sum(0)
+            floor_first = 0 if up[2] > 0.7 * np.linalg.norm(up) else 1
             cand.append((floor_first, max(dist, 0.0), t, m, name, uv3, texel, est))
     # floors first, then nearest first, each class within its own share of the budget (relief_budget, else the
     # level's) and the level within relief_budget_triangles
