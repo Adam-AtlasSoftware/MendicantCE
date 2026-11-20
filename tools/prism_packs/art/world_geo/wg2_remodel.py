@@ -9,10 +9,11 @@ environment: WG_VARIANT (recipe key suffix), WG_GPU ("OPTIX" or "NONE"), WG_GPU_
 
 What it does, after v1 (wg_remodel.py):
   1. The BSP's opaque materials become one welded mesh, every face tagged with its material and stock surface.
-  2. Topology (bmesh): deep bevels on the sharp edges CE's metal mesh already has; for metal, grooves cut along the
-     panel lines of the material's own texture (iso-u and iso-v lines found in its luminance or bump profile); then
-     adaptive subdivision of the displaced classes to a target edge length (crack-free: edges are split, so both
-     faces of an edge always agree), within a triangle budget.
+  2. Topology (bmesh): deep bevels on the sharp edges CE's metal mesh already has (the grooves once cut along a
+     metal texture's panel lines, "grooves" in a recipe, are off everywhere: they drew a grid into CE's flat
+     surfaces); then adaptive subdivision of the displaced classes to a target edge length (crack-free: edges are
+     split, so both faces of an edge always agree), within a triangle budget; then the metal relief (wg2_relief.py):
+     the texture's bump map channels clipped into its flat triangles near where one walks, set in later.
   3. Shape (numpy, wg2_shape.py, a function of position only): rock gets strata (layers with their own set-back,
      notches whose lips make overhang undersides and ledges), chipped facets and the CE texture's painted relief at
      two scales; ground gets wind ripples, swells from the texture and small lumps; metal grooves are set in.
