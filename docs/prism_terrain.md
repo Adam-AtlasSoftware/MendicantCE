@@ -248,7 +248,8 @@ at the 10 m pose; at 1 m, where Rebaked's frame is about 1 ms, the frame instead
 slice (about 1.4 ms) whenever it passes about 1.05 ms, whatever is added (a copy alone does it), so that figure is
 the sharing, not the pass. Diagnostic packs with no normal, no roughness or neither change nothing.
 
-The 60 m view of every T1 pose is within 0.92 ΔE (Oklab x100, the worst 32-pixel tile of one class) of Classic;
+The 60 m view of every T1 pose (B1 to B3, N1 to N3, D1, D2, R1, R2) is within 1.63 ΔE (Oklab x100, the worst
+32-pixel tile of one class; medians 0.04 to 0.30) of Classic;
 Classic stays byte-identical, PRISM Rebaked with `display.terrain` `"off"` or `display.terrain_layers` `"ce"` is the
 previous build's frame byte for byte, b30's bake still loads whole, and the game's simulation is the same with the
 terrain on and off (`determinism_compare.py --simulation`).
