@@ -1021,6 +1021,16 @@ void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct 
 	xgpu_vulkan_set_jitter(up.jitter[0], up.jitter[1], description->width, description->height);
 }
 
+float xgpu_vulkan_upscale_view_ratio(void)
+{
+	float ratio;
+
+	if (!up.jittering || !up.last_sizes[0] || !up.last_sizes[2])
+		return 1.0f;
+	ratio = (float)up.last_sizes[0] / (float)up.last_sizes[2];
+	return ratio >= 0.2f && ratio < 1.0f ? ratio : 1.0f;
+}
+
 void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view)
 {
 	const struct xgpu_vulkan_image_description *description, *had;

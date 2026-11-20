@@ -442,7 +442,9 @@ TERRAIN_DEBUG_SOURCE = (
 # layer{2i+1}: roughness, height contrast, the grain's weight (a second, finer, turned lookup of the layer from
 # above, FINE_SCALE times as many tiles, within 1 to 12 world units: the sand's grain, which one tile at its size
 # draws too large and soft up close), the steepness triplanar starts at, negative where the taps are not turned
-# (rock: its strata stay level). bounds.w 1: the weight shown.
+# (rock: its strata stay level). bounds.w 1: the weight shown. window.x: the view's pixels over the screen's each way
+# under an upscaler (1 without one): the layers' lookups' footprints are the screen's pixels' (the prints march at
+# the view's own).
 #
 # T4's prints (TERRAIN_PRINTS: the same with the parts marked PRINTS; the plain pass is the text without them, its
 # words unchanged): the prints' pool (prints_texture, a 2D array of pages: the displacement in world units, the
@@ -949,7 +951,14 @@ void main()
 			print_cavity);
 		p.xy = hit;
 	}
-/*}PRINTS*/	vec4 detail, detail_b;
+/*}PRINTS*/	/* (under an upscaler the view's pixels are coarser than the screen's: window.x their ratio each way, 1 without
+	one. The layers' footprint is the screen's pixel's, as the game's mip bias (log2 of the ratio) samples CE's own
+	maps, so the layers and the grain keep the detail the upscaler's jittered history gives back, not the view's
+	coarser levels) */
+	float sharp = window.x > 0.0 && window.x < 1.0 ? window.x : 1.0;
+	dpx *= sharp;
+	dpy *= sharp;
+	vec4 detail, detail_b;
 	vec3 normal, normal_b;
 	float rough, rough_b, ao, ao_b;
 	/* (the surface (normal, roughness) only near, where it is drawn; one class alone where the other has

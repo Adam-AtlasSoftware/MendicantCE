@@ -182,7 +182,11 @@ the base is copied (`TERRAIN_LAYERS_LOCAL`); elsewhere both are copied and the w
 pixel:
 
 - the point is found from the G-buffer's distance and `SCENE_VIEW`'s camera, and its footprint on the surface's
-  plane (no derivative instructions, so the discards cost nothing);
+  plane (no derivative instructions, so the discards cost nothing). Under an upscaler (`display.upscaler`, or DLSS
+  Ray Reconstruction) the footprint is the screen's pixel's, not the smaller view's: the pass multiplies it by the
+  view's pixels over the output's (`xgpu_vulkan_upscale_view_ratio`, the last END's sizes), as the game's mip bias
+  of log2 of the ratio samples CE's own maps. Before, at Ultra Performance (0.33) the layers were looked up about
+  1.6 levels coarser than CE's maps beside them and the grain averaged away, so the sand looked as CE's;
 - the layer is sampled in world space: from above where the surface is flatter than 41 degrees, from all three axes
   (whiteout-blended normals) where it is steeper; each projection hex-tiled (Mikkelsen 2022: three offset and turned
   samples on a triangle grid, weighted by their place and height; rock is not turned, so its strata stay level);
