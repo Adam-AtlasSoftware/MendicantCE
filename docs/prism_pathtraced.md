@@ -725,10 +725,12 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
 ## The water
 
 CE's water (the terrain overhaul's T7 layer, `docs/prism_terrain.md` "T7 and T8") is composited over the traced frame
-at each water group's END. Its rays are this mode's: the pass `"water"` (T8) traces each water pixel's reflection and
+at each water group's END. Its rays are this mode's: the pass `"water"` (T8) traces, at half the resolution (one ray
+pair a 2x2 block with water), the water's reflection and
 refraction (from below, Snell's window's ray and the total internal reflection) through the frame's scene with the
 frame's job, each hit lit from the bake as the reflections' (`hit_light`), the sun's visibility by the sun's ray, and
-writes them in the frame's encoding for the layer's composite; with `debug.pt_reference` it sums the reference's paths
+writes them in light (the frame's encoding to 2.2), premultiplied by the block's water share, for the layer's
+composite; with `debug.pt_reference` it sums the reference's paths
 (`reference_path`) over the layer's filter footprint instead. Its GPU time is the debug.pass_times group `WATER`
 (with the layer's composite).
 

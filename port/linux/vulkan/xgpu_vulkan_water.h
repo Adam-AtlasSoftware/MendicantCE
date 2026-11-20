@@ -35,9 +35,11 @@ struct xgpu_vulkan_water_job
 	of the level's materials of the water class) */
 	struct xgpu_vulkan_image *classes;
 	/* (T8, Path Traced: the reflection's and the refraction's light traced
-	(xgpu_vulkan_pt_water: the upper ray's, its alpha the sun's visibility;
-	the lower ray's, its alpha its length in the water), NULL where not
-	traced; reference 1 where they are debug.pt_reference's sums) */
+	at half the resolution, premultiplied by each block's water share
+	(xgpu_vulkan_pt_water: the upper ray's, the lower ray's, and the sun's
+	visibility, the share that left the level, the lower ray's length and
+	the share), NULL where not traced; reference 1 where they are
+	debug.pt_reference's sums) */
 	struct xgpu_vulkan_image *traced_up, *traced_down, *traced_aux;
 	int reference;
 };

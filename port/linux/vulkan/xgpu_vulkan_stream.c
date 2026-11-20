@@ -5764,7 +5764,7 @@ cannot be, the frame behind is put back, and the water is not drawn (logged
 once). */
 static struct
 {
-	struct xgpu_vulkan_image *behind, *ripples, *base;
+	struct xgpu_vulkan_image *behind, *ripples;
 	struct xgpu_stream_terrain_water begun;
 	struct xgpu_vulkan_image *cube;
 	uint32_t color, depth;
@@ -5970,8 +5970,9 @@ static void stream_water(const struct xgpu_stream_prism_terrain *record)
 		targets_bind();
 		return;
 	}
-	/* END */
-	if (water_layer.state == 2 && water_image(&water_layer.base, color->image))
+	/* END: the base map's capture read where the game drew it (the colour
+	target, which the layer's frame is copied into after it) */
+	if (water_layer.state == 2)
 	{
 		struct xgpu_vulkan_water_job job;
 		struct xgpu_vulkan_image *made = NULL;
@@ -5981,11 +5982,10 @@ static void stream_water(const struct xgpu_stream_prism_terrain *record)
 		int have_gbuffer = (gbuffer.drawn || gbuffer.begun) && gbuffer.color == stream.color && gbuffer.width == color->width &&
 			gbuffer.height == color->height && gbuffer.words && gbuffer.extras && gbuffer.view_known;
 
-		xgpu_vulkan_image_copy(color->image, 0, 0, water_layer.base, 0, 0);
 		memset(&job, 0, sizeof(job));
 		job.behind = water_layer.behind;
 		job.ripples = water_layer.ripples;
-		job.base = water_layer.base;
+		job.base = color->image;
 		job.depth = depth->image;
 		job.words = have_gbuffer ? gbuffer.words : NULL;
 		job.extras = have_gbuffer ? gbuffer.extras : NULL;
@@ -6007,7 +6007,7 @@ static void stream_water(const struct xgpu_stream_prism_terrain *record)
 		/* (T8: in Path Traced, the reflection's and the refraction's rays
 		traced through the frame's scene, in the screen's march's place) */
 		if (have_gbuffer && water_layer.pathtraced)
-			xgpu_vulkan_pt_water(water_layer.ripples, water_layer.base, water_layer.begun.plane,
+			xgpu_vulkan_pt_water(water_layer.ripples, color->image, water_layer.begun.plane,
 				xgpu_vulkan_water_ripples(), &job.traced_up, &job.traced_down, &job.traced_aux, &job.reference);
 		if (!have_gbuffer)
 			water_failed("no G-buffer of the window's");

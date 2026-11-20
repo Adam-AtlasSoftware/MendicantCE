@@ -4055,19 +4055,22 @@ void main()
 
 //@pass water
 layout(local_size_x = 8, local_size_y = 8) in;
-/* the terrain overhaul's water in Path Traced (T8; xgpu_vulkan_water.glsl composites it): at each pixel of a CE water
-group (the game's base map capture's alpha, binding 3 in this pass's set), the surface (the group's plane,
-push.values, met by the pixel's ray; its normal bent by CE's ripples as the game drew them, binding 2, by the
-strength parameters.x's bits, as the composite bends it) and its two rays traced through the bake's scene, each hit
-lit from the bake as a reflection's (hit_light's), a miss the sky's:
+/* the terrain overhaul's water in Path Traced (T8; xgpu_vulkan_water.glsl composites it): at half the resolution,
+one ray pair a 2x2 block of the frame (the composite's first pass's texel) where it has pixels of a CE water group
+(the game's base map capture's alpha, binding 3 in this pass's set): the surface (the group's plane, push.values,
+met by the ray through the block's water pixels' mean position; its normal bent by CE's ripples' mean there as the
+game drew them, binding 2, by the strength parameters.x's bits, as the composite bends it) and its two rays traced
+through the bake's scene, each hit lit from the bake as a reflection's (hit_light's), a miss the sky's:
 - seen from above: the reflection (the domes with the sky where it leaves) and the sun's visibility at the surface
   (its ray, the structure's and the objects'); the refraction into the water, to the floor (its length);
 - seen from under the surface: Snell's window's ray up through it (the sky above, the cliffs, the ring), and the
   reflection back into the water (total internal reflection outside the window; its length).
-Written in the frame's encoding (the exposure and the curve composite gives the frame), the upper ray's light to
-binding 4, the lower ray's to binding 5, and to binding 8 the sun's visibility at the surface, the upper ray's
-share that left the level (the composite takes the sky there as the frame shows it, CE's sky: the scene's sky light
-is the light's, not the picture's) and the lower ray's length in the water (-1 none).
+Written in light (the frame's encoding, the exposure and the curve composite gives the frame, to display.gamma's
+2.2), premultiplied by the block's water share w so that the composite filters the water's texels alone: to binding
+4 the upper ray's light by w where it met the level (alpha that weight), to binding 5 the lower ray's by w (alpha
+w), and to binding 8 the sun's visibility, the upper ray's share that left the level (the composite takes the sky
+there as the frame shows it, CE's sky: the scene's sky light is the light's, not the picture's) and the lower ray's
+length in the water (-1 none), each by w, and w. A block with no water: zeros.
 debug.pt_reference's frames (parameters.y the frame's number in its sum, 0 live, 0xffffffff stopped: kept) trace
 the reference's paths (reference_path: no bake) over the roughness's footprint the composite's filter takes in the
 live frames (the normal turned by a Gaussian of its angle), summed in linear light in bindings 6, 7 and 23, the mean
@@ -4089,35 +4092,56 @@ void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 h = ivec2(gl_GlobalInvocationID.xy);
     uint count = push.parameters.y;
-    if (!inside(pixel) || count == 0xffffffffu)
+    ivec2 half_extent = (size_of() + 1) / 2;
+    if (h.x >= half_extent.x || h.y >= half_extent.y || count == 0xffffffffu)
         return;
-    if (texelFetch(additions_in, pixel, 0).a <= 0.5)
+    /* (the block's water pixels: their share, mean position and CE's ripples' mean) */
+    float share = 0.0;
+    vec2 position = vec2(0.0);
+    vec3 rip = vec3(0.0);
+    for (int k = 0; k < 4; k++)
+    {
+        ivec2 q = h * 2 + ivec2(k & 1, k >> 1);
+        if (!inside(q) || texelFetch(additions_in, q, 0).a <= 0.5)
+            continue;
+        share += 1.0;
+        position += vec2(q);
+        rip += texelFetch(base_in, q, 0).rgb * 2.0 - 1.0;
+    }
+    if (share <= 0.0)
+    {
+        imageStore(noisy_diffuse, h, vec4(0.0));
+        imageStore(noisy_specular, h, vec4(0.0));
+        imageStore(sun_raw, h, vec4(0.0));
         return;
+    }
+    position /= share;
+    rip /= share;
+    share *= 0.25;
     bool ref = count > 0u;
     float up_miss = 0.0;
-    seed_for(pixel, push.parameters.z, 11u);
+    seed_for(h, push.parameters.z, 11u);
     vec3 n = normalize(push.values.xyz);
     float d = push.values.w / max(length(push.values.xyz), 1.0e-6);
     vec3 eye = job.camera[0].xyz;
-    vec3 ray = ray_of(job.camera, job.corners, vec2(pixel));
+    vec3 ray = ray_of(job.camera, job.corners, position);
     float eye_side = dot(n, eye) - d;
     bool above = eye_side >= 0.0;
     float facing = dot(n, ray);
     float t = abs(facing) > 1.0e-6 ? -eye_side / facing : -1.0;
     if (t <= 0.0)
     {
-        imageStore(noisy_diffuse, pixel, vec4(0.0));
-        imageStore(noisy_specular, pixel, vec4(0.0));
-        imageStore(sun_raw, pixel, vec4(0.0, 1.0, -1.0, 0.0));
+        imageStore(noisy_diffuse, h, vec4(0.0));
+        imageStore(noisy_specular, h, vec4(0.0));
+        imageStore(sun_raw, h, vec4(0.0, share, -share, share));
         return;
     }
     vec3 p = eye + t * ray;
     float view_length = t * length(ray);
     vec3 v = -normalize(ray);
     /* (the composite's normal: CE's ripples at its strength, flattened far off and edge on) */
-    vec3 rip = texelFetch(base_in, pixel, 0).rgb * 2.0 - 1.0;
     vec3 tangent = normalize(abs(n.z) < 0.9 ? cross(vec3(0.0, 0.0, 1.0), n) : cross(n, vec3(0.0, 1.0, 0.0)));
     vec3 bitangent = cross(n, tangent);
     float far_fade = smoothstep(8.0, 160.0, view_length);
@@ -4179,23 +4203,27 @@ void main()
     {
         /* (summed in linear light: the mean tone-curved) */
         /* (the upper ray's light summed where it met the level: its mean there, by its share) */
-        vec4 su = count <= 1u ? vec4(0.0) : imageLoad(clean_diffuse, pixel);
-        vec4 sd = count <= 1u ? vec4(0.0) : imageLoad(clean_specular, pixel);
-        vec4 sa = count <= 1u ? vec4(0.0) : imageLoad(sun_a, pixel);
+        vec4 su = count <= 1u ? vec4(0.0) : imageLoad(clean_diffuse, h);
+        vec4 sd = count <= 1u ? vec4(0.0) : imageLoad(clean_specular, h);
+        vec4 sa = count <= 1u ? vec4(0.0) : imageLoad(sun_a, h);
         float w = 1.0 / float(count);
         su = mix(su, vec4(max(up_light, vec3(0.0)) * (1.0 - up_miss), 0.0), w);
         sd = mix(sd, vec4(max(down_light, vec3(0.0)), 0.0), w);
         sa = mix(sa, vec4(sun_seen, up_miss, down_length, 0.0), w);
-        imageStore(clean_diffuse, pixel, su);
-        imageStore(clean_specular, pixel, sd);
-        imageStore(sun_a, pixel, sa);
+        imageStore(clean_diffuse, h, su);
+        imageStore(clean_specular, h, sd);
+        imageStore(sun_a, h, sa);
         up_light = su.rgb / max(1.0 - sa.y, 1.0e-3);
         down_light = sd.rgb;
         sun_seen = sa.x;
         up_miss = sa.y;
         down_length = sa.z;
     }
-    imageStore(noisy_diffuse, pixel, vec4(tone_curved(up_light * exposure, curve), 1.0));
-    imageStore(noisy_specular, pixel, vec4(tone_curved(down_light * exposure, curve), 1.0));
-    imageStore(sun_raw, pixel, vec4(sun_seen, up_miss, down_length, 1.0));
+    /* (in light: the frame's encoding to display.gamma's 2.2, as the composite takes the frame) */
+    vec3 up_shown = pow(max(tone_curved(up_light * exposure, curve), vec3(0.0)), vec3(2.2));
+    vec3 down_shown = pow(max(tone_curved(down_light * exposure, curve), vec3(0.0)), vec3(2.2));
+    float met = share * (1.0 - clamp(up_miss, 0.0, 1.0));
+    imageStore(noisy_diffuse, h, vec4(up_shown * met, met));
+    imageStore(noisy_specular, h, vec4(down_shown * share, share));
+    imageStore(sun_raw, h, vec4(sun_seen, up_miss, down_length, 1.0) * share);
 }

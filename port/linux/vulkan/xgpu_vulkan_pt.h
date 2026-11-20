@@ -37,9 +37,12 @@ game's base map capture), the surface the plane (n, d) bent by ripples (the
 game's ripple capture) at the strength the composite takes: *up the upper
 ray's light (from above the reflection, from below Snell's window's),
 *down the lower ray's (the refraction, or the reflection back into the
-water), in the frame's encoding, *aux the sun's visibility at the surface,
-the upper ray's share that left the level and the lower ray's length in
-the water (-1 none), RGBA16F at the frame's size; *reference 1 where
+water), in light (the frame's encoding to 2.2), *aux the sun's visibility
+at the surface, the upper ray's share that left the level, the lower ray's
+length in the water (-1 none) and the block's water share, RGBA16F at half
+the frame's size (a texel a 2x2 block of it), each premultiplied by the
+block's water share (the upper ray's by the share where it met the level:
+xgpu_vulkan_water.glsl's first pass reads them); *reference 1 where
 they are debug.pt_reference's means. 0 where no frame was traced this frame
 or the sizes differ */
 int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_image *base, const float plane[4],

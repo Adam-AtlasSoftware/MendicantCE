@@ -87,7 +87,7 @@ def test_path_traced_water_rays():
     pt = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
     assert "PASS_WATER," in pt and "Path Traced's water rays" in pt
     stream = STREAM.read_text()
-    assert "xgpu_vulkan_pt_water(water_layer.ripples, water_layer.base" in stream
+    assert "xgpu_vulkan_pt_water(water_layer.ripples, color->image" in stream
     assert "xgpu_vulkan_pt_water_frame_end();" in stream
     glsl = GLSL.read_text()
     assert "uniform sampler2D traced_up;" in glsl and "uniform sampler2D traced_down;" in glsl

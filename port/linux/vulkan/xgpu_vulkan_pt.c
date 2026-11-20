@@ -2198,7 +2198,7 @@ int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_i
 	struct xgpu_vulkan_image *bound[BINDINGS];
 	VkDescriptorSet set;
 	VkCommandBuffer commands;
-	uint32_t index, set_slot, count, groups_x, groups_y;
+	uint32_t index, set_slot, count, groups_x, groups_y, half_width, half_height;
 	union
 	{
 		float value;
@@ -2215,12 +2215,16 @@ int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_i
 		xgpu_vulkan_image_description(ripples)->width != pt.width ||
 		xgpu_vulkan_image_description(ripples)->height != pt.height)
 		return 0;
-	if (!(pt.water_up = image_make(pt.water_up, XGPU_VULKAN_FORMAT_RGBA16F, pt.width, pt.height)) ||
-		!(pt.water_down = image_make(pt.water_down, XGPU_VULKAN_FORMAT_RGBA16F, pt.width, pt.height)) ||
-		!(pt.water_sum_up = image_make(pt.water_sum_up, XGPU_VULKAN_FORMAT_RGBA32F, pt.width, pt.height)) ||
-		!(pt.water_sum_down = image_make(pt.water_sum_down, XGPU_VULKAN_FORMAT_RGBA32F, pt.width, pt.height)) ||
-		!(pt.water_aux = image_make(pt.water_aux, XGPU_VULKAN_FORMAT_RGBA16F, pt.width, pt.height)) ||
-		!(pt.water_sum_aux = image_make(pt.water_sum_aux, XGPU_VULKAN_FORMAT_RGBA16F, pt.width, pt.height)))
+	/* (the rays at half the resolution: one a 2x2 block of the frame, the
+	composite's first pass's; the sums in the format the pass declares) */
+	half_width = (pt.width + 1) / 2;
+	half_height = (pt.height + 1) / 2;
+	if (!(pt.water_up = image_make(pt.water_up, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_down = image_make(pt.water_down, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_sum_up = image_make(pt.water_sum_up, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_sum_down = image_make(pt.water_sum_down, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_aux = image_make(pt.water_aux, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_sum_aux = image_make(pt.water_sum_aux, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)))
 		return 0;
 	set_slot = pt.set_next;
 	if (pt.set_serial[set_slot] > xgpu_vulkan_completed())
@@ -2254,8 +2258,8 @@ int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_i
 	if (pt.water_reference)
 		count = pt.ref_stopped && pt.ref_copied ? 0xffffffffu : pt.ref_count ? pt.ref_count : 1u;
 	strength.value = ripple_strength;
-	groups_x = (pt.width + 7) / 8;
-	groups_y = (pt.height + 7) / 8;
+	groups_x = (half_width + 7) / 8;
+	groups_y = (half_height + 7) / 8;
 	barrier(commands);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pt.pipeline_layout, 0, 1, &set, 0, NULL);
 	memset(&push, 0, sizeof(push));

@@ -2,9 +2,10 @@
 XGPU_VULKAN_WATER.C
 
 The terrain overhaul's water layer, T7 (xgpu_vulkan_water.h; docs/prism_terrain.md "T7";
-overhaul_research/prism_v4_renderer/terrain/design.md section 8): each CE water group's pixels composited by one
-compute pass (xgpu_vulkan_water.glsl, tools/vulkan_water_shaders.py) into an image of the colour target's size,
-which xgpu_vulkan_stream.c copies into the target. Its device is ray tracing's (as the bake's), its descriptor
+overhaul_research/prism_v4_renderer/terrain/design.md section 8): each CE water group's pixels composited by two
+dispatches of one compute shader (xgpu_vulkan_water.glsl, tools/vulkan_water_shaders.py): the reflection and the
+sun's visibility at half the resolution into two images, then the frame into an image of the colour target's size,
+which xgpu_vulkan_stream.c copies into the target (an opaque water's layer: the second alone). Its device is ray tracing's (as the bake's), its descriptor
 sets a ring of four frames' pools (each emptied as its frame comes round again: the frames in flight are fewer), its
 constants pushed.
 
@@ -33,7 +34,8 @@ mask, distance and side, 4 the reflection, 5 the refraction).
 WATER_FUNCTIONS(DECLARE)
 #undef DECLARE
 
-#define BINDINGS 11
+#define BINDINGS 12
+#define STORAGE_FIRST 10
 #define FRAMES 4
 #define SETS_A_FRAME 32
 
@@ -64,7 +66,8 @@ static struct
 	VkDescriptorPool pools[FRAMES];
 	uint32_t frame, used;
 	VkSampler linear, nearest;
-	struct xgpu_vulkan_image *result, *cube_stand_in;
+	/* (the frame; the first pass's two images at half the resolution) */
+	struct xgpu_vulkan_image *result, *half_reflection, *half_second, *cube_stand_in;
 	/* the tuning (the environment's, read once) */
 	float ripples, absorb, sun, deep, cube, view;
 	uint32_t logged, opaque_logged;
@@ -110,7 +113,7 @@ static int make(void)
 	for (index = 0; index < BINDINGS; index++)
 	{
 		bindings[index].binding = index;
-		bindings[index].descriptorType = index == BINDINGS - 1 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE :
+		bindings[index].descriptorType = index >= STORAGE_FIRST ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE :
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		bindings[index].descriptorCount = 1;
 		bindings[index].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -152,9 +155,9 @@ static int make(void)
 		return 0;
 	memset(sizes, 0, sizeof(sizes));
 	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	sizes[0].descriptorCount = SETS_A_FRAME * (BINDINGS - 1);
+	sizes[0].descriptorCount = SETS_A_FRAME * STORAGE_FIRST;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	sizes[1].descriptorCount = SETS_A_FRAME;
+	sizes[1].descriptorCount = SETS_A_FRAME * (BINDINGS - STORAGE_FIRST);
 	memset(&pool_info, 0, sizeof(pool_info));
 	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 	pool_info.maxSets = SETS_A_FRAME;
@@ -221,15 +224,14 @@ static void barrier(VkCommandBuffer commands)
 		&memory, 0, NULL, 0, NULL);
 }
 
-static struct xgpu_vulkan_image *result_fit(uint32_t width, uint32_t height)
+static struct xgpu_vulkan_image *result_fit(struct xgpu_vulkan_image **kept, uint32_t width, uint32_t height)
 {
-	const struct xgpu_vulkan_image_description *had = water.result ? xgpu_vulkan_image_description(water.result) :
-		NULL;
+	const struct xgpu_vulkan_image_description *had = *kept ? xgpu_vulkan_image_description(*kept) : NULL;
 	struct xgpu_vulkan_image_description wanted;
 
 	if (had && had->width == width && had->height == height)
-		return water.result;
-	xgpu_vulkan_image_destroy(water.result);
+		return *kept;
+	xgpu_vulkan_image_destroy(*kept);
 	memset(&wanted, 0, sizeof(wanted));
 	wanted.type = XGPU_VULKAN_IMAGE_2D;
 	wanted.format = XGPU_VULKAN_FORMAT_RGBA16F;
@@ -239,23 +241,62 @@ static struct xgpu_vulkan_image *result_fit(uint32_t width, uint32_t height)
 	wanted.height = height;
 	wanted.depth_or_layers = 1;
 	wanted.levels = 1;
-	water.result = xgpu_vulkan_image_create(&wanted);
-	return water.result;
+	*kept = xgpu_vulkan_image_create(&wanted);
+	return *kept;
+}
+
+/* a descriptor set of this frame's pool with its images (the last two the storage images) */
+static VkDescriptorSet set_of(struct xgpu_vulkan_image *const images[BINDINGS])
+{
+	VkDescriptorImageInfo infos[BINDINGS];
+	VkWriteDescriptorSet writes[BINDINGS];
+	VkDescriptorSetAllocateInfo allocate;
+	VkDescriptorSet set;
+	uint32_t index;
+
+	if (water.used >= SETS_A_FRAME)
+		return VK_NULL_HANDLE;
+	memset(&allocate, 0, sizeof(allocate));
+	allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocate.descriptorPool = water.pools[water.frame];
+	allocate.descriptorSetCount = 1;
+	allocate.pSetLayouts = &water.set_layout;
+	if (vkAllocateDescriptorSets(water.device.device, &allocate, &set) != VK_SUCCESS)
+		return VK_NULL_HANDLE;
+	water.used++;
+	memset(infos, 0, sizeof(infos));
+	memset(writes, 0, sizeof(writes));
+	for (index = 0; index < BINDINGS; index++)
+	{
+		/* (linear: what is behind, the cube, and the first pass's images, filtered over the water's texels) */
+		infos[index].sampler = index >= STORAGE_FIRST ? VK_NULL_HANDLE : index == 0 || (index >= 6 && index <= 9) ?
+			water.linear : water.nearest;
+		infos[index].imageView = xgpu_vulkan_image_view(images[index]);
+		infos[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		if (!infos[index].imageView)
+			return VK_NULL_HANDLE;
+		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[index].dstSet = set;
+		writes[index].dstBinding = index;
+		writes[index].descriptorCount = 1;
+		writes[index].descriptorType = index >= STORAGE_FIRST ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE :
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		writes[index].pImageInfo = &infos[index];
+	}
+	vkUpdateDescriptorSets(water.device.device, BINDINGS, writes, 0, NULL);
+	return set;
 }
 
 struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_water_job *job)
 {
 	struct xgpu_vulkan_image *images[BINDINGS];
-	VkDescriptorImageInfo infos[BINDINGS];
-	VkWriteDescriptorSet writes[BINDINGS];
-	VkDescriptorSetAllocateInfo allocate;
-	VkDescriptorSet set;
+	VkDescriptorSet set_first = VK_NULL_HANDLE, set;
 	VkCommandBuffer commands;
 	const struct xgpu_vulkan_image_description *description;
 	struct water_push push;
 	struct xgpu_vulkan_image *result;
-	uint32_t index;
-	int traced;
+	uint32_t index, half_width, half_height;
+	int traced, two_passes;
 
 	static const struct xgpu_stream_terrain_water opaque_water;
 	const struct xgpu_stream_terrain_water *item;
@@ -265,17 +306,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 		return NULL;
 	item = job->water ? job->water : &opaque_water;
 	description = xgpu_vulkan_image_description(job->behind);
-	result = result_fit(description->width, description->height);
-	if (!result || water.used >= SETS_A_FRAME)
+	result = result_fit(&water.result, description->width, description->height);
+	half_width = (description->width + 1) / 2;
+	half_height = (description->height + 1) / 2;
+	/* (an opaque water's layer is one pass; a water group's two: its reflection at half the resolution, then the
+	frame) */
+	two_passes = !job->classes;
+	traced = job->traced_up && job->traced_down && job->traced_aux;
+	if (!result || (two_passes && (!result_fit(&water.half_reflection, half_width, half_height) ||
+		!result_fit(&water.half_second, half_width, half_height))))
 		return NULL;
-	memset(&allocate, 0, sizeof(allocate));
-	allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-	allocate.descriptorPool = water.pools[water.frame];
-	allocate.descriptorSetCount = 1;
-	allocate.pSetLayouts = &water.set_layout;
-	if (vkAllocateDescriptorSets(water.device.device, &allocate, &set) != VK_SUCCESS)
-		return NULL;
-	water.used++;
 	images[0] = job->behind;
 	images[1] = job->classes ? job->behind : job->ripples;
 	images[2] = job->classes ? job->classes : job->base;
@@ -283,32 +323,39 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 	images[4] = job->words;
 	images[5] = job->extras;
 	images[6] = job->cube ? job->cube : water.cube_stand_in;
-	traced = job->traced_up && job->traced_down && job->traced_aux;
-	images[7] = traced ? job->traced_up : job->behind;
-	images[8] = traced ? job->traced_down : job->behind;
-	images[9] = traced ? job->traced_aux : job->behind;
-	images[10] = result;
-	commands = xgpu_vulkan_compute_commands();
-	memset(infos, 0, sizeof(infos));
-	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < BINDINGS; index++)
+	if (two_passes)
 	{
-		xgpu_vulkan_image_compute_use(images[index], index == BINDINGS - 1);
-		infos[index].sampler = index == BINDINGS - 1 ? VK_NULL_HANDLE : index == 0 || index == 6 ? water.linear :
-			water.nearest;
-		infos[index].imageView = xgpu_vulkan_image_view(images[index]);
-		infos[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-		if (!infos[index].imageView)
+		images[7] = traced ? job->traced_up : job->behind;
+		images[8] = traced ? job->traced_down : job->behind;
+		images[9] = traced ? job->traced_aux : job->behind;
+		images[10] = water.half_reflection;
+		images[11] = water.half_second;
+		set_first = set_of(images);
+		if (!set_first)
 			return NULL;
-		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		writes[index].dstSet = set;
-		writes[index].dstBinding = index;
-		writes[index].descriptorCount = 1;
-		writes[index].descriptorType = index == BINDINGS - 1 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE :
-			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-		writes[index].pImageInfo = &infos[index];
+		images[7] = water.half_reflection;
+		images[9] = water.half_second;
 	}
-	vkUpdateDescriptorSets(water.device.device, BINDINGS, writes, 0, NULL);
+	else
+	{
+		images[7] = images[8] = images[9] = job->behind;
+		images[11] = result;
+	}
+	images[10] = result;
+	if (two_passes)
+		images[11] = water.half_second;
+	set = set_of(images);
+	if (!set)
+		return NULL;
+	commands = xgpu_vulkan_compute_commands();
+	if (two_passes && traced)
+	{
+		xgpu_vulkan_image_compute_use(job->traced_up, 0);
+		xgpu_vulkan_image_compute_use(job->traced_aux, 0);
+	}
+	for (index = 0; index < BINDINGS; index++)
+		xgpu_vulkan_image_compute_use(images[index], index >= STORAGE_FIRST || (two_passes && (index == 7 ||
+			index == 9)));
 	memset(&push, 0, sizeof(push));
 	memcpy(push.camera, job->view->now, sizeof(push.camera));
 	memcpy(push.corners, job->view->corners, sizeof(push.corners));
@@ -338,6 +385,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 		(traced ? 4u | (job->reference ? 8u : 0u) : 0u);
 	barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, water.pipeline);
+	if (two_passes)
+	{
+		push.flags[3] |= 16u;
+		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, water.layout, 0, 1, &set_first, 0, NULL);
+		vkCmdPushConstants(commands, water.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+		xgpu_vulkan_breadcrumb(commands, 89, "PRISM's water layer's reflection");
+		vkCmdDispatch(commands, (half_width + 7) / 8, (half_height + 7) / 8, 1);
+		barrier(commands);
+		push.flags[3] &= ~16u;
+	}
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, water.layout, 0, 1, &set, 0, NULL);
 	vkCmdPushConstants(commands, water.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 	xgpu_vulkan_breadcrumb(commands, 90, "PRISM's water layer");
@@ -356,8 +413,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 			"distance %.3f, the eye %.3f over it", item->fog[0], item->fog[1], item->fog[2],
 			item->fog[3], item->fog_shape[0], item->fog_shape[1], item->fog_shape[2]);
 		host_logf(HOST_LOG_INFO, "prism water: the first group composited (%ux%u, flags 0x%x, plane %.3f %.3f %.3f "
-			"%.3f)", description->width, description->height, item->flags, item->plane[0],
-			item->plane[1], item->plane[2], item->plane[3]);
+			"%.3f; tints %.3f %.3f %.3f %.3f, %.3f %.3f %.3f %.3f)", description->width, description->height,
+			item->flags, item->plane[0], item->plane[1], item->plane[2], item->plane[3], item->perpendicular[0],
+			item->perpendicular[1], item->perpendicular[2], item->perpendicular[3], item->parallel[0],
+			item->parallel[1], item->parallel[2], item->parallel[3]);
 	}
 	return result;
 }
