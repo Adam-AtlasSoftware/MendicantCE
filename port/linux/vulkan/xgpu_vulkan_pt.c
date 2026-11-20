@@ -147,6 +147,7 @@ enum
 	PASS_REFERENCE_STATS,
 	PASS_LAMPS,
 	PASS_CACHE,
+	PASS_WATER,
 	PASSES
 };
 
@@ -347,6 +348,15 @@ static struct
 	float recent_lights[LIGHTS_MOST * LIGHT_FLOATS];
 	uint32_t recent_ids[LIGHTS_MOST];
 	uint32_t recent_count;
+	/* the terrain overhaul's water rays (T8, xgpu_vulkan_pt_water): this
+	frame's job (its block's address, the scene, the images bound, 0 until
+	a frame is traced and again at the frame's end), the rays' light (the
+	upper and the lower ray's) and the reference's sums of them */
+	VkDeviceAddress water_job;
+	uint64_t water_scene;
+	int water_reference;
+	struct xgpu_vulkan_image *water_bound[BINDINGS];
+	struct xgpu_vulkan_image *water_up, *water_down, *water_sum_up, *water_sum_down, *water_aux, *water_sum_aux;
 } pt;
 
 /* ---------- memory */
@@ -435,7 +445,7 @@ static const char *const pass_names[] =
 {
 	"Path Traced's light pass", "Path Traced's temporal pass", "Path Traced's fix pass", "Path Traced's atrous pass",
 	"Path Traced's composite pass", "Path Traced's reference pass", "Path Traced's reference statistics",
-	"Path Traced's lamps copy", "Path Traced's radiance cache",
+	"Path Traced's lamps copy", "Path Traced's radiance cache", "Path Traced's water rays",
 };
 typedef char pass_names_complete[sizeof(pass_names) / sizeof(pass_names[0]) == PASSES ? 1 : -1];
 #define BREADCRUMB_BEGUN 20u
@@ -645,6 +655,7 @@ static int make(void)
 		!pipeline_make(PASS_REFERENCE, xgpu_vulkan_pt_reference_words, xgpu_vulkan_pt_reference_count) ||
 		!pipeline_make(PASS_LAMPS, xgpu_vulkan_pt_lamps_words, xgpu_vulkan_pt_lamps_count) ||
 		!pipeline_make(PASS_CACHE, xgpu_vulkan_pt_cache_words, xgpu_vulkan_pt_cache_count) ||
+		!pipeline_make(PASS_WATER, xgpu_vulkan_pt_water_words, xgpu_vulkan_pt_water_count) ||
 		!pipeline_make(PASS_REFERENCE_STATS, xgpu_vulkan_pt_reference_stats_words,
 		xgpu_vulkan_pt_reference_stats_count))
 	{
@@ -1950,6 +1961,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	for (index = 0; index < BINDINGS; index++)
 		write_image(&writes[index], &infos[index], set, index, bound[index], index < 4 || index == IMAGE_LIGHT_IN);
 	vkUpdateDescriptorSets(pt.device.device, BINDINGS, writes, 0, NULL);
+	/* (the water's rays this frame trace with this job, T8) */
+	memcpy(pt.water_bound, bound, sizeof(pt.water_bound));
+	pt.water_job = slot_buffer->address;
+	pt.water_scene = scene;
+	pt.water_reference = reference;
 	commands = xgpu_vulkan_compute_commands();
 	job->meter = xgpu_vulkan_bake_meter(commands);
 	job->exposure[2] = !pt_view && job->meter ? 1.0f : 0.0f;
@@ -2170,6 +2186,107 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	return pt.out;
 }
 
+/* ---------- the terrain overhaul's water (T8) */
+
+int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_image *base, const float plane[4],
+	float ripple_strength, struct xgpu_vulkan_image **up, struct xgpu_vulkan_image **down,
+	struct xgpu_vulkan_image **aux, int *reference)
+{
+	const struct xgpu_vulkan_image_description *description;
+	VkDescriptorImageInfo infos[BINDINGS];
+	VkWriteDescriptorSet writes[BINDINGS];
+	struct xgpu_vulkan_image *bound[BINDINGS];
+	VkDescriptorSet set;
+	VkCommandBuffer commands;
+	uint32_t index, set_slot, count, groups_x, groups_y, half_width, half_height;
+	union
+	{
+		float value;
+		uint32_t bits;
+	} strength;
+	struct pt_push push;
+
+	*up = *down = *aux = NULL;
+	*reference = 0;
+	if (!pt.made || !pt.water_job || !ripples || !base || !pt.width)
+		return 0;
+	description = xgpu_vulkan_image_description(base);
+	if (description->width != pt.width || description->height != pt.height ||
+		xgpu_vulkan_image_description(ripples)->width != pt.width ||
+		xgpu_vulkan_image_description(ripples)->height != pt.height)
+		return 0;
+	/* (the rays at half the resolution: one a 2x2 block of the frame, the
+	composite's first pass's; the sums in the format the pass declares) */
+	half_width = (pt.width + 1) / 2;
+	half_height = (pt.height + 1) / 2;
+	if (!(pt.water_up = image_make(pt.water_up, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_down = image_make(pt.water_down, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_sum_up = image_make(pt.water_sum_up, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_sum_down = image_make(pt.water_sum_down, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_aux = image_make(pt.water_aux, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)) ||
+		!(pt.water_sum_aux = image_make(pt.water_sum_aux, XGPU_VULKAN_FORMAT_RGBA16F, half_width, half_height)))
+		return 0;
+	set_slot = pt.set_next;
+	if (pt.set_serial[set_slot] > xgpu_vulkan_completed())
+		xgpu_vulkan_wait(pt.set_serial[set_slot]);
+	pt.set_next = (set_slot + 1) % SET_SLOTS;
+	set = pt.sets[set_slot];
+	/* (the frame's images, the water's in four of their places: the ripples
+	and the base map's capture sampled, the rays' light and the reference's
+	sums written) */
+	memcpy(bound, pt.water_bound, sizeof(bound));
+	bound[2] = ripples;
+	bound[3] = base;
+	bound[IMAGE_NOISY_DIFFUSE] = pt.water_up;
+	bound[IMAGE_NOISY_SPECULAR] = pt.water_down;
+	bound[IMAGE_CLEAN_DIFFUSE] = pt.water_sum_up;
+	bound[IMAGE_CLEAN_SPECULAR] = pt.water_sum_down;
+	bound[IMAGE_SUN_RAW] = pt.water_aux;
+	bound[IMAGE_SUN_A] = pt.water_sum_aux;
+	for (index = 0; index < BINDINGS; index++)
+		if (!bound[index])
+			return 0;
+	for (index = 0; index < BINDINGS; index++)
+		write_image(&writes[index], &infos[index], set, index, bound[index], index < 4 || index == IMAGE_LIGHT_IN);
+	vkUpdateDescriptorSets(pt.device.device, BINDINGS, writes, 0, NULL);
+	commands = xgpu_vulkan_compute_commands();
+	for (index = 0; index < BINDINGS; index++)
+		xgpu_vulkan_image_compute_use(bound[index], !(index < 4 || index == IMAGE_LIGHT_IN));
+	/* (the reference's frame in its sum: 0 live, its number while it sums,
+	and the sums kept once it stops) */
+	count = 0;
+	if (pt.water_reference)
+		count = pt.ref_stopped && pt.ref_copied ? 0xffffffffu : pt.ref_count ? pt.ref_count : 1u;
+	strength.value = ripple_strength;
+	groups_x = (half_width + 7) / 8;
+	groups_y = (half_height + 7) / 8;
+	barrier(commands);
+	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pt.pipeline_layout, 0, 1, &set, 0, NULL);
+	memset(&push, 0, sizeof(push));
+	push.scene = pt.water_scene;
+	push.job = pt.water_job;
+	push.parameters[0] = strength.bits;
+	push.parameters[1] = count;
+	push.parameters[2] = pt.frame;
+	memcpy(push.values, plane, sizeof(push.values));
+	xgpu_vulkan_breadcrumb(commands, (uint32_t)PASS_WATER + 1u, pass_names[PASS_WATER]);
+	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pt.pipelines[PASS_WATER]);
+	vkCmdPushConstants(commands, pt.pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+	vkCmdDispatch(commands, groups_x, groups_y, 1);
+	barrier(commands);
+	pt.set_serial[set_slot] = xgpu_vulkan_serial();
+	*up = pt.water_up;
+	*down = pt.water_down;
+	*aux = pt.water_aux;
+	*reference = pt.water_reference;
+	return 1;
+}
+
+void xgpu_vulkan_pt_water_frame_end(void)
+{
+	pt.water_job = 0;
+}
+
 void xgpu_vulkan_pt_shutdown(void)
 {
 	uint32_t index;
@@ -2180,6 +2297,7 @@ void xgpu_vulkan_pt_shutdown(void)
 		&pt.spec_moments[0], &pt.spec_moments[1], &pt.sun[0], &pt.sun[1], &pt.diff_a, &pt.diff_b, &pt.spec_a, &pt.spec_b,
 		&pt.sun_a, &pt.sun_b, &pt.out, &pt.reservoir_point[0], &pt.reservoir_point[1], &pt.reservoir_info[0],
 		&pt.reservoir_info[1], &pt.gi_point[0], &pt.gi_point[1], &pt.gi_data[0], &pt.gi_data[1], &pt.exposure,
+		&pt.water_up, &pt.water_down, &pt.water_sum_up, &pt.water_sum_down, &pt.water_aux, &pt.water_sum_aux,
 	};
 	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
 		&pt.tree, &pt.cache };

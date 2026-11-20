@@ -63,6 +63,11 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view);
 /* (a window's G-buffer begun: the pass may be drawn for it) */
 void xgpu_vulkan_terrain_window(void);
+/* (T7) the classes' table (CLASS_TABLE_SIDE squared RGBA8, a texel a
+material: its two classes) where this frame's FRAME has display.water
+"prism" and the map has a material of the water class (an opaque water's:
+d40's), for the water layer over it; else NULL */
+struct xgpu_vulkan_image *xgpu_vulkan_terrain_water_classes(void);
 /* the frame's end: a FRAME is this frame's alone */
 void xgpu_vulkan_terrain_frame_end(void);
 /* (T1) whether the terrain pack of that folder (FRAME's pack folder) is

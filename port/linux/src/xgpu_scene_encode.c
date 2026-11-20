@@ -343,9 +343,10 @@ uint32_t xgpu_scene_encode_terrain(void *out, uint32_t room, const struct xgpu_s
 	if (!out || !terrain || terrain->phase >= XGPU_TERRAIN_PHASES || (count && !items))
 		return 0;
 	most = terrain->phase == XGPU_TERRAIN_EVENTS ? XGPU_TERRAIN_EVENTS_MOST :
-		terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST : 0;
+		terrain->phase == XGPU_TERRAIN_WADERS ? XGPU_TERRAIN_WADERS_MOST :
+		terrain->phase == XGPU_TERRAIN_WATER_DRAW ? XGPU_TERRAIN_WATER_ITEMS : 0;
 	size = (uint32_t)(sizeof(*record) + count * sizeof(record->items[0]));
-	if (count > most || room < size)
+	if (count > most || room < size || (terrain->phase == XGPU_TERRAIN_WATER_DRAW && count != most))
 		return 0;
 	memcpy(record, terrain, sizeof(*record));
 	record->header = XGPU_STREAM_HEADER(XGPU_STREAM_PRISM_TERRAIN, size);
@@ -359,7 +360,20 @@ uint32_t xgpu_scene_encode_terrain(void *out, uint32_t room, const struct xgpu_s
 	memset(record->winds, 0, sizeof(record->winds));
 	for (index = 0; index < record->wind_count; index++)
 		copy_floats(record->winds[index], terrain->winds[index], 3);
-	if (terrain->phase == XGPU_TERRAIN_WADERS)
+	if (terrain->phase == XGPU_TERRAIN_WATER_DRAW)
+	{
+		const struct xgpu_stream_terrain_water *from = items;
+		struct xgpu_stream_terrain_water *to = (struct xgpu_stream_terrain_water *)record->items;
+
+		*to = *from;
+		copy_floats(to->plane, from->plane, 4);
+		copy_floats(to->perpendicular, from->perpendicular, 4);
+		copy_floats(to->parallel, from->parallel, 4);
+		copy_floats(to->fog, from->fog, 4);
+		copy_floats(to->fog_shape, from->fog_shape, 4);
+		to->ripple_scale = finite_or_zero(from->ripple_scale);
+	}
+	else if (terrain->phase == XGPU_TERRAIN_WADERS)
 	{
 		const struct xgpu_stream_terrain_wader *from = items;
 		struct xgpu_stream_terrain_wader *to = (struct xgpu_stream_terrain_wader *)record->items;

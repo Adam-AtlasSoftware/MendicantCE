@@ -140,11 +140,12 @@ def test_sizes_multiples_of_four(driver64):
         "xgpu_stream_terrain_event": 32,
         "xgpu_stream_terrain_wader": 32,
         "xgpu_stream_prism_terrain": 180,
+        "xgpu_stream_terrain_water": 96,
     }
 
 
 def test_stream_types(constants):
-    # (41: PRISM_TERRAIN's FRAME carries the terrain pack's folder (T1); 40: the terrain overhaul's PRISM_TERRAIN (T0), after UPSCALE (39 on its own branch), the last scene record;
+    # (42: PRISM_TERRAIN's WATER_DRAW sent (T7), three items (41 on its own branch); 41: PRISM_TERRAIN's FRAME carries the terrain pack's folder (T1); 40: the terrain overhaul's PRISM_TERRAIN (T0), after UPSCALE (39 on its own branch), the last scene record;
     # 39: the integration of M5's UPSCALE (38 on its own branch), after the scene's types; 38: the merge with GOAT H1
     # (OpenH1/goath1 ff83e8d62), whose own 20 to 23 come first in the list, PRISM's records after them, the scene
     # records still last; 37: prism-v4-raster-int's RT_FRAME flag RASTER_OBJECTS, 32, and GBUFFER_DRAW's STATIC_SCENERY; 36: M3's
@@ -153,9 +154,9 @@ def test_stream_types(constants):
     # SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends
     # SCENE_MATERIAL and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was GBUFFER_PHASE, its first
     # record)
-    assert constants["version"] == 41
+    assert constants["version"] == 42
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 41\b", text)
+    assert re.search(r"#define XGPU_STREAM_VERSION 42\b", text)
     # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
     # the decoder takes every one of them)
     assert constants["rt_frame"] == constants["record_types"] - 15
@@ -372,6 +373,16 @@ def test_terrain_waders(encoded, constants):
         assert record(encoded, name) == b""
 
 
+def test_terrain_water(encoded, constants):
+    """T7: a water draw is its one xgpu_stream_terrain_water whole (96 bytes, three items), the floats not finite
+    written 0; fewer items refused"""
+    body = terrain_fixed(constants, 180 + 96, 4, 3, 2)
+    body += struct.pack("<2I", 2, 1 | 0x100) + pack_floats([0.0, 0.0, 1.0, 0.0]) + struct.pack("<I", 2)
+    body += pack_floats([50.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0, 1.0, 1.0, 0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 2.0, 3.0])
+    assert record(encoded, "terrain_water") == body
+    assert record(encoded, "terrain_water_short") == b""
+
+
 def test_terrain_decoded():
     """the host's decoder takes PRISM_TERRAIN's fixed part and checks its count against its phase's most and the
     record's size"""
@@ -379,4 +390,5 @@ def test_terrain_decoded():
     case = decoder[decoder.index("case XGPU_STREAM_PRISM_TERRAIN:"):]
     case = case[:case.index("break;")]
     assert "XGPU_TERRAIN_EVENTS_MOST" in case and "XGPU_TERRAIN_WADERS_MOST" in case
+    assert "XGPU_TERRAIN_WATER_ITEMS" in case and "XGPU_TERRAIN_WATER_STEPS" in case
     assert "terrain->count * sizeof(terrain->items[0])" in case and "CALL(prism_terrain, terrain)" in case

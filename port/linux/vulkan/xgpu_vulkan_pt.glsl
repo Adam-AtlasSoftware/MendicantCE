@@ -4052,3 +4052,178 @@ void main()
     c.v[at + 8u] = floatBitsToUint(now.b);
     c.v[at + 9u] = floatBitsToUint(held + float(count));
 }
+
+//@pass water
+layout(local_size_x = 8, local_size_y = 8) in;
+/* the terrain overhaul's water in Path Traced (T8; xgpu_vulkan_water.glsl composites it): at half the resolution,
+one ray pair a 2x2 block of the frame (the composite's first pass's texel) where it has pixels of a CE water group
+(the game's base map capture's alpha, binding 3 in this pass's set): the surface (the group's plane, push.values,
+met by the ray through the block's water pixels' mean position; its normal bent by CE's ripples' mean there as the
+game drew them, binding 2, by the strength parameters.x's bits, as the composite bends it) and its two rays traced
+through the bake's scene, each hit lit from the bake as a reflection's (hit_light's), a miss the sky's:
+- seen from above: the reflection (the domes with the sky where it leaves) and the sun's visibility at the surface
+  (its ray, the structure's and the objects'); the refraction into the water, to the floor (its length);
+- seen from under the surface: Snell's window's ray up through it (the sky above, the cliffs, the ring), and the
+  reflection back into the water (total internal reflection outside the window; its length).
+Written in light (the frame's encoding, the exposure and the curve composite gives the frame, to display.gamma's
+2.2), premultiplied by the block's water share w so that the composite filters the water's texels alone: to binding
+4 the upper ray's light by w where it met the level (alpha that weight), to binding 5 the lower ray's by w (alpha
+w), and to binding 8 the sun's visibility, the upper ray's share that left the level (the composite takes the sky
+there as the frame shows it, CE's sky: the scene's sky light is the light's, not the picture's) and the lower ray's
+length in the water (-1 none), each by w, and w. A block with no water: zeros.
+debug.pt_reference's frames (parameters.y the frame's number in its sum, 0 live, 0xffffffff stopped: kept) trace
+the reference's paths (reference_path: no bake) over the roughness's footprint the composite's filter takes in the
+live frames (the normal turned by a Gaussian of its angle), summed in linear light in bindings 6, 7 and 23, the mean
+written to 4, 5 and 8. parameters.z: the frame's number (the seeds). */
+vec3 water_ray_light(vec3 o, vec3 d, bool up, bool ref, out float length_)
+{
+    if (ref)
+    {
+        vec3 nh, oa;
+        uint t;
+        vec2 b;
+        float h = scene_hit(o, d, 2000.0, nh, t, b, oa);
+        length_ = h;
+        return reference_path(o, d, REFERENCE_BOUNCES, up, true);
+    }
+    return hit_light(o, d, 2000.0, up, length_);
+}
+void main()
+{
+    s = Scene(push.scene);
+    job = Job(push.job);
+    ivec2 h = ivec2(gl_GlobalInvocationID.xy);
+    uint count = push.parameters.y;
+    ivec2 half_extent = (size_of() + 1) / 2;
+    if (h.x >= half_extent.x || h.y >= half_extent.y || count == 0xffffffffu)
+        return;
+    /* (the block's water pixels: their share, mean position and CE's ripples' mean) */
+    float share = 0.0;
+    vec2 position = vec2(0.0);
+    vec3 rip = vec3(0.0);
+    for (int k = 0; k < 4; k++)
+    {
+        ivec2 q = h * 2 + ivec2(k & 1, k >> 1);
+        if (!inside(q) || texelFetch(additions_in, q, 0).a <= 0.5)
+            continue;
+        share += 1.0;
+        position += vec2(q);
+        rip += texelFetch(base_in, q, 0).rgb * 2.0 - 1.0;
+    }
+    if (share <= 0.0)
+    {
+        imageStore(noisy_diffuse, h, vec4(0.0));
+        imageStore(noisy_specular, h, vec4(0.0));
+        imageStore(sun_raw, h, vec4(0.0));
+        return;
+    }
+    position /= share;
+    rip /= share;
+    share *= 0.25;
+    bool ref = count > 0u;
+    float up_miss = 0.0;
+    seed_for(h, push.parameters.z, 11u);
+    vec3 n = normalize(push.values.xyz);
+    float d = push.values.w / max(length(push.values.xyz), 1.0e-6);
+    vec3 eye = job.camera[0].xyz;
+    vec3 ray = ray_of(job.camera, job.corners, position);
+    float eye_side = dot(n, eye) - d;
+    bool above = eye_side >= 0.0;
+    float facing = dot(n, ray);
+    float t = abs(facing) > 1.0e-6 ? -eye_side / facing : -1.0;
+    if (t <= 0.0)
+    {
+        imageStore(noisy_diffuse, h, vec4(0.0));
+        imageStore(noisy_specular, h, vec4(0.0));
+        imageStore(sun_raw, h, vec4(0.0, share, -share, share));
+        return;
+    }
+    vec3 p = eye + t * ray;
+    float view_length = t * length(ray);
+    vec3 v = -normalize(ray);
+    /* (the composite's normal: CE's ripples at its strength, flattened far off and edge on) */
+    vec3 tangent = normalize(abs(n.z) < 0.9 ? cross(vec3(0.0, 0.0, 1.0), n) : cross(n, vec3(0.0, 1.0, 0.0)));
+    vec3 bitangent = cross(n, tangent);
+    float far_fade = smoothstep(8.0, 160.0, view_length);
+    float edge_on = clamp(abs(dot(normalize(ray), n)) * 3.0, 0.0, 1.0);
+    float strength = uintBitsToFloat(push.parameters.x) * mix(1.0, 0.6, far_fade) * mix(0.6, 1.0, edge_on);
+    vec3 normal = normalize(n + strength * (rip.x * tangent + rip.y * bitangent));
+    if (ref)
+    {
+        /* (the reference: the normal turned over the footprint the composite's filter takes, blur_radius pixels
+        wide and blur_stretch times as tall: a pixel's angle, the reflected ray's spread twice the normal's) */
+        float scale = float(job.counts.z) / 720.0;
+        float grazing_rough = far_fade * (1.0 - edge_on);
+        float radius = (1.0 + 4.0 * far_fade + 16.0 * grazing_rough) * mix(1.8, 1.0, edge_on) * scale;
+        float stretch = mix(2.4, 1.0, edge_on);
+        float pixel_angle = 2.0 * length(job.camera[3].xyz) / max(float(job.corners.w - job.corners.y), 1.0);
+        float spread = 0.33 * radius * pixel_angle;
+        vec3 toward = normalize(v - n * dot(v, n) + tangent * 1.0e-4);
+        vec3 across = cross(n, toward);
+        float u1 = max(rnd(), 1.0e-6), u2 = rnd();
+        vec2 g = sqrt(-2.0 * log(u1)) * vec2(cos(2.0 * PI * u2), sin(2.0 * PI * u2)) * spread;
+        normal = normalize(normal + toward * g.y * stretch + across * g.x);
+    }
+    vec3 up_light, down_light;
+    float sun_seen = 1.0, down_length = -1.0, up_length;
+    if (above)
+    {
+        vec3 r = reflect(-v, normal);
+        float under = dot(r, n);
+        if (under < 0.02)
+            r = normalize(r + n * (0.02 - under));
+        up_light = water_ray_light(p + n * 0.02, r, true, ref, up_length);
+        up_miss = up_length < 0.0 ? 1.0 : 0.0;
+        float blocker;
+        sun_seen = s.sun.w > 0.0 && dot(n, s.sun.xyz) > 0.0 ? sun_ray(p + n * 0.05, blocker) : 0.0;
+        vec3 tr = refract(-v, normal, 1.0 / 1.33);
+        down_light = water_ray_light(p - n * 0.02, tr, false, ref, down_length);
+    }
+    else
+    {
+        vec3 tr = refract(-v, -normal, 1.33);
+        if (dot(tr, tr) < 1.0e-6)
+        {
+            vec3 along = -v - n * dot(-v, n);
+            tr = normalize(along * 0.999 + n * 0.045);
+        }
+        up_light = water_ray_light(p + n * 0.02, tr, true, ref, up_length);
+        up_miss = up_length < 0.0 ? 1.0 : 0.0;
+        vec3 r = reflect(-v, -normal);
+        down_light = water_ray_light(p - n * 0.02, r, false, ref, down_length);
+    }
+    if (any(isnan(up_light)) || any(isinf(up_light)))
+        up_light = vec3(0.0);
+    if (any(isnan(down_light)) || any(isinf(down_light)))
+        down_light = vec3(0.0);
+    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
+    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
+    int curve = int(job.exposure.y + 0.5);
+    if (ref)
+    {
+        /* (summed in linear light: the mean tone-curved) */
+        /* (the upper ray's light summed where it met the level: its mean there, by its share) */
+        vec4 su = count <= 1u ? vec4(0.0) : imageLoad(clean_diffuse, h);
+        vec4 sd = count <= 1u ? vec4(0.0) : imageLoad(clean_specular, h);
+        vec4 sa = count <= 1u ? vec4(0.0) : imageLoad(sun_a, h);
+        float w = 1.0 / float(count);
+        su = mix(su, vec4(max(up_light, vec3(0.0)) * (1.0 - up_miss), 0.0), w);
+        sd = mix(sd, vec4(max(down_light, vec3(0.0)), 0.0), w);
+        sa = mix(sa, vec4(sun_seen, up_miss, down_length, 0.0), w);
+        imageStore(clean_diffuse, h, su);
+        imageStore(clean_specular, h, sd);
+        imageStore(sun_a, h, sa);
+        up_light = su.rgb / max(1.0 - sa.y, 1.0e-3);
+        down_light = sd.rgb;
+        sun_seen = sa.x;
+        up_miss = sa.y;
+        down_length = sa.z;
+    }
+    /* (in light: the frame's encoding to display.gamma's 2.2, as the composite takes the frame) */
+    vec3 up_shown = pow(max(tone_curved(up_light * exposure, curve), vec3(0.0)), vec3(2.2));
+    vec3 down_shown = pow(max(tone_curved(down_light * exposure, curve), vec3(0.0)), vec3(2.2));
+    float met = share * (1.0 - clamp(up_miss, 0.0, 1.0));
+    imageStore(noisy_diffuse, h, vec4(up_shown * met, met));
+    imageStore(noisy_specular, h, vec4(down_shown * share, share));
+    imageStore(sun_raw, h, vec4(sun_seen, up_miss, down_length, 1.0) * share);
+}

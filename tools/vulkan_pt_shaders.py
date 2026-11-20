@@ -25,7 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "port/linux/vulkan/xgpu_vulkan_pt.glsl"
 BAKE = ROOT / "port/linux/vulkan/xgpu_vulkan_bake_glsl.inc"
 OUTPUT = ROOT / "port/linux/vulkan/xgpu_vulkan_pt_shaders.c"
-NAMES = ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats", "lamps", "cache")
+NAMES = ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats", "lamps", "cache",
+         "water")
 DECLARATION = re.compile(r"static const char (\w+)_source\[\]\s*=\s*((?:\s|\"(?:\\.|[^\"\\])*\")+);", re.S)
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"')
 MARK = re.compile(r"^//@(common|pass (\w+))\s*$", re.M)
