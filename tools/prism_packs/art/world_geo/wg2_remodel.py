@@ -1076,10 +1076,13 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
             if dist > r.get("relief_reach", 8.0):
                 continue
             est = auv * len(tile.tris) * 1.4
-            cand.append((max(dist, 0.0), t, m, name, uv3, texel, est))
-    # nearest first, each class within its own share of the budget (relief_budget, else the level's) and the level
-    # within relief_budget_triangles
-    cand.sort(key=lambda x: (x[0], x[1]))
+            # (floors first: where the eye goes and the light grazes)
+            floor_first = 0 if fn[t][2] / fl[t] > 0.7 else 1
+            cand.append((floor_first, max(dist, 0.0), t, m, name, uv3, texel, est))
+    # floors first, then nearest first, each class within its own share of the budget (relief_budget, else the
+    # level's) and the level within relief_budget_triangles
+    cand.sort(key=lambda x: (x[0], x[1], x[2]))
+    cand = [x[1:] for x in cand]
     used, per_class, per_surface = 0.0, {}, {}
     chosen = []
     for item in cand:

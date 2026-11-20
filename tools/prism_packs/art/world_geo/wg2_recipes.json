@@ -99,11 +99,11 @@
     "lines_v": 2,
     "max_repeats": 8,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 260000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    },
    "forerunner_int": {
     "kind": "metal",
@@ -129,11 +129,11 @@
     "lines_v": 3,
     "max_repeats": 8,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 40000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -195,11 +195,11 @@
     "lines_v": 1,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 1200000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1066,11 +1066,11 @@
     "lines_v": 2,
     "max_repeats": 4,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 200000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    },
    "forerunner_int": {
     "kind": "metal",
@@ -1096,11 +1096,11 @@
     "lines_v": 3,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 50000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1226,11 +1226,11 @@
     "lines_v": 2,
     "max_repeats": 4,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 240000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    },
    "forerunner_int": {
     "kind": "metal",
@@ -1256,11 +1256,11 @@
     "lines_v": 3,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 60000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1322,11 +1322,11 @@
     "lines_v": 1,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1387,11 +1387,11 @@
     "lines_v": 1,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1452,11 +1452,11 @@
     "lines_v": 1,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1517,11 +1517,11 @@
     "lines_v": 1,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1645,11 +1645,11 @@
     "lines_v": 1,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
@@ -1774,11 +1774,11 @@
     "lines_v": 1,
     "max_repeats": 2,
     "relief": true,
-    "relief_scale": 1.0,
-    "relief_max": 0.03,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1500
+    "relief_tile_triangles": 1000
    }
   },
   "near": {
