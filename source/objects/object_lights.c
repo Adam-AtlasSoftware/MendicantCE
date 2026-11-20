@@ -825,6 +825,22 @@ short light_port_object_type(
 	return object ? object->object.type : NONE;
 }
 
+/* port: the definition of the object a light is on (NONE: none, or no
+light): PRISM Path Traced's light of a grenade (port/linux/game/
+prism_scene_lights.c) */
+long light_port_object_definition(
+	long light_index)
+{
+	struct light_datum *light;
+	struct object_datum *object;
+
+	if (light_index == NONE || !light_data->valid)
+		return NONE;
+	light = (struct light_datum *)datum_try_and_get(light_data, light_index);
+	object = light && light->object_index != NONE ? object_try_and_get(light->object_index) : NULL;
+	return object ? object->definition_index : NONE;
+}
+
 void lights_initialize_for_new_map(
 	void)
 {

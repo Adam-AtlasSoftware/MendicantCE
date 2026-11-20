@@ -483,6 +483,12 @@ static long camera_pose_object_tag(char const *name)
 		'proj' };
 	short i;
 
+	/* ("proj:<name>": the projectile of that name, where another group has
+	a tag of the same name: a grenade's projectile, not its pickup) */
+	if (!strncmp(name, "proj:", 5))
+	{
+		return tag_loaded('proj', name + 5);
+	}
 	for (i = 0; i < (short)NUMBEROF(groups); i++)
 	{
 		long tag_index = tag_loaded(groups[i], name);
