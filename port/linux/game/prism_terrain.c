@@ -24,8 +24,10 @@ in a campaign (no game engine runs) being played (prism_terrain_wanted);
 never in Classic, multiplayer or the menus. Every hook's first act is that
 test, and none writes the game's state, calls a random function or the
 seeds: the hooks read their arguments and append to this file's ring, and
-the frame reads objects, the scenario and the wind. Nothing the renderer
-makes of it comes back. HALO_PORT_NETWORK_VERSION is unchanged.
+the frame reads objects, the scenario and the wind. Of what the renderer
+makes of it only one thing comes back, whether it loaded the terrain pack
+(T1: the texture pass fades CE's detail maps only then), and that reaches
+no state of the game's. HALO_PORT_NETWORK_VERSION is unchanged.
 */
 
 #include "cseries.h"
@@ -41,12 +43,20 @@ makes of it comes back. HALO_PORT_NETWORK_VERSION is unchanged.
 #include "scenario/wind.h"
 #include "structures/structure_bsp_definitions.h"
 #include "tag_files/tag_files.h"
+#include "shaders/shader_definitions.h"
 #include "prism_deferred.h"
 #include "prism_terrain.h"
 #include "../src/xgpu_stream.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
+
+/* (the data folder: port/linux/src/platform.h's) */
+char const *platform_data_root(void);
+/* (sdl_platform.c's: whether the renderer loaded the terrain pack of that
+folder, 1 loaded, -1 not, 0 not tried yet) */
+int platform_prism_terrain_pack(char const *folder);
 
 /* ---------- prototypes */
 
@@ -85,7 +95,7 @@ static struct
 	/* the settings (read when they change) */
 	unsigned long changes;
 	int read;
-	boolean on, tracks, drifts, layers_hq, weather, water, view_class, view_events;
+	boolean on, tracks, drifts, layers_hq, weather, water, view_class, view_events, detail_fade;
 	unsigned long quality;
 	/* the frame's events since the last frame, those left out (the ring
 	full), and the foot whose ground comes next (-1 none) */
@@ -102,6 +112,16 @@ static struct
 	long game_time;
 	unsigned long long real_ns;
 	boolean active;
+	/* (T1) the terrain pack's folder (display.terrain_pack_folder; the data
+	folder's prism_terrain), sent with each FRAME */
+	char pack_folder[XGPU_TERRAIN_PATH];
+	/* (whether the renderer loaded its pack: platform_prism_terrain_pack,
+	asked each frame the HQ layers are asked for; 1 loaded and its layers
+	drawn in the renderer's last frame, -1 not loaded, 0 not tried yet or not
+	drawn. CE's detail maps fade only where it is 1, since only then do the
+	layers stand in for them; the last answer logged beside it) */
+	int pack_state, pack_logged;
+	boolean detail_logged;
 } prism_terrain;
 
 /* ---------- private code */
@@ -134,6 +154,36 @@ static void settings_read(void)
 	value = config_string("debug.gbuffer_view");
 	prism_terrain.view_class = value && !strcmp(value, "terrain_class");
 	prism_terrain.view_events = config_boolean("debug.terrain_events") != 0;
+	prism_terrain.detail_fade = config_boolean("debug.terrain_detail_fade") != 0;
+	value = config_string("display.terrain_pack_folder");
+	if (value && value[0])
+	{
+		snprintf(prism_terrain.pack_folder, sizeof(prism_terrain.pack_folder), "%s", value);
+	}
+	else
+	{
+		snprintf(prism_terrain.pack_folder, sizeof(prism_terrain.pack_folder), "%s/prism_terrain", platform_data_root());
+	}
+}
+
+/* (T1) what the renderer made of the terrain pack's folder, asked each
+frame the HQ layers are: CE's detail maps fade only once it says the pack
+is loaded (prism_terrain_detail_level); a change logged */
+static void pack_state_read(
+	void)
+{
+	int state = prism_terrain.layers_hq ? platform_prism_terrain_pack(prism_terrain.pack_folder) : 0;
+
+	/* (0 also while the pack is loaded but no layers were drawn in the last
+	frame, so the log names each answer once, not each return to it) */
+	if (state != prism_terrain.pack_logged && state != 0)
+	{
+		prism_terrain.pack_logged = state;
+		platform_log("prism terrain: the renderer %s the terrain pack in %s%s", state > 0 ? "loaded" : "did not load",
+			prism_terrain.pack_folder, state > 0 ? ": CE's fine detail maps fade near the camera" :
+			": CE's ground alone, its detail maps unfaded");
+	}
+	prism_terrain.pack_state = state;
 }
 
 /* a direction, octahedral, 2x16 snorm (the G-buffer's normal's encoding);
@@ -370,6 +420,53 @@ static void frame_weather(struct xgpu_stream_prism_terrain *frame)
 
 /* ---------- public code */
 
+/* (T1: the border colour that marks a ground shader's detail maps for the
+renderer's near fade under the HQ layers: xgpu_shader.h's
+XGPU_TERRAIN_FADE_BORDER_COLOR; their wrapped addressing never shows it) */
+#define TERRAIN_FADE_BORDER_COLOR 0x01fade01L
+
+boolean prism_terrain_detail_fades(
+	void const *shader,
+	long bitmap_tag_index)
+{
+	char const *name;
+	char lower[256];
+	int index;
+
+	if (!shader || bitmap_tag_index == NONE)
+	{
+		return FALSE;
+	}
+	name = tag_get_name(bitmap_tag_index);
+	for (index = 0; name && name[index] && index < (int)sizeof(lower) - 1; index++)
+	{
+		lower[index] = (char)(name[index] >= 'A' && name[index] <= 'Z' ? name[index] + 32 : name[index]);
+	}
+	lower[name ? index : 0] = 0;
+	return !strstr(lower, "grass") && !strstr(lower, "moss");
+}
+
+long prism_terrain_detail_level(
+	void const *shader)
+{
+	short material_type;
+
+	if (!shader || !prism_terrain_wanted() || !prism_terrain.layers_hq || prism_terrain.pack_state != 1 ||
+		!prism_terrain.detail_fade)
+	{
+		return 0;
+	}
+	/* (CE's material types: dirt 0, sand 1, stone 2, snow 3, ice 31) */
+	material_type = ((struct shader const *)shader)->base.physics.material_type;
+	if (!prism_terrain.detail_logged)
+	{
+		prism_terrain.detail_logged = TRUE;
+		platform_log("prism terrain: CE's detail maps faded near the camera under the HQ layers");
+	}
+	return material_type == 0 || material_type == 1 || material_type == 2 || material_type == 3 ||
+		material_type == 31 ? TERRAIN_FADE_BORDER_COLOR : 0;
+}
+
 boolean prism_terrain_wanted(
 	void)
 {
@@ -443,6 +540,8 @@ void prism_terrain_frame(
 		(prism_terrain.view_events ? XGPU_TERRAIN_FLAG_VIEW_EVENTS : 0);
 	frame.quality = (uint32_t)prism_terrain.quality;
 	frame.map_checksum = (uint32_t)checksum;
+	frame.pack_folder = (uint32_t)(unsigned long)prism_terrain.pack_folder;
+	pack_state_read();
 	frame_weather(&frame);
 	prism_terrain.game_time = game_time;
 	prism_terrain.real_ns = now_ns;

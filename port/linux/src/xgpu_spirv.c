@@ -46,7 +46,7 @@ enum
 	OP_DECORATE = 71, OP_MEMBER_DECORATE = 72,
 	OP_VECTOR_EXTRACT_DYNAMIC = 77, OP_VECTOR_SHUFFLE = 79, OP_COMPOSITE_CONSTRUCT = 80, OP_COMPOSITE_EXTRACT = 81,
 	OP_COMPOSITE_INSERT = 82,
-	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_SAMPLE_DREF_EXPLICIT_LOD = 90, OP_IMAGE_FETCH = 95, OP_IMAGE_GATHER = 96, OP_IMAGE_READ = 98, OP_IMAGE_WRITE = 99, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103,
+	OP_IMAGE_SAMPLE_IMPLICIT_LOD = 87, OP_IMAGE_SAMPLE_EXPLICIT_LOD = 88, OP_IMAGE_SAMPLE_DREF_EXPLICIT_LOD = 90, OP_IMAGE_FETCH = 95, OP_IMAGE_GATHER = 96, OP_IMAGE_READ = 98, OP_IMAGE_WRITE = 99, OP_IMAGE = 100, OP_IMAGE_QUERY_SIZE_LOD = 103, OP_IMAGE_QUERY_LOD = 105,
 	OP_CONVERT_F_TO_U = 109, OP_CONVERT_F_TO_S = 110, OP_CONVERT_S_TO_F = 111, OP_BITCAST = 124,
 	OP_F_NEGATE = 127, OP_I_ADD = 128, OP_F_ADD = 129, OP_I_SUB = 130, OP_F_SUB = 131, OP_I_MUL = 132, OP_F_MUL = 133,
 	OP_F_DIV = 136, OP_VECTOR_TIMES_SCALAR = 142, OP_DOT = 148,
@@ -2201,6 +2201,58 @@ static unsigned int sample(struct module *m, struct pixel_state *state, int stag
 	else
 	{
 		texel = op2(m, OP_IMAGE_SAMPLE_IMPLICIT_LOD, m->t_v4, image, uv);
+	}
+	/* (a ground shader's detail map under the terrain's HQ layers: toward its
+	coarser texel near the camera, xgpu_shader.h's XGPU_BORDER_TERRAIN_FADE) */
+	if ((state->options->border[stage] & XGPU_BORDER_TERRAIN_FADE) && sampler == _xgpu_sampler_2d)
+	{
+		unsigned int operands[4], coarse = 0, lod, fade, raw, step, near;
+		unsigned int faded = local(m, &state->locals, m->t_v4), blur = id_new(m), merge = id_new(m);
+		int tap;
+
+		/* (the lookup's level of detail, unclamped: below 0 the map is
+		magnified; its blur the mean of five lookups of its second level
+		within XGPU_TERRAIN_FADE_BLUR texels of the point: CE's coarser
+		levels fade toward grey, its first two hardly; looked up only where it
+		is mixed in) */
+		m->image_query = TRUE;
+		lod = extract(m, op2(m, OP_IMAGE_QUERY_LOD, m->t_v2, image, uv), 1);
+		fade = fmul(m, 1, constant_float(m, XGPU_TERRAIN_FADE_MOST), fsub(m, 1, constant_float(m, 1.0f),
+			ext3(m, GLSL_SMOOTH_STEP, m->t_float, constant_float(m, XGPU_TERRAIN_FADE_NEAR),
+			constant_float(m, XGPU_TERRAIN_FADE_FAR), lod)));
+		store(m, faded, texel);
+		/* (the condition first: the merge must be just before the branch) */
+		near = compare(m, OP_F_ORD_GREATER_THAN, fade, constant_float(m, 0.0f));
+		selection_merge(m, merge);
+		branch_conditional(m, near, blur, merge);
+		label_at(m, blur);
+		raw = op(m, OP_IMAGE, type_sampled_image(m, DIM_2D, FALSE, FALSE, FALSE), 1, &image);
+		step = fdiv(m, 2, splat(m, 2, constant_float(m, XGPU_TERRAIN_FADE_BLUR)),
+			op1(m, OP_CONVERT_S_TO_F, m->t_v2, image_size(m, raw, m->t_iv2)));
+		/* (five lookups of its second level, already the mean of its first's
+		texels in twos: the point and four about it at uneven angles, so that
+		the blur has no grid of its own) */
+		for (tap = 0; tap < 5; tap++)
+		{
+			/* (unit offsets at 0.46, 2.03, 3.60 and 5.17 radians) */
+			static const float offsets[4][2] = { { 0.8961f, 0.4439f }, { -0.4439f, 0.8961f },
+				{ -0.8961f, -0.4439f }, { 0.4439f, -0.8961f } };
+			unsigned int sampled, at = uv;
+
+			if (tap)
+				at = fadd(m, 2, uv, fmul(m, 2, step, constant_vector(m, 2, offsets[tap - 1])));
+			operands[0] = image;
+			operands[1] = at;
+			operands[2] = IMAGE_OPERANDS_LOD;
+			operands[3] = constant_float(m, 1.0f);
+			sampled = op(m, OP_IMAGE_SAMPLE_EXPLICIT_LOD, m->t_v4, 4, operands);
+			coarse = coarse ? fadd(m, 4, coarse, sampled) : sampled;
+		}
+		coarse = fscale(m, 4, coarse, constant_float(m, 1.0f / 5.0f));
+		store(m, faded, ext3(m, GLSL_F_MIX, m->t_v4, texel, coarse, splat(m, 4, fade)));
+		branch(m, merge);
+		label_at(m, merge);
+		texel = load(m, m->t_v4, faded);
 	}
 	/* (the high-res text's distance fields: xgpu_msl.c's msdf_coverage) */
 	if ((state->options->border[stage] & XGPU_BORDER_MSDF) && sampler == _xgpu_sampler_2d)

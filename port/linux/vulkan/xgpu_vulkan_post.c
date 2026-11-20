@@ -106,6 +106,10 @@ static struct
 	struct xgpu_vulkan_image *gbuffer_stand_in;
 	/* (the terrain's debug view's events' stand-in, where none is shown) */
 	struct xgpu_vulkan_image *terrain_events_stand_in;
+	/* (the terrain's HQ layers: the G-buffer words' copy, and the layers'
+	sampler: repeating, trilinear, anisotropic) */
+	struct xgpu_vulkan_image *terrain_words;
+	VkSampler terrain_sampler;
 } post;
 
 /* ---------- images */
@@ -217,7 +221,7 @@ static struct xgpu_vulkan_pipeline_description *pipeline_of(int program, uint8_t
 	/* (PRISM v4's passes, which draw into the frame's target whatever its format: half floats, display.
 	output_depth's 16 bits since GOAT H1 made them the computers' default, or 8 bits) */
 	int prism = program == XGPU_VULKAN_POST_DEFERRED_RESOLVE || program == XGPU_VULKAN_POST_ALBEDO_OVER ||
-		program == XGPU_VULKAN_POST_TERRAIN_DEBUG;
+		program == XGPU_VULKAN_POST_TERRAIN_DEBUG || program == XGPU_VULKAN_POST_TERRAIN_LAYERS;
 
 	return (into_target || prism) && format == XGPU_VULKAN_FORMAT_RGBA16F ? &post.half_float[program] :
 		(into_target || prism) && format == XGPU_VULKAN_FORMAT_RGBA16 ? &post.deep[program] : &post.pipelines[program];
@@ -645,6 +649,152 @@ int xgpu_vulkan_post_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu
 	pass_draw(XGPU_VULKAN_POST_TERRAIN_DEBUG, target, 0, rectangle, post.color, classes,
 		events ? events : post.terrain_events_stand_in, bounds);
 	post.gbuffer = NULL;
+	return 1;
+}
+
+/* the terrain overhaul's HQ layers (xgpu_vulkan_terrain.c, T1): the base
+target's level pixels of a material with a layer drawn again (TERRAIN_LAYERS:
+CE's colour times the layers' detail, its alpha kept) and their words'
+normal and roughness, from a copy of the base; the rest discarded, so
+neither changes there. Where the device reads a target where it is drawn
+(capabilities color_read: TERRAIN_LAYERS_LOCAL) the words are the first
+target, read where they are drawn and written through a mask; else they
+are copied too and written whole from the copy */
+int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
+	struct xgpu_vulkan_image *extras, struct xgpu_vulkan_image *classes, struct xgpu_vulkan_image *detail,
+	struct xgpu_vulkan_image *surface, struct xgpu_vulkan_image *macro,
+	const struct xgpu_vulkan_post_uniforms *values)
+{
+	const struct xgpu_vulkan_image_description *description;
+	struct xgpu_vulkan_pipeline_description pipeline;
+	struct xgpu_vulkan_post_uniforms *uniforms;
+	struct xgpu_vulkan_dynamic_state dynamic;
+	struct xgpu_vulkan_draw draw;
+	int32_t rectangle[4];
+	int stage, local, program;
+
+	if (!base || !words || !extras || !classes || !detail || !surface || !macro || !values)
+		return 0;
+	description = xgpu_vulkan_image_description(base);
+	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
+		description->samples > 1)
+		return 0;
+	if (xgpu_vulkan_image_description(words)->width != description->width ||
+		xgpu_vulkan_image_description(words)->height != description->height)
+		return 0;
+	{
+		struct xgpu_vulkan_capabilities capabilities;
+
+		xgpu_vulkan_capabilities(&capabilities);
+		local = capabilities.color_read;
+	}
+	program = local ? XGPU_VULKAN_POST_TERRAIN_LAYERS_LOCAL : XGPU_VULKAN_POST_TERRAIN_LAYERS;
+	if (!post.vertex)
+		post.vertex = xgpu_vulkan_shader(xgpu_vulkan_post_vertex.words, xgpu_vulkan_post_vertex.count);
+	if (!post.pixel[program])
+		post.pixel[program] = xgpu_vulkan_shader(xgpu_vulkan_post_programs[program].words,
+			xgpu_vulkan_post_programs[program].count);
+	if (!post.vertex || !post.pixel[program] || !sampler_make())
+		return 0;
+	if (!post.terrain_sampler)
+	{
+		struct xgpu_vulkan_sampler_description sampler;
+
+		memset(&sampler, 0, sizeof(sampler));
+		sampler.minify = sampler.magnify = XGPU_VULKAN_FILTER_LINEAR;
+		sampler.mip = XGPU_VULKAN_MIP_LINEAR;
+		sampler.address[0] = sampler.address[1] = sampler.address[2] = XGPU_VULKAN_ADDRESS_WRAP;
+		sampler.anisotropy = 2;
+		post.terrain_sampler = xgpu_vulkan_sampler(&sampler);
+		if (!post.terrain_sampler)
+			return 0;
+	}
+	if (!images_fit(0, description->format, description->width, description->height))
+		return 0;
+	if (!local && (!post.terrain_words || xgpu_vulkan_image_description(post.terrain_words)->width != description->width ||
+		xgpu_vulkan_image_description(post.terrain_words)->height != description->height))
+	{
+		xgpu_vulkan_image_destroy(post.terrain_words);
+		post.terrain_words = image_make(XGPU_VULKAN_FORMAT_RGBA32_UINT, XGPU_VULKAN_USAGE_SAMPLED |
+			XGPU_VULKAN_USAGE_TARGET, description->width, description->height);
+		if (!post.terrain_words)
+			return 0;
+	}
+	memset(&pipeline, 0, sizeof(pipeline));
+	pipeline.vertex_shader = post.vertex;
+	pipeline.pixel_shader = post.pixel[program];
+	pipeline.primitive_class = XGPU_VULKAN_CLASS_TRIANGLES;
+	pipeline.samples = 1;
+	if (local)
+	{
+		/* (the words the first target, read where they are drawn, their
+		normal and roughness alone written; the base the second, whole) */
+		pipeline.color_mask = 6;
+		pipeline.color_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+		pipeline.color2_format = description->format;
+		pipeline.color_read = 1;
+	}
+	else
+	{
+		pipeline.color_mask = 7;
+		pipeline.color_format = description->format;
+		pipeline.color2_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+	}
+	rectangle[0] = rectangle[1] = 0;
+	rectangle[2] = (int32_t)description->width;
+	rectangle[3] = (int32_t)description->height;
+	/* (debug.pass_times: the copies apart from the draw) */
+	xgpu_vulkan_pass_owner("TERRAIN COPIES");
+	xgpu_vulkan_image_copy_rectangle(base, 0, post.color, rectangle);
+	if (!local)
+		xgpu_vulkan_image_copy_rectangle(words, 0, post.terrain_words, rectangle);
+	xgpu_vulkan_pass_owner("TERRAIN");
+	memset(&draw, 0, sizeof(draw));
+	draw.pipeline = xgpu_vulkan_pipeline(&pipeline);
+	if (!draw.pipeline)
+		return 0;
+	draw.textures[0].image = post.color;
+	draw.textures[1].image = classes;
+	draw.textures[2].image = extras;
+	draw.textures[3].image = local ? post.color : post.terrain_words;
+	for (stage = 0; stage < 4; stage++)
+	{
+		draw.textures[stage].kind = XGPU_VULKAN_IMAGE_2D;
+		draw.textures[stage].sampler = post.nearest;
+	}
+	draw.material_overlay = 1;
+	draw.overlay[0].image = detail;
+	draw.overlay[0].kind = XGPU_VULKAN_IMAGE_2D_ARRAY;
+	draw.overlay[1].image = surface;
+	draw.overlay[1].kind = XGPU_VULKAN_IMAGE_2D_ARRAY;
+	draw.overlay[2].image = macro;
+	draw.overlay[2].kind = XGPU_VULKAN_IMAGE_2D;
+	for (stage = 0; stage < 3; stage++)
+		draw.overlay[stage].sampler = post.terrain_sampler;
+	for (stage = 3; stage < XGPU_VULKAN_OVERLAY_IMAGES; stage++)
+		draw.overlay[stage].kind = XGPU_VULKAN_IMAGE_2D;
+	uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
+	if (!uniforms)
+		return 0;
+	*uniforms = *values;
+	uniforms->metrics[0] = 1.0f / (float)description->width;
+	uniforms->metrics[1] = 1.0f / (float)description->height;
+	uniforms->metrics[2] = (float)description->width;
+	uniforms->metrics[3] = (float)description->height;
+	draw.constants = draw.uniforms;
+	memset(&dynamic, 0, sizeof(dynamic));
+	dynamic.viewport[2] = dynamic.scissor[2] = rectangle[2];
+	dynamic.viewport[3] = dynamic.scissor[3] = rectangle[3];
+	dynamic.depth_range[1] = 1.0f;
+	draw.dynamic = &dynamic;
+	draw.topology = XGPU_VULKAN_TOPOLOGY_TRIANGLES;
+	draw.count = 3;
+	draw.reads_color = (uint8_t)local;
+	xgpu_vulkan_set_target_views(local ? words : base, NULL, 0, 1);
+	xgpu_vulkan_set_second_target(local ? base : words);
+	xgpu_vulkan_set_third_target(NULL);
+	xgpu_vulkan_draw(&draw);
+	xgpu_vulkan_set_second_target(NULL);
 	return 1;
 }
 

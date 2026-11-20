@@ -99,7 +99,8 @@ GOAT H1's records and M5's `UPSCALE` (105), `XGPU_STREAM_RECORD_TYPES` 107; 39 a
 campaign with `display.terrain` `"on"` (`port/linux/game/prism_terrain.c`; `docs/prism_terrain.md`): each frame its
 `FRAME` (generation, time steps, camera, BSP, settings, weather and wind), then the frame's `EVENTS` (feet, a
 vehicle's mass points on the ground, impacts, detonations, explosions) and `WADERS` (units in water or just out of it),
-items of 32 bytes inline after a fixed part of 176. Its `WEATHER_DRAW` and `WATER_DRAW` phases are specified for T12
+items of 32 bytes inline after a fixed part of 180 (stream version 41, T1: `FRAME` also carries the terrain pack's
+folder, a guest address as `PRISM_BAKE`'s folder; 176 before). Its `WEATHER_DRAW` and `WATER_DRAW` phases are specified for T12
 and T7 and not sent yet. Never with `"ce"`, never in multiplayer.
 
 The other three are specified and taken, not sent: `SCENE_MATERIAL_ANIMATE`, `SCENE_DECAL`, `SCENE_FOG`. `xgpu_scene_encode.c` still fills all eight from typed values for the tests; the stream writes its own

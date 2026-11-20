@@ -150,6 +150,7 @@ symbols in this file:
 #include "math/real_math.h"
 #undef REAL_MATH_EXTERNAL_POINT_FROM_LINE3D
 #include "rasterizer/rasterizer.h"
+#include "prism_terrain.h" /* port: port/linux/game/prism_terrain.c */
 #include "rasterizer/rasterizer_console_vars.h"
 #include "rasterizer/rasterizer_environment.h"
 #include "rasterizer/common/rasterizer_common.h"
@@ -1598,6 +1599,7 @@ void _rasterizer_environment_diffuse_texture_draw(
 			real_vector2d primary_detail_map_scale;
 			real_vector2d secondary_detail_map_scale;
 			real_vector2d micro_detail_map_scale;
+			long terrain_detail_level, terrain_detail_stages, terrain_stage; /* port: the terrain's HQ layers */
 
 			if (TEST_FLAG(
 				shader_environment->environment.diffuse.flags,
@@ -1768,11 +1770,42 @@ void _rasterizer_environment_diffuse_texture_draw(
 			}
 			rasterizer_set_pixel_shader(&pixel_shader);
 
+			/* port: in PRISM's modes with the terrain pack's HQ layers, a ground
+			shader's fine detail maps (texels a base map's repeat past
+			PRISM_TERRAIN_FINE_DETAIL: CE's grain, not its large shapes) marked (a
+			border colour their wrapped addressing never shows) for the renderer's
+			fade toward their blurred texels where they are magnified, so that up
+			close the layers' grain stands in for their texels (0: as CE draws;
+			never in Classic: prism_terrain.c) */
+			terrain_detail_level = prism_terrain_detail_level(shader);
+			terrain_detail_stages = 0;
+			if (terrain_detail_level)
+			{
+				if (texture_transform_constants[0].i * primary_detail_map_size.x >= PRISM_TERRAIN_FINE_DETAIL &&
+					prism_terrain_detail_fades(shader, shader_environment->environment.diffuse.primary_detail_map.index))
+					terrain_detail_stages |= 2;
+				if (texture_transform_constants[0].k * secondary_detail_map_size.x >= PRISM_TERRAIN_FINE_DETAIL &&
+					prism_terrain_detail_fades(shader, shader_environment->environment.diffuse.secondary_detail_map.index))
+					terrain_detail_stages |= 4;
+				/* (never the micro detail map: CE's relief at the finest scale,
+				d40's lumps and pits, which the layers do not stand in for) */
+				for (terrain_stage = 1; terrain_stage < 4; terrain_stage++)
+				{
+					if (terrain_detail_stages & (1 << terrain_stage))
+						IDirect3DDevice8_SetTextureStageState(global_d3d_device, terrain_stage, D3DTSS_BORDERCOLOR,
+							terrain_detail_level);
+				}
+			}
 			rasterizer_draw_dynamic_triangles_static_vertices(
 				dynamic_triangle_buffer_index,
 				first_triangle_index,
 				triangle_count,
 				vertex_buffer);
+			for (terrain_stage = 1; terrain_stage < 4; terrain_stage++)
+			{
+				if (terrain_detail_stages & (1 << terrain_stage))
+					IDirect3DDevice8_SetTextureStageState(global_d3d_device, terrain_stage, D3DTSS_BORDERCOLOR, 0);
+			}
 			if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_enabled)
 			{
 				rasterizer_frame_statistics.diffuse_texture_dynamic_draw_count++;

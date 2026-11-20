@@ -82,6 +82,7 @@ names another file, or none (empty).
 #include "xgpu_vulkan_loading.h"
 #include "xgpu_vulkan_post.h"
 #include "xgpu_vulkan_stream.h"
+#include "xgpu_vulkan_terrain.h"
 #include "xgpu_vulkan_textures.h"
 #include "xgpu_vulkan_upscale.h"
 #include "frame_pacing.h"
@@ -703,6 +704,15 @@ uint32_t host_vulkan_plugin_ready(uint32_t name)
 	const char *text = host_pointer(name);
 
 	return plugin_folder[0] && text ? xgpu_vulkan_upscale_plugin_ready(plugin_folder, text) : 0;
+}
+
+/* (a host import: the guest's sdl_platform.c, for prism_terrain.c each
+frame; a guest address of the pack's folder, FRAME's) whether the renderer
+loaded the terrain pack of that folder: 1 loaded, -1 not (none there, or
+not whole), 0 not tried yet (xgpu_vulkan_terrain_pack_state) */
+int32_t host_vulkan_terrain_pack(uint32_t folder)
+{
+	return xgpu_vulkan_terrain_pack_state(host_pointer(folder));
 }
 
 /* (a host import: the guest's sdl_platform.c, on its main thread; the

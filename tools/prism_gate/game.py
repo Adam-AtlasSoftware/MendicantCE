@@ -78,7 +78,7 @@ def isolated_environment(work, data):
     }
 
 
-def stage_data(data_source, data, links=("prism_world", "prism_lightmaps", "world_sdf", "custom_maps")):
+def stage_data(data_source, data, links=("prism_world", "prism_lightmaps", "world_sdf", "custom_maps", "prism_terrain")):
     """a run's own data folder: the maps and the PRISM folders linked from data_source (read only), the mods each
     linked with a copy of their load order (the game may rewrite it), the network's files empty"""
     data_source = Path(data_source)

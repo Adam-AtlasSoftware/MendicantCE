@@ -37,8 +37,10 @@ nothing here draws, and the classes are only kept.
 #include "host.h"
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_post.h"
+#include "xgpu_vulkan_post_shaders.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -74,6 +76,32 @@ struct terrain_material
 	float scale, porosity;
 };
 
+/* the terrain pack's layers (T1; tools/prism_terrain_layers: layers.ptl), at
+most PACK_LAYERS (the pass's uniforms hold eight) */
+#define PACK_LAYERS 8u
+#define PACK_HEADER 32u
+#define PACK_LAYER_BYTES 48u
+/* (the detail transfer's fade: whole to FADE_NEAR world units, none past
+FADE_FAR: design 3.2) */
+#define FADE_NEAR 15.0f
+#define FADE_FAR 60.0f
+
+struct terrain_pack
+{
+	char folder[XGPU_TERRAIN_PATH];
+	/* tried (loaded or refused) for this folder; loaded */
+	int tried, loaded;
+	/* (what the game is told: xgpu_vulkan_terrain_pack_state, written
+	atomically, 0 while a new folder is not tried) */
+	int state;
+	uint32_t size, layers;
+	char names[PACK_LAYERS][16];
+	/* each layer's: tile metres, strength, chroma, normal, roughness, height
+	contrast, the grain's weight, a spare */
+	float values[PACK_LAYERS][8];
+	struct xgpu_vulkan_image *detail, *surface, *macro;
+};
+
 struct terrain_event_kept
 {
 	struct xgpu_stream_terrain_event event;
@@ -105,6 +133,16 @@ static struct
 	uint32_t counts[XGPU_TERRAIN_EVENT_KINDS];
 	float logged_seconds;
 	uint32_t largest;
+	struct terrain_pack pack;
+	/* (the pass drawn this frame for this window: BASE_TEXTURED, or the
+	resolve where that did not come; logged once) */
+	int layers_drawn, layers_logged;
+	/* (whether the pass was drawn in any window of this frame; of the last
+	whole frame, written atomically: the pack is reported loaded (1) only
+	while its layers are drawn, so CE's detail maps never fade under a
+	frame with no layers over them: the class view, Classic's frames, a
+	target the pass cannot draw to) */
+	int drawn_frame, drawn_shown;
 } terrain;
 
 /* ---------- classes */
@@ -274,6 +312,19 @@ void xgpu_vulkan_terrain_record(const struct xgpu_stream_prism_terrain *record)
 		}
 		terrain.frame_flags = record->flags;
 		terrain.fresh = terrain.ever = 1;
+		if (record->pack_folder)
+		{
+			const char *folder = (const char *)host_pointer(record->pack_folder);
+			char copy[XGPU_TERRAIN_PATH];
+
+			snprintf(copy, sizeof(copy), "%s", folder ? folder : "");
+			if (strcmp(copy, terrain.pack.folder))
+			{
+				__atomic_store_n(&terrain.pack.state, 0, __ATOMIC_RELEASE);
+				memcpy(terrain.pack.folder, copy, sizeof(copy));
+				terrain.pack.tried = 0;
+			}
+		}
 		terrain.seconds += record->real_seconds > 0.0f && record->real_seconds < 1.0f ? record->real_seconds : 0.0f;
 		terrain.wader_count = 0;
 		/* (every 10 seconds: what came, for the log) */
@@ -319,9 +370,17 @@ int xgpu_vulkan_terrain_view_held(void)
 	return terrain.fresh && (terrain.frame_flags & XGPU_TERRAIN_FLAG_VIEW_CLASS) != 0;
 }
 
+void xgpu_vulkan_terrain_window(void)
+{
+	terrain.layers_drawn = 0;
+}
+
 void xgpu_vulkan_terrain_frame_end(void)
 {
+	__atomic_store_n(&terrain.drawn_shown, terrain.drawn_frame, __ATOMIC_RELEASE);
+	terrain.drawn_frame = 0;
 	terrain.fresh = 0;
+	terrain.layers_drawn = 0;
 }
 
 /* ---------- the debug views */
@@ -339,6 +398,46 @@ static struct xgpu_vulkan_image *image_of(uint8_t format, uint32_t width, uint32
 	description.depth_or_layers = 1;
 	description.levels = 1;
 	return xgpu_vulkan_image_create(&description);
+}
+
+/* the pack's layer of a material's class (which: 0 the first, whose layer
+the curated table may name; 1 the second, by its class), + 1; 0 none */
+static unsigned pack_layer(const struct terrain_material *material, int which)
+{
+	static const char *const class_names[XGPU_TERRAIN_CLASSES] = { "none", "sand", "dirt", "mud", "rock", "snow",
+		"ice", "water" };
+	uint8_t class_index = material->classes[which];
+	const char *named = NULL;
+	char stem[16];
+	uint32_t index;
+
+	if (!terrain.pack.loaded || class_index == XGPU_TERRAIN_CLASS_NONE || class_index >= XGPU_TERRAIN_CLASSES ||
+		class_index == XGPU_TERRAIN_CLASS_WATER)
+		return 0;
+	/* (the named layer is the first class's, and the second's too where it
+	is the same class: d40's sand is sand and sand, and its second class
+	once drew b30's beach sand, grain and all, over d40's paler texels) */
+	if ((which == 0 || material->classes[1] == material->classes[0]) &&
+		material->layer < sizeof(terrain_layer_names) / sizeof(terrain_layer_names[0]))
+		named = terrain_layer_names[material->layer];
+	/* (the layer named, else its stem: "sand_desert" is sand's until the pack
+	has its own, else the class's) */
+	for (index = 0; named && index < terrain.pack.layers; index++)
+		if (!strcmp(terrain.pack.names[index], named))
+			return index + 1;
+	if (named)
+	{
+		snprintf(stem, sizeof(stem), "%s", named);
+		if (strchr(stem, '_'))
+			*strchr(stem, '_') = 0;
+		for (index = 0; index < terrain.pack.layers; index++)
+			if (!strcmp(terrain.pack.names[index], stem))
+				return index + 1;
+	}
+	for (index = 0; index < terrain.pack.layers; index++)
+		if (!strcmp(terrain.pack.names[index], class_names[class_index]))
+			return index + 1;
+	return 0;
 }
 
 static int classes_upload(void)
@@ -359,8 +458,12 @@ static int classes_upload(void)
 		{
 			texels[material * 4 + 0] = terrain.materials[material].classes[0];
 			texels[material * 4 + 1] = terrain.materials[material].classes[1];
-			texels[material * 4 + 2] = terrain.materials[material].flags;
-			texels[material * 4 + 3] = terrain.materials[material].known;
+			/* (T1: each class's pack layer + 1, the first's in the low 4 bits;
+			0 none; the flags and known in alpha) */
+			texels[material * 4 + 2] = (unsigned char)(pack_layer(&terrain.materials[material], 0) |
+				pack_layer(&terrain.materials[material], 1) << 4);
+			texels[material * 4 + 3] = (unsigned char)(terrain.materials[material].known |
+				terrain.materials[material].flags << 1);
 		}
 		xgpu_vulkan_image_upload(terrain.class_image, 0, 0, 0, 0, 0, CLASS_TABLE_SIDE, CLASS_TABLE_SIDE, 1, texels,
 			CLASS_TABLE_SIDE * 4, sizeof(texels));
@@ -489,4 +592,240 @@ void xgpu_vulkan_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu_vul
 	bounds[2] = words ? 1.0f : 0.0f;
 	bounds[3] = 0.0f;
 	xgpu_vulkan_post_terrain_debug(target, words, terrain.class_image, shown ? terrain.event_image : NULL, bounds);
+}
+
+/* ---------- the HQ layers (T1)
+
+The pack (tools/prism_terrain_layers/prism_terrain_layers.py's layers.ptl in
+FRAME's pack folder) read once a folder, its layers made 2D arrays with
+whole chains of levels (RGBA8: the detail and height, the normal, roughness
+and occlusion), the macro map a 2D image; then, each frame with
+display.terrain_layers "hq", the pass over the level's base colour and
+normals (xgpu_vulkan_post_terrain_layers) at the texture pass's end. */
+
+static uint32_t levels_of(uint32_t size)
+{
+	uint32_t levels = 1;
+
+	while (size > 1)
+	{
+		size >>= 1;
+		levels++;
+	}
+	return levels;
+}
+
+static struct xgpu_vulkan_image *pack_image(uint32_t size, uint32_t layers)
+{
+	struct xgpu_vulkan_image_description description;
+
+	memset(&description, 0, sizeof(description));
+	description.type = layers ? XGPU_VULKAN_IMAGE_2D_ARRAY : XGPU_VULKAN_IMAGE_2D;
+	description.format = XGPU_VULKAN_FORMAT_RGBA8;
+	description.usage = XGPU_VULKAN_USAGE_SAMPLED;
+	description.width = description.height = size;
+	description.depth_or_layers = layers ? layers : 1;
+	description.levels = levels_of(size);
+	return xgpu_vulkan_image_create(&description);
+}
+
+static uint32_t get32(const unsigned char *bytes)
+{
+	return (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 | (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
+}
+
+static void pack_forget(void)
+{
+	xgpu_vulkan_image_destroy(terrain.pack.detail);
+	xgpu_vulkan_image_destroy(terrain.pack.surface);
+	xgpu_vulkan_image_destroy(terrain.pack.macro);
+	terrain.pack.detail = terrain.pack.surface = terrain.pack.macro = NULL;
+	terrain.pack.loaded = 0;
+	terrain.pack.layers = 0;
+}
+
+/* the pack read and made images of: 1 if it is */
+static int pack_load(void)
+{
+	char path[XGPU_TERRAIN_PATH + 32];
+	unsigned char head[PACK_HEADER], entry[PACK_LAYER_BYTES], *texels = NULL;
+	uint32_t size, layers, macro, index, which;
+	long expected, length;
+	FILE *file;
+
+	if (terrain.pack.tried)
+		return terrain.pack.loaded;
+	terrain.pack.tried = 1;
+	pack_forget();
+	terrain.classes_changed = 1;
+	if (!terrain.pack.folder[0])
+	{
+		__atomic_store_n(&terrain.pack.state, -1, __ATOMIC_RELEASE);
+		return 0;
+	}
+	snprintf(path, sizeof(path), "%s/layers.ptl", terrain.pack.folder);
+	file = fopen(path, "rb");
+	if (!file)
+	{
+		host_logf(HOST_LOG_INFO, "prism terrain: no terrain pack at %s: CE's ground alone "
+			"(tools/prism_terrain_layers builds it)", path);
+		__atomic_store_n(&terrain.pack.state, -1, __ATOMIC_RELEASE);
+		return 0;
+	}
+	if (fread(head, 1, sizeof(head), file) != sizeof(head) || memcmp(head, "PTL1", 4) || get32(head + 4) != 1)
+		goto refused;
+	size = get32(head + 8);
+	layers = get32(head + 12);
+	macro = get32(head + 16);
+	if (size < 16 || size > 4096 || (size & (size - 1)) || !layers || layers > PACK_LAYERS || macro < 16 ||
+		macro > 4096 || (macro & (macro - 1)))
+		goto refused;
+	expected = (long)PACK_HEADER + (long)layers * PACK_LAYER_BYTES + 2L * layers * size * size * 4 +
+		(long)macro * macro * 4;
+	if (fseek(file, 0, SEEK_END) || (length = ftell(file)) != expected || fseek(file, PACK_HEADER, SEEK_SET))
+		goto refused;
+	for (index = 0; index < layers; index++)
+	{
+		uint32_t value;
+
+		if (fread(entry, 1, sizeof(entry), file) != sizeof(entry))
+			goto refused;
+		memcpy(terrain.pack.names[index], entry, 15);
+		terrain.pack.names[index][15] = 0;
+		for (value = 0; value < 8; value++)
+		{
+			uint32_t bits = get32(entry + 16 + value * 4);
+
+			memcpy(&terrain.pack.values[index][value], &bits, 4);
+			if (!isfinite(terrain.pack.values[index][value]))
+				goto refused;
+		}
+		if (!(terrain.pack.values[index][0] > 0.05f))
+			goto refused;
+	}
+	terrain.pack.detail = pack_image(size, layers);
+	terrain.pack.surface = pack_image(size, layers);
+	terrain.pack.macro = pack_image(macro, 0);
+	texels = malloc((size_t)(size > macro ? size : macro) * (size > macro ? size : macro) * 4);
+	if (!terrain.pack.detail || !terrain.pack.surface || !terrain.pack.macro || !texels)
+		goto refused;
+	for (which = 0; which < 2; which++)
+	{
+		struct xgpu_vulkan_image *image = which ? terrain.pack.surface : terrain.pack.detail;
+
+		for (index = 0; index < layers; index++)
+		{
+			if (fread(texels, 1, (size_t)size * size * 4, file) != (size_t)size * size * 4)
+				goto refused;
+			xgpu_vulkan_image_upload(image, 0, index, 0, 0, 0, size, size, 1, texels, size * 4, size * size * 4);
+		}
+		xgpu_vulkan_image_make_levels(image, 1);
+	}
+	if (fread(texels, 1, (size_t)macro * macro * 4, file) != (size_t)macro * macro * 4)
+		goto refused;
+	xgpu_vulkan_image_upload(terrain.pack.macro, 0, 0, 0, 0, 0, macro, macro, 1, texels, macro * 4, macro * macro * 4);
+	xgpu_vulkan_image_make_levels(terrain.pack.macro, 1);
+	free(texels);
+	fclose(file);
+	terrain.pack.size = size;
+	terrain.pack.layers = layers;
+	terrain.pack.loaded = 1;
+	{
+		char names[PACK_LAYERS * 18] = "";
+
+		for (index = 0; index < layers; index++)
+		{
+			strncat(names, index ? ", " : "", sizeof(names) - strlen(names) - 1);
+			strncat(names, terrain.pack.names[index], sizeof(names) - strlen(names) - 1);
+		}
+		host_logf(HOST_LOG_INFO, "prism terrain: the terrain pack %s: %u layers at %u (%s)", path, layers, size, names);
+	}
+	__atomic_store_n(&terrain.pack.state, 1, __ATOMIC_RELEASE);
+	return 1;
+refused:
+	free(texels);
+	fclose(file);
+	pack_forget();
+	host_logf(HOST_LOG_WARN, "prism terrain: %s is not a whole terrain pack (version 1): CE's ground alone", path);
+	__atomic_store_n(&terrain.pack.state, -1, __ATOMIC_RELEASE);
+	return 0;
+}
+
+int xgpu_vulkan_terrain_pack_state(const char *folder)
+{
+	char copy[XGPU_TERRAIN_PATH];
+	int state;
+
+	/* (the folder the game asks of is the one FRAME last brought: else not
+	known yet; the folder changes only with display.terrain_pack_folder, so
+	a compare that meets a copy being made says 0 for a frame) */
+	if (!folder)
+		return 0;
+	snprintf(copy, sizeof(copy), "%s", folder);
+	if (strncmp(copy, terrain.pack.folder, sizeof(copy)))
+		return 0;
+	state = __atomic_load_n(&terrain.pack.state, __ATOMIC_ACQUIRE);
+	/* (loaded, but its layers not drawn in the last whole frame: 0, as not
+	known yet, so nothing fades with nothing over it) */
+	if (state == 1 && !__atomic_load_n(&terrain.drawn_shown, __ATOMIC_ACQUIRE))
+		return 0;
+	return state;
+}
+
+void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
+	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view)
+{
+	/* (each class's lightness, Oklab L of CE's colours: none, sand, dirt, mud,
+	rock, snow, ice, water) */
+	static const float cues[XGPU_TERRAIN_CLASSES] = { 0.5f, 0.74f, 0.52f, 0.42f, 0.55f, 0.92f, 0.85f, 0.5f };
+	struct xgpu_vulkan_post_uniforms values;
+	uint32_t index;
+
+	if (terrain.layers_drawn || !terrain.fresh || !base || !words || !extras || !view)
+		return;
+	if (!(terrain.frame_flags & XGPU_TERRAIN_FLAG_LAYERS_HQ) || (terrain.frame_flags & XGPU_TERRAIN_FLAG_VIEW_CLASS))
+		return;
+	if (!pack_load() || !classes_upload())
+		return;
+	memset(&values, 0, sizeof(values));
+	values.bounds[0] = (float)terrain.pack.layers;
+	values.bounds[1] = FADE_NEAR;
+	values.bounds[2] = FADE_FAR;
+	values.bounds[3] = getenv("HALO_TERRAIN_LAYERS_VIEW") ? 1.0f : 0.0f;
+	memcpy(values.view_eye, view->now[0], sizeof(values.view_eye));
+	memcpy(values.view_axis, view->now[1], sizeof(values.view_axis));
+	memcpy(values.view_across, view->now[2], sizeof(values.view_across));
+	memcpy(values.view_down, view->now[3], sizeof(values.view_down));
+	for (index = 0; index < 4; index++)
+		values.view_corners[index] = (float)view->corners[index];
+	for (index = 0; index < XGPU_TERRAIN_CLASSES; index++)
+		values.class_cue[index / 4][index % 4] = cues[index];
+	for (index = 0; index < terrain.pack.layers; index++)
+	{
+		const float *v = terrain.pack.values[index];
+
+		/* (tiles a world unit, 3.048 m; strength, chroma, normal; roughness,
+		height contrast, the grain's weight (the pack's first spare: its
+		finer lookup), the steepness the three axes start at, negative where
+		the taps are not turned (rock: its strata stay level)) */
+		values.layer[index * 2][0] = 3.048f / v[0];
+		values.layer[index * 2][1] = v[1];
+		values.layer[index * 2][2] = v[2];
+		values.layer[index * 2][3] = v[3];
+		values.layer[index * 2 + 1][0] = v[4];
+		values.layer[index * 2 + 1][1] = v[5];
+		values.layer[index * 2 + 1][2] = v[6] > 0.0f && v[6] <= 1.0f ? v[6] : 0.0f;
+		values.layer[index * 2 + 1][3] = strcmp(terrain.pack.names[index], "rock") ? 0.75f : -0.75f;
+	}
+	terrain.layers_drawn = xgpu_vulkan_post_terrain_layers(base, words, extras, terrain.class_image,
+		terrain.pack.detail, terrain.pack.surface, terrain.pack.macro, &values);
+	terrain.drawn_frame |= terrain.layers_drawn;
+	if (!terrain.layers_logged)
+	{
+		const struct xgpu_vulkan_image_description *b = xgpu_vulkan_image_description(base);
+
+		host_logf(HOST_LOG_INFO, "prism terrain: the HQ layers drawn over %ux%u (base format %u)%s", b->width,
+			b->height, b->format, terrain.layers_drawn ? "" : ": not drawn (the targets' formats)");
+		terrain.layers_logged = 1;
+	}
 }

@@ -1038,8 +1038,8 @@ static const struct config_setting config_settings[] =
 		"campaign with PRISM Rebaked or Path Traced (display.lighting \"raster\"\n"
 		"or \"pathtraced\"): \"on\" the game tells the renderer of its ground,\n"
 		"footsteps, tyres, impacts, wind and weather each frame; \"off\" none\n"
-		"of it. Never in Classic or multiplayer. So far (T0) nothing is drawn\n"
-		"of it but its debug views. Read each frame." },
+		"of it. Never in Classic or multiplayer. The ground takes the HQ\n"
+		"layers (display.terrain_layers). Read each frame." },
 	{ "display.terrain_quality", _config_string, "\"auto\"", "HALO_TERRAIN_QUALITY", _environment_value,
 		_platform_desktop,
 		"With display.terrain: \"auto\" (by the graphics card), \"low\",\n"
@@ -1049,8 +1049,11 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"With display.terrain: \"hq\" sand, dirt, mud, rock, snow and ice get\n"
 		"the terrain pack's high-quality layers over CE's colours where the\n"
-		"pack is installed (CE's alone otherwise); \"ce\" CE's alone (not\n"
-		"drawn yet)." },
+		"pack is installed (CE's alone otherwise); \"ce\" CE's alone." },
+	{ "display.terrain_pack_folder", _config_string, "\"\"", "HALO_TERRAIN_PACK_FOLDER", _environment_value,
+		_platform_desktop,
+		"Where the terrain pack is (tools/prism_terrain_layers builds it);\n"
+		"empty: the data folder's prism_terrain." },
 	{ "display.terrain_tracks", _config_boolean, "true", "HALO_TERRAIN_TRACKS", _environment_value,
 		_platform_desktop,
 		"With display.terrain: footprints, tyre tracks and craters in sand,\n"
@@ -3709,6 +3712,11 @@ static const struct config_setting config_settings[] =
 		"rock blue-grey, snow white, ice cyan, water blue, striped where a\n"
 		"shader blends two; docs/prism_terrain.md); \"off\" the frame. Read\n"
 		"each frame." },
+	{ "debug.terrain_detail_fade", _config_boolean, "true", "HALO_TERRAIN_DETAIL_FADE", _environment_value,
+		_platform_desktop,
+		"With display.terrain_layers \"hq\": CE's fine detail maps faded where\n"
+		"they are magnified up close, the HQ layers' grain in their place;\n"
+		"false: CE's drawn as they are under the layers. For checking." },
 	{ "debug.terrain_events", _config_boolean, "false", "HALO_TERRAIN_EVENTS", _environment_value,
 		_platform_desktop,
 		"With display.terrain: the terrain's events drawn where they happened\n"

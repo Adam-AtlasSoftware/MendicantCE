@@ -131,6 +131,10 @@ renderer plugin of that name ("dlss") is ready to be offered: in use, or
 found in the plugins folder and working on the graphics card (the desktop's
 Vulkan builds; 0 elsewhere) */
 int platform_prism_plugin_ready(char const *name);
+/* whether the renderer loaded the terrain pack of that folder (the
+terrain's HQ layers, prism_terrain.c): 1 loaded, -1 not (or no renderer
+that draws them), 0 not tried yet */
+int platform_prism_terrain_pack(char const *folder);
 /* Settings > Audio's devices (port/linux/game/menu_tags.c): the names of
 the output (or, recording, input) devices SDL finds; how many. None on
 Android, which plays and records with the system's. */

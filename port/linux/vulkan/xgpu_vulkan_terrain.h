@@ -52,7 +52,24 @@ its G-buffer's words and its camera (SCENE_VIEW); nothing where this frame
 had no FRAME or asks for neither */
 void xgpu_vulkan_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *words,
 	const struct xgpu_stream_scene_view *view);
+/* (T1) the HQ layers over a window's level pixels: CE's base colour (the
+base target) times the terrain pack's detail, the G-buffer's normal and
+roughness (its words) the pack's, the distance from its second target's
+words (extras), the point from its camera (SCENE_VIEW); at the texture
+pass's end (BASE_TEXTURED), else before the resolve; once a window a frame,
+only where this frame's FRAME asks for display.terrain_layers "hq" and the
+pack is there */
+void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
+	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view);
+/* (a window's G-buffer begun: the pass may be drawn for it) */
+void xgpu_vulkan_terrain_window(void);
 /* the frame's end: a FRAME is this frame's alone */
 void xgpu_vulkan_terrain_frame_end(void);
+/* (T1) whether the terrain pack of that folder (FRAME's pack folder) is
+loaded: 1 loaded and drawn from, -1 tried and not loaded (no file, or not a
+whole pack), 0 not tried yet (or another folder's state); any thread (the
+game's asks through host_vulkan_terrain_pack before it fades CE's detail
+maps, which it must not do with no layers to stand in for them) */
+int xgpu_vulkan_terrain_pack_state(const char *folder);
 
 #endif

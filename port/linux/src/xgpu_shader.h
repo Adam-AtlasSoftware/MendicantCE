@@ -203,6 +203,25 @@ field's edge, the median of red, green and blue at 0.5, smoothed over a
 pixel of the screen (XGPU_MSDF_RANGE texels of the field from its 0 to its
 1, as many pixels as the lookup's derivatives make them, at least one) */
 #define XGPU_BORDER_MSDF 16
+/* the bit of a stage's border axes that says it is a ground shader's detail
+map under the terrain overhaul's HQ layers (T1, PRISM's modes alone: the
+game marks such a stage by XGPU_TERRAIN_FADE_BORDER_COLOR, a border colour
+its wrapped addressing never shows): where the map is magnified the texel
+sampled is mixed toward the map's own blurred texel (the mean of five
+lookups of its second level within XGPU_TERRAIN_FADE_BLUR texels of the
+point: not its coarser levels, which CE's detail maps fade toward grey),
+by XGPU_TERRAIN_FADE_MOST while the lookup's level of detail (unclamped) is below
+XGPU_TERRAIN_FADE_NEAR and not at all past XGPU_TERRAIN_FADE_FAR, so that the HQ layers' grain stands in for CE's
+magnified texels up close while CE's ground is its own from mid range on */
+#define XGPU_BORDER_TERRAIN_FADE 32
+#define XGPU_TERRAIN_FADE_BORDER_COLOR 0x01fade01u
+#define XGPU_TERRAIN_FADE_BLUR 2.5f
+#define XGPU_TERRAIN_FADE_NEAR -2.0f
+#define XGPU_TERRAIN_FADE_FAR -0.5f
+/* (how far toward the blur it goes at most: part of CE's texel kept, so its
+mottle, contrast and relief stay under the layers' grain while its blocks
+soften) */
+#define XGPU_TERRAIN_FADE_MOST 0.25f
 /* the range of the high-res text's distance fields (text_hires.c), in
 texels from the field's 0 to its 1; and as the shaders' source has it */
 #define XGPU_MSDF_RANGE 6.0f
