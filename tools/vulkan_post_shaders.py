@@ -442,7 +442,8 @@ TERRAIN_DEBUG_SOURCE = (
 # layer{2i+1}: roughness, height contrast, the grain's weight (a second, finer, turned lookup of the layer from
 # above, FINE_SCALE times as many tiles, within 1 to 12 world units: the sand's grain, which one tile at its size
 # draws too large and soft up close), the steepness triplanar starts at, negative where the taps are not turned
-# (rock: its strata stay level). bounds.w 1: the weight shown.
+# (rock: its strata stay level). bounds.w 1: the weight shown. window.x: the view's pixels over the screen's each way
+# under an upscaler (1 without one): the lookups' footprints are the screen's pixels'.
 TERRAIN_LAYERS_SOURCE = """uniform sampler2D color_texture;
 uniform sampler2D classes_texture;
 uniform usampler2D extras_texture;
@@ -697,6 +698,13 @@ void main()
 	rn = abs(rn) < 0.05 ? (rn < 0.0 ? -0.05 : 0.05) : rn;
 	vec3 dpx = dist * (rx - ray * (dot(rx, plane) / rn));
 	vec3 dpy = dist * (ry - ray * (dot(ry, plane) / rn));
+	/* (under an upscaler the view's pixels are coarser than the screen's: window.x their ratio each way, 1 without
+	one. The footprint is the screen's pixel's, as the game's mip bias (log2 of the ratio) samples CE's own maps,
+	so the layers and the grain keep the detail the upscaler's jittered history gives back, not the view's
+	coarser levels) */
+	float sharp = window.x > 0.0 && window.x < 1.0 ? window.x : 1.0;
+	dpx *= sharp;
+	dpy *= sharp;
 	vec4 base = texelFetch(color_texture, texel, 0);
 	float weight = 0.0;
 	if (lb != la)

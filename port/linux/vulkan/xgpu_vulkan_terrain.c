@@ -38,6 +38,7 @@ nothing here draws, and the classes are only kept.
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_post.h"
 #include "xgpu_vulkan_post_shaders.h"
+#include "xgpu_vulkan_upscale.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -798,6 +799,9 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 	values.bounds[1] = FADE_NEAR;
 	values.bounds[2] = FADE_FAR;
 	values.bounds[3] = getenv("HALO_TERRAIN_LAYERS_VIEW") ? 1.0f : 0.0f;
+	/* (the view drawn smaller under an upscaler: the layers' lookups at the
+	screen's pixels' footprint, as CE's own maps' mip bias has them) */
+	values.window[0] = xgpu_vulkan_upscale_view_ratio();
 	memcpy(values.view_eye, view->now[0], sizeof(values.view_eye));
 	memcpy(values.view_axis, view->now[1], sizeof(values.view_axis));
 	memcpy(values.view_across, view->now[2], sizeof(values.view_across));

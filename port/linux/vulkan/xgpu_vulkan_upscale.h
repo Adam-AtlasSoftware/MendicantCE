@@ -52,6 +52,13 @@ upscaler run, and its output and the view's depth stretched into the
 output's targets' rectangle. The images are the stream's targets'. */
 
 void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view);
+/* the view begun's pixels over the output's each way while an upscaler (or
+a denoiser that upscales) brings it to the screen's (the last END's sizes:
+the game's ratio, a frame behind where it changes), 1 outside such a view:
+the passes that sample textures by their own footprints (the terrain's HQ
+layers) sample them as sharp as the screen's pixels would, as the game's
+mip bias samples CE's maps */
+float xgpu_vulkan_upscale_view_ratio(void);
 void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view);
 void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view,
 	struct xgpu_vulkan_image *view_depth, struct xgpu_vulkan_image *output, struct xgpu_vulkan_image *output_depth,
