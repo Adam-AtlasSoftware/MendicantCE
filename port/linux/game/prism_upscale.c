@@ -119,7 +119,12 @@ static void settings_read(
 	denoiser = config_string("display.denoiser");
 	prism_upscale.upscaler = !strcmp(upscaler, "fsr3") ? _upscaler_fsr3 : plugin_named(upscaler) ? _upscaler_plugin :
 		_upscaler_none;
-	prism_upscale.denoiser = plugin_named(denoiser) || !strcmp(denoiser, "dlss_rr") ? _denoiser_plugin :
+	/* (Ray Reconstruction denoises the path tracer's light: under PRISM
+	Rebaked, display.lighting "raster", with no traced light to take, a
+	"dlss_rr" chosen for Path Traced is the in-tree filter's, as the
+	settings' help says, never the plugin's) */
+	prism_upscale.denoiser = plugin_named(denoiser) ||
+		(!strcmp(denoiser, "dlss_rr") && strcmp(config_string("display.lighting"), "raster")) ? _denoiser_plugin :
 		!strcmp(denoiser, "off") ? _denoiser_off : _denoiser_prism;
 	if (!UPSCALE_BUILT)
 	{

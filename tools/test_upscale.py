@@ -185,7 +185,10 @@ def test_settings():
     classic = upscale.split('else if (!strcmp(config_string("display.lighting"), "ce"))', 1)[1].split("}", 1)[0]
     assert "prism_upscale.upscaler = _upscaler_none;" in classic
     assert "prism_upscale.denoiser = _denoiser_prism;" in classic
-    platform = (ROOT / "port/linux/src/sdl_platform.c").read_text()
+    # (Ray Reconstruction is the path tracer's: under Rebaked, "raster", a "dlss_rr" kept from Path Traced is the
+    # in-tree filter's)
+    assert '(!strcmp(denoiser, "dlss_rr") && strcmp(config_string("display.lighting"), "raster"))' in upscale
+    platform =(ROOT / "port/linux/src/sdl_platform.c").read_text()
     assert "return host_vulkan_plugin_ready(name) != 0;" in platform
     assert "host_vulkan_plugin_ready" in (ROOT / "port/linux/vulkan/host_imports.list").read_text().split()
 
