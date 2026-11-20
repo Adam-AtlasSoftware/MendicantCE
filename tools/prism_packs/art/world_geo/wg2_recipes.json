@@ -1,5 +1,5 @@
 {
- "_doc": "PRISM world geometry v2 recipes (wg2_remodel.py, wg2_shape.py). A class matches a material by a substring of its shader's name (first class wins; exclude: substrings that do not). Lengths in world units (1 wu = 3.05 m); groove widths in texture repeats. cap_in / cap_out: the most a point goes behind / in front of the stock (collision) surface. budget_triangles bounds the displaced classes' density (their target edges scale up together to meet it). light: Cycles' sun (estimated from CE's lightmap and incident radiosity unless given) and sky, and the clamp of the light ratio put into the incident radiosity.",
+ "_doc": "PRISM world geometry v2 recipes (wg2_remodel.py, wg2_shape.py). A class matches a material by a substring of its shader's name (first class wins; exclude: substrings that do not). Lengths in world units (1 wu = 3.05 m); groove widths in texture repeats. cap_in / cap_out: the most a point goes behind / in front of the stock (collision) surface. budget_triangles bounds the displaced classes' density (their target edges scale up together to meet it). light: Cycles' sun (estimated from CE's lightmap and incident radiosity unless given) and sky, and the clamp of the light ratio put into the incident radiosity. Metal grooves (grooves: true, cut along the texture's panel lines into CE's flat surface) are off in every recipe: CE's floors and walls are flat there, and the grooves drew a grid CE does not have; bevels stay on CE's own sharp edges (bevel_angle). relief: the metal texture's own bump map made geometry (wg2_relief.py): its channels set into flat metal triangles within relief_reach wu of where one walks, nearest first, within the level's relief_budget_triangles; relief_scale times the bump map's own depth (in texels times the texel's size on the surface), at most relief_max wu. The relief budgets keep each BSP's .pwg under the engine's 256 MB file limit (prism_world_geometry.c MAXIMUM_FILE_BYTES) with its far levels.",
  "levels\\b30\\b30a": {
   "budget_triangles": 1500000,
   "fade_distance": 0.2,
@@ -91,13 +91,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.02,
     "groove_floor": 0.45,
     "groove_depth": 0.05,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 8
+    "max_repeats": 8,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 600000,
+    "relief_tile_triangles": 2200
    },
    "forerunner_int": {
     "kind": "metal",
@@ -121,7 +127,13 @@
     "groove_depth": 0.02,
     "lines_u": 3,
     "lines_v": 3,
-    "max_repeats": 8
+    "max_repeats": 8,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 200000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -131,7 +143,8 @@
    "walk_sample": 1.0
   },
   "lod_distance": 8.0,
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 800000
  },
  "levels\\b30\\b30b": {
   "budget_triangles": 900000,
@@ -174,13 +187,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
     "lines_u": 1,
     "lines_v": 1,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 1200000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -189,7 +208,8 @@
    "far_mult": 2.0,
    "walk_sample": 1.0
   },
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 1200000
  },
  "levels\\a10\\a10a": {
   "budget_triangles": 900000,
@@ -240,7 +260,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -259,7 +279,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
@@ -346,7 +366,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -365,7 +385,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
@@ -452,7 +472,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -471,7 +491,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
@@ -558,7 +578,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -577,7 +597,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
@@ -664,7 +684,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -683,7 +703,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
@@ -770,7 +790,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -789,7 +809,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
@@ -876,7 +896,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -895,7 +915,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
@@ -1038,13 +1058,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.02,
     "groove_floor": 0.45,
     "groove_depth": 0.05,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 4
+    "max_repeats": 4,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 350000,
+    "relief_tile_triangles": 2200
    },
    "forerunner_int": {
     "kind": "metal",
@@ -1068,7 +1094,13 @@
     "groove_depth": 0.02,
     "lines_u": 3,
     "lines_v": 3,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 150000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1078,7 +1110,8 @@
    "walk_sample": 1.0
   },
   "lod_distance": 8.0,
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 500000
  },
  "levels\\a30\\a30_b": {
   "budget_triangles": 1500000,
@@ -1185,13 +1218,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.02,
     "groove_floor": 0.45,
     "groove_depth": 0.05,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 4
+    "max_repeats": 4,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 400000,
+    "relief_tile_triangles": 2200
    },
    "forerunner_int": {
     "kind": "metal",
@@ -1215,7 +1254,13 @@
     "groove_depth": 0.02,
     "lines_u": 3,
     "lines_v": 3,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 200000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1225,7 +1270,8 @@
    "walk_sample": 1.0
   },
   "lod_distance": 8.0,
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 600000
  },
  "levels\\c10\\c10_interiora": {
   "budget_triangles": 900000,
@@ -1268,13 +1314,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
     "lines_u": 1,
     "lines_v": 1,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 600000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1283,7 +1335,8 @@
    "far_mult": 2.0,
    "walk_sample": 1.0
   },
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 600000
  },
  "levels\\c10\\c10_interiorb": {
   "budget_triangles": 900000,
@@ -1326,13 +1379,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
     "lines_u": 1,
     "lines_v": 1,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 600000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1341,7 +1400,8 @@
    "far_mult": 2.0,
    "walk_sample": 1.0
   },
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 600000
  },
  "levels\\c10\\c10_interiorc": {
   "budget_triangles": 900000,
@@ -1384,13 +1444,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
     "lines_u": 1,
     "lines_v": 1,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 600000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1399,7 +1465,8 @@
    "far_mult": 2.0,
    "walk_sample": 1.0
   },
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 600000
  },
  "levels\\c10\\c10_interiord": {
   "budget_triangles": 900000,
@@ -1442,13 +1509,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
     "lines_u": 1,
     "lines_v": 1,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 600000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1457,7 +1530,8 @@
    "far_mult": 2.0,
    "walk_sample": 1.0
   },
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 600000
  },
  "levels\\c10\\c10_exteriora": {
   "budget_triangles": 1200000,
@@ -1563,13 +1637,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
     "lines_u": 1,
     "lines_v": 1,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 600000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1579,7 +1659,8 @@
    "walk_sample": 1.0
   },
   "lod_distance": 8.0,
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 600000
  },
  "levels\\c10\\c10_exteriorb": {
   "budget_triangles": 1200000,
@@ -1685,13 +1766,19 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
     "lines_u": 1,
     "lines_v": 1,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 1.0,
+    "relief_max": 0.03,
+    "relief_reach": 8.0,
+    "relief_budget": 600000,
+    "relief_tile_triangles": 2200
    }
   },
   "near": {
@@ -1701,7 +1788,8 @@
    "walk_sample": 1.0
   },
   "lod_distance": 8.0,
-  "bevel_across": true
+  "bevel_across": true,
+  "relief_budget_triangles": 600000
  },
  "levels\\a50\\a50_exterior": {
   "budget_triangles": 1200000,
@@ -2065,7 +2153,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.05,
     "groove_floor": 0.4,
     "groove_depth": 0.06,
@@ -2084,7 +2172,7 @@
     "bevel_profile": 0.5,
     "bevel_angle": 35,
     "smooth_angle": 38,
-    "grooves": true,
+    "grooves": false,
     "groove_width": 0.04,
     "groove_floor": 0.4,
     "groove_depth": 0.05,
