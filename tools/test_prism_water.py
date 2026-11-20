@@ -61,3 +61,33 @@ def test_the_hosts_steps_and_layer():
     glsl = GLSL.read_text()
     assert match and f"binding = {int(match.group(1)) - 1}, rgba16f" in glsl
     assert "typedef char verify_water_push[sizeof(struct water_push) <= 256" in layer
+
+
+def test_a_water_before_the_fog_leaves_ces_fog_to_the_floor():
+    """c10's swamp (a water CE draws before the fog): nothing of it at its early draw, not even its depth, so that
+    CE's environment fog fogs the floor under it as Classic's; the layer takes that fog at its queued draw"""
+    text = WATER.read_text()
+    assert "if (prism_later)\n\t\t{\n\t\t\t/* port: (drawn at its queued draw) */\n\t\t}\n\t\telse if (draw_depth_only)" \
+        in text
+    glsl = GLSL.read_text()
+    assert "const uint BEFORE_FOG = 8u;" in glsl
+    assert "fogged = clamp(dot(was.rgb, fog_color)" in glsl
+
+
+def test_path_traced_water_rays():
+    """T8: the pass "water" of Path Traced traces the reflection and the refraction (TIR from below) through the
+    frame's scene, and the composite takes them in the screen march's place"""
+    pt_glsl = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.glsl").read_text()
+    assert "//@pass water" in pt_glsl
+    water_pass = pt_glsl[pt_glsl.index("//@pass water"):]
+    assert "hit_light(o, d, 2000.0, up, length_)" in water_pass
+    assert "reference_path(o, d, REFERENCE_BOUNCES, up, true)" in water_pass
+    assert "refract(-v, -normal, 1.33)" in water_pass and "reflect(-v, -normal)" in water_pass
+    assert '"water")' in (ROOT / "tools/vulkan_pt_shaders.py").read_text()
+    pt = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
+    assert "PASS_WATER," in pt and "Path Traced's water rays" in pt
+    stream = STREAM.read_text()
+    assert "xgpu_vulkan_pt_water(water_layer.ripples, water_layer.base" in stream
+    assert "xgpu_vulkan_pt_water_frame_end();" in stream
+    glsl = GLSL.read_text()
+    assert "uniform sampler2D traced_up;" in glsl and "uniform sampler2D traced_down;" in glsl

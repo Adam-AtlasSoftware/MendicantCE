@@ -33,7 +33,7 @@ mask, distance and side, 4 the reflection, 5 the refraction).
 WATER_FUNCTIONS(DECLARE)
 #undef DECLARE
 
-#define BINDINGS 8
+#define BINDINGS 11
 #define FRAMES 4
 #define SETS_A_FRAME 32
 
@@ -255,6 +255,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 	struct water_push push;
 	struct xgpu_vulkan_image *result;
 	uint32_t index;
+	int traced;
 
 	static const struct xgpu_stream_terrain_water opaque_water;
 	const struct xgpu_stream_terrain_water *item;
@@ -282,7 +283,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 	images[4] = job->words;
 	images[5] = job->extras;
 	images[6] = job->cube ? job->cube : water.cube_stand_in;
-	images[7] = result;
+	traced = job->traced_up && job->traced_down && job->traced_aux;
+	images[7] = traced ? job->traced_up : job->behind;
+	images[8] = traced ? job->traced_down : job->behind;
+	images[9] = traced ? job->traced_aux : job->behind;
+	images[10] = result;
 	commands = xgpu_vulkan_compute_commands();
 	memset(infos, 0, sizeof(infos));
 	memset(writes, 0, sizeof(writes));
@@ -329,7 +334,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 	push.flags[0] = item->flags;
 	push.flags[1] = description->width;
 	push.flags[2] = description->height;
-	push.flags[3] = (uint32_t)(job->pathtraced != 0) | (job->classes ? 2u : 0u);
+	push.flags[3] = (uint32_t)(job->pathtraced != 0) | (job->classes ? 2u : 0u) |
+		(traced ? 4u | (job->reference ? 8u : 0u) : 0u);
 	barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, water.pipeline);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, water.layout, 0, 1, &set, 0, NULL);
@@ -354,6 +360,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_w
 			item->plane[1], item->plane[2], item->plane[3]);
 	}
 	return result;
+}
+
+float xgpu_vulkan_water_ripples(void)
+{
+	return make() ? water.ripples : tuning("HALO_WATER_RIPPLES", 0.35f);
 }
 
 void xgpu_vulkan_water_frame_end(void)

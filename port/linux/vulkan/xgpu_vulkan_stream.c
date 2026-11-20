@@ -159,6 +159,7 @@ pre-pass, and the frame's last pass (its composition, encoding, present) */
 #define PASS_OWNER_PANINI "PANINI"
 #define PASS_OWNER_AO "AO"
 #define PASS_OWNER_FINAL "FINAL PASS"
+#define PASS_OWNER_WATER "WATER"
 
 struct stream_target
 {
@@ -5916,12 +5917,14 @@ static void water_opaque(struct stream_target *color, struct stream_target *dept
 	job.power = 2.2f;
 	job.pathtraced = pathtraced;
 	water_sun(&job);
+	xgpu_vulkan_pass_owner(PASS_OWNER_WATER);
 	made = xgpu_vulkan_water_composite(&job);
 	whole[0] = whole[1] = 0;
 	whole[2] = (int32_t)color->width;
 	whole[3] = (int32_t)color->height;
 	if (made)
 		xgpu_vulkan_image_blit(made, whole, color->image, whole, 0);
+	xgpu_vulkan_pass_owner(NULL);
 }
 
 static void stream_water(const struct xgpu_stream_prism_terrain *record)
@@ -6000,10 +6003,17 @@ static void stream_water(const struct xgpu_stream_prism_terrain *record)
 				stream.color, gbuffer.width, gbuffer.height, color->width, color->height, gbuffer.words != NULL,
 				gbuffer.extras != NULL, gbuffer.view_known);
 		}
+		xgpu_vulkan_pass_owner(PASS_OWNER_WATER);
+		/* (T8: in Path Traced, the reflection's and the refraction's rays
+		traced through the frame's scene, in the screen's march's place) */
+		if (have_gbuffer && water_layer.pathtraced)
+			xgpu_vulkan_pt_water(water_layer.ripples, water_layer.base, water_layer.begun.plane,
+				xgpu_vulkan_water_ripples(), &job.traced_up, &job.traced_down, &job.traced_aux, &job.reference);
 		if (!have_gbuffer)
 			water_failed("no G-buffer of the window's");
 		else
 			made = xgpu_vulkan_water_composite(&job);
+		xgpu_vulkan_pass_owner(NULL);
 		whole[0] = whole[1] = 0;
 		whole[2] = (int32_t)color->width;
 		whole[3] = (int32_t)color->height;
@@ -6237,6 +6247,7 @@ static void stream_frame_end(void *context)
 	four frames back used again) */
 	xgpu_vulkan_terrain_frame_end();
 	xgpu_vulkan_water_frame_end();
+	xgpu_vulkan_pt_water_frame_end();
 	deferred.hold = 0;
 	deferred.albedo_over = 0;
 	gbuffer.active = gbuffer.ready = 0;

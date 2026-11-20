@@ -628,6 +628,7 @@ void rasterizer_water_draw(
 	boolean write_depth;
 	boolean draw_depth_only;
 	boolean prism_water; /* port: (rasterizer_water_draw_prism) */
+	boolean prism_later; /* port: (a water before the fog, the layer at its queued draw) */
 	real reflection_amount;
 	union
 	{
@@ -657,14 +658,17 @@ void rasterizer_water_draw(
 		prism_water = !TEST_FLAG(group->geometry_flags, _rasterizer_geometry_sky_bit) &&
 			prism_terrain_water_wanted();
 		/* (a water CE draws before the fog: its colour draw comes as the
-		environment is drawn, before PRISM's frame is resolved, so its depth
-		alone there and the layer at its queued draw, after the resolve, over
-		the fog CE drew on it) */
-		if (prism_water && TEST_FLAG(water->flags, _shader_transparent_water_draw_before_fog_bit) &&
-			TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_queue_bit))
+		environment is drawn, before PRISM's frame is resolved, so nothing
+		of it there, not even its depth: CE's colour draw writes none, and
+		the environment's fog then fogs the floor under it as Classic's;
+		the layer at its queued draw, after the resolve, takes that fog on
+		what is behind and puts it over its surface) */
+		prism_later = prism_water && TEST_FLAG(water->flags, _shader_transparent_water_draw_before_fog_bit) &&
+			TEST_FLAG(group->geometry_flags, _rasterizer_geometry_no_queue_bit);
+		if (prism_later)
 		{
 			prism_water = FALSE;
-			draw_depth_only = TRUE;
+			draw_depth_only = FALSE;
 		}
 		/* port: before the water's depth, the planar fog where the world
 		ends under it */
@@ -675,7 +679,11 @@ void rasterizer_water_draw(
 			rasterizer_water_draw_prism(group, water, vertex_type, permutation_index);
 			draw_depth_only = TRUE;
 		}
-		if (draw_depth_only)
+		if (prism_later)
+		{
+			/* port: (drawn at its queued draw) */
+		}
+		else if (draw_depth_only)
 		{
 			IDirect3DDevice8_SetRenderState(
 				global_d3d_device,

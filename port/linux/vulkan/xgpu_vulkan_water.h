@@ -34,11 +34,19 @@ struct xgpu_vulkan_water_job
 	in the base's place, no ripples or water item; the water's pixels those
 	of the level's materials of the water class) */
 	struct xgpu_vulkan_image *classes;
+	/* (T8, Path Traced: the reflection's and the refraction's light traced
+	(xgpu_vulkan_pt_water: the upper ray's, its alpha the sun's visibility;
+	the lower ray's, its alpha its length in the water), NULL where not
+	traced; reference 1 where they are debug.pt_reference's sums) */
+	struct xgpu_vulkan_image *traced_up, *traced_down, *traced_aux;
+	int reference;
 };
 
 /* the group's frame (an RGBA16F image of the colour target's size: the water at its pixels, what was behind it
 elsewhere, the alpha behind's), which the caller copies into the colour target; NULL where it cannot be made */
 struct xgpu_vulkan_image *xgpu_vulkan_water_composite(const struct xgpu_vulkan_water_job *job);
+/* CE's ripples' strength in the normal (HALO_WATER_RIPPLES), the composite's and Path Traced's water rays' (T8) */
+float xgpu_vulkan_water_ripples(void);
 /* the frame's end (the descriptor sets of a frame four frames back used again) */
 void xgpu_vulkan_water_frame_end(void);
 

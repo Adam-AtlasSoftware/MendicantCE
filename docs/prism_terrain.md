@@ -135,7 +135,7 @@ Scripted actions (the game live, the AI erased, the camera held at a pose, the p
 
 The run folder's `tools/tcap.py` and `jobs/actions.sh` make them (`work/openh1_eval/v4_terrain_runs`).
 
-## T7: the water layer (Rebaked, and Path Traced's frame)
+## T7 and T8: the water layer (Rebaked; Path Traced's traced rays)
 
 With `display.water` `"prism"` (the default) in a campaign in Rebaked or Path Traced, on a backend with ray tracing
 (`xgpu_backend_ray_tracing`: the layer's pass runs on its device), CE's water is drawn by PRISM in place of CE's colour
@@ -160,7 +160,10 @@ game's draws can give, so the game draws them into the frame for the host, and t
 | `END` | | The base map and the mask (the alpha) copied; the layer composited (`xgpu_vulkan_water.c`, a compute pass) and copied into the colour target, what was behind put back wherever the captures drew outside the water. Where it cannot run (no G-buffer of the window's), what was behind is put back and the water is not drawn (logged) |
 
 A water CE draws before the fog (c10's swamps) has its colour draw as the environment is drawn, before PRISM's frame
-is resolved: there its depth alone, and the layer at its queued draw after the resolve, over the fog CE drew on it.
+is resolved: there nothing of it, not even its depth (CE's colour draw writes none, and CE's environment fog then
+fogs the floor under the water as Classic's does: a depth there would keep that fog off the water's pixels, and the
+swamp's milky lavender with it), and the layer at its queued draw after the resolve, which lays CE's fog over its
+surface (below).
 `WATER_DRAW`'s item carries the step, the shader's flags, the group's plane, CE's ripple scale and tints (straight on and
 edge on) and the window's planar fog (its colour and density, depth and distance, the eye's height over it).
 
@@ -169,33 +172,81 @@ edge on) and the window's planar fog (its colour and density, depth and distance
 Each water pixel: the plane met by the pixel's ray (the G-buffer's distances give what is behind), the normal bent by
 CE's ripples (flattened edge on and far off, where the 8-bit map would alias), in light (the frame's values to 2.2):
 
-- **Fresnel** at an IOR of 1.33 (Schlick, F0 0.02).
+- **Fresnel** at an IOR of 1.33 (Schlick, F0 0.02), less edge on far off (a rough sea's facets shadow and mask the
+  grazing reflection).
 - **Reflection**: marched along the screen against the G-buffer's distances (refined by halving, faded at the view's
   edges, only surfaces above the water); else what lies far along the reflected ray where the frame shows it (the sky,
-  or far surfaces in their fog); else CE's reflection cube in CE's tint. Blurred with distance (the ripples finer than a
-  pixel as roughness). CE's base map alpha, where it modulates CE's reflection (b30's mask by the shore), modulates it.
+  or far surfaces in their fog); else CE's reflection cube in CE's tint. Blurred over the roughness's footprint: an
+  ellipse (nine taps, seventeen when wide) growing with distance and most edge on, up to 2.4 times as tall as wide (a
+  rough water's reflections stretch toward the eye); far off and edge on half of what the screen gives is CE's cube at
+  its widest blur, the sky's broad light (the open sea is no mirror at the horizon). CE's base map alpha, where it
+  modulates CE's reflection (b30's mask by the shore), modulates it.
 - **Refraction**: the floor the refracted ray reaches (Snell, found on the screen, the pixel's own where it is not), its
   colour absorbed over the path by Beer and Lambert, in CE's tint's colours (the base map's where it tints the
   background, else the straight-on tint's hue), in-scattered toward the deep colour (CE's planar fog's colour where the
   window has one, else the tint's). Where the frame has no floor (CE's fog beyond the world), what CE drew there.
-- **The sun's highlight** off the ripples (GGX, rougher far off), from SCENE_LIGHTS' sun.
+- **The sun's highlight** off the ripples (GGX, rougher far off), from SCENE_LIGHTS' sun, in the shade of what
+  stands between the sun and the surface: the sun's ray marched along the screen against the G-buffer's distances
+  (Rebaked; the cliffs' and the logs' shadows on the water), traced in Path Traced.
+- **CE's fog over a water drawn before the fog** (c10): the share CE's planar fog took of the floor behind the water
+  (CE's fog colour's part of the frame there: the floor under a swamp is dark), which Classic's fog laid over the whole
+  water: the refraction has it already (CE's base map colour put under it, as Classic's colour draw modulates what is
+  behind before the fog), the reflection and the highlight take it over them. The deep colour of such a water is its
+  own tint's, not the fog's.
 - **The shore**: the water fades into the ground over its first 0.05 world units of depth.
-- **From below**: Snell's window (CE's cube, the sky) and total internal reflection outside it (the deep colour, and
-  what the screen has under the surface along the reflected ray), with a little of the deep colour over long paths.
-  CE's own planar fog (b30's: opaque in 0.15 world units) never fogged CE's water's surface, drawn after it, and
+- **From below**: Snell's window and total internal reflection outside it. The window's edge is decided by CE's
+  ripples smoothed over a few pixels and drawn toward the plane's normal, Fresnel's reflectance (exact, water to air)
+  rising to 1 at the critical angle and blended a little past it: a soft, gently moving ring, not CE's ripples' every
+  texel (T7's jagged edge and white flakes). The window shows CE's cube blurred (its zenith's detail, smeared by the
+  ripples, read as a dark streak) in Rebaked, the traced sky in Path Traced. Outside it, the water's body as the frame
+  shows it along the reflected ray (CE's fog under the surface; off the view, the frame's bottom edge where that is not
+  the surface; else the deep colour), with a share of CE's cube and CE's ripples' pattern over it (the cube by the full
+  ripples against the smoothed), as Classic's surface from below shows them; a little of the water's body over long
+  paths. CE's own planar fog (b30's: opaque in 0.15 world units) never fogged CE's water's surface, drawn after it, and
   would hide the window.
 
 **An opaque water** (d40's: an environment shader of the water class, `classes.json`): no capture and no refraction;
 after the resolve, its pixels (the level's of a material of the water class) take reflection, Fresnel and the sun's
-highlight over CE's own colour of them, the normal from its own bump.
+highlight over CE's own colour of them, the normal from its own bump. A muddy water reflects little and tints what it
+does: the Fresnel at 0.55 of a clear water's (at most 0.3), the reflection half in CE's colour's hue (its luminance
+kept), the bump flattened most edge on (where its texels streaked the reflection vertically) and the footprint wider
+and taller; the sun's highlight in the screen's shade; and the shore: the layer fades out where the water's own pixels
+thin out on two rings about the pixel (no hard line where the water class meets the sand). In Path Traced it is drawn
+as in Rebaked (no traced rays yet).
 
 Tuning, for one run (the defaults are the look judged against Classic by pictures): `HALO_WATER_RIPPLES` (0.35),
 `HALO_WATER_ABSORB` (0.25 a world unit), `HALO_WATER_SUN` (1.5), `HALO_WATER_DEEP` (1), `HALO_WATER_CUBE` (1), and
 `HALO_WATER_VIEW` (1 the ripples, 2 the base map, 3 the mask, distance and side, 4 the reflection, 5 the refraction).
 
 The bake is untouched: water stays out of SCENE_STATIC and the bake's scene, and a bake made by the build before loads
-whole. In Path Traced the same layer is drawn over the traced frame; its traced reflection and refraction rays are T8.
+whole.
 
-What T7 leaves for later: the waves' motion and foam (T9: the surface is CE's plane, its motion CE's ripples), the
-shore's run-up and caustics (T10), water in the acceleration structures and traced water rays (T8, T14), a sun shadow
-on the water's highlight (the cliffs' shade does not dim it yet).
+### T8: water in Path Traced
+
+In Path Traced, at a group's `END`, before the composite, Path Traced's pass `"water"` (`xgpu_vulkan_pt.glsl`,
+`xgpu_vulkan_pt_water`) traces each water pixel's two rays through the frame's own scene (the frame's job: its
+camera, exposure and curve; its own descriptor set, the frame's images with the water's in four places), from the
+surface the composite computes (the plane, CE's ripples at the composite's strength):
+
+- from above, the reflection (the hit lit from the bake as Path Traced's reflections are, `hit_light`) and the sun's
+  visibility at the surface (the sun's ray, the structure's and the moving objects'); the refraction into the water,
+  to the floor, with its length;
+- from below, Snell's window's ray up through the surface (the real sky, the cliffs, the ring) and the reflection back
+  into the water (total internal reflection outside the window), with its length.
+
+Both are written in the frame's encoding (the exposure and the tone curve of the frame's composite), with the sun's
+visibility, the upper ray's share that left the level and the lower ray's length beside them, and the composite takes
+them in the screen march's place: the reflection filtered over the roughness's footprint on the water's own pixels
+(the mask is the filter's guide: nothing of the shore or of what stands in the water is taken into it), where the ray
+left the level the sky as the frame shows it (CE's sky, else CE's cube: the scene's sky is the light's radiance, not
+the picture of the sky, and read as a dark purple sea); the highlight by the traced visibility; from below the window's
+light (the sky where it left) and the internal reflection absorbed toward the water's body. The refraction keeps the
+frame's floor found along the refracted ray on the screen, which Path Traced lit at its own pixels, with CE's planar
+fog under the surface and what CE draws there (b30's surf: a traced floor has neither, and showed a bare sunlit sand
+bed CE's art hides), and takes the traced floor where the frame has none (CE's fog beyond the world), CE's planar fog
+put over it by its depth. One ray each a pixel and no jitter:
+the hits are lit from the bake, so the rays carry no noise of their own beyond the sun's penumbra, and the water needs
+no history (CE's ripples move every frame). With `debug.pt_reference` the pass traces the reference's paths
+(`reference_path`: no bake) instead, over the same footprint's directions (the normal turned by a Gaussian of the
+filter's angular size), summed in linear light while the reference sums, and the composite takes the means unfiltered:
+the water's reference.

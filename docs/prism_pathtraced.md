@@ -722,6 +722,16 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
   (`display.first_person_legs`), drawn, are flagged out of the capture so the body is not traced twice. Raster's
   `objects_visibility` takes the same masks. `display.player_shadow` turns it off.
 
+## The water
+
+CE's water (the terrain overhaul's T7 layer, `docs/prism_terrain.md` "T7 and T8") is composited over the traced frame
+at each water group's END. Its rays are this mode's: the pass `"water"` (T8) traces each water pixel's reflection and
+refraction (from below, Snell's window's ray and the total internal reflection) through the frame's scene with the
+frame's job, each hit lit from the bake as the reflections' (`hit_light`), the sun's visibility by the sun's ray, and
+writes them in the frame's encoding for the layer's composite; with `debug.pt_reference` it sums the reference's paths
+(`reference_path`) over the layer's filter footprint instead. Its GPU time is the debug.pass_times group `WATER`
+(with the layer's composite).
+
 ## A lost device
 
 Path Traced was made on NVIDIA's cards. Should the driver lose the device while it draws (its timeout on a pass that

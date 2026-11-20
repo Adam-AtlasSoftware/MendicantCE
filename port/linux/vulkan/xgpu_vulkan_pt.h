@@ -30,6 +30,23 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
 	const struct xgpu_stream_scene_view *view, uint32_t phase, int *whole);
 
+/* the terrain overhaul's water in Path Traced (T8): a CE water group's
+reflection and refraction rays traced through this frame's scene (the pass
+"water"; the frame traced before it), at the pixels of base's alpha (the
+game's base map capture), the surface the plane (n, d) bent by ripples (the
+game's ripple capture) at the strength the composite takes: *up the upper
+ray's light (from above the reflection, from below Snell's window's),
+*down the lower ray's (the refraction, or the reflection back into the
+water), in the frame's encoding, *aux the sun's visibility at the surface,
+the upper ray's share that left the level and the lower ray's length in
+the water (-1 none), RGBA16F at the frame's size; *reference 1 where
+they are debug.pt_reference's means. 0 where no frame was traced this frame
+or the sizes differ */
+int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_image *base, const float plane[4],
+	float ripple_strength, struct xgpu_vulkan_image **up, struct xgpu_vulkan_image **down,
+	struct xgpu_vulkan_image **aux, int *reference);
+/* the frame's end: the water's rays have no frame's job until the next */
+void xgpu_vulkan_pt_water_frame_end(void);
 /* the device going away: everything let go of */
 void xgpu_vulkan_pt_shutdown(void);
 

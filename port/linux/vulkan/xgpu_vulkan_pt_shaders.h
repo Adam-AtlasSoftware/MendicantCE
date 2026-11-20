@@ -30,5 +30,7 @@ extern const uint32_t xgpu_vulkan_pt_lamps_words[];
 extern const size_t xgpu_vulkan_pt_lamps_count;
 extern const uint32_t xgpu_vulkan_pt_cache_words[];
 extern const size_t xgpu_vulkan_pt_cache_count;
+extern const uint32_t xgpu_vulkan_pt_water_words[];
+extern const size_t xgpu_vulkan_pt_water_count;
 
 #endif
