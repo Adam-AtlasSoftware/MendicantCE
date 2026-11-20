@@ -1793,6 +1793,11 @@ PAGES = {
             ("SHOULDER", "camera.third_person_shoulder", CAMERA_SHOULDERS,
              "Third person: how far right of your head the camera is, in world units; below 0 over your left "
              "shoulder.|Click the number (or press A) to type any from -0.5 to 0.5.", None),
+            ("RETICLE ASSIST", "camera.third_person_reticle_assist", ON_OFF,
+             "Third person: aim assist moves the reticle onto the target instead of turning the camera. The "
+             "camera stays where you put it; the reticle shows where your shots go and comes back to the "
+             "middle without a target. Off turns the camera, the reticle always in the middle.", None,
+             "reticle_assist"),
             ("MULTIPLAYER", "camera.third_person_netgames", ON_OFF,
              "Third person in multiplayer games too. Off keeps it to the campaign and co-op: seeing round "
              "corners is an advantage the others may not have.", None),

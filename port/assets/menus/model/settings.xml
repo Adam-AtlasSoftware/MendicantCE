@@ -1087,6 +1087,11 @@
 			<help>Third person: how far right of your head the camera is, in world units; below 0 over your left shoulder.</help>
 			<note>Click the number (or press A) to type any from -0.5 to 0.5.</note>
 		</row>
+		<row key="reticle_assist" kind="choice" setting="camera.third_person_reticle_assist" label="RETICLE ASSIST" crumb="VIDEO › … › CAMERA">
+			<help>Third person: aim assist moves the reticle onto the target instead of turning the camera. The camera stays where you put it; the reticle shows where your shots go and comes back to the middle without a target. Off turns the camera, the reticle always in the middle.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
 		<row key="third_person_netgames" kind="choice" setting="camera.third_person_netgames" label="MULTIPLAYER" crumb="VIDEO › … › CAMERA">
 			<help>Third person in multiplayer games too. Off keeps it to the campaign and co-op: seeing round corners is an advantage the others may not have.</help>
 			<choice shown="ON" value="true"/>

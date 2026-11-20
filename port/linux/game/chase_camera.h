@@ -18,4 +18,13 @@ line), and forward from that point through where the player's shot goes,
 so that the reticle in the middle of the screen is on it */
 boolean chase_camera_command(short local_player_index, struct camera_command *command);
 
+/* camera.third_person_reticle_assist: aim assist moves the reticle, not the
+camera. player_control.c tells the turn the magnetism added to the
+player's look this frame (radians of facing; seconds the frame's, target
+whether the assist has one), which the camera leaves out of its view; the
+HUD (passenger_camera_reticle_begin) asks where the shot lands on the
+screen, from the middle, eased (FALSE: the reticle stays in the middle) */
+void chase_camera_assist_turn(short local_player_index, real yaw, real pitch, boolean target, real seconds);
+boolean chase_camera_reticle_screen(short local_player_index, long weapon_index, real_point2d *offset);
+
 #endif
