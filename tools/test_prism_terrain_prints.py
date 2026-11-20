@@ -3,7 +3,7 @@ the prints"): the module compiled on its own, with stand-ins for the renderer's 
 driven by footstep events as PRISM_TERRAIN brings them. Checked: each species' stamp is a dent with a broad rim about
 it; a dry print in sand is as deep as the design says and points the way the foot faced; an event sent
 twice makes the same print; the left foot is the right's mirror; relax brings the walls to the ground's angle of
-repose (a wet print crisper); two minutes of b30's wind fill a dry print in by about half, dirt and mud keep theirs,
+repose (a wet print crisper); two minutes of b30's wind fill a dry print in by about a third, dirt and mud keep theirs,
 nothing moves while the game is paused; the ground's height kept with the print (so a bridge over it shows none);
 a new generation forgets every page; a full pool lets the farthest page go; Sentinels, stone and slopes past 40
 degrees take none; the half floats the pool is sent as; the page table's window. No GPU and no game data."""
@@ -299,7 +299,8 @@ int main(void)
 		assert(worst < 0.002f * metres);
 	}
 
-	/* infill: two minutes of b30's wind (0.8) take about half a dry print's depth; dirt keeps its own; a pause none */
+	/* infill: two minutes of b30's wind (0.8) take about a third of a dry print's depth; dirt keeps its own; a pause
+	none */
 	terrain_prints_forget();
 	e = foot(50.0f, 50.0f, 0.0f, 0.0f, 1.0f, XGPU_TERRAIN_EVENT_WALK, 1, 1, XGPU_TERRAIN_SPECIES_HUMAN);
 	terrain_prints_event(&e);
@@ -323,7 +324,7 @@ int main(void)
 		survey(52.0f, 50.0f, 0.15f, &dirt1, &most, &dent, &rim);
 		printf("two minutes: sand %.1f -> %.1f mm, dirt %.1f -> %.1f mm\n", sand0 * 3048.0f, sand1 * 3048.0f,
 			dirt0 * 3048.0f, dirt1 * 3048.0f);
-		assert(sand1 / sand0 > 0.35f && sand1 / sand0 < 0.7f);
+		assert(sand1 / sand0 > 0.5f && sand1 / sand0 < 0.8f);
 		assert(dirt1 / dirt0 > 0.9f);
 	}
 

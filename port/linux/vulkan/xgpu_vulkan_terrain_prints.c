@@ -185,9 +185,9 @@ static float sole(int species, float u, float v, float length)
 	case XGPU_TERRAIN_SPECIES_HUMAN:
 		/* (a boot: heel and ball joined by the shank, its outer edge
 		straighter; the lugs chevrons across it, 4.5 cm apart) */
-		a = ellipse(u, v, -0.30f * length, 0.0f, 0.20f * length, 0.042f, 0.0f);
-		b = ellipse(u, v, 0.17f * length, 0.006f, 0.33f * length, 0.055f, 0.06f);
-		toe = ellipse(u, v, -0.06f * length, 0.012f, 0.22f * length, 0.036f, 0.0f);
+		a = ellipse(u, v, -0.30f * length, 0.0f, 0.20f * length, 0.050f, 0.0f);
+		b = ellipse(u, v, 0.17f * length, 0.006f, 0.33f * length, 0.062f, 0.06f);
+		toe = ellipse(u, v, -0.06f * length, 0.012f, 0.22f * length, 0.044f, 0.0f);
 		a = fmaxf(a, fmaxf(b, toe));
 		lug = 0.5f + 0.5f * cosf((u * 22.0f + fabsf(v) * 9.0f) * 6.2831853f / 3.0f);
 		return a * (0.80f + 0.20f * smooth(0.35f, 0.65f, lug));
@@ -589,8 +589,9 @@ void terrain_prints_event(const struct xgpu_stream_terrain_event *event)
 	default: break;
 	}
 	depth *= stamp->depth / WORLD_UNIT_METRES;
-	if (depth > DEPTH_MOST * 0.9f)
-		depth = DEPTH_MOST * 0.9f;
+	/* (the pass marches snow's prints to DEPTH_MOST, the rest's to half of it) */
+	if (depth > DEPTH_MOST * (ground == GROUND_SNOW ? 0.9f : 0.45f))
+		depth = DEPTH_MOST * (ground == GROUND_SNOW ? 0.9f : 0.45f);
 	/* (the stamp's box: half its side along the foot, world units; its reach
 	about the centre) */
 	half = 0.5f * stamp->box / WORLD_UNIT_METRES;
@@ -694,14 +695,16 @@ void terrain_prints_event(const struct xgpu_stream_terrain_event *event)
 /* ---------- relax and infill */
 
 /* the most a texel may stand over its neighbour (world units): the angle
-of repose's tangent over a texel. Sand's 42 degrees, not loose dry sand's
-34: a beach's sand is damp under its surface and holds a print's wall
-steeper (at 34 every print rounded flat under b30's sun, 35 degrees up,
-and cast no shadow); wet sand's 65 */
+of repose's tangent over a texel. Sand's 56 degrees, not loose dry sand's
+34: a beach's sand is damp under its surface and a boot packs it, so a
+print's wall stands steep (at 34 every print rounded flat under b30's sun,
+35 degrees up, and cast no shadow; at 42 a boot's 10 cm sole became a
+V-shaped trough of 2 cm texels with no floor); wet sand's 72; snow packs
+and its wall stands (68) */
 static float repose_step(uint8_t ground, int wet)
 {
-	float degrees = ground == GROUND_SAND ? (wet ? 65.0f : 42.0f) : ground == GROUND_SNOW ? 55.0f :
-		ground == GROUND_MUD ? 50.0f : 45.0f;
+	float degrees = ground == GROUND_SAND ? (wet ? 72.0f : 56.0f) : ground == GROUND_SNOW ? 68.0f :
+		ground == GROUND_MUD ? 60.0f : 50.0f;
 
 	return tanf(degrees * 0.017453293f) * TEXEL_WU;
 }
@@ -755,8 +758,9 @@ static float infill_rate(uint8_t ground, float wind)
 
 	switch (ground)
 	{
-	/* (b30's 0.8 of wind: about half the depth in two minutes) */
-	case GROUND_SAND: return 0.0045f * (0.3f + 0.7f * w);
+	/* (b30's 0.8 of wind: about a third of the depth gone in two minutes,
+	the walls softened: an old trail still reads as one) */
+	case GROUND_SAND: return 0.0035f * (0.3f + 0.7f * w);
 	case GROUND_SNOW: return 0.0006f;
 	case GROUND_MUD: return 0.0002f;
 	default: return 0.0004f * (0.5f + 0.5f * w);
@@ -770,7 +774,7 @@ static void page_infill(struct print_page *page)
 	float sink = expf(-seconds * rate), sink_wet = expf(-seconds * rate * 0.4f), pack = expf(-seconds * rate / 3.0f);
 	/* (the softening: a share of a blur's step a second, wind-borne grains
 	filling the edges first) */
-	float spread = clampf(seconds * rate * 4.0f, 0.0f, 0.5f);
+	float spread = clampf(seconds * rate * 2.5f, 0.0f, 0.5f);
 	float next[PRINT_PAGE_TEXELS];
 	float above[PRINT_PAGE_TEXELS];
 	int x, y;
@@ -1069,7 +1073,7 @@ int terrain_prints_prepare(const float eye[3], const float sun[4], struct terrai
 	draw->values[0][3] = (float)PRINT_WINDOW;
 	memcpy(draw->values[1], sun, 4 * sizeof(float));
 	draw->values[2][0] = PARALLAX_RANGE;
-	draw->values[2][1] = 16.0f;
+	draw->values[2][1] = 24.0f;
 	draw->values[2][2] = 8.0f;
 	draw->values[2][3] = 0.0f;
 	draw->values[3][0] = DEPTH_MOST;

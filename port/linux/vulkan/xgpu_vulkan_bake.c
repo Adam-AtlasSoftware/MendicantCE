@@ -6235,6 +6235,16 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	return 1;
 }
 
+int xgpu_vulkan_bake_sun(float sun[4])
+{
+	struct bake_state *b = bake.bake;
+
+	if (!bake.made || !b || !(b->block.sun[3] > 0.0f))
+		return 0;
+	memcpy(sun, b->block.sun, 4 * sizeof(float));
+	return 1;
+}
+
 void xgpu_vulkan_bake_shutdown(void)
 {
 	uint32_t index;

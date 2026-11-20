@@ -33,6 +33,7 @@ Without a FRAME this frame (Classic, multiplayer, display.terrain "off")
 nothing here draws, and the classes are only kept.
 */
 
+#include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_terrain.h"
 #include "xgpu_vulkan_terrain_prints.h"
 #include "xgpu_vulkan_scene.h"
@@ -799,14 +800,29 @@ int xgpu_vulkan_terrain_pack_state(const char *folder)
 	return state;
 }
 
-/* (T4) the sun toward which the prints' micro-shadows are marched: SCENE_LIGHTS'
-sun (its direction toward it, w 1), else w 0 */
+/* (T4) the sun toward which the prints' micro-shadows are marched: the loaded
+bake's (the sun Rebaked's light pass lights by), else SCENE_LIGHTS' (its
+direction toward it, w 1), else w 0 */
 static void sun_of(float sun[4])
 {
 	const struct xgpu_stream_scene_light *lights;
 	uint32_t count = 0, serial = 0, index;
 
 	memset(sun, 0, 4 * sizeof(float));
+	if (xgpu_vulkan_bake_sun(sun))
+	{
+		float length = sqrtf(dot3(sun, sun));
+
+		if (length > 1.0e-6f)
+		{
+			sun[0] /= length;
+			sun[1] /= length;
+			sun[2] /= length;
+			sun[3] = 1.0f;
+			return;
+		}
+		memset(sun, 0, 4 * sizeof(float));
+	}
 	lights = xgpu_vulkan_scene_light_table(&count, &serial);
 	for (index = 0; lights && index < count; index++)
 		if (lights[index].type == XGPU_SCENE_LIGHT_SUN && (lights[index].flags & XGPU_SCENE_LIGHT_FLAG_ON))
@@ -938,11 +954,12 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 		terrain.pack.detail, terrain.pack.surface, terrain.pack.macro, micro ? prints.pool : NULL,
 		micro ? prints.table : NULL, micro, &values);
 	terrain.micro_drawn = micro && terrain.layers_drawn;
-	if (terrain.micro_drawn && !terrain.prints_logged)
+	/* (logged at the first frame drawn, and again where the sun comes or goes) */
+	if (terrain.micro_drawn && terrain.prints_logged != (prints.values[1][3] > 0.5f ? 2 : 1))
 	{
 		host_logf(HOST_LOG_INFO, "prism terrain: the prints drawn by parallax over the HQ layers, their sun's "
 			"micro-shadows for Raster's light (sun %s)", prints.values[1][3] > 0.5f ? "found" : "none");
-		terrain.prints_logged = 1;
+		terrain.prints_logged = prints.values[1][3] > 0.5f ? 2 : 1;
 	}
 	terrain.drawn_frame |= terrain.layers_drawn;
 	if (!terrain.layers_logged)

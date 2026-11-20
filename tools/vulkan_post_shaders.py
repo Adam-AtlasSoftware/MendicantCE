@@ -694,8 +694,8 @@ vec4 print_at(vec2 xy, float z, float lod)
 /* the view ray (d, from the eye) through the prints about p (the flat surface's point, its footprint dpx, dpy):
 the point met, the field's slope there, its depth, its compaction, the sun's visibility there (the field marched
 toward the sun) and the cavity's occlusion; p and no print where there is none */
-void print_march(vec3 p, vec3 d, vec3 dpx, vec3 dpy, out vec2 hit, out vec2 slope, out float depth, out float pack,
-	out float micro, out float cavity)
+void print_march(vec3 p, vec3 d, vec3 dpx, vec3 dpy, float deepest, out vec2 hit, out vec2 slope, out float depth,
+	out float pack, out float micro, out float cavity)
 {
 	hit = p.xy;
 	slope = vec2(0.0);
@@ -707,7 +707,7 @@ void print_march(vec3 p, vec3 d, vec3 dpx, vec3 dpy, out vec2 hit, out vec2 slop
 	float foot = max(length(dpx), length(dpy));
 	float lod = clamp(log2(max(foot / texel, 1.0)), 0.0, prints3.w);
 	float dz = min(d.z, -0.03);
-	float top = prints3.y, bottom = -prints3.x;
+	float top = prints3.y, bottom = -deepest;
 	/* (the ray's span over the field's heights, from the highest rim to the deepest floor; nothing where neither
 	end nor the pixel has a page) */
 	vec2 a = p.xy + d.xy * (top / dz), b = p.xy + d.xy * (bottom / dz);
@@ -727,8 +727,28 @@ void print_march(vec3 p, vec3 d, vec3 dpx, vec3 dpy, out vec2 hit, out vec2 slop
 		float f = print_at(xy, p.z, lod).x;
 		if (h <= f)
 		{
-			float d0 = last_h - last_f, d1 = h - f;
-			met = mix(last_xy, xy, clamp(d0 / max(d0 - d1, 1.0e-6), 0.0, 1.0));
+			/* (the crossing found between the last two steps by halving it thrice, then the secant) */
+			vec2 xa = last_xy, xb = xy;
+			float ha = last_h, hb = h, fa = last_f, fb = f;
+			for (int j = 0; j < 3; j++)
+			{
+				vec2 xm = 0.5 * (xa + xb);
+				float hm = 0.5 * (ha + hb), fm = print_at(xm, p.z, lod).x;
+				if (hm <= fm)
+				{
+					xb = xm;
+					hb = hm;
+					fb = fm;
+				}
+				else
+				{
+					xa = xm;
+					ha = hm;
+					fa = fm;
+				}
+			}
+			float d0 = ha - fa, d1 = hb - fb;
+			met = mix(xa, xb, clamp(d0 / max(d0 - d1, 1.0e-6), 0.0, 1.0));
 			break;
 		}
 		last_h = h;
@@ -817,7 +837,9 @@ void main()
 	if (printed)
 	{
 		vec2 hit;
-		print_march(p, normalize(ray), dpx, dpy, hit, print_slope, print_depth, print_pack, print_micro,
+		/* (the deepest a print goes: snow's prints far deeper than the rest's) */
+		float deepest = c.r == 5u || c.g == 5u ? prints3.x : prints3.x * 0.5;
+		print_march(p, normalize(ray), dpx, dpy, deepest, hit, print_slope, print_depth, print_pack, print_micro,
 			print_cavity);
 		p.xy = hit;
 	}
@@ -859,7 +881,7 @@ void main()
 	float k = a.y * fade * clamp(0.7 + (macro.r - 0.5) * 1.2 + (macro.g - 0.5) * 0.6, 0.35, 1.25);
 /*PRINTS{*/	/* (a print's floor pressed smooth: the sand's grain and relief less where the foot packed it) */
 	float print_press = printed ? clamp(max(-print_depth / 0.008, clamp(print_pack, 0.0, 1.0)), 0.0, 1.0) : 0.0;
-	k *= 1.0 - 0.55 * print_press;
+	k *= 1.0 - 0.75 * print_press;
 /*}PRINTS*/	vec3 ratio = detail.rgb * 2.0;
 	float lum = max(dot(ratio, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
 	ratio = lum * mix(vec3(1.0), ratio / lum, a.z);
@@ -877,7 +899,8 @@ void main()
 	{
 		float snow = c.r == 5u ? 1.0 : 0.0;
 		float under = clamp(-print_depth / 0.008, 0.0, 1.0);
-		color *= mix(1.0, mix(0.87, 0.94, snow), max(under * (1.0 - snow), clamp(print_pack, 0.0, 1.0) * snow));
+		color *= mix(1.0, mix(0.80, 0.93, snow), max(under * (1.0 - snow), clamp(print_pack, 0.0, 1.0) * snow));
+		color *= 1.0 + 0.07 * (1.0 - snow) * clamp(print_depth / 0.0015, 0.0, 1.0);
 		r = clamp(r * mix(1.0, mix(1.06, 0.78, snow), clamp(print_pack, 0.0, 1.0)), 0.02, 1.0);
 		normal = normalize(mix(normal, n, 0.6 * print_press));
 		normal = normalize(normal + vec3(-print_slope, 0.0));

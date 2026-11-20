@@ -331,14 +331,17 @@ A stamp takes the lower of what is there and its dent and the higher where it ra
 
 For a second and a half of the game's time after a page is pressed, the pressed region slumps toward the ground's
 angle of repose (thermal erosion, three passes a frame, each moving a fifth of a step past the angle downhill): sand
-42 degrees, wet sand 65, snow 55, dirt 45, mud 50. Sand is not loose dry sand's 34 degrees: a beach's sand is damp
-under its surface and holds a print's wall steeper, and at 34 degrees every print rounded flat under b30's sun (35
-degrees up) and cast no shadow at all. So a dry print's walls round off and a wet print stays sharp.
+56 degrees, wet sand 72, snow 68, dirt 50, mud 60. Sand is not loose dry sand's 34 degrees: a beach's sand is damp
+under its surface and a boot packs it, so a print's wall stands steep. At 34 degrees every print rounded flat under
+b30's sun (35 degrees up) and cast no shadow at all; at 42 a boot's 10 cm sole, five texels of 2 cm, slumped into a
+V-shaped trough with no floor (a thin dark slit in the frames). So a dry print's walls round off a little and a wet
+print stays sharp.
 
 Then, about every two seconds of the game's time while a page is within 70 world units of the camera, it is filled
 in: its displacement sinks toward flat and a blur softens its edges, by the ground and the wind at the eye
-(FRAME's): dry sand in b30's wind (0.8 world units a second) keeps about half its depth after two minutes, dirt and
-mud keep nearly all of theirs, snow fills in only while it snows (T12); wet sand at 0.4 of dry's rate; the
+(FRAME's): dry sand in b30's wind (0.8 world units a second) keeps about two thirds of its depth after two minutes
+(its walls softened: an old trail still reads as one; at half the depth and twice the blur the first frames lost the
+trail entirely), dirt and mud keep nearly all of theirs, snow fills in only while it snows (T12); wet sand at 0.4 of dry's rate; the
 compaction outlives the displacement. A page out of range catches up when it comes back (its sinking by the time
 gone). While the game is paused nothing moves (FRAME's step is 0).
 
@@ -349,14 +352,17 @@ layers' source with the parts marked `PRINTS`; without them its words are exactl
 or `display.terrain_tracks` off, the frame is T1's). For each pixel of a ground that takes prints (sand, dirt, mud,
 snow) within 25 world units:
 
-- **Parallax**: the view ray is marched through the field from the highest rim to the deepest floor, in linear steps
-  of about a pixel's footprint (4 to 16), the point met refined between the last two; the layers are looked up there
+- **Parallax**: the view ray is marched through the field from the highest rim to the deepest floor (snow's prints
+  to 18 cm, the rest's to 9 cm), in linear steps of about a pixel's footprint (4 to 24), the crossing halved thrice
+  between the last two steps and then refined by the secant; the layers are looked up there
   (CE's own colour stays the pixel's), so the scan's grain lies down in the print. Three lookups (the pixel, and the
   ray's two ends) decide first whether there is any print about: a ground with none costs three texel fetches.
 - **The surface**: the normal is bent by the field's slope at the point met (over the layers' normal, which a
-  pressed floor smooths), the floor a little darker (the damp sand under the dry; snow packed greyer and smoother),
-  the layers' grain and relief less where the foot packed it.
-- **The micro-shadow**: the field is marched toward the sun (SCENE_LIGHTS' sun) over 9 cm in 8 steps; what stands
+  pressed floor smooths), the floor darker (the damp sand under the dry, to 0.8; snow packed greyer and smoother),
+  the rim's kicked-out grains a little lighter (to 1.07), the layers' grain and relief a quarter where the foot packed
+  it.
+- **The micro-shadow**: the field is marched toward the sun (the loaded bake's sun, the one Rebaked's light pass
+  lights by; SCENE_LIGHTS' where no bake is) over 27 cm (0.09 world units) in 8 steps; what stands
   over the ray shades the point, softly over three quarters of a texel. With the cavity's occlusion (the floor under
   the field's mean about it, up to 30%) it is written into a third target, the micro-shadow target (RGBA8, the base's
   size, cleared to lit each frame the prints are drawn), which PRISM Rebaked's light pass reads

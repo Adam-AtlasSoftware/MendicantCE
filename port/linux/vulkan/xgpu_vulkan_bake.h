@@ -61,6 +61,9 @@ struct xgpu_vulkan_bake_lookup
 	float probe_spacing, coarse_spacing, gamma;
 };
 int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup);
+/* (T4) the loaded bake's sun, the one Raster's light pass lights by (its
+direction toward the sun, w over 0 where it has one): 1 where there is one */
+int xgpu_vulkan_bake_sun(float sun[4]);
 
 /* PRISM v4's exposure (docs/prism_bake.md, "Raster's exposure"): the meter's
 buffer (made in commands the first time; 0 none), which a frame's pass fills
