@@ -70,11 +70,11 @@ SAMPLER = re.compile(r"^uniform (u?sampler2D(?:Array)?) (\w+);\n", re.M)
 # encoding's)
 UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents", "gamut", "view_eye", "view_axis",
             "view_across", "view_down", "view_corners", "class_cue0", "class_cue1") + \
-    tuple(f"layer{index}" for index in range(16))
+    tuple(f"layer{index}" for index in range(16)) + tuple(f"prints{index}" for index in range(4))
 # the fragment programs, in xgpu_vulkan_post_shaders.h's order
 PROGRAMS = ("fxaa", "smaa_edges", "smaa_weights", "smaa_blend", "rotate", "hdr_tone_map", "hdr_tone_map_ms",
             "hdr_encode", "panini", "bloom_down", "bloom_up", "prism_tone", "deferred_resolve", "albedo_over",
-            "terrain_debug", "terrain_layers", "terrain_layers_local")
+            "terrain_debug", "terrain_layers", "terrain_layers_local", "terrain_prints", "terrain_prints_local")
 # one triangle over the whole viewport
 VERTEX_SOURCE = (
     "void main()\n"
@@ -229,7 +229,7 @@ SMAA_PREFIX = (
 UNITS = {"color_texture": 0, "edges_texture": 0, "area_texture": 1, "search_texture": 2, "weights_texture": 1,
          "local_texture": 1, "base_texture": 1, "additions_texture": 2, "gbuffer_texture": 3, "albedo_texture": 0,
          "classes_texture": 1, "events_texture": 2, "extras_texture": 2, "detail_texture": 4,
-         "surface_texture": 5, "macro_texture": 6}
+         "surface_texture": 5, "macro_texture": 6, "prints_texture": 7, "pages_texture": 8}
 # display.lighting "ce_deferred"'s resolve (Vulkan's: xgpu_vulkan_post_
 # deferred_resolve): each pixel the copy of the light (the colour target's
 # pixels) times the base plus the additions, the additions' alpha (CE's
@@ -443,14 +443,31 @@ TERRAIN_DEBUG_SOURCE = (
 # above, FINE_SCALE times as many tiles, within 1 to 12 world units: the sand's grain, which one tile at its size
 # draws too large and soft up close), the steepness triplanar starts at, negative where the taps are not turned
 # (rock: its strata stay level). bounds.w 1: the weight shown.
-TERRAIN_LAYERS_SOURCE = """uniform sampler2D color_texture;
+#
+# T4's prints (TERRAIN_PRINTS: the same with the parts marked PRINTS; the plain pass is the text without them, its
+# words unchanged): the prints' pool (prints_texture, a 2D array of pages: the displacement in world units, the
+# compaction, the ground's height over the page's own times the coverage, the coverage) through the page table
+# about the camera (pages_texture: a page's pool layer + 1, its x and y, its height's bits; a page at x, y modulo the
+# window's side). Where the pixel's ground takes prints (sand, dirt, mud, snow) within prints2.x world units, its
+# view ray is marched through the field from the highest rim to the deepest floor (linear steps of about a pixel's
+# footprint, at most prints2.y, refined between the last two), the layers looked up at the point met (CE's own colour
+# stays the pixel's), the normal bent by the field's slope there, the floor a little darker (damp sand under the
+# dry: snow packed greyer and smoother), and the field marched toward the sun (prints1: toward it) over prints2.z
+# steps for the micro-shadow, written with the cavity's occlusion (the floor under the field's mean about it) at
+# location 2 (micro_out: Raster's light pass multiplies its sun by red). prints0: pages a world unit, a texel's
+# world units, a page's own texels, the window's side; prints3: the deepest floor and the highest rim (world
+# units), a page's texels with its apron, its last level. prints2.w 1: the micro-shadow, the cavity and the depth
+# shown.
+TERRAIN_LAYERS_RAW = """uniform sampler2D color_texture;
 uniform sampler2D classes_texture;
 uniform usampler2D extras_texture;
 uniform usampler2D gbuffer_texture;
 uniform sampler2DArray detail_texture;
 uniform sampler2DArray surface_texture;
 uniform sampler2D macro_texture;
-uniform vec4 metrics;
+/*PRINTS{*/uniform sampler2DArray prints_texture;
+uniform usampler2D pages_texture;
+/*}PRINTS*/uniform vec4 metrics;
 uniform vec4 bounds;
 uniform vec4 hdr;
 uniform vec4 window;
@@ -480,9 +497,14 @@ uniform vec4 layer12;
 uniform vec4 layer13;
 uniform vec4 layer14;
 uniform vec4 layer15;
-out vec4 result;
+/*PRINTS{*/uniform vec4 prints0;
+uniform vec4 prints1;
+uniform vec4 prints2;
+uniform vec4 prints3;
+/*}PRINTS*/out vec4 result;
 layout(location = 1) out uvec4 words_out;
-
+/*PRINTS{*/layout(location = 2) out vec4 micro_out;
+/*}PRINTS*/
 vec4 layer_a(int i)
 {
 	return i == 0 ? layer0 : i == 1 ? layer2 : i == 2 ? layer4 : i == 3 ? layer6 : i == 4 ? layer8 : i == 5 ? layer10 :
@@ -657,7 +679,116 @@ void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, floa
 	rough *= 2.0;
 }
 
-float oklab_l(vec3 c)
+/*PRINTS{*//* the prints' field at a world point: the displacement (world units), the compaction, the ground's height,
+the coverage; none where no page is, or where the texel's ground is not the pixel's (z: more than 0.3 world units
+off, a bridge over the print or a floor under it) */
+vec4 print_at(vec2 xy, float z, float lod)
+{
+	vec2 pc = floor(xy * prints0.x);
+	uvec4 e = texelFetch(pages_texture, ivec2(mod(pc, prints0.w)), 0);
+	if (e.x == 0u || int(e.y) != int(pc.x) || int(e.z) != int(pc.y))
+		return vec4(0.0);
+	vec2 local = xy / prints0.y - pc * prints0.z + 1.0;
+	vec4 v = textureLod(prints_texture, vec3(local / prints3.z, float(e.x - 1u)), lod);
+	float ground = uintBitsToFloat(e.w) + v.z / max(v.w, 1.0e-3);
+	float own = clamp(v.w, 0.0, 1.0) * (1.0 - smoothstep(0.15, 0.3, abs(z - ground)));
+	return vec4(v.x * own, v.y * own, ground, own);
+}
+
+/* the view ray (d, from the eye) through the prints about p (the flat surface's point, its footprint dpx, dpy):
+the point met, the field's slope there, its depth, its compaction, the sun's visibility there (the field marched
+toward the sun) and the cavity's occlusion; p and no print where there is none */
+void print_march(vec3 p, vec3 d, vec3 dpx, vec3 dpy, float deepest, out vec2 hit, out vec2 slope, out float depth,
+	out float pack, out float micro, out float cavity)
+{
+	hit = p.xy;
+	slope = vec2(0.0);
+	depth = 0.0;
+	pack = 0.0;
+	micro = 1.0;
+	cavity = 1.0;
+	float texel = prints0.y;
+	float foot = max(length(dpx), length(dpy));
+	float lod = clamp(log2(max(foot / texel, 1.0)), 0.0, prints3.w);
+	float dz = min(d.z, -0.03);
+	float top = prints3.y, bottom = -deepest;
+	/* (the ray's span over the field's heights, from the highest rim to the deepest floor; nothing where neither
+	end nor the pixel has a page) */
+	vec2 a = p.xy + d.xy * (top / dz), b = p.xy + d.xy * (bottom / dz);
+	float first = print_at(a, p.z, lod).x;
+	if (print_at(p.xy, p.z, lod).w <= 0.0 && print_at(a, p.z, lod).w <= 0.0 && print_at(b, p.z, lod).w <= 0.0)
+		return;
+	int steps = int(clamp(length(b - a) / max(foot, texel * 1.5), 4.0, prints2.y));
+	float last_h = top, last_f = first;
+	vec2 last_xy = a, met = b;
+	for (int i = 1; i <= 24; i++)
+	{
+		if (i > steps)
+			break;
+		float t = float(i) / float(steps);
+		float h = mix(top, bottom, t);
+		vec2 xy = mix(a, b, t);
+		float f = print_at(xy, p.z, lod).x;
+		if (h <= f)
+		{
+			/* (the crossing found between the last two steps by halving it thrice, then the secant) */
+			vec2 xa = last_xy, xb = xy;
+			float ha = last_h, hb = h, fa = last_f, fb = f;
+			for (int j = 0; j < 3; j++)
+			{
+				vec2 xm = 0.5 * (xa + xb);
+				float hm = 0.5 * (ha + hb), fm = print_at(xm, p.z, lod).x;
+				if (hm <= fm)
+				{
+					xb = xm;
+					hb = hm;
+					fb = fm;
+				}
+				else
+				{
+					xa = xm;
+					ha = hm;
+					fa = fm;
+				}
+			}
+			float d0 = ha - fa, d1 = hb - fb;
+			met = mix(xa, xb, clamp(d0 / max(d0 - d1, 1.0e-6), 0.0, 1.0));
+			break;
+		}
+		last_h = h;
+		last_f = f;
+		last_xy = xy;
+	}
+	hit = met;
+	vec4 v = print_at(met, p.z, lod);
+	if (v.w <= 0.0)
+		return;
+	depth = v.x;
+	pack = v.y;
+	float e = texel * exp2(lod);
+	float hx = print_at(met + vec2(e, 0.0), p.z, lod).x - print_at(met - vec2(e, 0.0), p.z, lod).x;
+	float hy = print_at(met + vec2(0.0, e), p.z, lod).x - print_at(met - vec2(0.0, e), p.z, lod).x;
+	slope = vec2(hx, hy) / (2.0 * e);
+	float mean = print_at(met, p.z, min(lod + 2.0, prints3.w)).x;
+	cavity = 1.0 - 0.3 * smoothstep(0.0, 0.01, mean - v.x);
+	if (prints1.w > 0.5 && prints1.z > 0.02)
+	{
+		float shade = 0.0;
+		int count = int(prints2.z);
+		for (int k = 1; k <= 12; k++)
+		{
+			if (k > count)
+				break;
+			float t = 0.09 * float(k) / float(count);
+			float rise = v.x + prints1.z * t;
+			float f = print_at(met + prints1.xy * t, p.z, lod).x;
+			shade = max(shade, clamp((f - rise) / (texel * 0.75), 0.0, 1.0));
+		}
+		micro = 1.0 - shade;
+	}
+}
+
+/*}PRINTS*/float oklab_l(vec3 c)
 {
 	/* (Oklab's lightness of a grey of the colour's luminance: its cube root; near enough for the cues) */
 	vec3 lin = c * c;
@@ -786,7 +917,8 @@ void main()
 		float rf = TERRAIN_ROUGHNESS[far_class];
 		result = vec4(far_color, base.a);
 		words_out = classed(w, far_class, rf >= 0.0 ? rf : float(w.z & 255u) / 255.0, 1.0);
-		return;
+/*PRINTS{*/		micro_out = vec4(1.0, 1.0, 0.0, 1.0);
+/*}PRINTS*/		return;
 	}
 	vec4 corners = view_corners;
 	vec2 span = max(corners.zw - corners.xy, vec2(1.0));
@@ -803,7 +935,21 @@ void main()
 	rn = abs(rn) < 0.05 ? (rn < 0.0 ? -0.05 : 0.05) : rn;
 	vec3 dpx = dist * (rx - ray * (dot(rx, plane) / rn));
 	vec3 dpy = dist * (ry - ray * (dot(ry, plane) / rn));
-	vec4 detail, detail_b;
+/*PRINTS{*/	/* (the prints: their ground's pixels near enough; the layers looked up where the ray meets them) */
+	float print_micro = 1.0, print_cavity = 1.0, print_depth = 0.0, print_pack = 0.0;
+	vec2 print_slope = vec2(0.0);
+	bool printed = (c.r == 1u || c.r == 2u || c.r == 3u || c.r == 5u || c.g == 1u || c.g == 2u || c.g == 3u ||
+		c.g == 5u) && dist < prints2.x && n.z > 0.6;
+	if (printed)
+	{
+		vec2 hit;
+		/* (the deepest a print goes: snow's prints far deeper than the rest's) */
+		float deepest = c.r == 5u || c.g == 5u ? prints3.x : prints3.x * 0.5;
+		print_march(p, normalize(ray), dpx, dpy, deepest, hit, print_slope, print_depth, print_pack, print_micro,
+			print_cavity);
+		p.xy = hit;
+	}
+/*}PRINTS*/	vec4 detail, detail_b;
 	vec3 normal, normal_b;
 	float rough, rough_b, ao, ao_b;
 	/* (the surface (normal, roughness) only near, where it is drawn; one class alone where the other has
@@ -833,7 +979,10 @@ void main()
 	vec4 a = layer_a(la), b = layer_b(la);
 	vec4 macro = texture(macro_texture, p.xy * (1.0 / 24.0));
 	float k = a.y * fade * clamp(0.7 + (macro.r - 0.5) * 1.2 + (macro.g - 0.5) * 0.6, 0.35, 1.25);
-	vec3 ratio = detail.rgb * 2.0;
+/*PRINTS{*/	/* (a print's floor pressed smooth: the sand's grain and relief less where the foot packed it) */
+	float print_press = printed ? clamp(max(-print_depth / 0.008, clamp(print_pack, 0.0, 1.0)), 0.0, 1.0) : 0.0;
+	k *= 1.0 - 0.75 * print_press;
+/*}PRINTS*/	vec3 ratio = detail.rgb * 2.0;
 	float lum = max(dot(ratio, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
 	ratio = lum * mix(vec3(1.0), ratio / lum, a.z);
 	ratio = mix(vec3(1.0), ratio, k);
@@ -859,7 +1008,22 @@ void main()
 		occlusion = mix(occlusion, 1.0, snow_cover);
 		cls = snow_cover > 0.5 ? 5u : cls;
 	}
-	if (bounds.w > 0.5)
+/*PRINTS{*/	/* (a print's floor a little darker, the damp sand under the dry; snow packed greyer and smoother; the
+	normal bent by the field's slope) */
+	if (printed)
+	{
+		float snow = c.r == 5u ? 1.0 : 0.0;
+		float under = clamp(-print_depth / 0.008, 0.0, 1.0);
+		color *= mix(1.0, mix(0.80, 0.93, snow), max(under * (1.0 - snow), clamp(print_pack, 0.0, 1.0) * snow));
+		color *= 1.0 + 0.07 * (1.0 - snow) * clamp(print_depth / 0.0015, 0.0, 1.0);
+		r = clamp(r * mix(1.0, mix(1.06, 0.78, snow), clamp(print_pack, 0.0, 1.0)), 0.02, 1.0);
+		normal = normalize(mix(normal, n, 0.6 * print_press));
+		normal = normalize(normal + vec3(-print_slope, 0.0));
+	}
+	if (prints2.w > 0.5)
+		color = vec3(print_micro, print_cavity, clamp(-print_depth * 60.0, 0.0, 1.0));
+	micro_out = vec4(print_micro, print_cavity, 0.0, 1.0);
+/*}PRINTS*/	if (bounds.w > 0.5)
 		color = vec3(weight, fade, float(la) / 6.0);
 	result = vec4(color, base.a);
 	uvec4 o = classed(w, cls, r, occlusion);
@@ -868,19 +1032,31 @@ void main()
 	words_out = uvec4(w.x, packSnorm2x16(fold(normal)), o.z, w.w);
 }
 """
+PRINTS_BLOCK = re.compile(r"/\*PRINTS\{\*/(.*?)/\*\}PRINTS\*/", re.S)
+TERRAIN_LAYERS_SOURCE = PRINTS_BLOCK.sub("", TERRAIN_LAYERS_RAW)
+TERRAIN_PRINTS_SOURCE = PRINTS_BLOCK.sub(lambda match: match[1], TERRAIN_LAYERS_RAW)
+
+
 # the same, where the device reads a target where it is drawn (dynamic rendering's local reads: Vulkan's
 # xgpu_vulkan_post_terrain_layers, capabilities color_read): the G-buffer's words are the pass's first target,
 # read where it is drawn (input attachment 0 of set 2) and written through a mask of their second and third words
 # (the normal and the roughness), the base the second target, written whole (its alpha the copy's), so that the
 # words are not copied.
-TERRAIN_LAYERS_LOCAL_SOURCE = TERRAIN_LAYERS_SOURCE.replace(
-    "uniform usampler2D gbuffer_texture;\n",
-    "layout(input_attachment_index = 0, set = 2, binding = 0) uniform usubpassInput words_input;\n").replace(
-    "out vec4 result;\nlayout(location = 1) out uvec4 words_out;\n",
-    "layout(location = 1) out vec4 base_out;\nlayout(location = 0) out uvec4 words_out;\n").replace(
-    "\tuvec4 w = texelFetch(gbuffer_texture, texel, 0);\n", "\tuvec4 w = subpassLoad(words_input);\n").replace(
-    "result = vec4(", "base_out = vec4(")
-assert TERRAIN_LAYERS_LOCAL_SOURCE.count("words_input") == 2 and "base_out" in TERRAIN_LAYERS_LOCAL_SOURCE
+def terrain_local(source: str) -> str:
+    local = source.replace(
+        "uniform usampler2D gbuffer_texture;\n",
+        "layout(input_attachment_index = 0, set = 2, binding = 0) uniform usubpassInput words_input;\n").replace(
+        "out vec4 result;\nlayout(location = 1) out uvec4 words_out;\n",
+        "layout(location = 1) out vec4 base_out;\nlayout(location = 0) out uvec4 words_out;\n").replace(
+        "\tuvec4 w = texelFetch(gbuffer_texture, texel, 0);\n", "\tuvec4 w = subpassLoad(words_input);\n").replace(
+        "result = vec4(", "base_out = vec4(")
+    assert local.count("words_input") == 2 and "base_out" in local
+    return local
+
+
+TERRAIN_LAYERS_LOCAL_SOURCE = terrain_local(TERRAIN_LAYERS_SOURCE)
+TERRAIN_PRINTS_LOCAL_SOURCE = terrain_local(TERRAIN_PRINTS_SOURCE)
+assert "PRINTS" not in TERRAIN_LAYERS_SOURCE and "micro_out" in TERRAIN_PRINTS_LOCAL_SOURCE
 # Vulkan's own program: the frame turned for a swapchain the display turns
 # (a phone held sideways: xgpu_vulkan_post_rotate). Each pixel takes the
 # texel the bounds' matrix (its rows xy and zw) turns it to, about the
@@ -1195,6 +1371,8 @@ def generate(args):
     programs["terrain_debug"] = ("frag", TERRAIN_DEBUG_SOURCE)
     programs["terrain_layers"] = ("frag", TERRAIN_LAYERS_SOURCE)
     programs["terrain_layers_local"] = ("frag", TERRAIN_LAYERS_LOCAL_SOURCE)
+    programs["terrain_prints"] = ("frag", TERRAIN_PRINTS_SOURCE)
+    programs["terrain_prints_local"] = ("frag", TERRAIN_PRINTS_LOCAL_SOURCE)
     programs["clear"] = ("frag", CLEAR)
     text = [
         "/* Generated by tools/vulkan_post_shaders.py from its GLSL, xgpu_hdr.c and port/third_party/smaa. "

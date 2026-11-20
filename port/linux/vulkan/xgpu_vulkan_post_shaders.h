@@ -67,6 +67,11 @@ enum xgpu_vulkan_post_program_id
 	words its first target, read as input attachment 0 of set 2 and written
 	through a mask of their normal and roughness, the base its second) */
 	XGPU_VULKAN_POST_TERRAIN_LAYERS_LOCAL,
+	/* (T4: the same with the prints, by parallax: their pool at unit 7 (a 2D
+	array), their page table at 8; the micro-shadows written at location 2,
+	the third target) */
+	XGPU_VULKAN_POST_TERRAIN_PRINTS,
+	XGPU_VULKAN_POST_TERRAIN_PRINTS_LOCAL,
 	XGPU_VULKAN_POST_PROGRAM_COUNT
 };
 
@@ -106,6 +111,12 @@ struct xgpu_vulkan_post_uniforms
 	float view_corners[4];
 	float class_cue[2][4];
 	float layer[16][4];
+	/* (T4) the prints': the pages a world unit, a texel's world units, a
+	page's own texels, the window's pages a side; the sun (toward it, w 1
+	where there is one); the parallax's reach, its most steps, the
+	micro-shadow's steps, the debug view; the deepest print and the highest
+	rim (world units), a page's texels with its apron, its last level */
+	float prints[4][4];
 };
 
 struct xgpu_vulkan_post_module

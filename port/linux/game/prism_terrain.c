@@ -42,6 +42,7 @@ no state of the game's. HALO_PORT_NETWORK_VERSION is unchanged.
 #include "game/players.h"
 #include "objects/objects.h"
 #include "objects/object_types.h"
+#include "physics/collisions.h"
 #include "scenario/scenario.h"
 #include "scenario/wind.h"
 #include "structures/structure_bsp_definitions.h"
@@ -79,6 +80,9 @@ boolean main_menu_is_active(void);
 /* (events within this many world units of a local player's camera: what
 the renderer can show) */
 #define EVENT_RANGE 60.0f
+/* (T4: feet past CE's material effect's reach (10 world units) within this
+of a local player's camera are found for the prints) */
+#define PRINT_FOOT_RANGE 40.0f
 /* (a footstep's ray's hit belongs to the foot just sent within this) */
 #define GROUND_REACH 0.6f
 #define WADER_SECONDS 10.0f
@@ -606,9 +610,60 @@ void prism_terrain_footstep(
 		return;
 	}
 	event->kind |= (uint32_t)(species_of(biped_index) << 24);
-	event->facing = (uint32_t)octahedral(&marker->forward);
+	/* (T4: the foot's facing the body's, the way a print points; a contact
+	marker's own axes are the skeleton's, not the sole's) */
+	event->facing = (uint32_t)octahedral(&object_get(biped_index)->object.forward);
 	event->magnitude = 1.0f;
 	prism_terrain.pending_foot = (long)(event - prism_terrain.events);
+}
+
+boolean prism_terrain_footstep_far(
+	real_point3d const *centre)
+{
+	short local_player_index;
+
+	if (!prism_terrain_wanted() || !prism_terrain.tracks)
+	{
+		return FALSE;
+	}
+	for (local_player_index = 0; local_player_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; local_player_index++)
+	{
+		if (local_player_get_player_index(local_player_index) != NONE &&
+			distance_squared3d(&observer_get_camera(local_player_index)->position, centre) <
+			PRINT_FOOT_RANGE * PRINT_FOOT_RANGE)
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+void prism_terrain_footstep_trace(
+	real_point3d const *marker)
+{
+	real_point3d test_point;
+	real_vector3d test_vector;
+	struct collision_result collision;
+
+	if (prism_terrain.pending_foot < 0 || !prism_terrain_wanted())
+	{
+		return;
+	}
+	/* (material_effect_new_from_point's ray, the structure's alone: the
+	ground under the foot) */
+	test_point = *marker;
+	test_point.z += 0.15f;
+	test_vector.i = 0.0f;
+	test_vector.j = 0.0f;
+	test_vector.k = -0.3f;
+	if (collision_test_vector(FLAG(_collision_test_structure_bit), &test_point, &test_vector, NONE, &collision))
+	{
+		long material_type = scenario_location_underwater(&collision.location, &collision.point, NULL) ? 0x1c :
+			(long)collision.material_type;
+
+		prism_terrain_footstep_ground(&collision.point, &collision.plane.n, material_type);
+	}
+	prism_terrain.pending_foot = -1;
 }
 
 void prism_terrain_footstep_ground(

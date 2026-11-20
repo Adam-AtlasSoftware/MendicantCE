@@ -1056,8 +1056,10 @@ static const struct config_setting config_settings[] =
 		"empty: the data folder's prism_terrain." },
 	{ "display.terrain_tracks", _config_boolean, "true", "HALO_TERRAIN_TRACKS", _environment_value,
 		_platform_desktop,
-		"With display.terrain: footprints, tyre tracks and craters in sand,\n"
-		"snow, dirt and mud (not drawn yet)." },
+		"With display.terrain: footprints in sand, snow, dirt and mud, kept\n"
+		"for the level, pressed by every biped's feet (the HQ layers' pass\n"
+		"draws them: display.terrain_layers \"hq\"); tyre tracks and craters\n"
+		"are not drawn yet." },
 	{ "display.terrain_drifts", _config_boolean, "true", "HALO_TERRAIN_DRIFTS", _environment_value,
 		_platform_desktop,
 		"With display.terrain: sand and snow piled at the walls' feet (not\n"

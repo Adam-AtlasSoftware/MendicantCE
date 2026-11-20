@@ -33,7 +33,10 @@ Without a FRAME this frame (Classic, multiplayer, display.terrain "off")
 nothing here draws, and the classes are only kept.
 */
 
+#include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_terrain.h"
+#include "xgpu_vulkan_terrain_prints.h"
+#include "xgpu_vulkan_scene.h"
 #include "host.h"
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_post.h"
@@ -155,6 +158,13 @@ static struct
 	frame with no layers over them: the class view, Classic's frames, a
 	target the pass cannot draw to) */
 	int drawn_frame, drawn_shown;
+	/* (T4) the prints' micro-shadow target (RGBA8, the base's size: the sun's
+	visibility at the print's surface, its cavity's occlusion), drawn this
+	frame for the window whose base it is (Raster's light pass reads it:
+	xgpu_vulkan_terrain_micro); the last FRAME's step, camera and wind */
+	struct xgpu_vulkan_image *micro;
+	int micro_drawn, prints_logged;
+	float step, camera[3], wind[3];
 } terrain;
 
 /* ---------- classes */
@@ -321,6 +331,7 @@ void xgpu_vulkan_terrain_record(const struct xgpu_stream_prism_terrain *record)
 				record->flags & XGPU_TERRAIN_FLAG_CAMPAIGN ? "campaign" : "not a campaign");
 			terrain.generation = record->generation;
 			events_forget();
+			terrain_prints_forget();
 			{
 				uint32_t h = record->map_checksum * 2654435761u;
 				float angle = (float)(h >> 8) * (6.2831853f / 16777216.0f);
@@ -332,6 +343,9 @@ void xgpu_vulkan_terrain_record(const struct xgpu_stream_prism_terrain *record)
 		}
 		terrain.frame_flags = record->flags;
 		terrain.fresh = terrain.ever = 1;
+		/* (T4: the prints' clock, relax and infill, with display.terrain_tracks) */
+		if (record->flags & XGPU_TERRAIN_FLAG_TRACKS)
+			terrain_prints_frame(record->game_seconds, record->camera, record->wind);
 		if (record->pack_folder)
 		{
 			const char *folder = (const char *)host_pointer(record->pack_folder);
@@ -385,7 +399,11 @@ void xgpu_vulkan_terrain_record(const struct xgpu_stream_prism_terrain *record)
 	if (record->phase == XGPU_TERRAIN_EVENTS)
 	{
 		for (index = 0; index < record->count; index++)
+		{
 			event_keep(&record->items[index]);
+			if (terrain.frame_flags & XGPU_TERRAIN_FLAG_TRACKS)
+				terrain_prints_event(&record->items[index]);
+		}
 	}
 	else if (record->phase == XGPU_TERRAIN_WADERS)
 	{
@@ -393,6 +411,7 @@ void xgpu_vulkan_terrain_record(const struct xgpu_stream_prism_terrain *record)
 
 		terrain.wader_count = record->count < XGPU_TERRAIN_WADERS_MOST ? record->count : XGPU_TERRAIN_WADERS_MOST;
 		memcpy(terrain.waders, waders, terrain.wader_count * sizeof(waders[0]));
+		terrain_prints_waders(terrain.waders, terrain.wader_count);
 	}
 }
 
@@ -404,6 +423,8 @@ int xgpu_vulkan_terrain_view_held(void)
 void xgpu_vulkan_terrain_window(void)
 {
 	terrain.layers_drawn = 0;
+	/* (a window's own: another's micro-shadows are not this one's) */
+	terrain.micro_drawn = 0;
 }
 
 void xgpu_vulkan_terrain_frame_end(void)
@@ -412,6 +433,7 @@ void xgpu_vulkan_terrain_frame_end(void)
 	terrain.drawn_frame = 0;
 	terrain.fresh = 0;
 	terrain.layers_drawn = 0;
+	terrain.micro_drawn = 0;
 }
 
 /* ---------- the debug views */
@@ -811,9 +833,96 @@ int xgpu_vulkan_terrain_pack_state(const char *folder)
 	return state;
 }
 
+/* (T4) the sun toward which the prints' micro-shadows are marched: the loaded
+bake's (the sun Rebaked's light pass lights by), else SCENE_LIGHTS' (its
+direction toward it, w 1), else w 0 */
+static void sun_of(float sun[4])
+{
+	const struct xgpu_stream_scene_light *lights;
+	uint32_t count = 0, serial = 0, index;
+
+	memset(sun, 0, 4 * sizeof(float));
+	if (xgpu_vulkan_bake_sun(sun))
+	{
+		float length = sqrtf(dot3(sun, sun));
+
+		if (length > 1.0e-6f)
+		{
+			sun[0] /= length;
+			sun[1] /= length;
+			sun[2] /= length;
+			sun[3] = 1.0f;
+			return;
+		}
+		memset(sun, 0, 4 * sizeof(float));
+	}
+	lights = xgpu_vulkan_scene_light_table(&count, &serial);
+	for (index = 0; lights && index < count; index++)
+		if (lights[index].type == XGPU_SCENE_LIGHT_SUN && (lights[index].flags & XGPU_SCENE_LIGHT_FLAG_ON))
+		{
+			float length = sqrtf(dot3(lights[index].position, lights[index].position));
+
+			if (!(length > 1.0e-6f))
+				return;
+			sun[0] = lights[index].position[0] / length;
+			sun[1] = lights[index].position[1] / length;
+			sun[2] = lights[index].position[2] / length;
+			sun[3] = 1.0f;
+			return;
+		}
+}
+
+/* (T4) the micro-shadow target, the base's size, cleared to lit (1) and
+unoccluded (1) for the pass to draw the prints' pixels into; NULL where it
+cannot be */
+static struct xgpu_vulkan_image *micro_target(struct xgpu_vulkan_image *base)
+{
+	static const float lit[4] = { 1.0f, 1.0f, 0.0f, 1.0f };
+	const struct xgpu_vulkan_image_description *b = xgpu_vulkan_image_description(base);
+	int32_t whole[1][4];
+
+	if (!terrain.micro || xgpu_vulkan_image_description(terrain.micro)->width != b->width ||
+		xgpu_vulkan_image_description(terrain.micro)->height != b->height)
+	{
+		struct xgpu_vulkan_image_description description;
+
+		xgpu_vulkan_image_destroy(terrain.micro);
+		memset(&description, 0, sizeof(description));
+		description.type = XGPU_VULKAN_IMAGE_2D;
+		description.format = XGPU_VULKAN_FORMAT_RGBA8;
+		description.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET;
+		description.width = b->width;
+		description.height = b->height;
+		description.depth_or_layers = 1;
+		description.levels = 1;
+		terrain.micro = xgpu_vulkan_image_create(&description);
+		if (!terrain.micro)
+			return NULL;
+	}
+	whole[0][0] = whole[0][1] = 0;
+	whole[0][2] = (int32_t)b->width;
+	whole[0][3] = (int32_t)b->height;
+	xgpu_vulkan_set_targets(terrain.micro, NULL, 0);
+	xgpu_vulkan_clear((const int32_t (*)[4])whole, 1, XGPU_VULKAN_CLEAR_COLOR | XGPU_VULKAN_CLEAR_CHANNELS, lit, 1.0f,
+		0);
+	return terrain.micro;
+}
+
+struct xgpu_vulkan_image *xgpu_vulkan_terrain_micro(uint32_t width, uint32_t height)
+{
+	const struct xgpu_vulkan_image_description *d;
+
+	if (!terrain.micro_drawn || !terrain.micro)
+		return NULL;
+	d = xgpu_vulkan_image_description(terrain.micro);
+	return d->width == width && d->height == height ? terrain.micro : NULL;
+}
+
 void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
 	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view)
 {
+	struct terrain_prints_draw prints;
+	struct xgpu_vulkan_image *micro = NULL;
 	/* (each class's lightness, Oklab L of CE's colours: none, sand, dirt, mud,
 	rock, snow, ice, water) */
 	static const float cues[XGPU_TERRAIN_CLASSES] = { 0.5f, 0.74f, 0.52f, 0.42f, 0.55f, 0.92f, 0.85f, 0.5f };
@@ -866,8 +975,35 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 		values.layer[index * 2 + 1][2] = v[6] > 0.0f && v[6] <= 1.0f ? v[6] : 0.0f;
 		values.layer[index * 2 + 1][3] = strcmp(terrain.pack.names[index], "rock") ? 0.75f : -0.75f;
 	}
+	/* (T4: the prints, where display.terrain_tracks is on and a page of them
+	lies about the eye: the pass's prints variant, its micro-shadows into
+	their own target) */
+	memset(&prints, 0, sizeof(prints));
+	if ((terrain.frame_flags & XGPU_TERRAIN_FLAG_TRACKS) && !getenv("HALO_TERRAIN_NO_PRINTS"))
+	{
+		float sun[4];
+
+		sun_of(sun);
+		if (terrain_prints_prepare(view->now[0], sun, &prints))
+		{
+			const char *shown = getenv("HALO_TERRAIN_PRINTS_VIEW");
+
+			memcpy(values.prints, prints.values, sizeof(values.prints));
+			values.prints[2][3] = shown ? (float)atof(shown) : 0.0f;
+			micro = micro_target(base);
+		}
+	}
 	terrain.layers_drawn = xgpu_vulkan_post_terrain_layers(base, words, extras, terrain.class_image,
-		terrain.pack.detail, terrain.pack.surface, terrain.pack.macro, &values);
+		terrain.pack.detail, terrain.pack.surface, terrain.pack.macro, micro ? prints.pool : NULL,
+		micro ? prints.table : NULL, micro, &values);
+	terrain.micro_drawn = micro && terrain.layers_drawn;
+	/* (logged at the first frame drawn, and again where the sun comes or goes) */
+	if (terrain.micro_drawn && terrain.prints_logged != (prints.values[1][3] > 0.5f ? 2 : 1))
+	{
+		host_logf(HOST_LOG_INFO, "prism terrain: the prints drawn by parallax over the HQ layers, their sun's "
+			"micro-shadows for Raster's light (sun %s)", prints.values[1][3] > 0.5f ? "found" : "none");
+		terrain.prints_logged = prints.values[1][3] > 0.5f ? 2 : 1;
+	}
 	terrain.drawn_frame |= terrain.layers_drawn;
 	if (!terrain.layers_logged)
 	{
