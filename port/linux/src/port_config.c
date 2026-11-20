@@ -1036,13 +1036,14 @@ static const struct config_setting config_settings[] =
 		"level played before its bake is done in the background while you play;\n"
 		"\"off\" never (a bake made before is still drawn). The older \"ask\" is\n"
 		"read as \"auto\"." },
-	{ "display.bake_quality", _config_string, "\"max\"", "HALO_BAKE_QUALITY", _environment_value,
+	{ "display.bake_quality", _config_string, "\"ultra\"", "HALO_BAKE_QUALITY", _environment_value,
 		_platform_desktop,
-		"The bake's quality: \"max\" the finest (16 texels a world unit where the\n"
-		"player can be and finer where the light needs it, every texel's samples\n"
-		"until its noise is under 1%, the sun's shadows at 4 times the texels;\n"
-		"slow and large), \"ultra\", \"high\" or \"draft\" quicker and smaller.\n"
-		"A change bakes again." },
+		"The bake's quality: \"ultra\" (the default: minutes a level on the main\n"
+		"menu, as games compile their shaders), \"max\" the finest (16 texels a\n"
+		"world unit where the player can be and finer where the light needs it,\n"
+		"every texel's samples until its noise is under 1%, the sun's shadows at\n"
+		"4 times the texels; slow, hours a level, and large), \"high\" or \"draft\"\n"
+		"quicker and smaller. A change bakes again." },
 	{ "display.terrain", _config_string, "\"on\"", "HALO_TERRAIN", _environment_value, _platform_desktop,
 		"The terrain, weather and water overhaul (docs/prism_terrain.md), in a\n"
 		"campaign with PRISM Rebaked or Path Traced (display.lighting \"raster\"\n"
@@ -6245,7 +6246,7 @@ static const struct
 	{ "display.weather", { "prism", "ce", NULL }, "prism" },
 	{ "display.water", { "prism", "ce", NULL }, "prism" },
 	{ "display.bake", { "auto", "off", NULL }, "auto" },
-	{ "display.bake_quality", { "max", "ultra", "high", "draft", NULL }, "max" },
+	{ "display.bake_quality", { "max", "ultra", "high", "draft", NULL }, "ultra" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },
 	{ "display.prism_rt_quality", { "medium", "low", "high", "ultra", NULL }, "medium" },
 	{ "display.prism_rt_resolution", { "auto", "half", "full", NULL }, "auto" },

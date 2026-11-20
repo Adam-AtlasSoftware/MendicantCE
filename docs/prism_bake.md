@@ -346,7 +346,7 @@ the first traced window) and the beach stayed CE's light 16 s coming out.
 | --- | --- | --- |
 | `display.lighting` | `"ce"`, `"ce_deferred"`, `"raster"` | Raster is the third |
 | `display.bake` | `"auto"`, `"off"` | Bake on the main menu and while playing (default), never (a whole bake is still drawn); the older `"ask"` is read as `"auto"` |
-| `display.bake_quality` | `"max"`, `"ultra"`, `"high"`, `"draft"` | D4's `max` the default |
+| `display.bake_quality` | `"max"`, `"ultra"`, `"high"`, `"draft"` | `ultra` the default since prism-9 (minutes a level on the main menu); D4's `max` (hours a level) where asked for. A config.toml that names a quality keeps it |
 | `display.bake_rebake` | an integer | Each change bakes the BSP drawn again from nothing (the console's; Settings' Rebake All deletes every level's bake) |
 | `display.bake_folder` | a path | Empty: the data folder's `prism_bake` |
 | `display.bake_budget` | 0.25 to 200 ms | The GPU time a frame may give a background bake (30 in the menus, 60 with `debug.bake_exit`, 40 in the main menu's worker) |

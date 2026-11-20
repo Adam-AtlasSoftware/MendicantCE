@@ -212,8 +212,9 @@ static void settings_read(
 	/* ("ask", the older word, is read as "auto": port_config.c) */
 	prism_bake.mode = value && !strcmp(value, "off") ? XGPU_BAKE_MODE_OFF : XGPU_BAKE_MODE_AUTO;
 	value = config_string("display.bake_quality");
-	prism_bake.quality = !value ? 3 : !strcmp(value, "draft") ? 0 : !strcmp(value, "high") ? 1 :
-		!strcmp(value, "ultra") ? 2 : 3;
+	/* (ultra the default; max only where it is asked for) */
+	prism_bake.quality = !value ? 2 : !strcmp(value, "draft") ? 0 : !strcmp(value, "high") ? 1 :
+		!strcmp(value, "max") ? 3 : 2;
 	prism_bake.request = config_integer("display.bake_rebake");
 	prism_bake.budget = (float)config_real("display.bake_budget");
 	if (!(prism_bake.budget >= 0.25f && prism_bake.budget <= 200.0f))
