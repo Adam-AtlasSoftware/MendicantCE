@@ -212,6 +212,7 @@ symbols in this file:
 
 #include "real_math.h"
 #include "passenger_camera.h" /* port: port/linux/game/passenger_camera.c; after the limit2d alias above */
+#include "chase_camera.h" /* port: port/linux/game/chase_camera.c */
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "sim_rate.h" /* port: port/linux/game/sim_rate.c */
 #include "network_substeps.h" /* port: port/linux/game/network_substeps.c */
@@ -1773,6 +1774,9 @@ static void get_local_player_input_blob(
 				if (player_control_camera_control_is_active())
 				{
 					real_euler_angles2d look_delta;
+					/* port: the turn the magnetism added to the look this frame,
+					for the third-person camera's reticle assist (chase_camera.c) */
+					real_euler_angles2d magnetism_turn;
 					/* port: the touch controls' swipe or gyroscope this frame */
 					boolean touching = FALSE;
 					/* port: the stick's turn accelerating, by the controller's
@@ -1782,6 +1786,8 @@ static void get_local_player_input_blob(
 
 					player_control_stick_zoom_look(gamepad_index, player->unit_index, control->zoom_level,
 						&look_delta);
+					magnetism_turn.yaw = 0.f;
+					magnetism_turn.pitch = 0.f;
 
 					{
 						/* port: the touch controls' swipe (port/linux/src/xinput_sdl.c),
@@ -1884,10 +1890,14 @@ static void get_local_player_input_blob(
 								target_angular_velocity.pitch,
 								-DEGREES_TO_RADIANS(3.f),
 								DEGREES_TO_RADIANS(3.f));
+							/* port: (what the magnetism adds to the turn) */
+							magnetism_turn = look_delta;
 							look_delta.yaw = target_angular_velocity.yaw * magnetism_scale +
 								look_delta.yaw * input_scale;
 							look_delta.pitch = target_angular_velocity.pitch * magnetism_scale +
 								look_delta.pitch * input_scale;
+							magnetism_turn.yaw = look_delta.yaw - magnetism_turn.yaw;
+							magnetism_turn.pitch = look_delta.pitch - magnetism_turn.pitch;
 						}
 					}
 
@@ -1896,6 +1906,10 @@ static void get_local_player_input_blob(
 
 						input->facing_delta.yaw = facing_scale * look_delta.yaw;
 						input->facing_delta.pitch = facing_scale * look_delta.pitch;
+						/* port: the view only; the facing is the game's as ever */
+						chase_camera_assist_turn(local_player_index, facing_scale * magnetism_turn.yaw,
+							facing_scale * magnetism_turn.pitch,
+							control->target_object_index != NONE && control->magnetism_level > 0.f, time_delta_sec);
 					}
 					{
 						/* direct mouse aim (port/linux/src/xinput_sdl.c) */

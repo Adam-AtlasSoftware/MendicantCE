@@ -29,6 +29,22 @@ eased (a near wall swept over does not jerk the view), and held at least
 CHASE_TARGET_NEAREST out (a target at the muzzle would swing the view
 round).
 
+Aim assist (camera.third_person_reticle_assist, on by default) moves the
+reticle, not the camera. The game's aim is unchanged: a controller's
+magnetism still slows the player's turn over a target and drags it along
+with a moving one (player_control.c), and the shots are still bent toward
+the target by autoaim (aim_assist.c's player_aim_projectile). But the
+view leaves the magnetism's part of the turn out (chase_camera_assist_
+turn: the facing less what the magnetism added, at most CHASE_ASSIST_YAW_
+MOST and _PITCH_MOST, given back over a third of a second once the assist
+has no target), and it converges on the world behind the aim (the trace
+leaves units, weapons and the like out), so that an enemy crossing the
+aim does not swing the view; the reticle is drawn where the shot lands
+(chase_camera_reticle_screen: the weapon's own ray, autoaim and all, as
+the shot leaves, traced to what it hits and projected through the view as
+drawn), eased, kept on the screen, back in the middle without a target.
+Off, the view turns with the aim and the reticle is in the middle.
+
 Zoomed with a scope, the view is the first person's until the zoom ends;
 in a vehicle's seat, its own; dead, the dead camera's; in a cinematic or a
 scripted camera, theirs. Not in multiplayer games unless
@@ -48,6 +64,10 @@ in the VR mode, nor in Forge's.
 #include "objects/objects.h"
 #include "physics/collisions.h"
 #include "physics/collision_usage.h"
+#include "items/weapons.h"
+#include "render/render.h"
+#include "render/render_cameras.h"
+#include "render/render_cameras_internal.h"
 #include "units/units.h"
 
 #include "player_settings.h"
@@ -86,6 +106,24 @@ wheel's (world units) */
 /* a distance changed by the keys or the wheel written to config.toml this
 long after the last change (milliseconds) */
 #define CHASE_WRITE_AFTER 1500
+/* camera.third_person_reticle_assist: the most of the magnetism's turn the
+view leaves out (beyond it the view follows the aim), how quickly it is
+given back once the assist has no target (of the way a second,
+exponential), how quickly the reticle eases to where the shot lands, and
+how near the screen's edges it may go (of the view's half width and
+height) */
+#define CHASE_ASSIST_YAW_MOST (12.0f * _pi / 180.0f)
+#define CHASE_ASSIST_PITCH_MOST (8.0f * _pi / 180.0f)
+#define CHASE_ASSIST_RECENTRE 3.0f
+#define CHASE_RETICLE_EASE 18.0f
+#define CHASE_RETICLE_EDGE 0.9f
+/* the world the view converges on with the reticle assist: the projectile's
+trace without the objects that move or are aimed at (the structure, the
+water, scenery and machines) */
+#define CHASE_WORLD_FLAGS (FLAG(_collision_test_front_facing_surfaces_bit) | \
+	FLAG(_collision_test_ignore_invisible_surfaces_bit) | FLAG(_collision_test_structure_bit) | \
+	FLAG(_collision_test_media_bit) | FLAG(_collision_test_objects_bit) | \
+	FLAG(_collision_test_objects_scenery_bit) | FLAG(_collision_test_objects_machines_bit))
 
 static struct chase_camera_globals
 {
@@ -93,7 +131,7 @@ static struct chase_camera_globals
 	{
 		boolean read;
 		unsigned long read_at;
-		boolean third_person, netgames;
+		boolean third_person, netgames, reticle_assist;
 		real distance, shoulder;
 	} settings[PLAYER_SETTINGS_SLOTS];
 	/* each local player's distance as they play (the setting's, then the
@@ -104,6 +142,12 @@ static struct chase_camera_globals
 	boolean target_known[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 	unsigned long last_ms[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 	unsigned long logged_ms;
+	/* the reticle assist: the magnetism's turn the view leaves out, the
+	reticle's eased place from the middle and the clock of its last ease */
+	real_euler_angles2d assist[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	real_point2d reticle[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	boolean reticle_known[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
+	unsigned long reticle_ms[MAXIMUM_NUMBER_OF_LOCAL_PLAYERS];
 	/* a distance the keys changed, to write (0: none) when */
 	unsigned long write_at;
 	real write_distance;
@@ -127,6 +171,8 @@ static void chase_settings(short local_player_index)
 		chase.settings[slot].read_at = config_changes();
 		chase.settings[slot].third_person = view && !strcmp(view, "third_person");
 		chase.settings[slot].netgames = config_player_boolean(local_player_index, "camera.third_person_netgames") != 0;
+		chase.settings[slot].reticle_assist =
+			config_player_boolean(local_player_index, "camera.third_person_reticle_assist") != 0;
 		chase.settings[slot].distance = chase_clamp((real)config_player_real(local_player_index,
 			"camera.third_person_distance"), CHASE_DISTANCE_LEAST, CHASE_DISTANCE_MOST);
 		chase.settings[slot].shoulder = chase_clamp((real)config_player_real(local_player_index,
@@ -256,6 +302,18 @@ boolean chase_camera_command(short local_player_index, struct camera_command *co
 	facing now, which the unit's aim follows) */
 	first_person_camera_deterministic(unit_index, &eye, &aim);
 	facing = *player_control_get_facing_angles(local_player_index);
+	/* (the reticle assist: the view where the player turned it, the
+	magnetism's part of the turn left out) */
+	if (chase.settings[slot].reticle_assist)
+	{
+		facing.yaw -= chase.assist[local_player_index].yaw;
+		facing.pitch -= chase.assist[local_player_index].pitch;
+	}
+	else
+	{
+		chase.assist[local_player_index].yaw = 0.0f;
+		chase.assist[local_player_index].pitch = 0.0f;
+	}
 	facing.pitch = chase_clamp(facing.pitch, -_pi / 2.f + 0.01f, _pi / 2.f - 0.01f);
 	vector3d_from_euler_angles2d(&aim, &facing);
 
@@ -295,13 +353,16 @@ boolean chase_camera_command(short local_player_index, struct camera_command *co
 		focus.z = eye.z + CHASE_HEIGHT;
 	}
 
-	/* the target: where the game's aim reaches from the eye, eased */
+	/* the target: where the game's aim reaches from the eye, eased (with the
+	reticle assist the world's alone: the reticle shows what the shot hits
+	in front of it) */
 	{
 		real_vector3d ray;
 
 		scale_vector3d(&aim, CHASE_TARGET_REACH, &ray);
 		reach = CHASE_TARGET_REACH;
-		if (collision_test_vector(_collision_test_for_projectiles_flags, &eye, &ray, unit_index, &collision))
+		if (collision_test_vector(chase.settings[slot].reticle_assist ? CHASE_WORLD_FLAGS :
+				_collision_test_for_projectiles_flags, &eye, &ray, unit_index, &collision))
 			reach = collision.t * CHASE_TARGET_REACH;
 		reach = chase_clamp(reach, CHASE_TARGET_NEAREST, CHASE_TARGET_REACH);
 		if (!chase.target_known[local_player_index] || seconds <= 0.0f)
@@ -375,12 +436,121 @@ boolean chase_camera_command(short local_player_index, struct camera_command *co
 
 		chase.logged_ms = now;
 		platform_log("chase camera: distance %.2f asked, %.2f from the shoulder point after the walls; shoulder %.2f "
-			"of %.2f; target %.1f out", (double)command->depth, (double)square_root(dx * dx + dy * dy + dz * dz),
-			(double)shoulder, (double)chase.settings[slot].shoulder, (double)reach);
+			"of %.2f; target %.1f out; assist left out %.2f, %.2f degrees; reticle %.1f, %.1f",
+			(double)command->depth, (double)square_root(dx * dx + dy * dy + dz * dz),
+			(double)shoulder, (double)chase.settings[slot].shoulder, (double)reach,
+			(double)(chase.assist[local_player_index].yaw * 180.0f / _pi),
+			(double)(chase.assist[local_player_index].pitch * 180.0f / _pi),
+			(double)chase.reticle[local_player_index].x, (double)chase.reticle[local_player_index].y);
 	}
 	command->forward = toward;
 	observer_up_from_forward(&command->forward, &command->up);
 	object_get_velocities(unit_index, &command->velocity, NULL);
 	SET_FLAG(command->flags, 0, TRUE);
+	return TRUE;
+}
+
+/* ---------- the reticle assist */
+
+void chase_camera_assist_turn(short local_player_index, real yaw, real pitch, boolean target, real seconds)
+{
+	short slot = PLAYER_SETTINGS_SLOT(local_player_index);
+	real_euler_angles2d *assist;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	assist = &chase.assist[local_player_index];
+	/* (the settings' cache first: in first person nothing else is asked) */
+	chase_settings(local_player_index);
+	if (!chase.settings[slot].third_person || !chase.settings[slot].reticle_assist ||
+		!chase_camera_wanted(local_player_index))
+	{
+		assist->yaw = 0.0f;
+		assist->pitch = 0.0f;
+		return;
+	}
+	if (!(seconds > 0.0f))
+		seconds = 0.0f;
+	/* (a target held: the view stays where the player turned it; none: the
+	view brought back to the aim) */
+	if (!target)
+	{
+		real k = (real)exp(-CHASE_ASSIST_RECENTRE * seconds);
+
+		assist->yaw *= k;
+		assist->pitch *= k;
+	}
+	if (yaw == yaw && pitch == pitch)
+	{
+		assist->yaw = chase_clamp(assist->yaw + yaw, -CHASE_ASSIST_YAW_MOST, CHASE_ASSIST_YAW_MOST);
+		assist->pitch = chase_clamp(assist->pitch + pitch, -CHASE_ASSIST_PITCH_MOST, CHASE_ASSIST_PITCH_MOST);
+	}
+}
+
+boolean chase_camera_reticle_screen(short local_player_index, long weapon_index, real_point2d *offset)
+{
+	short slot = PLAYER_SETTINGS_SLOT(local_player_index);
+	long unit_index;
+	real_point3d origin, target;
+	real_vector3d direction, ray;
+	real_point2d screen, want;
+	real half_width, half_height, seconds;
+	unsigned long now;
+	struct collision_result collision;
+
+	if (local_player_index < 0 || local_player_index >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return FALSE;
+	chase_settings(local_player_index);
+	if (!chase.settings[slot].third_person || !chase.settings[slot].reticle_assist ||
+		!chase_camera_wanted(local_player_index) || weapon_index == NONE)
+	{
+		chase.reticle_known[local_player_index] = FALSE;
+		return FALSE;
+	}
+	unit_index = player_control_get_unit_index(local_player_index);
+	/* (the shot's ray as it leaves, before its spread: the weapon's own
+	(weapons.c), with the autoaim's bend toward its target; traced as the
+	game traces it, to what it hits) */
+	want.x = 0.0f;
+	want.y = 0.0f;
+	if (weapon_get_projectile_ray(weapon_index, 0, &origin, &direction))
+	{
+		scale_vector3d(&direction, CHASE_TARGET_REACH, &ray);
+		if (collision_test_vector(_collision_test_for_projectiles_flags, &origin, &ray, unit_index, &collision))
+			target = collision.point;
+		else
+			point_from_line3d(&origin, &direction, CHASE_TARGET_REACH, &target);
+		/* (the view as drawn: display.lowered_reticle's lift and display.
+		panini's projection with it) */
+		if (render_camera_world_to_screen(&render.camera, &render.frustum, &target, &screen))
+		{
+			want.x = screen.x - (render.camera.window_bounds.x0 + render.camera.window_bounds.x1) * 0.5f;
+			want.y = screen.y - (render.camera.window_bounds.y0 + render.camera.window_bounds.y1) * 0.5f;
+		}
+	}
+	half_width = (real)(render.camera.window_bounds.x1 - render.camera.window_bounds.x0) * 0.5f * CHASE_RETICLE_EDGE;
+	half_height = (real)(render.camera.window_bounds.y1 - render.camera.window_bounds.y0) * 0.5f * CHASE_RETICLE_EDGE;
+	if (!(want.x == want.x) || !(want.y == want.y))
+	{
+		want.x = 0.0f;
+		want.y = 0.0f;
+	}
+	want.x = chase_clamp(want.x, -half_width, half_width);
+	want.y = chase_clamp(want.y, -half_height, half_height);
+	now = system_milliseconds();
+	seconds = chase.reticle_known[local_player_index] ?
+		chase_clamp((real)(now - chase.reticle_ms[local_player_index]) * 0.001f, 0.0f, 0.1f) : 0.0f;
+	if (!chase.reticle_known[local_player_index])
+		chase.reticle[local_player_index] = want;
+	else if (seconds > 0.0f)
+	{
+		real k = 1.0f - (real)exp(-CHASE_RETICLE_EASE * seconds);
+
+		chase.reticle[local_player_index].x += (want.x - chase.reticle[local_player_index].x) * k;
+		chase.reticle[local_player_index].y += (want.y - chase.reticle[local_player_index].y) * k;
+	}
+	chase.reticle_known[local_player_index] = TRUE;
+	chase.reticle_ms[local_player_index] = now;
+	*offset = chase.reticle[local_player_index];
 	return TRUE;
 }

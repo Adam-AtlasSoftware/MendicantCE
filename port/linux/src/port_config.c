@@ -477,6 +477,14 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"In third person, how far right of your head the camera is, in world\n"
 		"units (-0.5 to 0.5; below 0 over the left shoulder, 0 centered).", _scope_player },
+	{ "camera.third_person_reticle_assist", _config_boolean, "true", "HALO_CAMERA_THIRD_PERSON_RETICLE_ASSIST",
+		_environment_value, _platform_all,
+		"In third person, aim assist moves the reticle, not the camera: the\n"
+		"camera stays where you turn it, and the reticle leaves the middle of\n"
+		"the screen for where your shots go (onto the target the game's\n"
+		"autoaim bends them to, held there as a controller's magnetism slows\n"
+		"your turn), and comes back to the middle without a target. false:\n"
+		"the camera turns with the aim, the reticle always in the middle.", _scope_player },
 	{ "camera.third_person_netgames", _config_boolean, "false", "HALO_CAMERA_THIRD_PERSON_NETGAMES",
 		_environment_value, _platform_all,
 		"camera.view \"third_person\" in multiplayer games too (off: seeing\n"

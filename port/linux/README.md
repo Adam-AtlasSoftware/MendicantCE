@@ -1406,6 +1406,7 @@ the setting for one start of the game. It has priority over the file.
 | `camera.view` | `"first_person"` | `HALO_CAMERA_VIEW` | `"third_person"`: on foot in the campaign and co-op, the view from behind your shoulder, your whole body drawn, the reticle where your shots go. Zooming a scope is in first person; vehicles keep their cameras. Refer to "Your body and the third-person camera". |
 | `camera.third_person_distance` | `1.5` | `HALO_CAMERA_THIRD_PERSON_DISTANCE` | Third person: how far behind your head the camera is, in world units (1 to 6); `controls.camera_closer` and `controls.camera_further` (Keypad + and -), and the mouse wheel while `controls.camera_wheel_modifier` (Left Alt) is held, change it as you play, and it is kept. |
 | `camera.third_person_shoulder` | `0.22` | `HALO_CAMERA_THIRD_PERSON_SHOULDER` | Third person: how far right of your head the camera is, in world units (-0.5 to 0.5; below 0 over the left shoulder). |
+| `camera.third_person_reticle_assist` | `true` | `HALO_CAMERA_THIRD_PERSON_RETICLE_ASSIST` | Third person: aim assist moves the reticle, not the camera. The camera stays where you turn it (a controller's magnetism, which still slows and drags the aim over a target, is left out of the view; an enemy crossing the aim no longer swings it), and the reticle leaves the middle of the screen for where the shot lands (the weapon's ray with the autoaim's bend, traced to what it hits), eased, kept on the screen, back in the middle without a target. `false`: the view turns with the aim and the reticle stays in the middle. Camera's RETICLE ASSIST. Refer to "Your body and the third-person camera". |
 | `camera.third_person_netgames` | `false` | `HALO_CAMERA_THIRD_PERSON_NETGAMES` | `camera.view` `"third_person"` in multiplayer games too. |
 | `display.shield_color` | `default` | `HALO_SHIELD_COLOR` | Your energy shield's flare as this machine draws it: `default` (the shield's own) or a multiplayer armor color (`white`, `black`, `red`, `blue`, `gray`, `yellow`, `green`, `pink`, `purple`, `cyan`, `cobalt`, `orange`, `teal`, `sage`, `brown`, `tan`, `maroon`, `salmon`), whatever the armor's, on the body and, with `display.viewmodel_shield`, on the first-person arms. The shield's own shader is drawn with its two colors replaced at their brightness; the flare is added to what is behind it, so `black` is drawn a faint grey. Only this machine sees it. |
 | `display.spartan_link` | `"medium"` | `HALO_SPARTAN_LINK` | The Spartan link: live feeds of your living teammates' views in the HUD's top line (up to four), shown and hidden with `controls.spartan_link` (B; a controller's D-pad Down in the stock layouts), off as each game starts; co-op and team games only, not Pro 2V2. `"small"`, `"medium"` or `"large"` feeds; `"off"`: the key does nothing. SPARTAN LINK in Settings > Interface. Refer to "Spartan link". |
@@ -3056,8 +3057,21 @@ out of walls by bringing it nearer along its line, and eases it as it
 eases a vehicle's camera. The camera looks from that point through where
 the game's aim reaches (the same trace the game makes from your eye along
 your aim, eased so a near wall swept over does not jerk the view), so the
-reticle stays in the middle of the screen and on the shot. Only the view
-changes: the game aims, fires and saves from your eye as in first person,
+reticle stays in the middle of the screen and on the shot. With RETICLE
+ASSIST (`camera.third_person_reticle_assist`, on by default) aim assist
+moves the reticle instead of the camera: the camera converges on the
+world behind the aim (the trace leaves units, weapons and the like out),
+and the turn a controller's magnetism adds to the aim (its friction
+slowing the turn over a target, its adhesion dragging the aim along with
+a moving one) is left out of the view, up to 12 degrees across and 8 up
+and down, given back over about a third of a second once the assist has
+no target; the reticle is drawn where the shot lands (the weapon's own
+ray as it fires, the autoaim's bend toward its target included, traced to
+what it hits, through the view as drawn), eased over about a twentieth of
+a second, kept within the screen, and back in the middle without a target.
+The mouse has no magnetism unless `input.mouse_aim_assist`, so with it the
+reticle moves only for the autoaim's bend and for what is under the aim.
+Only the view changes: the game aims, fires and saves from your eye as in first person,
 so a saved game, a demo and a network game are the same in either view.
 Keypad + and Keypad - (Controls, Camera: CAMERA CLOSER and FURTHER) bring
 it closer and further while held, and the wheel does while Left Alt (CAMERA

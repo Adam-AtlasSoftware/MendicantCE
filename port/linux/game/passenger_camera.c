@@ -25,6 +25,7 @@ and the deterministic camera used for shooting keeps its original view.
 #include "units/vehicles.h"
 
 #include "player_settings.h"
+#include "chase_camera.h"
 
 #include <string.h>
 #ifdef HALO_VR
@@ -176,7 +177,13 @@ boolean passenger_camera_reticle_begin(short local_player_index, long weapon_ind
 	reticle_active = FALSE;
 	if (!passenger_camera_enabled(local_player_index) ||
 		director_get_perspective(local_player_index) != _director_perspective_third_person)
+	{
+		/* (on foot in third person, the reticle where the shot lands:
+		camera.third_person_reticle_assist, chase_camera.c) */
+		if (chase_camera_reticle_screen(local_player_index, weapon_index, &reticle_offset))
+			reticle_active = TRUE;
 		return TRUE;
+	}
 	unit_index = player_control_get_unit_index(local_player_index);
 	if (weapon_index == NONE || !weapon_get_projectile_ray(weapon_index, 0, &origin, &direction))
 		return FALSE;
