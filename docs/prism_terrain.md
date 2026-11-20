@@ -237,7 +237,9 @@ whole, so the ground is never left blurred with nothing over it; other renderers
 At 1280x720 in Path Traced (`performance`, the 2060's tier in design section 10), alone on the card at its full
 clocks, the pass takes 0.37 ms at B1's 1 m pose (every pixel sand: the layer, its grain and the normals) and 0.37 ms
 at its 10 m pose, plus 0.02 ms for the base's copy (`debug.pass_times`: `TERRAIN`, `TERRAIN COPIES`). The grain is
-one lookup of the detail alone: hex-tiled with its normal it cost 0.13 ms more.
+one lookup of the detail alone: hex-tiled with its normal it cost 0.13 ms more. At native 1920x1080 with no
+upscaler the pass takes 0.72 to 0.90 ms (plus 0.05 ms for the copy), over the 0.4 ms budget: that is met only at
+the 2060's 720p internal resolution until the quality tiers (T15) give a lighter one.
 
 Read PRISM Rebaked's figures with care. Offscreen, Rebaked does not load the card: the RTX 2060 stays at its idle
 clocks (900 MHz, its memory at 5000 MHz, about a quarter busy), where every pass reads about eight times its time at
@@ -252,4 +254,8 @@ The 60 m view of every T1 pose (B1 to B3, N1 to N3, D1, D2, R1, R2) is within 1.
 32-pixel tile of one class; medians 0.04 to 0.30) of Classic;
 Classic stays byte-identical, PRISM Rebaked with `display.terrain` `"off"` or `display.terrain_layers` `"ce"` is the
 previous build's frame byte for byte, b30's bake still loads whole, and the game's simulation is the same with the
-terrain on and off (`determinism_compare.py --simulation`).
+terrain on and off (`determinism_compare.py --simulation`). (That check was run on T1's first round; the second round's game side changed only in
+which detail stages it marks and in reading the renderer's pack state, and was not re-run.)
+
+At d40's shoreline (D2) the 1 m view is busier than Classic's (std of Oklab L 3.9 against 2.0): the desert scan
+with its grain shows pale crust and dark pebbles CE's smooth sand does not have. Open: a softer d40 layer.
