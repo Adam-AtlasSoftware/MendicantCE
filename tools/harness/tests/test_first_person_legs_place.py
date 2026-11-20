@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, function, inline, mutated, read, run, structure  # noqa: E402
 
-CASES = ["planted", "turned", "stateless", "clear", "crouch_jump", "shadow"]
+CASES = ["planted", "turned", "stateless", "clear", "crouch_jump", "down", "shadow"]
 CONTROLS = [
     # set back along the view's heading rather than the body's: the feet swing about as the view turns (#724)
     ("\tforward.k = 0.f;\n\tif (normalize3d(&forward) <= 0.f)",
@@ -32,6 +32,14 @@ CONTROLS = [
      "\t\t\tplaced[index].position.x -= forward.i * 0.12f - forward.j * front.y;", "planted"),
     # the belly drawn as it is: closed in a cone to the chest's joint
     ("\t\t\tfirst_person_legs_matrices[index].up.k *= FIRST_PERSON_LEGS_LID;", "", "clear"),
+    # never set back looking down: the lid over the hips under the eye hides the legs and feet
+    ("\tfor (index = 0; index < count && ease > 0.f; index++)", "\tfor (index = 0; index < 0; index++)", "down"),
+    # set back along the view's heading rather than the body's: the legs swing as the view turns looking down
+    ("\t\tplaced[index].position.x -= heading->i * ease;\n\t\tplaced[index].position.y -= heading->j * ease;",
+     "\t\tplaced[index].position.x -= global_window_parameters.camera.forward.i * ease;\n"
+     "\t\tplaced[index].position.y -= global_window_parameters.camera.forward.j * ease;", "down"),
+    # the legs set back looking down and not their shadow: they no longer stand on it (nor, traced, on the body)
+    ("\tfirst_person_legs_down(shadow, count, &heading);\n", "", "down"),
     # never lowered: a crouch jump's hips and thighs at the eye
     ("\tif (drop > 0.f)\n", "\tif (drop > 1000.f)\n", "crouch_jump"),
     # a lean kept from frame to frame (#772): drawn again, the pose is not what it was
@@ -41,7 +49,7 @@ CONTROLS = [
 ]
 FUNCTIONS = ["first_person_legs_name_has", "first_person_legs_below", "first_person_legs_model",
              "first_person_legs_blend", "first_person_legs_yaw", "first_person_legs_front", "first_person_legs_place",
-             "first_person_legs_node_matrices", "first_person_legs_shadow_node_matrices"]
+             "first_person_legs_down", "first_person_legs_node_matrices", "first_person_legs_shadow_node_matrices"]
 
 
 def types():

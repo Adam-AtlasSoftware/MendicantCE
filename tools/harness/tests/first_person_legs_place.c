@@ -29,6 +29,11 @@ of the test's own:
   near the eye;
 - rigid (#772): what is drawn is the game's pose moved whole: every two
   nodes drawn as far apart as the game has them (nothing stretched);
+- down: looking down past FIRST_PERSON_LEGS_DOWN_FROM, the pose drawn set
+  back whole along the body's heading, the farther the farther down, as far
+  as FIRST_PERSON_LEGS_DOWN_BACK looking straight down (the lid over the hips
+  out from under the eye, the legs and feet seen), however the view turns;
+  the shadow set back with it (the legs stand on their own shadow);
 - shadow: the shadow's pose is placed as the legs are, nothing folded nor
   flattened.
 */
@@ -379,8 +384,8 @@ int main(int argc, char **argv)
 	if (!strcmp(which, "planted") || !strcmp(which, "stateless"))
 	{
 		/* standing still, facing 30 degrees, the view turned about and
-		tilted from level to straight down: the pose the same every time,
-		set back along the body's heading */
+		tilted from level to as far down as the set-back begins: the pose
+		the same every time, set back along the body's heading */
 		double yaw = 30.0;
 
 		body(standing, (real)(yaw * _pi / 180.0));
@@ -399,7 +404,7 @@ int main(int argc, char **argv)
 		}
 		for (turn = -60; turn <= 60; turn += 20)
 		{
-			for (pitch = 0; pitch >= -89; pitch -= 7)
+			for (pitch = 0; sin(-pitch * _pi / 180.0) < FIRST_PERSON_LEGS_DOWN_FROM; pitch -= 7)
 			{
 				real_matrix4x3 const *pose;
 
@@ -419,10 +424,15 @@ int main(int argc, char **argv)
 		}
 		if (!strcmp(which, "stateless"))
 		{
-			/* (after a crouch jump's pose and back) */
+			/* (looking down, after a crouch jump's pose and a level view, and
+			back) */
+			look(-80, yaw);
+			memcpy(drawn, first_person_legs_node_matrices(0, game_pose), sizeof(drawn));
 			body(crouch_jump, (real)(yaw * _pi / 180.0));
 			first_person_legs_node_matrices(0, game_pose);
 			body(standing, (real)(yaw * _pi / 180.0));
+			look(0, yaw);
+			first_person_legs_node_matrices(0, game_pose);
 			look(-80, yaw);
 			CHECK(!memcmp(first_person_legs_node_matrices(0, game_pose), drawn, sizeof(drawn)),
 				"the pose not the same drawn again");
@@ -470,6 +480,66 @@ int main(int argc, char **argv)
 		check_drawn(first_person_legs_node_matrices(0, game_pose), "crouch jump", &moved);
 		CHECK(fabsf(game_pose[HEAD].position.z + moved.k - (test_eye.z - FIRST_PERSON_LEGS_HEAD_BELOW)) < 1.0e-5f,
 			"crouch jump: the head %.3f below the eye", test_eye.z - game_pose[HEAD].position.z - moved.k);
+	}
+	else if (!strcmp(which, "down"))
+	{
+		/* looking down past FIRST_PERSON_LEGS_DOWN_FROM, the pose drawn is
+		the level view's moved whole, straight back along the body's heading,
+		farther the farther down it looks, FIRST_PERSON_LEGS_DOWN_BACK looking
+		straight down, the same however the view turns; the shadow with it */
+		double yaw = 30.0;
+		real c = (real)cos(yaw * _pi / 180.0), s = (real)sin(yaw * _pi / 180.0);
+		real last = 0.f;
+		short node;
+
+		body(standing, (real)(yaw * _pi / 180.0));
+		look(0, yaw);
+		memcpy(drawn, first_person_legs_node_matrices(0, game_pose), sizeof(drawn));
+		for (pitch = 0; pitch >= -90; pitch -= 5)
+		{
+			real_matrix4x3 const *pose;
+			real along, across;
+
+			look(pitch, yaw);
+			pose = first_person_legs_node_matrices(0, game_pose);
+			CHECK(pose != NULL, "pitched %d: no pose", pitch);
+			along = (pose[PELVIS].position.x - drawn[PELVIS].position.x) * c +
+				(pose[PELVIS].position.y - drawn[PELVIS].position.y) * s;
+			across = -(pose[PELVIS].position.x - drawn[PELVIS].position.x) * s +
+				(pose[PELVIS].position.y - drawn[PELVIS].position.y) * c;
+			for (node = 0; node < NODES; node++)
+			{
+				CHECK(fabsf(pose[node].position.x - drawn[node].position.x - (along * c - across * s)) < 1.0e-5f &&
+					fabsf(pose[node].position.y - drawn[node].position.y - (along * s + across * c)) < 1.0e-5f &&
+					pose[node].position.z == drawn[node].position.z,
+					"pitched %d: node %d not moved with the rest", pitch, node);
+			}
+			CHECK(fabsf(across) < 1.0e-4f, "pitched %d: moved %g across the heading", pitch, across);
+			CHECK(along <= last + 1.0e-6f && along >= -FIRST_PERSON_LEGS_DOWN_BACK - 1.0e-5f,
+				"pitched %d: set back %g (before %g)", pitch, -along, -last);
+			if (sin(-pitch * _pi / 180.0) <= FIRST_PERSON_LEGS_DOWN_FROM)
+				CHECK(fabsf(along) < 1.0e-6f, "pitched %d: set back %g before it looks down far enough", pitch, -along);
+			if (pitch == -90)
+				CHECK(fabsf(along + FIRST_PERSON_LEGS_DOWN_BACK) < 1.0e-4f, "straight down: set back %g", -along);
+			last = along;
+			for (turn = -60; turn <= 60; turn += 30)
+			{
+				real_matrix4x3 kept[NODES];
+
+				memcpy(kept, pose, sizeof(kept));
+				look(pitch, yaw + turn);
+				CHECK(!memcmp(first_person_legs_node_matrices(0, game_pose), kept, sizeof(kept)),
+					"pitched %d, turned %d: the pose moved", pitch, turn);
+				look(pitch, yaw);
+				pose = first_person_legs_node_matrices(0, game_pose);
+			}
+			{
+				real_matrix4x3 const *shadow = first_person_legs_shadow_node_matrices(0, game_pose);
+
+				CHECK(shadow && !memcmp(&shadow[PELVIS], &pose[PELVIS], sizeof(pose[PELVIS])),
+					"pitched %d: the shadow not where the legs are", pitch);
+			}
+		}
 	}
 	else if (!strcmp(which, "shadow"))
 	{
