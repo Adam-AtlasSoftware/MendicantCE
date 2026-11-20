@@ -59,6 +59,7 @@ inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
 #include "xgpu_vulkan_bake_shaders.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_scene.h"
+#include "xgpu_vulkan_terrain.h"
 #include "host.h"
 #include "prism_bake_atlas.h"
 #include "prism_bake_batch.h"
@@ -552,6 +553,8 @@ static struct
 	int samples_step;
 	double gpu_milliseconds;
 	struct xgpu_vulkan_image *raster_light;
+	/* (the terrain's micro-shadows' stand-in: a white texel) */
+	struct xgpu_vulkan_image *micro_white;
 	uint32_t raster_frames;
 	/* the exposure's meter (xgpu_vulkan_bake_glsl.inc's EXPOSURE_COMMON: 128
 	bins, the exposure's log2, whether it is made, the last medians), kept
@@ -874,6 +877,7 @@ static int make(void)
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 	};
 	VkPhysicalDeviceAccelerationStructurePropertiesKHR structure_properties;
 	VkPhysicalDeviceProperties2 properties;
@@ -915,7 +919,7 @@ static int make(void)
 		!pipeline_make(PIPELINE_IMPORTANCE, NULL, 0, xgpu_vulkan_bake_importance_words,
 		xgpu_vulkan_bake_importance_count) ||
 		!pipeline_make(PIPELINE_VOLUME, NULL, 0, xgpu_vulkan_bake_volume_words, xgpu_vulkan_bake_volume_count) ||
-		!pipeline_make(PIPELINE_RASTER, raster_types, 6, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
+		!pipeline_make(PIPELINE_RASTER, raster_types, 7, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
 		!pipeline_make(PIPELINE_COMPACT, NULL, 0, xgpu_vulkan_bake_compact_words, xgpu_vulkan_bake_compact_count) ||
 		!pipeline_make(PIPELINE_REFLECTION, NULL, 0, xgpu_vulkan_bake_reflection_words,
 		xgpu_vulkan_bake_reflection_count) ||
@@ -926,7 +930,7 @@ static int make(void)
 	}
 	memset(sizes, 0, sizeof(sizes));
 	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	sizes[0].descriptorCount = 20;
+	sizes[0].descriptorCount = 24;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 	sizes[1].descriptorCount = 4;
 	memset(&pool_info, 0, sizeof(pool_info));
@@ -5985,9 +5989,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_image_description wanted;
 	struct bake_raster_job job;
-	VkDescriptorImageInfo images[6];
-	VkWriteDescriptorSet writes[6];
+	VkDescriptorImageInfo images[7];
+	VkWriteDescriptorSet writes[7];
 	VkDescriptorSet set;
+	struct xgpu_vulkan_image *micro;
 	VkCommandBuffer commands;
 	uint32_t index, flags = 0, light_count = 0, serial = 0, dynamic = 0;
 	const struct xgpu_stream_scene_light *lights;
@@ -6099,15 +6104,40 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	xgpu_vulkan_image_compute_use(extras, 0);
 	xgpu_vulkan_image_compute_use(base, 0);
 	xgpu_vulkan_image_compute_use(additions, 0);
+	/* (the terrain's prints' micro-shadows where the terrain pass drew them
+	this frame, else a white texel: xgpu_vulkan_terrain.c) */
+	micro = xgpu_vulkan_terrain_micro(description->width, description->height);
+	if (!micro)
+	{
+		if (!bake.micro_white)
+		{
+			static const uint8_t white[4] = { 255, 255, 255, 255 };
+			struct xgpu_vulkan_image_description one;
+
+			memset(&one, 0, sizeof(one));
+			one.type = XGPU_VULKAN_IMAGE_2D;
+			one.format = XGPU_VULKAN_FORMAT_RGBA8;
+			one.usage = XGPU_VULKAN_USAGE_SAMPLED;
+			one.width = one.height = 1;
+			one.depth_or_layers = 1;
+			one.levels = 1;
+			bake.micro_white = xgpu_vulkan_image_create(&one);
+			if (!bake.micro_white)
+				return NULL;
+			xgpu_vulkan_image_upload(bake.micro_white, 0, 0, 0, 0, 0, 1, 1, 1, white, 4, 4);
+		}
+		micro = bake.micro_white;
+	}
+	xgpu_vulkan_image_compute_use(micro, 0);
 	xgpu_vulkan_image_compute_use(bake.raster_light, 1);
 	set = bake.raster_sets[bake.raster_set_next];
 	bake.raster_set_next = (bake.raster_set_next + 1) & 3;
 	memset(images, 0, sizeof(images));
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 6; index++)
+	for (index = 0; index < 7; index++)
 	{
 		struct xgpu_vulkan_image *image = index == 0 ? words : index == 1 ? extras : index == 2 ? copy : index == 3 ?
-			bake.raster_light : index == 4 ? base : additions;
+			bake.raster_light : index == 4 ? base : index == 5 ? additions : micro;
 
 		images[index].sampler = index != 3 ? bake.sampler : VK_NULL_HANDLE;
 		images[index].imageView = xgpu_vulkan_image_view(image);
@@ -6120,7 +6150,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		writes[index].pImageInfo = &images[index];
 	}
-	vkUpdateDescriptorSets(bake.device.device, 6, writes, 0, NULL);
+	vkUpdateDescriptorSets(bake.device.device, 7, writes, 0, NULL);
 	if (b->block.rig[1][3] > 1.001f)
 		flags |= 1u;
 	/* (the frame whole, its own materials composing it (display.

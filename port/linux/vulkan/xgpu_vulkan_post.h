@@ -127,11 +127,13 @@ sample) take CE's colour times the layers' detail, and their G-buffer words
 second target's words (extras: the distance), the classes' table, the
 layers' detail and surface arrays and the macro map; values: the uniforms
 (the camera, the cues, the layers; metrics are the pass's). The words are
-the second target while it draws (none after). 0 if it cannot be drawn */
+the second target while it draws (none after). T4's prints: their pool (a
+2D array), page table and the micro-shadow target (the third), NULL none
+(the plain pass). 0 if it cannot be drawn */
 struct xgpu_vulkan_post_uniforms;
 int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
 	struct xgpu_vulkan_image *extras, struct xgpu_vulkan_image *classes, struct xgpu_vulkan_image *detail,
-	struct xgpu_vulkan_image *surface, struct xgpu_vulkan_image *macro,
-	const struct xgpu_vulkan_post_uniforms *values);
+	struct xgpu_vulkan_image *surface, struct xgpu_vulkan_image *macro, struct xgpu_vulkan_image *prints,
+	struct xgpu_vulkan_image *pages, struct xgpu_vulkan_image *micro, const struct xgpu_vulkan_post_uniforms *values);
 
 #endif

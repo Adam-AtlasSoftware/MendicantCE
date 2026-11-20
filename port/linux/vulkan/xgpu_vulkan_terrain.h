@@ -61,6 +61,11 @@ only where this frame's FRAME asks for display.terrain_layers "hq" and the
 pack is there */
 void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
 	struct xgpu_vulkan_image *extras, const struct xgpu_stream_scene_view *view);
+/* (T4) the prints' micro-shadow target (RGBA8: red the sun's visibility at
+a print's surface, green its cavity's occlusion; 1 elsewhere) where the pass
+drew the prints this frame into a target of that size; else NULL (Raster's
+light pass reads it, xgpu_vulkan_bake_raster) */
+struct xgpu_vulkan_image *xgpu_vulkan_terrain_micro(uint32_t width, uint32_t height);
 /* (a window's G-buffer begun: the pass may be drawn for it) */
 void xgpu_vulkan_terrain_window(void);
 /* (T7) the classes' table (CLASS_TABLE_SIDE squared RGBA8, a texel a

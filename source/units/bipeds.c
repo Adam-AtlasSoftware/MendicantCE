@@ -2159,13 +2159,18 @@ static void biped_make_footstep(
 {
 	struct biped_datum *biped = biped_get(biped_index);
 	struct biped_definition *definition = biped_definition_get(biped->definition_index);
+	/* port: a foot past CE's material effect's reach is still found for
+	PRISM's terrain's prints (prism_terrain_footstep_far: FALSE but in its
+	PRISM modes; read only), its ground by the footstep's own ray there */
+	boolean visible = FALSE;
 
 	match_assert("c:\\halo\\SOURCE\\units\\bipeds.c", 3965, global_current_collision_user_depth < MAXIMUM_COLLISION_USER_STACK_DEPTH);
 	global_current_collision_users[global_current_collision_user_depth++] = _collision_user_bipeds;
 
 	if (contact_point_index<definition->biped.contact_points.count &&
 		definition->biped.material_effects.index!=NONE &&
-		material_effect_visible(&biped->object.bounding_sphere_center))
+		((visible = material_effect_visible(&biped->object.bounding_sphere_center)) ||
+		prism_terrain_footstep_far(&biped->object.bounding_sphere_center)))
 	{
 		struct biped_contact_point *contact_point = TAG_BLOCK_GET_ELEMENT(
 			&definition->biped.contact_points,
@@ -2177,11 +2182,18 @@ static void biped_make_footstep(
 		{
 			/* port: the foot for PRISM's terrain (port/linux/game/prism_terrain.c; read only) */
 			prism_terrain_footstep(biped_index, event_index, contact_point_index, &marker.matrix);
-			material_effect_new_from_point(
-				definition->biped.material_effects.index,
-				event_index,
-				&marker.matrix.position,
-				0.f);
+			if (visible)
+			{
+				material_effect_new_from_point(
+					definition->biped.material_effects.index,
+					event_index,
+					&marker.matrix.position,
+					0.f);
+			}
+			else
+			{
+				prism_terrain_footstep_trace(&marker.matrix.position);
+			}
 		}
 	}
 

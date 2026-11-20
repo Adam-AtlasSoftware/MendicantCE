@@ -659,11 +659,14 @@ normal and roughness, from a copy of the base; the rest discarded, so
 neither changes there. Where the device reads a target where it is drawn
 (capabilities color_read: TERRAIN_LAYERS_LOCAL) the words are the first
 target, read where they are drawn and written through a mask; else they
-are copied too and written whole from the copy */
+are copied too and written whole from the copy. With micro (T4), the
+prints' variant (TERRAIN_PRINTS, _LOCAL): the prints' pool and page table
+read too (units 7 and 8), the micro-shadows written into micro, the third
+target */
 int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
 	struct xgpu_vulkan_image *extras, struct xgpu_vulkan_image *classes, struct xgpu_vulkan_image *detail,
-	struct xgpu_vulkan_image *surface, struct xgpu_vulkan_image *macro,
-	const struct xgpu_vulkan_post_uniforms *values)
+	struct xgpu_vulkan_image *surface, struct xgpu_vulkan_image *macro, struct xgpu_vulkan_image *prints,
+	struct xgpu_vulkan_image *pages, struct xgpu_vulkan_image *micro, const struct xgpu_vulkan_post_uniforms *values)
 {
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_pipeline_description pipeline;
@@ -675,6 +678,10 @@ int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_
 
 	if (!base || !words || !extras || !classes || !detail || !surface || !macro || !values)
 		return 0;
+	if (micro && (!prints || !pages || xgpu_vulkan_image_description(micro)->width !=
+		xgpu_vulkan_image_description(base)->width || xgpu_vulkan_image_description(micro)->height !=
+		xgpu_vulkan_image_description(base)->height))
+		micro = NULL;
 	description = xgpu_vulkan_image_description(base);
 	if ((description->format != XGPU_VULKAN_FORMAT_BGRA8 && description->format != XGPU_VULKAN_FORMAT_RGBA16F) ||
 		description->samples > 1)
@@ -688,7 +695,8 @@ int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_
 		xgpu_vulkan_capabilities(&capabilities);
 		local = capabilities.color_read;
 	}
-	program = local ? XGPU_VULKAN_POST_TERRAIN_LAYERS_LOCAL : XGPU_VULKAN_POST_TERRAIN_LAYERS;
+	program = micro ? (local ? XGPU_VULKAN_POST_TERRAIN_PRINTS_LOCAL : XGPU_VULKAN_POST_TERRAIN_PRINTS) :
+		local ? XGPU_VULKAN_POST_TERRAIN_LAYERS_LOCAL : XGPU_VULKAN_POST_TERRAIN_LAYERS;
 	if (!post.vertex)
 		post.vertex = xgpu_vulkan_shader(xgpu_vulkan_post_vertex.words, xgpu_vulkan_post_vertex.count);
 	if (!post.pixel[program])
@@ -740,6 +748,11 @@ int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_
 		pipeline.color_format = description->format;
 		pipeline.color2_format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
 	}
+	if (micro)
+	{
+		pipeline.color3_format = XGPU_VULKAN_FORMAT_RGBA8;
+		pipeline.color3_mask = 15;
+	}
 	rectangle[0] = rectangle[1] = 0;
 	rectangle[2] = (int32_t)description->width;
 	rectangle[3] = (int32_t)description->height;
@@ -773,6 +786,16 @@ int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_
 		draw.overlay[stage].sampler = post.terrain_sampler;
 	for (stage = 3; stage < XGPU_VULKAN_OVERLAY_IMAGES; stage++)
 		draw.overlay[stage].kind = XGPU_VULKAN_IMAGE_2D;
+	/* (T4: the prints' pool, linear and clamped, and their page table,
+	fetched) */
+	if (micro)
+	{
+		draw.overlay[3].image = prints;
+		draw.overlay[3].kind = XGPU_VULKAN_IMAGE_2D_ARRAY;
+		draw.overlay[3].sampler = post.sampler;
+		draw.overlay[4].image = pages;
+		draw.overlay[4].sampler = post.nearest;
+	}
 	uniforms = xgpu_vulkan_upload(UNIFORMS_RANGE, 256, &draw.uniforms);
 	if (!uniforms)
 		return 0;
@@ -792,8 +815,9 @@ int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_
 	draw.reads_color = (uint8_t)local;
 	xgpu_vulkan_set_target_views(local ? words : base, NULL, 0, 1);
 	xgpu_vulkan_set_second_target(local ? base : words);
-	xgpu_vulkan_set_third_target(NULL);
+	xgpu_vulkan_set_third_target(micro);
 	xgpu_vulkan_draw(&draw);
+	xgpu_vulkan_set_third_target(NULL);
 	xgpu_vulkan_set_second_target(NULL);
 	return 1;
 }

@@ -55,9 +55,12 @@ species) and append to `prism_terrain.c`'s ring. None writes the game's state, c
 seed. The frame reads objects (the units' positions, media flags and velocities), the scenario (the cluster's weather
 palette entry) and the wind (pure reads). The renderer sends nothing back.
 
-The footstep hook sits where CE finds the foot's marker, inside CE's own gate (a foot within 10 world units of a
-local player's camera: `material_effect_visible`). T4's prints will need feet up to 40 world units away; moving the
-hook out of that gate (and finding the marker and the ground there) is part of T4.
+The footstep hook sits where CE finds the foot's marker. CE's own gate (a foot within 10 world units of a local
+player's camera: `material_effect_visible`) still decides CE's effect; since T4 a foot past it is still found for the
+prints where `prism_terrain_footstep_far` says so (display.terrain_tracks, within 40 world units of a local player's
+camera; `FALSE` before anything else in Classic and wherever the hooks return), and its ground is found by the
+footstep's own ray there (`prism_terrain_footstep_trace`: the structure's alone, read only). The foot's facing sent is
+the body's forward (the way a print points), not the contact marker's (the skeleton's axes).
 
 ### Surface classes
 
@@ -87,7 +90,7 @@ counts as an object in the view (its G-buffer pixels carry no static-scenery fla
 | `display.terrain` | `"on"`, `"off"` | Sends the record (nothing visible) |
 | `display.terrain_quality` | `"auto"`, `"low"`, `"medium"`, `"high"`, `"ultra"` | Sent, unused |
 | `display.terrain_layers` | `"hq"`, `"ce"` | Sent, unused |
-| `display.terrain_tracks` | `true` | Sent, unused |
+| `display.terrain_tracks` | `true` | T4: footprints (below) |
 | `display.terrain_drifts` | `true` | Sent, unused |
 | `display.weather` | `"prism"`, `"ce"` | Sent; CE's weather is drawn either way |
 | `display.water` | `"prism"`, `"ce"` | T7: `"prism"` PRISM's water layer in CE's colour draw's place (below) |
@@ -264,6 +267,125 @@ terrain on and off (`determinism_compare.py --simulation`, re-run on T1's final 
 d40's sand (`sand_desert`, Ground080) is at strength 1.0, chroma 0 and no grain: its scan is smooth, and with the
 second slot fixed (above) d40's shoreline (D2) at 1 m reads as CE's ground with fine relief (std of Oklab L 2.1
 against Classic's 2.0, was 3.9), its hue CE's.
+
+## T4: the prints (PRISM Rebaked)
+
+With `display.terrain_tracks` on (the default) and the HQ layers drawn (`display.terrain_layers` `"hq"`, the pack
+there: the prints are drawn by the layers' pass), every biped's feet press prints into sand, snow, dirt and mud, and
+they stay for the level. Render only: nothing of it reaches the game.
+
+### The feet
+
+`EVENTS`' feet (T0's hook in `biped_make_footstep`): walk, run, slide, shuffle, jump and landing, the left or right
+foot, the species (by the biped's tag name), the ground under the foot (the footstep's own ray: its hit, its normal
+and CE's material type) and the way the body faced. CE makes a footstep's effect only within 10 world units of a
+local player's camera; T4 finds the feet out to 40 (above, "What the hooks may do"), so the Marines' and the
+Covenant's prints are made where the player is not looking. Only sand (CE's material type 1), dirt (0) and snow (3)
+take prints (a curated mud class has no material type of its own on the collision: it takes dirt's); stone, ice,
+metal and water none, nor a slope past 40 degrees, nor a Sentinel.
+
+### The pages (`port/linux/vulkan/xgpu_vulkan_terrain_prints.c`)
+
+A sparse pool of world-space pages (design 2.3): a page is 128 squared texels of 2 cm, 126 of its own and a texel of
+its neighbours' about it (so the pass's linear lookups meet across a page's edge), 0.827 world units a side, made
+where a foot first presses. Each texel holds the displacement (world units, negative down, a rim positive), the
+compaction, and the ground's height (over the page's own; with the coverage): a pixel takes a print only where its
+own height is within 0.15 to 0.3 world units of the texel's ground, so a bridge over a print, or a floor under it,
+shows none. The pool holds 384 pages (b30's opening battle on the first beach presses about 250 in a minute); when it
+is full the page farthest from the camera that has not been pressed in 5 seconds is let go. A new generation (a new
+map or BSP, a revert to a checkpoint) forgets every page: the beach is clean again, as the game's state says it is.
+
+The host keeps the pages (the displacement as floats, the compaction and coverage as bytes, the ground's height in
+1024ths of a world unit: 144 KB a page, 54 MB for a full pool) and sends a page's changed rectangle of its first
+level, and its two smaller levels whole, as half floats into a 2D array (`RGBA16F`, 384 layers, 3 levels: 64 MB of
+the card's). A page table (64 x 64 pages about the camera, toroidal: a page at x, y modulo 64, its x, y and height
+beside its layer, so the pass checks it is the page it wants) is sent again when the camera's page or the pages
+change.
+
+### The stamps
+
+Our own, made in code at start (`stamp_make`), 64 squared each, one a species, each a dent (0 to 1) and a broad, low
+rim about it (the dent spread 6 cm, the outside alone, its highest 1):
+
+| Species | The sole | Length | Depth's scale |
+| --- | --- | --- | --- |
+| Human (the Chief, Marines, crew) | A boot: heel, shank and ball, lugs as chevrons 4.5 cm apart | 33 cm | 1.15 |
+| Elite | Two long toes splayed forward, the pad behind them, a heel spur | 42 cm | 1.3 |
+| Grunt | A broad pad and three stubby toes | 24 cm | 0.85 |
+| Jackal | A bird's: three thin toes fanned forward, one behind | 22 cm | 0.7 |
+| Hunter | A great flat foot, its front ridged | 62 cm | 1.7 |
+| Flood | A ragged human sole | 30 cm | 0.95 |
+| Sentinel | None (it floats) | | |
+| Another | An oval | 28 cm | 1.0 |
+
+A right foot's stamp is the left's mirror across the foot's axis. The ground sets the depth and the rim (a share of
+the depth): dry sand 3.5 cm and a rim 0.35 of it, wet sand 1.5 cm and 0.15, snow 10 cm
+and 0.06 (it packs), dirt 0.8 cm and 0.2, mud 3 cm and 0.35 (design 4.1). The walk sets the rest: a run digs its
+toe 15% deeper, a jump's push-off its toe more, a landing goes half again as deep and scuffs (the stamp 20% longer),
+a slide stretches it to twice its length, a shuffle presses half as deep. A foot is wet sand's (shallow, crisp) when
+a wader (a unit in water, or out of it for less than 10 seconds: `WADERS`) stands within 1.5 world units of it.
+A stamp takes the lower of what is there and its dent and the higher where it raises a rim, so a foot sent twice
+(sub-steps, co-op's prediction) makes the same print.
+
+### Relax and infill
+
+For a second and a half of the game's time after a page is pressed, the pressed region slumps toward the ground's
+angle of repose (thermal erosion, three passes a frame, each moving a fifth of a step past the angle downhill): sand
+42 degrees, wet sand 65, snow 55, dirt 45, mud 50. Sand is not loose dry sand's 34 degrees: a beach's sand is damp
+under its surface and holds a print's wall steeper, and at 34 degrees every print rounded flat under b30's sun (35
+degrees up) and cast no shadow at all. So a dry print's walls round off and a wet print stays sharp.
+
+Then, about every two seconds of the game's time while a page is within 70 world units of the camera, it is filled
+in: its displacement sinks toward flat and a blur softens its edges, by the ground and the wind at the eye
+(FRAME's): dry sand in b30's wind (0.8 world units a second) keeps about half its depth after two minutes, dirt and
+mud keep nearly all of theirs, snow fills in only while it snows (T12); wet sand at 0.4 of dry's rate; the
+compaction outlives the displacement. A page out of range catches up when it comes back (its sinking by the time
+gone). While the game is paused nothing moves (FRAME's step is 0).
+
+### Drawing them (the HQ layers' pass, `TERRAIN_PRINTS`)
+
+Where a page lies in the table's window, the pass is the prints' variant (`tools/vulkan_post_shaders.py`: the
+layers' source with the parts marked `PRINTS`; without them its words are exactly T1's, so with no print about,
+or `display.terrain_tracks` off, the frame is T1's). For each pixel of a ground that takes prints (sand, dirt, mud,
+snow) within 25 world units:
+
+- **Parallax**: the view ray is marched through the field from the highest rim to the deepest floor, in linear steps
+  of about a pixel's footprint (4 to 16), the point met refined between the last two; the layers are looked up there
+  (CE's own colour stays the pixel's), so the scan's grain lies down in the print. Three lookups (the pixel, and the
+  ray's two ends) decide first whether there is any print about: a ground with none costs three texel fetches.
+- **The surface**: the normal is bent by the field's slope at the point met (over the layers' normal, which a
+  pressed floor smooths), the floor a little darker (the damp sand under the dry; snow packed greyer and smoother),
+  the layers' grain and relief less where the foot packed it.
+- **The micro-shadow**: the field is marched toward the sun (SCENE_LIGHTS' sun) over 9 cm in 8 steps; what stands
+  over the ray shades the point, softly over three quarters of a texel. With the cavity's occlusion (the floor under
+  the field's mean about it, up to 30%) it is written into a third target, the micro-shadow target (RGBA8, the base's
+  size, cleared to lit each frame the prints are drawn), which PRISM Rebaked's light pass reads
+  (`xgpu_vulkan_bake_glsl.inc`'s `raster_source`, binding 6): the sun's visibility of a level's pixel times red, the
+  rest of its light times green. Where no print was drawn this frame the pass reads a white texel.
+- The lookups take a level of the pages by the pixel's footprint (2 cm, 4 cm, 8 cm), so far prints do not shimmer.
+
+`HALO_TERRAIN_PRINTS_VIEW=1` shows the micro-shadow (red), the cavity (green) and the depth (blue) over the lit
+frame; `HALO_TERRAIN_NO_PRINTS=1` draws the plain pass; `HALO_TERRAIN_PRINTS_LOG=1` logs every stamp (the first four
+are always logged, and every 20 seconds of the game's the stamps and pages).
+
+### Path Traced
+
+The pass is the same in Path Traced, which takes its base colour and normals: the prints' parallax, floors and bent
+normals show, lit by the trace. Their shadows are not traced yet (Path Traced does not read the micro-shadow target):
+the ray-origin offset and the short march of the field for every light are T5's.
+
+### What is not done in T4
+
+- Wet against dry comes only from waders (a foot near a unit in or just out of water): T6's wetness writes the rest.
+- No vehicles' tracks, no craters, no resting bodies (T5); impacts and explosions press nothing yet.
+- No prints without the HQ layers (the pack missing, or `display.terrain_layers` `"ce"`): the prints are the layers'
+  pass's.
+- The ground grid (design 2.3: the level rasterised top-down into layers at BSP load) is not built: a page belongs
+  to the ground its feet stood on, and each texel keeps its ground's height, which does the grid's work for prints
+  (a bridge over a print shows none); the drifts (T11) will need the grid itself.
+- A page under a bridge and one on it share their texels where both are pressed (the later foot's ground wins
+  there): rare, and only where both are walked.
+- The quality tiers are not used: 2 cm texels and 384 pages on every card.
 
 ## T7 and T8: the water layer (Rebaked; Path Traced's traced rays)
 

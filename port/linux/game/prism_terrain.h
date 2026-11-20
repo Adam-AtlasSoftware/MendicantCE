@@ -24,6 +24,13 @@ effect's index: walk, run, sliding, shuffle, jump, jump's landing; the
 contact point 0 the left foot, 1 the right) */
 void prism_terrain_footstep(long biped_index, short event_index, short contact_point_index,
 	real_matrix4x3 const *marker);
+/* (T4) bipeds.c's biped_make_footstep: whether a foot past CE's material
+effect's reach (10 world units of a local player's camera, where CE makes
+no effect) is still wanted for a print (display.terrain_tracks, within 40
+world units of one; FALSE in Classic); then, for it, the ground under its
+marker found by the footstep's own ray (the structure's alone; read only) */
+boolean prism_terrain_footstep_far(real_point3d const *centre);
+void prism_terrain_footstep_trace(real_point3d const *marker);
 /* material_effects.c's material_effect_new_from_point: the footstep's ray's
 hit (the ground under the foot just sent, its normal and CE's material
 type) */

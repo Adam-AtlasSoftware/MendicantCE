@@ -123,7 +123,7 @@ def test_post_shaders(tmp_path):
     # with display.hdr's tone map, the last pass's encoding (display.gamma's
     # curve and the dither are in it, hdr_encode, since #1108), display.panini's projection and
     # display.prism_bloom's passes, PRISM v4's albedo over the base (its materials' maps) and the terrain overhaul's
-    # debug views (terrain_debug): SMAA's lookup textures are
+    # debug views (terrain_debug), HQ layers and prints (T4: terrain_prints): SMAA's lookup textures are
     # port/third_party/smaa's, inflated, and each module is valid for Vulkan
     # 1.1 where spirv-val is installed.
     text = (ROOT / "port/linux/vulkan/xgpu_vulkan_post_shaders.c").read_text()
@@ -138,7 +138,8 @@ def test_post_shaders(tmp_path):
     assert modules == ["albedo_over_frag", "bloom_down_frag", "bloom_up_frag", "clear_frag", "deferred_resolve_frag", "fxaa_frag",
                        "hdr_encode_frag", "hdr_tone_map_frag", "hdr_tone_map_ms_frag",
                        "panini_frag", "post_vert", "prism_tone_frag", "rotate_frag", "smaa_blend_frag", "smaa_edges_frag",
-                       "smaa_weights_frag", "terrain_debug_frag", "terrain_layers_frag", "terrain_layers_local_frag"]
+                       "smaa_weights_frag", "terrain_debug_frag", "terrain_layers_frag", "terrain_layers_local_frag",
+                       "terrain_prints_frag", "terrain_prints_local_frag"]
     validator = shutil.which("spirv-val")
     if not validator:
         pytest.skip("needs spirv-val (SPIRV-Tools)")
