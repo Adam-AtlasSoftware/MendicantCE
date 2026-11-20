@@ -686,6 +686,23 @@ int host_update_restart(const char *path)
 	return update_restart(path);
 }
 
+/* (PRISM's light bake on the main menu: its worker, port/linux/game/
+prism_bake_menu.c) */
+int host_update_child_start(const char *path, const char *environment)
+{
+	return update_child_start(path, environment);
+}
+
+int host_update_child_state(int handle)
+{
+	return update_child_state(handle);
+}
+
+void host_update_child_stop(int handle)
+{
+	update_child_stop(handle);
+}
+
 /* ---------- the game's state, for the macOS app's updater */
 
 /* whether a game is played (1) or the main menu shown (0), as the guest

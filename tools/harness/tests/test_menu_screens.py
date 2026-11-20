@@ -281,6 +281,11 @@ def test_actions_registered():
             assert f'"{binding}"' in re.search(r"\nint pc_menu_layout_value\(.*?\n\}\n",
                                                 read("port/linux/game/controller_layout_menu.inc"), re.S).group(0), \
                 binding
+        elif binding.startswith("bake."):
+            # (PRISM's light bake's questions, prism_bake_menu.c's prism_bake_menu_value)
+            assert '"bake."' in value, binding
+            assert f'"{binding}"' in re.search(r"\nint prism_bake_menu_value\(.*?\n\}\n",
+                                                read("port/linux/game/prism_bake_menu.c"), re.S).group(0), binding
         else:
             assert f'"{binding}"' in value, binding
     sources = re.findall(r'"([^"]+)"', re.search(r"screen_source_names\[\] =\n\{\n(.*?)\n\};", source,

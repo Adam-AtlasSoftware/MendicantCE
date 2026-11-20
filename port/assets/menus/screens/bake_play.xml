@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PRISM's light bake (docs/prism_bake.md): a campaign level started under PRISM Rebaked or Path Traced before the
+main menu has baked it (menu_functions.c's campaign_start, prism_bake_menu.c). PLAY NOW plays it, with Classic's light
+until its bake, which goes on as it plays, is done; WAIT (or B) goes back, the main menu baking that level first. -->
+<screen name="bake_play" back="bake wait">
+	<dialog title="LIGHT NOT BAKED YET" text="{bake.level}'s light is still baking{bake.left}. Play now with Classic light, or wait?">
+		<list focus="wait">
+			<item id="play" label="PLAY NOW" do="bake play"/>
+			<item id="wait" label="WAIT" do="bake wait"/>
+		</list>
+	</dialog>
+</screen>

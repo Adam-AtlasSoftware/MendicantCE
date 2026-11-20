@@ -536,8 +536,8 @@ SEGMENTED_MOST = 3
 SEGMENT_PAD, SEGMENT_LEAST, SEGMENT_GAP, SEGMENT_HEIGHT = 8, 48, 4, 18
 SEGMENT_NOT = {"display.vrr", "display.resolution", "display.window_size", "display.refresh_rate",
                "audio.output_device", "audio.input_device",
-               # (Lighting Settings' BAKE and Video's LIGHTING: their words do not
-               # fit as segments)
+               # (Light Bake's BAKE and PRISM's LIGHTING: their words do not fit
+               # as segments)
                "display.bake", "display.lighting",
                # (the plugins' choices, left out where the plugin is not ready:
                # menu_tags.c's spinner_expand)
@@ -832,29 +832,41 @@ CONTROL_COMMAND_ROWS = {f"command_{n}" for n in range(1, CONTROL_ROWS + 1)}
 # (an action's row: its name, then its two bindings' columns, to the row's end)
 CONTROL_BINDINGS_X, CONTROL_BINDING_WIDTH = (136, 240), 104
 STREAMER = ("interface_settings/streamer_mode", "streamer_mode_screen")
-# (PRISM's graphics: Mods' PRISM GRAPHICS: the remodelled level, bloom and
-# the tone grade, every lighting mode's)
-PRISM_PAGE = ("mods_settings/prism", "prism_settings_screen")
-# (and the assets mods ship for it: Mods' PRISM ASSETS)
-PRISM_ASSETS_PAGE = ("mods_settings/prism_assets", "prism_assets_settings_screen")
-# (the lighting, Video's LIGHTING SETTINGS: the rows of the lighting mode
-# chosen, menu_functions.c's lighting_rows_show; docs/prism_bake.md,
-# docs/prism_pathtraced.md)
-LIGHTING_PAGE = ("video_settings/lighting", "lighting_settings_screen")
-# (and the ray tracing, Video's RAY TRACING: the traced features of the
-# mode chosen, docs/prism_rt.md; its rows greyed out where the renderer
+# (Video's PRISM: every PRISM setting and the lighting's, under one page:
+# the lighting mode (display.lighting) on top, then a link to each group,
+# shown only in the modes it applies to (LIGHTING_MODE_ROWS, menu_functions.c's
+# lighting_rows_show); docs/prism_settings.md has the tree)
+PRISM_MENU = ("video_settings/prism", "prism_screen")
+# (each mode's own light: Classic's and PRISM's extras on it (forward:
+# d3d8_device.c, prism_light.c, prism_shadows.c, prism_lightmaps.c, world_ao.c);
+# PRISM Rebaked's frame, docs/prism_bake.md; PRISM Path Traced's,
+# docs/prism_pathtraced.md, with its moving lights' look)
+CLASSIC_LIGHTING_PAGE = ("video_settings/prism/classic", "classic_lighting_screen")
+REBAKED_PAGE = ("video_settings/prism/rebaked", "rebaked_lighting_screen")
+PATH_TRACING_PAGE = ("video_settings/prism/path_tracing", "path_tracing_screen")
+# (the traced features: Classic's ray tracer, display.prism_rt (docs/prism_rt.md),
+# and the shapes every mode traces; its rows greyed out where the renderer
 # cannot trace rays, menu_functions.c's prism_rt_rows_show)
-RAY_TRACING_PAGE = ("video_settings/ray_tracing", "ray_tracing_settings_screen")
+RAY_TRACING_PAGE = ("video_settings/prism/ray_tracing", "ray_tracing_settings_screen")
 # (and the look of Classic's ray traced light, display.prism_rt's: docs/prism_rt.md
 # "The rig" and "Styles"; greyed out alike)
-TRACED_LOOK_PAGE = ("video_settings/ray_tracing/look", "traced_look_settings_screen")
-# (Lighting Settings' own pages, for room: Path Traced's COLOURED LIGHTS (the
-# moving lights' brightness and colour, docs/prism_pathtraced.md "What
-# glows"; not Advanced Graphics' LIGHT EFFECTS, which every mode has) and
-# both PRISM modes' UPSCALING (display.upscaler and its scale,
-# docs/prism_plugin.md))
-COLOURED_LIGHTS_PAGE = ("video_settings/lighting/coloured_lights", "coloured_lights_settings_screen")
-UPSCALING_PAGE = ("video_settings/lighting/upscaling", "upscaling_settings_screen")
+TRACED_LOOK_PAGE = ("video_settings/prism/ray_tracing/look", "traced_look_settings_screen")
+# (the picture: both PRISM modes' exposure and tone curve, every mode's bloom
+# and tone grade)
+IMAGE_PAGE = ("video_settings/prism/image", "prism_image_screen")
+# (both PRISM modes' upscaler and its scale, docs/prism_plugin.md)
+UPSCALING_PAGE = ("video_settings/prism/upscaling", "upscaling_settings_screen")
+# (the in-game baker, docs/prism_bake.md, whose bake both PRISM modes read)
+LIGHT_BAKE_PAGE = ("video_settings/prism/light_bake", "light_bake_screen")
+# (the materials and textures: the material packs and mods' materials
+# (prism_materials.c, mod_pbr.c), the texture store (mod_textures.c))
+MATERIALS_PAGE = ("video_settings/prism/materials", "materials_textures_screen")
+# (the mesh store and extended skeletons (mod_meshes.c), and the stores'
+# streaming against pop-in (prism_popin.c))
+MODELS_PAGE = ("video_settings/prism/models", "models_streaming_screen")
+# (the remodelled level (prism_world_geometry.c), and the terrain and water
+# overhaul's settings (docs/prism_terrain.md), the PRISM modes')
+WORLD_PAGE = ("video_settings/prism/world", "world_terrain_screen")
 
 # ---------- the lighting modes (display.lighting): the rows that show only
 # in some of them, by key, menu_functions.c's lighting_rows (which also has
@@ -865,43 +877,48 @@ UPSCALING_PAGE = ("video_settings/lighting/upscaling", "upscaling_settings_scree
 # two tables agree.
 LIGHTING_MODES = ("C", "R", "P")
 LIGHTING_MODE_ROWS = {
-    # (the Lighting page: Classic's own light and PRISM's extras on it)
+    # (PRISM's page: the way to each mode's own lighting page; its
+    # IMAGE, RAY TRACING and the world's and assets' pages in every mode)
+    "classic_lighting": "C", "rebaked_lighting": "R", "path_tracing": "P",
+    # (Classic Lighting: Classic's own light and PRISM's extras on it, and
+    # the remodel's shape for its sun shadows)
     "shadow_resolution": "C", "per_pixel_lighting": "C", "dynamic_lights": "C", "ambient_occlusion": "C",
     "ambient_occlusion_strength": "C", "prism_lightmaps": "C", "prism_specular": "C", "prism_reflections": "C",
     "prism_shadows": "C", "prism_shadow_resolution": "C", "prism_shadow_softness": "C",
-    "prism_baked_shadows": "C", "prism_baked_shadow_depth": "C",
-    # (PRISM Rebaked's frame)
-    "prism_raster_composition": "R", "prism_raster_objects": "R", "shadow_resolution_rebaked": "R",
-    # (PRISM Path Traced's)
-    "pt_profile": "P", "denoiser": "P",
-    # (and the way to its COLOURED LIGHTS page, the moving lights' brightness
-    # and colour; the page's rows are in no mode's list, as Traced Light
-    # Look's: only Path Traced's link opens it)
-    "coloured_lights": "P",
-    # (the way to the UPSCALING page, in both PRISM modes (prism_upscale.c:
-    # Classic draws without an upscaler); on it, the upscaler's scale in every
-    # mode while one is on, the condition's entry)
+    "prism_baked_shadows": "C", "prism_baked_shadow_depth": "C", "prism_geometry_shadows": "C",
+    # (PRISM Rebaked's frame: its composition, object light and object
+    # shadows (CE's shadow quality while those are Classic's), and the
+    # enhanced dynamic lights, which the game gives the bake's frame)
+    "prism_raster_composition": "R", "prism_raster_objects": "R", "prism_object_shadows": "R",
+    "shadow_resolution_rebaked": "R", "dynamic_lights_prism": "R",
+    # (PRISM Path Traced's: its profile and denoiser, and the moving lights:
+    # the enhanced dynamic lights the game gives the path tracer, their
+    # brightness and colour)
+    "pt_profile": "P", "denoiser": "P", "dynamic_lights_pt": "P", "prism_dynamic_lights": "P",
+    "prism_light_saturation": "P",
+    # (both PRISM modes: their exposure and tone curve (Image), the way to
+    # the Upscaling page (prism_upscale.c: Classic draws without an upscaler;
+    # on it the upscaler's scale while one is on, the condition's entry), and
+    # the bake both read (Light Bake))
+    "prism_exposure": "RP", "prism_exposure_bias": "RP", "prism_tone_curve": "RP",
     "upscaling": "RP", "upscaler_scale": "CRP",
-    # (the enhanced dynamic lights in both PRISM modes: which lights the game
-    # gives the bake's frame and the path tracer, and the plasma glows)
-    "dynamic_lights_prism": "RP",
-    # (both PRISM modes: their exposure and tone curve, and the bake both read)
-    "prism_exposure": "RP", "prism_exposure_bias": "RP", "prism_tone_curve": "RP", "bake": "RP",
-    "bake_quality": "RP", "prism_sky_light": "RP", "bake_rebake": "RP", "bake_indicator": "RP",
-    # (the Ray Tracing page: Classic's ray tracer, display.prism_rt, off under
-    # both PRISM modes (prism_rt.c), and Rebaked's traced object shadows)
+    "light_bake": "RP", "bake_quality": "RP", "prism_sky_light": "RP",
+    **{f"bake_{level}": "RP" for level in ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40")},
+    "bake_rebake_all": "RP",
+    # (Ray Tracing: Classic's ray tracer, display.prism_rt, off under both
+    # PRISM modes (prism_rt.c); the traced scene, which PRISM Path Traced,
+    # Rebaked's traced shadows and Classic's ray tracer take; the see-through
+    # surfaces, in the bake's scene too)
     "prism_rt": "C", "prism_rt_quality": "C", "prism_rt_resolution": "C", "prism_rt_denoiser": "C",
     "prism_rt_mood": "C", "prism_rt_sun": "C", "prism_rt_world": "C", "traced_light_look": "C",
-    "prism_object_shadows": "R",
-    # (the traced scene: the objects' capture, which PRISM Path Traced, Rebaked's
-    # traced shadows and Classic's ray tracer take; the see-through surfaces,
-    # in the bake's scene too)
     "prism_rt_objects": "CRP", "prism_rt_cache": "CRP", "prism_rt_alpha": "CRP",
-    # (PRISM ASSETS: the model shaders' forward light, Classic's; the material
-    # packs, the deferred modes')
+    # (Materials & Textures: the model shaders' forward light, Classic's; the
+    # material packs, both PRISM modes' G-buffer's: Rebaked's and Path
+    # Traced's)
     "prism_material_overlay": "C", "prism_surface_maps": "C", "material_packs": "RP",
-    # (PRISM GRAPHICS: the remodel's sun shadows, Classic's cascaded shadows')
-    "prism_geometry_shadows": "C",
+    # (World & Terrain: the terrain and water overhaul, in both PRISM modes
+    # (prism_terrain_wanted))
+    "terrain": "RP", "terrain_layers": "RP", "terrain_tracks": "RP", "water": "RP",
 }
 # the rows shown in some modes on a page that every platform has (Advanced
 # Graphics): Android's, which has no Lighting choice (display.lighting is the
@@ -978,7 +995,11 @@ SETTINGS_STATUS_ROWS = {"discord_account", "link_status", "link_unlink",
                         *(f"link_master_{n}" for n in range(1, 5)), "hdr_display",
                         "viewmodel_weapon_reset", "gyro_found", "gyro_calibrate", "clear_caches", "add_maps",
                         "layout_controller", "layout_export", "layout_files", "layout_bindings",
-                        "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1))}
+                        "remap_player", "remap_group", *(f"pad_{n}" for n in range(1, REMAP_ROWS + 1)),
+                        # (Light Bake's levels, each its bake's state, and REBAKE ALL:
+                        # menu_functions.c's bake_rows_show, prism_bake_menu.c)
+                        *(f"bake_{level}" for level in ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40",
+                                                        "d20", "d40")), "bake_rebake_all"}
 # the rows whose labels menu_functions.c writes (a master server's host): the
 # label's text its own, not its list's; their values the narrower column at
 # the spinners' column's right end ("CODE ABC-DEF")
@@ -1068,20 +1089,13 @@ PAGES = {
              "Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns "
              "it on while the device runs on its battery. Your own settings come back as it turns off.", "android",
              "battery_saver_android"),
-            # (PRISM v4's lighting modes, display.lighting: the Vulkan
-            # renderer's. The two pages after it show the rows of the mode
-            # shown here, changed or not: menu_functions.c's lighting_rows_show)
-            ("LIGHTING", "display.lighting", LIGHTING_CHOICES,
-             "How the world is lit. Classic: the game's own light. PRISM Rebaked: light baked on this computer "
-             "(sun, sky, lamps, bounces). PRISM Path Traced: every light traced each frame. The PRISM lightings "
-             "need a graphics card that traces rays.|Lighting Settings and Ray Tracing show what applies to the "
-             "lighting chosen.", "desktop"),
-            ("LIGHTING SETTINGS ›", None, _page_screen(*LIGHTING_PAGE),
-             "The settings of the lighting chosen: Classic's shadows, lights and PRISM extras; PRISM Rebaked's "
-             "and Path Traced's look, exposure and the light bake.", "desktop", "lighting_settings"),
-            ("RAY TRACING ›", None, _page_screen(*RAY_TRACING_PAGE),
-             "The ray traced features of the lighting chosen: Classic's ray traced shadows and light, PRISM "
-             "Rebaked's traced object shadows, and the shapes every mode traces.", "desktop", "ray_tracing"),
+            # (PRISM: the lighting mode, display.lighting (the Vulkan
+            # renderer's), and every setting of PRISM's and of the lighting,
+            # on a page of their own: PRISM_MENU)
+            ("PRISM ›", None, _page_screen(*PRISM_MENU),
+             "The lighting, Classic, PRISM Rebaked or PRISM Path Traced, then only the settings that apply to it: "
+             "light and shadows, ray tracing, exposure, upscaling, the light bake, materials, remodels and terrain.",
+             "desktop", "prism_settings"),
             # (display.gamma's page, and display.hdr's rows on the renderers
             # that draw it: menu_files.c's "hdr")
             ("BRIGHTNESS ›", None, _page_screen(*BRIGHTNESS_PAGE),
@@ -1401,16 +1415,6 @@ PAGES = {
             ("THEATER ›", None, f"{THEATER}/theater_screen",
              "The games recorded: watch one again from any player's view, or a free or cinematic camera.", None,
              "theater"),
-            # (PRISM: the graphics beyond the Xbox's, drawn by the Vulkan
-            # renderer, on pages of their own: PRISM's rows outgrew this one;
-            # under MODS, without a section of their own, so that the tab's rows
-            # fit with GOAT H1's GAME MAPS and MASTER CHIEF COLLECTION)
-            ("PRISM GRAPHICS ›", None, _page_screen(*PRISM_PAGE),
-             "The level remodelled from the data folder, bloom and the tone grade, with any lighting. The "
-             "lighting's own settings are Video's.", "desktop"),
-            ("PRISM ASSETS ›", None, _page_screen(*PRISM_ASSETS_PAGE),
-             "The sharper textures, remodelled characters and materials mods ship, and how much of the graphics "
-             "card they take.", "desktop"),
             # (its value the maps' sources the game has, and the screen asked
             # for at the next start: menu_functions.c's add_maps_show,
             # port/linux/src/map_sources.c; first_start.c's screen)
@@ -1436,7 +1440,7 @@ PAGES = {
             # Enhanced, Xbox or PRISM Extras, CUSTOM while any setting it
             # chooses is another value: menu_functions.c's graphics_preset_show;
             # choosing one sets them all again, as config_write does. Not a
-            # lighting mode: Video's Lighting is)
+            # lighting mode: PRISM's Lighting is)
             ("QUALITY", "display.graphics", QUALITY_CHOICES,
              "Enhanced: smoother edges, sharper textures and shadows, smoother model light. Xbox: as the Xbox "
              "drew it. PRISM Extras: Enhanced with PRISM's finer Classic light. Its light settings are Lighting "
@@ -1475,8 +1479,8 @@ PAGES = {
              "rate. Off shows each update as it is.", None),
             (SECTION, "LIGHT EFFECTS"),
             # (Android's lighting rows: it has no Lighting choice, its light is
-            # Classic's; the desktop's are on Video's Lighting Settings page,
-            # under Classic)
+            # Classic's; the desktop's are on Video's PRISM pages, Classic
+            # Lighting's, and Rebaked's and Path Traced's Dynamic Lights)
             ("SHADOW QUALITY", "display.shadow_resolution",
              [("XBOX", "128"), ("MEDIUM", "256"), ("HIGH", "512"), ("ULTRA", "1024")],
              "How sharp the shadows of characters, vehicles and weapons are. Xbox is the original's soft, blocky "
@@ -1494,15 +1498,6 @@ PAGES = {
              "World: soft shade where characters, vehicles and scenery meet the level and each other, from the "
              "level's shape; the levels keep their own lighting. Ray Traced: the shade of characters and vehicles "
              "traced by the graphics card, where it can (else World).", "android", "ambient_occlusion_android"),
-            # (the desktop's under the PRISM modes: the game gives them the
-            # enhanced lights too (object_lights.c: the plasma bolts' and
-            # needles' lights, world_scene's list, which the bake's frame and
-            # the path tracer light by) and draws the glows (d3d8_device.c);
-            # under Classic the row is on Lighting Settings, CLASSIC LIGHTING)
-            ("DYNAMIC LIGHTS", "display.dynamic_lights", [("CLASSIC", "classic"), ("ENHANCED", "enhanced")],
-             "Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle "
-             "flash lights your own weapon. Classic: only the lights the Xbox had.", "desktop",
-             "dynamic_lights_prism"),
             ("SHIELD GLOW", "display.shield_glow", ON_OFF,
              "Shields light their surroundings as they flare, in the shield's own color. Online: the host's "
              "choice.|Off in Pro 2v2 games, for everyone.", None),
@@ -2131,121 +2126,65 @@ PAGES = {
              "and rings, or Xbox green. It is never drawn over the picture.", "android"),
         ],
     },
-    PRISM_PAGE[0]: {
-        "screen": PRISM_PAGE[1], "title": "PRISM GRAPHICS",
+    # ---- Video's PRISM: the lighting mode on top, then a link to each
+    # group of its settings, each shown in the modes it applies to
+    # (LIGHTING_MODE_ROWS, menu_functions.c's lighting_rows_show); a hidden
+    # row keeps its value. docs/prism_settings.md has the tree
+    PRISM_MENU[0]: {
+        "screen": PRISM_MENU[1], "title": "PRISM",
         "rows": [
-            # (beyond CE: what the Xbox never drew, off in every preset, with
-            # any lighting; the lighting's own rows are Video's Lighting
-            # Settings')
-            (SECTION, "WORLD GEOMETRY"),
-            # (PRISM's remodelled level geometry, built on this machine:
-            # port/linux/game/prism_world_geometry.c)
-            ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
-             "Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; "
-             "none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on "
-             "the original.", "desktop"),
-            ("GEOMETRY DETAIL", "display.prism_world_geometry_detail", [("LOW", "50"), ("NORMAL", "100"),
-                                                                        ("HIGH", "200")],
-             "How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper "
-             "on the graphics card.", "desktop", "prism_geometry_detail"),
-            # (Classic's sun shadows' shape: with Lighting Classic and its Sun
-            # Shadows alone, menu_functions.c's lighting_rows)
-            ("GEOMETRY SHADOWS", "display.prism_world_geometry_shadows", [("XBOX", "stock"), ("FAR", "far"),
-                                                                          ("FULL", "remodel")],
-             "The shape Classic's sun shadows are cast from with the remodel: Far, its lighter level (the rock's "
-             "ledges still shade); Full, every detail; Xbox, the map's own (cheapest).", "desktop",
-             "prism_geometry_shadows"),
-            (SECTION, "POST EFFECTS"),
-            ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
-             "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
-             "Glow is faint, Full wider. Nothing lit only to white glows. With any lighting.", "desktop"),
-            ("TONE GRADE", "display.prism_tone", [("OFF", "off"), ("PRISM", "prism"), ("VIVID", "vivid")],
-             "Grades the finished picture by the light around each pixel: deeper local contrast, dark places "
-             "lifted, richer colour. Off draws it as the game does; Vivid goes further. With any lighting.",
-             "desktop"),
+            (SECTION, "LIGHTING"),
+            # (PRISM v4's lighting modes, display.lighting: the Vulkan
+            # renderer's. The links below, and the pages they open, show the
+            # rows of the mode shown here, changed or not: menu_functions.c's
+            # lighting_rows_show)
+            ("LIGHTING", "display.lighting", LIGHTING_CHOICES,
+             "How the world is lit. Classic: the game's own light. PRISM Rebaked: light baked on this computer "
+             "(sun, sky, lamps, bounces). PRISM Path Traced: every light traced each frame. The PRISM lightings "
+             "need a graphics card that traces rays.|The rows below follow the lighting chosen.", "desktop"),
+            ("CLASSIC LIGHTING ›", None, _page_screen(*CLASSIC_LIGHTING_PAGE),
+             "Classic's shadows, smooth lighting, dynamic lights and ambient occlusion, and PRISM's extras on "
+             "Classic's light: smoother lightmaps, highlights, reflections and sun shadows.", "desktop",
+             "classic_lighting"),
+            ("REBAKED LIGHTING ›", None, _page_screen(*REBAKED_PAGE),
+             "How PRISM Rebaked composes its frame and lights characters and vehicles, their shadows, and the "
+             "dynamic lights.", "desktop", "rebaked_lighting"),
+            ("PATH TRACING ›", None, _page_screen(*PATH_TRACING_PAGE),
+             "Path Traced's profile and denoiser (PRISM's or DLSS Ray Reconstruction), and the moving lights: "
+             "plasma, needles, blasts and shield flares.", "desktop", "path_tracing"),
+            ("RAY TRACING ›", None, _page_screen(*RAY_TRACING_PAGE),
+             "The traced features of the lighting chosen: Classic's ray traced shadows and light, and the shapes "
+             "every lighting traces (models, cutouts).", "desktop", "ray_tracing"),
+            ("IMAGE ›", None, _page_screen(*IMAGE_PAGE),
+             "The PRISM lightings' exposure and tone curve, and the bloom and tone grade of every lighting.",
+             "desktop", "prism_image"),
+            ("UPSCALING ›", None, _page_screen(*UPSCALING_PAGE),
+             "Draws the 3D view smaller and brings it to the screen's resolution with FSR 3.1 or DLSS: faster. "
+             "The upscaler and how much of the resolution it starts from.", "desktop", "upscaling"),
+            ("LIGHT BAKE ›", None, _page_screen(*LIGHT_BAKE_PAGE),
+             "The levels' light, baked on this computer on the main menu before you play, which both PRISM "
+             "lightings read: its quality, the sky's light, and each level's bake.", "desktop", "light_bake"),
+            (SECTION, "WORLD AND ASSETS"),
+            ("MATERIALS & TEXTURES ›", None, _page_screen(*MATERIALS_PAGE),
+             "The materials packs and mods give surfaces, and the sharper textures mods ship, with how much of the "
+             "graphics card they take.", "desktop", "materials_textures"),
+            ("MODELS & STREAMING ›", None, _page_screen(*MODELS_PAGE),
+             "The remodelled characters, weapons and vehicles mods ship, and how the sharper assets are read in "
+             "without popping.", "desktop", "models_streaming"),
+            ("WORLD & TERRAIN ›", None, _page_screen(*WORLD_PAGE),
+             "The level remodelled from the data folder, and under the PRISM lightings the HQ ground, footprints "
+             "and PRISM's water.", "desktop", "world_terrain"),
         ],
     },
-    PRISM_ASSETS_PAGE[0]: {
-        "screen": PRISM_ASSETS_PAGE[1], "title": "PRISM ASSETS",
+    CLASSIC_LIGHTING_PAGE[0]: {
+        "screen": CLASSIC_LIGHTING_PAGE[1], "title": "CLASSIC LIGHTING",
         "rows": [
-            (SECTION, "MATERIALS"),
-            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
-            # for the model shaders a mod's overlay.json names; the models'
-            # forward light, Classic's: menu_functions.c's lighting_rows)
-            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
-             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
-             "material overlay, in Classic's light. It changes only the light on them. Off draws them as the Xbox "
-             "did.", "desktop"),
-            ("SURFACE DETAIL", "display.prism_surface_maps", ON_OFF,
-             "Lights characters, weapons and vehicles by the surface maps a mod carries for its remodels, in "
-             "Classic's light: their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
-            # (PRISM v4's materials from the material pack and mods, in the
-            # deferred modes: prism_materials.c)
-            ("MATERIAL PACKS", "display.material_packs", ON_OFF,
-             "PRISM's lighting draws each surface by the material the material pack or a mod gives it: its "
-             "colour without the painted light, its bumps, roughness and metal. Off: every material made from the "
-             "game's shaders.", "desktop"),
-            # (PRISM's texture store: the replacement textures mods ship,
-            # drawn by the Vulkan renderer from the graphics card's memory)
-            ("TEXTURE DETAIL", "display.prism_textures", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
-             "Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's "
-             "memory. Stock draws the game's own.", "desktop"),
-            ("TEXTURE MEMORY", "display.prism_texture_budget_mb",
-             [("AUTO", "0"), ("512 MB", "512"), ("1 GB", "1024"), ("2 GB", "2048"), ("4 GB", "4096")],
-             "How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is "
-             "free; past it, those not seen lately go back to the game's.", "desktop"),
-            # (PRISM's materials: the GGX path for the model shaders a mod
-            # gives a material, drawn by the Vulkan renderer alone)
-            ("PBR MATERIALS", "display.prism_materials", [("STOCK", "stock"), ("PBR", "pbr")],
-             "Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, "
-             "metal and coats under the level's own lights. Stock draws them as the Xbox did.", "desktop"),
-            # (PRISM's mesh store and extended skeletons: the replacement
-            # meshes mods ship, drawn by the Vulkan renderer)
-            (SECTION, "MODELS AND STREAMING"),
-            ("REMODELS", "display.prism_models", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
-             "Draws the remodelled characters, weapons and vehicles mods ship in place of the game's, on the "
-             "game's own skeletons: animations, collision and aim are unchanged. Stock draws the game's own.",
-             "desktop"),
-            ("MODEL MEMORY", "display.prism_model_budget_mb",
-             [("AUTO", "0"), ("256 MB", "256"), ("512 MB", "512"), ("1 GB", "1024")],
-             "How much of the graphics card's memory mods' remodels may take. Auto takes a fifth of what is "
-             "free; a remodel past it is drawn as the game's.", "desktop"),
-            ("SECONDARY MOTION", "display.prism_secondary_motion", ON_OFF,
-             "A remodel's pouches swing and its joints keep their volume as it moves. Off: they follow the "
-             "bones they hang from.", "desktop"),
-            # (against pop-in: the stores' prefetch and the textures' fade,
-            # the host's; the texture cache's wait and the levels' hysteresis,
-            # port/linux/game/prism_popin.c)
-            ("PRELOAD", "display.prism_prefetch", ON_OFF,
-             "Reads a level's sharper textures and remodels while it loads, so they do not appear in front of "
-             "you. Off reads each when it is first seen, the game's drawn until then.", "desktop"),
-            ("TEXTURE FADE-IN", "display.prism_texture_fade",
-             [("OFF", "0"), ("QUICK", "120"), ("SMOOTH", "250"), ("SLOW", "500")],
-             "How gently a sharper texture blends in as it arrives. Off sharpens it in steps.", "desktop"),
-            ("TEXTURE WAIT", "display.prism_texture_wait", [("OFF", "0"), ("SHORT", "2"), ("NORMAL", "4"),
-                                                             ("LONG", "8")],
-             "Waits up to this long a frame for a texture the game is still reading, rather than leaving its "
-             "surface or character out until it arrives. Off as the Xbox.", "desktop"),
-            ("GEOMETRY BLEND", "display.prism_world_geometry_band", [("OFF", "0"), ("NARROW", "10"),
-                                                                     ("WIDE", "20"), ("WIDEST", "40")],
-             "Spreads where the remodel's surfaces change to their lighter far level over a band, one by one as "
-             "you move, rather than a ring of them at once.", "desktop"),
-            ("DETAIL STEADINESS", "display.prism_lod_hysteresis", [("OFF", "0"), ("SOME", "8"), ("STEADY", "15"),
-                                                                   ("STEADIEST", "30")],
-             "Keeps the remodel's and remodelled models' detail from flicking back and forth when you stand near "
-             "the distance it changes at.", "desktop"),
-        ],
-    },
-    LIGHTING_PAGE[0]: {
-        "screen": LIGHTING_PAGE[1], "title": "LIGHTING",
-        "rows": [
-            # (the rows of the lighting mode Video's Lighting shows, the others
-            # hidden, keeping their values: LIGHTING_MODE_ROWS,
-            # menu_functions.c's lighting_rows_show. Classic: the game's own
-            # light and PRISM's extras on it (forward, port/linux/src/
-            # d3d8_device.c, prism_light.c, prism_shadows.c, prism_lightmaps.c,
-            # world_ao.c): under PRISM's modes the frame's light is the bake's
-            # or the path tracer's, and they change nothing)
+            # (Classic, display.lighting "ce": the game's own light and PRISM's
+            # extras on it (forward, port/linux/src/d3d8_device.c,
+            # prism_light.c, prism_shadows.c, prism_lightmaps.c, world_ao.c):
+            # under PRISM's modes the frame's light is the bake's or the path
+            # tracer's, and they change nothing; PRISM's page opens it under
+            # Classic alone)
             (SECTION, "CLASSIC LIGHTING"),
             ("SHADOW QUALITY", "display.shadow_resolution",
              [("XBOX", "128"), ("MEDIUM", "256"), ("HIGH", "512"), ("ULTRA", "1024")],
@@ -2303,8 +2242,14 @@ PAGES = {
                                                                            ("DEEP", "1.5")],
              "How far Baked Shadows' Sharp goes: Light keeps some of the lightmaps' softness, Deep darkens the shaded "
              "side more.", "desktop", "prism_baked_shadow_depth"),
+        ],
+    },
+    REBAKED_PAGE[0]: {
+        "screen": REBAKED_PAGE[1], "title": "REBAKED LIGHTING",
+        "rows": [
             # (PRISM Rebaked, display.lighting "raster", docs/prism_bake.md: the
-            # frame composed from the bake by CE's shaders or PRISM's materials)
+            # frame composed from the bake by CE's shaders or PRISM's materials;
+            # PRISM's page opens it under Rebaked alone)
             (SECTION, "REBAKED LIGHTING"),
             ("COMPOSITION", "display.prism_raster_composition",
              [("GAME SHADERS", "ce"), ("PRISM MATERIALS", "materials")],
@@ -2314,14 +2259,34 @@ PAGES = {
             ("OBJECT LIGHT", "display.prism_raster_objects", [("BAKED", "volume"), ("NEVER DARKER", "classic")],
              "How characters, vehicles and weapons are lit. Baked: by the baked light where they are. Never "
              "Darker: the baked light, but never darker than Classic lit them.", "desktop"),
-            # (CE's projected object shadows, which PRISM Rebaked keeps with
-            # Ray Tracing's Object Shadows CLASSIC'S alone)
+            # (the moving objects' sun shadows, traced against the objects as
+            # drawn: prism_deferred.c, docs/prism_bake.md; or CE's projected
+            # object shadows, at Classic's shadow quality)
+            (SECTION, "SHADOWS"),
+            ("OBJECT SHADOWS", "display.prism_raster_object_shadows", [("TRACED", "traced"), ("CLASSIC'S", "classic")],
+             "The sun's shadows of vehicles, characters and weapons. Traced: ray traced, on the ground, on each "
+             "other and on themselves. Classic's: the game's own, on the ground only.", "desktop", "prism_object_shadows"),
             ("SHADOW QUALITY", "display.shadow_resolution",
              [("XBOX", "128"), ("MEDIUM", "256"), ("HIGH", "512"), ("ULTRA", "1024")],
-             "How sharp the game's own object shadows are, which PRISM Rebaked draws while Ray Tracing's Object "
-             "Shadows are Classic's.", "desktop", "shadow_resolution_rebaked"),
+             "How sharp the game's own object shadows are, which PRISM Rebaked draws while Object Shadows are "
+             "Classic's.", "desktop", "shadow_resolution_rebaked"),
+            # (the enhanced dynamic lights: the game gives the bake's frame the
+            # plasma bolts' and needles' lights too (object_lights.c,
+            # world_scene's list) and draws their glows (d3d8_device.c);
+            # Classic's row is Classic Lighting's)
+            (SECTION, "MOVING LIGHTS"),
+            ("DYNAMIC LIGHTS", "display.dynamic_lights", [("CLASSIC", "classic"), ("ENHANCED", "enhanced")],
+             "Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle "
+             "flash lights your own weapon. Classic: only the lights the Xbox had.|Classic for everyone in a Pro "
+             "2v2 game; yours again after it.", "desktop", "dynamic_lights_prism"),
+        ],
+    },
+    PATH_TRACING_PAGE[0]: {
+        "screen": PATH_TRACING_PAGE[1], "title": "PATH TRACING",
+        "rows": [
             # (PRISM Path Traced, display.lighting "pathtraced",
-            # docs/prism_pathtraced.md)
+            # docs/prism_pathtraced.md; PRISM's page opens it under Path Traced
+            # alone)
             (SECTION, "PATH TRACING"),
             ("PROFILE", "display.pt_profile", [("QUALITY", "quality"), ("PERFORMANCE", "performance")],
              "Quality: a bounce of light traced at every pixel. Performance: the bounced light read from the bake "
@@ -2336,65 +2301,16 @@ PAGES = {
              "from the next start. "
              "Off: the light as traced, grainy (for checking).|DLSS's plugin: the prism-plugins README.",
              "desktop"),
-            # (the moving lights' look, a page of its own for room:
-            # COLOURED_LIGHTS_PAGE)
-            ("COLOURED LIGHTS ›", None, _page_screen(*COLOURED_LIGHTS_PAGE),
-             "How brightly plasma, needles, grenades, blasts and shield flares light their surroundings, and how "
-             "deep the colour of their light is.", "desktop", "coloured_lights"),
-            # (both PRISM modes' exposure and tone curve: the bake's meter and
-            # step, shared, prism_rt.c's RT_FRAME settings)
-            (SECTION, "IMAGE"),
-            ("EXPOSURE", "display.prism_exposure",
-             [("DEFAULT", "style"), ("EYE", "auto"), ("CLASSIC'S", "ce"), ("FIXED", "fixed")],
-             "How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker "
-             "than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is.",
-             "desktop"),
-            ("EXPOSURE BIAS", "display.prism_exposure_bias", EXPOSURE_BIASES,
-             "Brighter or darker than the exposure chooses, in stops: +1 twice as bright, -1 half.", "desktop"),
-            ("TONE CURVE", "display.prism_tone_curve",
-             [("DEFAULT", "style"), ("FILMIC", "filmic"), ("ACES", "aces"), ("LOCAL", "local"), ("CLIPPED", "ce")],
-             "How light past white is drawn. Default and Filmic: rolled off gently, nothing darker moved. ACES: "
-             "punchier, a film's curve. Local: as Filmic here. Clipped: held at white, as Classic did.",
-             "desktop"),
-            # (the upscaler and its scale, a page of its own for room:
-            # UPSCALING_PAGE)
-            ("UPSCALING ›", None, _page_screen(*UPSCALING_PAGE),
-             "Draws the 3D view smaller and brings it to the screen's resolution with FSR 3.1 or DLSS: faster. "
-             "The upscaler and how much of the resolution it starts from.", "desktop", "upscaling"),
-            # (the in-game baker, docs/prism_bake.md, whose bake both PRISM
-            # modes read: Rebaked's light, and Path Traced's scene, lamps and
-            # bounced light)
-            (SECTION, "LIGHT BAKE"),
-            ("BAKE", "display.bake", [("WHILE PLAYING", "auto"), ("WHEN ASKED", "ask"), ("NEVER", "off")],
-             "While Playing: a level's light is baked in the background as you play it, a quick draft first, "
-             "then finished, picking up where it stopped. When Asked: only after Rebake Lightmaps. Both PRISM "
-             "lightings read the bake.", "desktop"),
-            ("BAKE QUALITY", "display.bake_quality",
-             [("MAX", "max"), ("ULTRA", "ultra"), ("HIGH", "high"), ("DRAFT", "draft")],
-             "Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and "
-             "large on disk. The others are quicker and smaller.", "desktop"),
-            ("SKY LIGHT", "display.prism_sky_light", [("SKY", "sky"), ("FLAT", "flat")],
-             "Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground "
-             "fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the "
-             "same everywhere. A change bakes again.", "desktop"),
-            ("REBAKE LIGHTMAPS", "display.bake_rebake", [("—", "0"), ("ASKED", "1")],
-             "Change this to bake the level you are playing again from nothing (needed after its geometry, "
-             "materials or lights change; a finished bake is otherwise kept).", "desktop"),
-            ("PROGRESS ON SCREEN", "display.bake_indicator", ON_OFF,
-             "Shows \"Baking lightmaps 37%\" at the top left while a level is baked.", "desktop"),
-        ],
-    },
-    COLOURED_LIGHTS_PAGE[0]: {
-        "screen": COLOURED_LIGHTS_PAGE[1], "title": "COLOURED LIGHTS",
-        "rows": [
-            # (Path Traced's moving lights, Lighting Settings' COLOURED LIGHTS
-            # opens it under Path Traced alone: LIGHTING_MODE_ROWS's
-            # "coloured_lights". Their keys and settings as they were on
-            # Lighting Settings)
+            # (the moving lights: the enhanced dynamic lights the game gives the
+            # path tracer (object_lights.c, world_scene's list) and their look:
+            # plasma, needles, grenades, muzzle flashes, the shields' flares;
+            # port/linux/game/prism_scene_lights.c's dynamic_look,
+            # docs/prism_pathtraced.md "What glows")
             (SECTION, "MOVING LIGHTS"),
-            # (the moving lights' look: plasma, needles, grenades, muzzle
-            # flashes, the shields' flares; port/linux/game/prism_scene_lights.c's
-            # dynamic_look, docs/prism_pathtraced.md "What glows")
+            ("DYNAMIC LIGHTS", "display.dynamic_lights", [("CLASSIC", "classic"), ("ENHANCED", "enhanced")],
+             "Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle "
+             "flash lights your own weapon. Classic: only the lights the Xbox had.|Classic for everyone in a Pro "
+             "2v2 game; yours again after it.", "desktop", "dynamic_lights_pt"),
             ("BRIGHTNESS", "display.prism_dynamic_lights",
              [("OFF", "0"), ("FAINT", "0.25"), ("SOFT", "0.4"), ("NATURAL", "0.6"), ("FULL", "1")],
              "How bright plasma, needles, grenades, blasts and shield flares light their surroundings. Full: as "
@@ -2406,51 +2322,22 @@ PAGES = {
              "pink; Pale: nearer white, as a real glow's light is.", "desktop", "prism_light_saturation"),
         ],
     },
-    UPSCALING_PAGE[0]: {
-        "screen": UPSCALING_PAGE[1], "title": "UPSCALING",
-        "rows": [
-            # (both PRISM modes', Lighting Settings' UPSCALING opens it under
-            # them alone: LIGHTING_MODE_ROWS's "upscaling")
-            (SECTION, "RESOLUTION"),
-            # (display.upscaler, docs/prism_plugin.md: the 3D view drawn smaller
-            # and brought to the window's resolution before the HUD, in both
-            # PRISM modes (prism_upscale.c: Classic draws without one); its
-            # scale (UPSCALE QUALITY) while one is on; display.upscaler_sharpness
-            # config.toml's alone. DLSS a plugin the player builds, its choice
-            # last and left out where it is not ready (menu_tags.c's
-            # spinner_expand))
-            ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
-             "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. "
-             "FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS's plugin: the "
-             "prism-plugins README.",
-             "desktop"),
-            ("UPSCALE QUALITY", "display.upscaler_scale",
-             [("QUALITY", "0"), ("BALANCED", "0.58"), ("PERFORMANCE", "0.5"), ("ULTRA PERF.", "0.33"),
-              ("NATIVE", "1")],
-             "How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each "
-             "way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone.",
-             "desktop"),
-        ],
-    },
     RAY_TRACING_PAGE[0]: {
         "screen": RAY_TRACING_PAGE[1], "title": "RAY TRACING",
         "rows": [
-            # (the traced features of the lighting mode Video's Lighting shows:
+            # (the traced features of the lighting mode PRISM's Lighting shows:
             # LIGHTING_MODE_ROWS, menu_functions.c's lighting_rows_show; PRISM
             # Path Traced traces every light itself, so none of display.prism_rt's
             # (Classic's ray tracer, docs/prism_rt.md, off under both PRISM modes:
-            # prism_rt.c) is there; greyed out where the card cannot trace rays)
+            # prism_rt.c) is there, only the traced scene; Rebaked's traced object
+            # shadows are Rebaked Lighting's; greyed out where the card cannot
+            # trace rays)
             (SECTION, "TRACED LIGHT AND SHADOWS"),
             ("RAY TRACING", "display.prism_rt",
              [("OFF", "off"), ("SHADOWS", "shadows"), ("SHADOWS + GI", "gi"), ("ALL LIGHTS", "pathtraced")],
              "Over Classic's light. Shadows: the sun's traced shadows and occlusion. Shadows + GI: light bounced "
              "about the characters too. All Lights: every light traced, held to the level's brightness. PRISM's "
              "own path tracing is Lighting's PRISM Path Traced.", "desktop"),
-            # (PRISM Rebaked's moving objects' sun shadows, traced against the
-            # objects as drawn: prism_deferred.c, docs/prism_bake.md)
-            ("OBJECT SHADOWS", "display.prism_raster_object_shadows", [("TRACED", "traced"), ("CLASSIC'S", "classic")],
-             "The sun's shadows of vehicles, characters and weapons. Traced: ray traced, on the ground, on each "
-             "other and on themselves. Classic's: the game's own, on the ground only.", "desktop", "prism_object_shadows"),
             ("QUALITY", "display.prism_rt_quality",
              [("LOW", "low"), ("MEDIUM", "medium"), ("HIGH", "high"), ("ULTRA", "ultra")],
              "More rays a pixel: softer, steadier shadows and more of the bounced light, at more of the graphics "
@@ -2535,6 +2422,217 @@ PAGES = {
                                                      ("4", "4")],
              "How often light bounces before the cache takes over. By Quality: 1 at Low and Medium, 2 at High, "
              "3 at Ultra.", "desktop"),
+        ],
+    },
+    IMAGE_PAGE[0]: {
+        "screen": IMAGE_PAGE[1], "title": "IMAGE",
+        "rows": [
+            # (both PRISM modes' exposure and tone curve: the bake's meter and
+            # step, shared, prism_rt.c's RT_FRAME settings)
+            (SECTION, "EXPOSURE"),
+            ("EXPOSURE", "display.prism_exposure",
+             [("DEFAULT", "style"), ("EYE", "auto"), ("CLASSIC'S", "ce"), ("FIXED", "fixed")],
+             "How bright the picture is made. Default and Eye: adapts as an eye does, a dark place staying darker "
+             "than a bright one. Classic's: kept as bright as Classic's frame. Fixed: the light as it is.",
+             "desktop"),
+            ("EXPOSURE BIAS", "display.prism_exposure_bias", EXPOSURE_BIASES,
+             "Brighter or darker than the exposure chooses, in stops: +1 twice as bright, -1 half.", "desktop"),
+            ("TONE CURVE", "display.prism_tone_curve",
+             [("DEFAULT", "style"), ("FILMIC", "filmic"), ("ACES", "aces"), ("LOCAL", "local"), ("CLIPPED", "ce")],
+             "How light past white is drawn. Default and Filmic: rolled off gently, nothing darker moved. ACES: "
+             "punchier, a film's curve. Local: as Filmic here. Clipped: held at white, as Classic did.",
+             "desktop"),
+            # (beyond CE: what the Xbox never drew, off in every preset, with
+            # any lighting)
+            (SECTION, "POST EFFECTS"),
+            ("BLOOM", "display.prism_bloom", [("OFF", "off"), ("GLOW", "glow"), ("FULL", "full")],
+             "A soft glow about light brighter than white: plasma, the sun, lights and blasts. The Xbox had none; "
+             "Glow is faint, Full wider. Nothing lit only to white glows. With any lighting.", "desktop"),
+            ("TONE GRADE", "display.prism_tone", [("OFF", "off"), ("PRISM", "prism"), ("VIVID", "vivid")],
+             "Grades the finished picture by the light around each pixel: deeper local contrast, dark places "
+             "lifted, richer colour. Off draws it as the game does; Vivid goes further. With any lighting.",
+             "desktop"),
+        ],
+    },
+    UPSCALING_PAGE[0]: {
+        "screen": UPSCALING_PAGE[1], "title": "UPSCALING",
+        "rows": [
+            # (both PRISM modes', PRISM's UPSCALING opens it under them alone:
+            # LIGHTING_MODE_ROWS's "upscaling")
+            (SECTION, "RESOLUTION"),
+            # (display.upscaler, docs/prism_plugin.md: the 3D view drawn smaller
+            # and brought to the window's resolution before the HUD, in both
+            # PRISM modes (prism_upscale.c: Classic draws without one); its
+            # scale (UPSCALE QUALITY) while one is on; display.upscaler_sharpness
+            # config.toml's alone. DLSS a plugin the player builds, its choice
+            # last and left out where it is not ready (menu_tags.c's
+            # spinner_expand))
+            ("UPSCALER", "display.upscaler", [("OFF", "off"), ("FSR 3.1", "fsr3"), ("DLSS", "plugin:dlss")],
+             "Draws the 3D view smaller and brings it to the screen's resolution, sharp and anti-aliased: faster. "
+             "FSR 3.1 is built in; DLSS, offered once installed, from the next start.|DLSS's plugin: the "
+             "prism-plugins README.",
+             "desktop"),
+            ("UPSCALE QUALITY", "display.upscaler_scale",
+             [("QUALITY", "0"), ("BALANCED", "0.58"), ("PERFORMANCE", "0.5"), ("ULTRA PERF.", "0.33"),
+              ("NATIVE", "1")],
+             "How much of the screen's resolution the 3D view is drawn at under the upscaler: Quality 67% each "
+             "way, Balanced 58%, Performance 50%, Ultra Performance 33%; Native all of it, anti-aliased alone.",
+             "desktop"),
+        ],
+    },
+    LIGHT_BAKE_PAGE[0]: {
+        "screen": LIGHT_BAKE_PAGE[1], "title": "LIGHT BAKE",
+        "rows": [
+            # (the in-game baker, docs/prism_bake.md, whose bake both PRISM
+            # modes read: Rebaked's light, and Path Traced's scene, lamps and
+            # bounced light; PRISM's page opens it under them alone)
+            (SECTION, "LIGHT BAKE"),
+            # (display.bake "auto": the main menu bakes the campaign's levels
+            # that need it, prism_bake_menu.c; no choice of when: "off" is
+            # config.toml's alone, and the older "ask" is read as "auto")
+            ("BAKE QUALITY", "display.bake_quality",
+             [("MAX", "max"), ("ULTRA", "ultra"), ("HIGH", "high"), ("DRAFT", "draft")],
+             "Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and "
+             "large on disk. The others are quicker and smaller. A change bakes every level again on the main "
+             "menu.", "desktop"),
+            ("SKY LIGHT", "display.prism_sky_light", [("SKY", "sky"), ("FLAT", "flat")],
+             "Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground "
+             "fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the "
+             "same everywhere. A change bakes every level again.", "desktop"),
+            # (each campaign level's bake: menu_functions.c's bake_rows_show
+            # writes its state each frame)
+            (SECTION, "LEVELS"),
+            *[(name, None, None,
+               "The main menu bakes each level's light before you play it, the level you play next first, and "
+               "picks up where it stopped. A level played before its bake is done shows Classic's light until "
+               "it is.", "desktop", f"bake_{level}")
+              for level, name in (("a10", "THE PILLAR OF AUTUMN"), ("a30", "HALO"), ("a50", "TRUTH & RECON."),
+                                  ("b30", "SILENT CARTOGRAPHER"), ("b40", "CONTROL ROOM"), ("c10", "343 GUILTY SPARK"),
+                                  ("c20", "THE LIBRARY"), ("c40", "TWO BETRAYALS"), ("d20", "KEYES"),
+                                  ("d40", "THE MAW"))],
+            ("REBAKE ALL", None, None,
+             "Deletes every level's bake: the main menu bakes them all again from nothing. Asks first.", "desktop",
+             "bake_rebake_all", "port settings bake rebake all"),
+        ],
+    },
+    MATERIALS_PAGE[0]: {
+        "screen": MATERIALS_PAGE[1], "title": "MATERIALS & TEXTURES",
+        "rows": [
+            (SECTION, "MATERIALS"),
+            # (PRISM v4's materials from the material pack and mods, in the
+            # G-buffer both PRISM modes draw (prism_materials.c): Rebaked's
+            # frame and the path tracer's surfaces alike)
+            ("MATERIAL PACKS", "display.material_packs", ON_OFF,
+             "PRISM Rebaked and Path Traced draw each surface by the material the material pack or a mod gives "
+             "it: its colour without the painted light, its bumps, roughness and metal. Off: every material made "
+             "from the game's shaders.", "desktop"),
+            # (PRISM's materials: the GGX path for the model shaders a mod
+            # gives a material, drawn by the Vulkan renderer alone: mod_pbr.c in
+            # Classic's light, prism_materials.c's mod tier in the PRISM modes')
+            ("PBR MATERIALS", "display.prism_materials", [("STOCK", "stock"), ("PBR", "pbr")],
+             "Lights armour and weapons with the materials mods give them: their colour, bumps, roughness, "
+             "metal and coats, under any lighting. Stock draws them as the Xbox did.", "desktop"),
+            # (PRISM's material overlay: drawn by the Vulkan renderer alone,
+            # for the model shaders a mod's overlay.json names; the models'
+            # forward light, Classic's: menu_functions.c's lighting_rows)
+            ("MATERIAL DETAIL", "display.prism_material_overlay", ON_OFF,
+             "Gives weapons and armour the fine grain of their surfaces (machining, weave, wear) from a mod's "
+             "material overlay, in Classic's light. It changes only the light on them. Off draws them as the Xbox "
+             "did.", "desktop"),
+            ("SURFACE DETAIL", "display.prism_surface_maps", ON_OFF,
+             "Lights characters, weapons and vehicles by the surface maps a mod carries for its remodels, in "
+             "Classic's light: their dents, seams and creases. Off draws them as the Xbox did.", "desktop"),
+            # (PRISM's texture store: the replacement textures mods ship,
+            # drawn by the Vulkan renderer from the graphics card's memory)
+            (SECTION, "TEXTURES"),
+            ("TEXTURE DETAIL", "display.prism_textures", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
+             "Draws the sharper textures mods ship in place of the game's, once they are in the graphics card's "
+             "memory. Stock draws the game's own.", "desktop"),
+            ("TEXTURE MEMORY", "display.prism_texture_budget_mb",
+             [("AUTO", "0"), ("512 MB", "512"), ("1 GB", "1024"), ("2 GB", "2048"), ("4 GB", "4096")],
+             "How much of the graphics card's memory mods' textures may take. Auto takes six tenths of what is "
+             "free; past it, those not seen lately go back to the game's.", "desktop"),
+            # (against pop-in: the textures' fade, the host's; the texture
+            # cache's wait, port/linux/game/prism_popin.c)
+            ("TEXTURE FADE-IN", "display.prism_texture_fade",
+             [("OFF", "0"), ("QUICK", "120"), ("SMOOTH", "250"), ("SLOW", "500")],
+             "How gently a sharper texture blends in as it arrives. Off sharpens it in steps.", "desktop"),
+            ("TEXTURE WAIT", "display.prism_texture_wait", [("OFF", "0"), ("SHORT", "2"), ("NORMAL", "4"),
+                                                             ("LONG", "8")],
+             "Waits up to this long a frame for a texture the game is still reading, rather than leaving its "
+             "surface or character out until it arrives. Off as the Xbox.", "desktop"),
+        ],
+    },
+    MODELS_PAGE[0]: {
+        "screen": MODELS_PAGE[1], "title": "MODELS & STREAMING",
+        "rows": [
+            # (PRISM's mesh store and extended skeletons: the replacement
+            # meshes mods ship, drawn by the Vulkan renderer)
+            (SECTION, "REMODELS"),
+            ("REMODELS", "display.prism_models", [("STOCK", "stock"), ("ENHANCED", "enhanced"), ("MAX", "max")],
+             "Draws the remodelled characters, weapons and vehicles mods ship in place of the game's, on the "
+             "game's own skeletons: animations, collision and aim are unchanged. Stock draws the game's own.",
+             "desktop"),
+            ("MODEL MEMORY", "display.prism_model_budget_mb",
+             [("AUTO", "0"), ("256 MB", "256"), ("512 MB", "512"), ("1 GB", "1024")],
+             "How much of the graphics card's memory mods' remodels may take. Auto takes a fifth of what is "
+             "free; a remodel past it is drawn as the game's.", "desktop"),
+            ("SECONDARY MOTION", "display.prism_secondary_motion", ON_OFF,
+             "A remodel's pouches swing and its joints keep their volume as it moves. Off: they follow the "
+             "bones they hang from.", "desktop"),
+            # (against pop-in: the stores' prefetch, the host's; the levels'
+            # hysteresis, port/linux/game/prism_popin.c)
+            (SECTION, "STREAMING"),
+            ("PRELOAD", "display.prism_prefetch", ON_OFF,
+             "Reads a level's sharper textures and remodels while it loads, so they do not appear in front of "
+             "you. Off reads each when it is first seen, the game's drawn until then.", "desktop"),
+            ("DETAIL STEADINESS", "display.prism_lod_hysteresis", [("OFF", "0"), ("SOME", "8"), ("STEADY", "15"),
+                                                                   ("STEADIEST", "30")],
+             "Keeps the remodel's and remodelled models' detail from flicking back and forth when you stand near "
+             "the distance it changes at.", "desktop"),
+        ],
+    },
+    WORLD_PAGE[0]: {
+        "screen": WORLD_PAGE[1], "title": "WORLD & TERRAIN",
+        "rows": [
+            (SECTION, "WORLD GEOMETRY"),
+            # (PRISM's remodelled level geometry, built on this machine:
+            # port/linux/game/prism_world_geometry.c; every lighting's)
+            ("WORLD GEOMETRY", "display.prism_world_geometry", [("XBOX", "stock"), ("REMODEL", "remodel")],
+             "Remodel draws the level's rock, sand and Forerunner walls from a denser model in the data folder; "
+             "none comes with the game, and a level without one is drawn as Xbox. You still walk and collide on "
+             "the original. Under the PRISM lightings a change bakes every level again.", "desktop"),
+            ("GEOMETRY DETAIL", "display.prism_world_geometry_detail", [("LOW", "50"), ("NORMAL", "100"),
+                                                                        ("HIGH", "200")],
+             "How far out the remodel is drawn in its full detail; beyond, its lighter far level. Low is cheaper "
+             "on the graphics card.", "desktop", "prism_geometry_detail"),
+            ("GEOMETRY BLEND", "display.prism_world_geometry_band", [("OFF", "0"), ("NARROW", "10"),
+                                                                     ("WIDE", "20"), ("WIDEST", "40")],
+             "Spreads where the remodel's surfaces change to their lighter far level over a band, one by one as "
+             "you move, rather than a ring of them at once.", "desktop"),
+            # (Classic's sun shadows' shape: with Lighting Classic and its Sun
+            # Shadows alone, menu_functions.c's lighting_rows)
+            ("GEOMETRY SHADOWS", "display.prism_world_geometry_shadows", [("XBOX", "stock"), ("FAR", "far"),
+                                                                          ("FULL", "remodel")],
+             "The shape Classic's sun shadows are cast from with the remodel: Far, its lighter level (the rock's "
+             "ledges still shade); Full, every detail; Xbox, the map's own (cheapest).", "desktop",
+             "prism_geometry_shadows"),
+            # (the terrain and water overhaul, docs/prism_terrain.md: in a
+            # campaign under the PRISM modes (prism_terrain_wanted); its other
+            # settings config.toml's until they draw)
+            (SECTION, "TERRAIN AND WATER"),
+            ("TERRAIN", "display.terrain", [("ON", "on"), ("OFF", "off")],
+             "In a campaign under PRISM Rebaked or Path Traced: the HQ ground, footprints and PRISM's water. Off: "
+             "the ground and water as the game draws them. Never in multiplayer.", "desktop"),
+            ("GROUND LAYERS", "display.terrain_layers", [("HQ", "hq"), ("GAME'S", "ce")],
+             "HQ: sand, dirt, mud, rock, snow and ice drawn with the terrain pack's high-quality layers in the "
+             "game's colours, where the pack is installed. Game's: the game's own detail.", "desktop"),
+            ("FOOTPRINTS", "display.terrain_tracks", ON_OFF,
+             "Footprints pressed into sand, snow, dirt and mud by every foot, kept for the level, where the HQ "
+             "ground layers draw them.", "desktop"),
+            ("WATER", "display.water", [("PRISM", "prism"), ("GAME'S", "ce")],
+             "PRISM: the water's surface drawn by PRISM, its reflection traced, in the game's own colour and "
+             "ripples. Game's: the game's own water. Needs a graphics card that traces rays.", "desktop"),
         ],
     },
     GAMEPLAY[0]: {
@@ -3371,6 +3469,8 @@ SETTINGS_ROW_ENABLED = {
     # in HDR, whose half floats are its own: settings_condition_term's
     # hdr_drawn)
     "output_depth": "!hdr_drawn",
+    # (the terrain overhaul's own rows while it is on: display.terrain)
+    "terrain_layers": "terrain=on", "terrain_tracks": "terrain=on", "water": "terrain=on",
 }
 
 
@@ -3615,8 +3715,12 @@ def _settings_page(folder: str, page: dict, g: SettingsLayout = SETTINGS_CLASSIC
             extra += _widget(row, row_pairs, handlers + [f'<child widget="{base}/{key}_label"/>'] + value + arrows)
             extra += label_widget
             if status:
+                # (as tall as the row under its top: at a wide screen's text
+                # scale (1.2) small_ui's line is taller than 16, and a box
+                # shorter than its line draws none of it, CLEAR CACHES' and
+                # every status row's value gone past 4:3)
                 extra += _settings_text(f"{base}/{key}_value", [("width", SETTINGS_SPINNER_X + SETTINGS_SPINNER_WIDTH -
-                                                                 value_x), ("height", 16),
+                                                                 value_x), ("height", g.row_height - 2),
                                                                 ("color", SETTINGS_BLUE),
                                                                 ("align", "right" if named_row else "center"),
                                                                 ("text_y", caps_text_y(g.row_height, 2)),

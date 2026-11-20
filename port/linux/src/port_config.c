@@ -918,10 +918,10 @@ static const struct config_setting config_settings[] =
 		"lamps and the dynamic lights traced each frame, the bounced light\n"
 		"from the bake, denoised); needs ray tracing and a bake of the level\n"
 		"(made while you play, display.bake). Read each frame. Vulkan only; no\n"
-		"anti-aliasing by multisampling. Settings > Video > Lighting: Classic\n"
-		"(\"ce\"), PRISM Rebaked (\"raster\"), PRISM Path Traced (\"pathtraced\");\n"
-		"\"classic\", \"rebaked\" and \"path_traced\" are read as those. Lighting\n"
-		"Settings and Ray Tracing there show what applies to the mode." },
+		"anti-aliasing by multisampling. Settings > Video > PRISM > Lighting:\n"
+		"Classic (\"ce\"), PRISM Rebaked (\"raster\"), PRISM Path Traced\n"
+		"(\"pathtraced\"); \"classic\", \"rebaked\" and \"path_traced\" are read as\n"
+		"those. The rows under it show only what applies to the mode." },
 	{ "display.pt_profile", _config_string, "\"quality\"", "HALO_PT_PROFILE", _environment_value,
 		_platform_desktop,
 		"With display.lighting \"pathtraced\": \"quality\" traces a bounce at\n"
@@ -1028,12 +1028,14 @@ static const struct config_setting config_settings[] =
 		"Performance; 0 is 0.67. Apart from display.render_scale, which scales\n"
 		"the whole frame, the HUD too. Read each frame." },
 	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
-		"PRISM's in-game baker (docs/prism_bake.md), with display.lighting\n"
-		"\"raster\" or \"pathtraced\" (both read the bake): \"auto\" bakes each\n"
-		"level's light in the background while\n"
-		"you play (a draft first, then refined, resumed where it stopped);\n"
-		"\"ask\" only when Settings' Rebake lightmaps asks (display.bake_rebake);\n"
-		"\"off\" never (a bake made before is still drawn)." },
+		"PRISM's light bake (docs/prism_bake.md), with display.lighting\n"
+		"\"raster\" or \"pathtraced\" (both read the bake): \"auto\" bakes the\n"
+		"campaign's levels on the main menu, before you play them, as other games\n"
+		"compile their shaders (the level you play next first, resumed where it\n"
+		"stopped, again by itself when a setting the bake holds changes), and a\n"
+		"level played before its bake is done in the background while you play;\n"
+		"\"off\" never (a bake made before is still drawn). The older \"ask\" is\n"
+		"read as \"auto\"." },
 	{ "display.bake_quality", _config_string, "\"max\"", "HALO_BAKE_QUALITY", _environment_value,
 		_platform_desktop,
 		"The bake's quality: \"max\" the finest (16 texels a world unit where the\n"
@@ -1087,15 +1089,16 @@ static const struct config_setting config_settings[] =
 		"prism_bake." },
 	{ "display.bake_budget", _config_real, "2.0", "HALO_BAKE_BUDGET", _environment_value, _platform_desktop,
 		"The milliseconds of each frame's graphics time a background bake may\n"
-		"take while you play (0.25 to 200; in the menus it takes 30)." },
+		"take while you play (0.25 to 200; in the menus it takes 30, and the\n"
+		"main menu's bake its own process's 40 a frame)." },
 	{ "debug.bake_noise_floor", _config_real, "0.1", "HALO_BAKE_NOISE_FLOOR", _environment_value, _platform_desktop,
 		"The `max` bake's noise floor (D4 amended): a texel stops once its\n"
 		"standard error is at most 1% of its light or of this share of middle\n"
 		"grey, the more (0 to 10; 0: of its light alone, the literal rule)." },
 	{ "display.bake_rebake", _config_integer, "0", "HALO_BAKE_REBAKE", _environment_value, _platform_desktop,
-		"Raised by Settings' Rebake lightmaps (and the console's prism_set\n"
-		"\"bake_rebake <n>\"): each change bakes the level drawn again from\n"
-		"nothing." },
+		"Raised by the console's prism_set \"bake_rebake <n>\": each change\n"
+		"bakes the level drawn again from nothing (Settings' Light Bake has\n"
+		"Rebake All for every level, on the main menu)." },
 	{ "display.bake_indicator", _config_boolean, "true", "HALO_BAKE_INDICATOR", _environment_value,
 		_platform_desktop,
 		"While a level's light is baked in the background, \"Baking lightmaps 37%\"\n"
@@ -1105,6 +1108,12 @@ static const struct config_setting config_settings[] =
 		"With display.lighting \"raster\": bake the level drawn in the\n"
 		"foreground (60 ms of each frame) and quit once its bake is done, for\n"
 		"measuring a bake's time and size." },
+	{ "debug.bake_worker", _config_string, "\"\"", "HALO_BAKE_WORKER", _environment_value, _platform_desktop,
+		"The main menu's light bake's own process (port/linux/game/\n"
+		"prism_bake_menu.c starts the game so, hidden and silent): the map\n"
+		"named here loaded at once, each of its BSPs baked in turn in the\n"
+		"foreground, its progress written to the bake folder, then the game\n"
+		"quits. Empty: the game as usual." },
 	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
 		"PRISM: hardware ray tracing over Classic's light (docs/prism_rt.md;\n"
 		"off under display.lighting \"raster\" and \"pathtraced\", which light the\n"
@@ -4513,6 +4522,9 @@ static const struct
 	{ "display.lighting", "classic", "ce" },
 	{ "display.lighting", "rebaked", "raster" },
 	{ "display.lighting", "path_traced", "pathtraced" },
+	/* (the bake only when Settings' Rebake Lightmaps asked: the main menu
+	bakes now, by itself, whatever needs it) */
+	{ "display.bake", "ask", "auto" },
 	{ NULL, NULL, NULL },
 };
 
@@ -6232,7 +6244,7 @@ static const struct
 	{ "display.terrain_layers", { "hq", "ce", NULL }, "hq" },
 	{ "display.weather", { "prism", "ce", NULL }, "prism" },
 	{ "display.water", { "prism", "ce", NULL }, "prism" },
-	{ "display.bake", { "auto", "ask", "off", NULL }, "auto" },
+	{ "display.bake", { "auto", "off", NULL }, "auto" },
 	{ "display.bake_quality", { "max", "ultra", "high", "draft", NULL }, "max" },
 	{ "display.prism_rt", { "off", "shadows", "gi", "pathtraced", NULL }, "off" },
 	{ "display.prism_rt_quality", { "medium", "low", "high", "ultra", NULL }, "medium" },

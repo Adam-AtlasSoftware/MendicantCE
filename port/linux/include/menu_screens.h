@@ -31,7 +31,9 @@ checked as the file is read against the names the game gave
 #define MENU_SCREEN_MAXIMUM_HINTS 4
 #define MENU_SCREEN_MAXIMUM_STRINGS 640
 #define MENU_SCREEN_MAXIMUM_TEXT 256
-#define MENU_SCREEN_MAXIMUM_SCREENS 16
+/* (the hand-written screens: 22 with the light bake's questions; at 16 the last
+three read, quit, save_changes and stick_test, were left out) */
+#define MENU_SCREEN_MAXIMUM_SCREENS 32
 /* a screen's <panel>s (each its if: the first whose if has a value shown),
 and its <spartan>s (one of its own, one in each panel) */
 #define MENU_SCREEN_MAXIMUM_PANELS 4

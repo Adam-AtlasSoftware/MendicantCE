@@ -50,6 +50,9 @@ host_update_make_directory
 host_update_make_executable
 host_update_launch
 host_update_restart
+host_update_child_start
+host_update_child_state
+host_update_child_stop
 host_app_playing
 host_server_signals_install
 host_server_signals_take

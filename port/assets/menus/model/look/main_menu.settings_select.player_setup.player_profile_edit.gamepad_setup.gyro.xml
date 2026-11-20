@@ -57,7 +57,7 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_found_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/labels" index="1" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_found_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_found_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/op_gyro_aim" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
@@ -185,7 +185,7 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_calibrate_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/labels" index="11" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_calibrate_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_calibrate_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/section_12" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">

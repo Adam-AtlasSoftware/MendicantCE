@@ -72,4 +72,20 @@ environment and none of its files: what started the game sees it go on
 (Linux; nothing on Windows); returns only if it could not be */
 int update_restart(const char *path);
 
+/* PRISM's light bake on the main menu (port/linux/game/prism_bake_menu.c):
+a worker, the executable at path started as a process of its own, with no
+arguments, this process's environment and working folder with environment's
+variables set ("NAME=value", each ended by a NUL, the list by another),
+none of this process's files, and ended with this one (Linux's parent death
+signal, a Windows job); its handle (above 0), or 0 */
+int update_child_start(const char *path, const char *environment);
+
+/* the worker's state: -1 while it runs, else its exit code (128 and the
+signal's number where one ended it; 255 where it is not known), its handle
+let go of once that is answered */
+int update_child_state(int handle);
+
+/* asks the worker to end (SIGTERM; on Windows, ended) */
+void update_child_stop(int handle);
+
 #endif

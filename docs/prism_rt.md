@@ -245,7 +245,7 @@ wavelet (Dammertz et al., 2010); Narkowicz's ACES fit (2016); the anchor after `
 `display.prism_rt_materials`, `display.prism_rt_alpha`, `display.prism_rt_bounces`, `display.prism_exposure`
 (`_range`, `_speed`, `_bias`), `display.prism_tone_curve` (port/linux/README.md has each);
 `display.vulkan_device` chooses the graphics card (auto, the loader's index, `0x` and a PCI device id, or a part of its
-name; the log lists them: `vulkan: device 0: ...`). Settings > Video > Ray Tracing has Ray Tracing and,
+name; the log lists them: `vulkan: device 0: ...`). Settings > Video > PRISM > Ray Tracing has Ray Tracing and,
 while it is on, its quality, resolution, denoiser, Light Freedom, Traced Sun, Traced Level and Traced Light Look (the
 look's page), with Lighting Classic alone (both PRISM modes turn `display.prism_rt` off); Traced Models, Keep Shapes
 and Cutout Shadows in every mode that traces. Greyed out where the renderer cannot trace (docs/prism_settings.md). `HALO_VULKAN_STATS=1` logs the passes' GPU time every 600

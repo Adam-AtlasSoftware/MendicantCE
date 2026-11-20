@@ -253,7 +253,7 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/labels" index="14" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/brightness/hdr_display_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
 </model>

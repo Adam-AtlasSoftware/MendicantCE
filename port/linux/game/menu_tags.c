@@ -591,7 +591,7 @@ static char const *const port_function_names[] =
 	"port settings ok", "port settings cancel", "port settings keep", "port settings page cancel",
 	"port settings new profile", "port settings profiles", "port settings report", "port settings weapon reset",
 	"port settings gyro calibrate", "port settings layout export", "port settings clear caches", "port settings add maps",
-	"port settings benchmark",
+	"port settings benchmark", "port settings bake rebake all",
 	/* (Settings' search, the menu engine's: settings_search_menu.inc) */
 	"port settings search", "port settings search edit", "port settings search back",
 	/* (Online's Discord account: menu_functions.c's discord_link and
@@ -1476,7 +1476,7 @@ static long spinner_expand(char const *setting, boolean values, char const **pie
 		return count;
 	}
 
-	/* (Lighting Settings' DENOISER and UPSCALER: their last choice the DLSS
+	/* (PRISM's Path Tracing's DENOISER and Upscaling's UPSCALER: their last choice the DLSS
 	plugin's (DLSS RR, DLSS), left out where the plugin is not ready to be
 	offered: one the player has not built, or that does not work on this
 	graphics card (sdl_platform.c's platform_prism_plugin_ready); the rows'

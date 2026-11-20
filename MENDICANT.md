@@ -35,7 +35,7 @@ settings as they come plays as OpenH1 does.
 | | What | Where |
 | --- | --- | --- |
 | **MENDICANT AI** | The campaign's Marines and Covenant fight as units, led through drills, with trained models choosing the drills and each soldier's way of fighting; and an "authenticity layer": soldier character, firing personality, reactions to grenades, convoys, spacing, vehicle lanes | Settings › Profiles › CAMPAIGN AI › MENDICANT AI. From the next map start; on the host of a campaign or co-op game |
-| **PRISM** | Graphics beyond the Xbox's, drawn by the Vulkan renderer: highlights, sun shadows, smoother lightmaps, tone, bloom, and ray traced shadows and light on cards that have ray queries | Settings › Video › Lighting, Lighting Settings and Ray Tracing; Settings › Mods › PRISM GRAPHICS, PRISM ASSETS |
+| **PRISM** | Graphics beyond the Xbox's, drawn by the Vulkan renderer: highlights, sun shadows, smoother lightmaps, tone, bloom, and ray traced shadows and light on cards that have ray queries | Settings › Video › PRISM: the lighting first, then only what applies to it |
 | **Theater** | Games recorded as replays and watched again, with free and cinematic cameras | Settings › Mods › RECORD GAMES and THEATER |
 | **Forge** | An in-game map editor for multiplayer maps, with AI characters | `game.forge` in `config.toml`, then FORGE on the main menu |
 | **Tag packs** | Tags of one map brought into another, built on your computer from your own maps | `port/linux/TAG_INJECTION.md` |
@@ -60,7 +60,7 @@ Who wrote the Theater, Forge and the tag importer, and under which licences:
 Works with the game's own data, nothing else needed: under Lighting Classic,
 MODEL HIGHLIGHTS, SUN SHADOWS (Sun; Soft and Traced with ambient occlusion
 World), SUN SHADOW DETAIL, SUN SHADOW SOFTNESS, LIGHTMAPS Smooth and SHADE
-DEPTH (Settings › Video › Lighting Settings); BLOOM and TONE GRADE with any
+DEPTH (Settings › Video › PRISM › Classic Lighting); BLOOM and TONE GRADE with any
 lighting; RAY TRACING; and Lighting PRISM Rebaked and PRISM Path Traced, which
 bake each level on this computer (greyed out, or drawn as Classic, where the
 graphics card or its driver has no ray queries).
@@ -74,7 +74,7 @@ copy of the game, with the pack tools that come with this download (below):
 | REFLECTIONS Local | `<data>/prism/probes/<map>.probes` (the pack tools' `probes`) |
 | LIGHTMAPS Rebaked | `<data>/prism_lightmaps/rebaked/*.prl` (`lightmaps`); without them it draws as Smooth |
 | WORLD GEOMETRY Remodel, GEOMETRY DETAIL, GEOMETRY SHADOWS | `<data>/prism_world/levels/<level>/<bsp>.pwg` (`world`); a level without one is drawn as the Xbox's |
-| Every row of PRISM ASSETS (material and surface detail, texture detail, PBR materials, remodels) | a mod with `textures/`, `meshes/`, `materials/`, a material overlay or surface maps ([docs/mods.md](docs/mods.md); the character packs) |
+| Every row of PRISM's Materials & Textures and Models & Streaming (material and surface detail, texture detail, PBR materials, remodels) | a mod with `textures/`, `meshes/`, `materials/`, a material overlay or surface maps ([docs/mods.md](docs/mods.md); the character packs) |
 
 No such pack is published, and none may be: each is made of the game's data.
 

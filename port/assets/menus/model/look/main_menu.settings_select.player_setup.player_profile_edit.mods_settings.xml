@@ -14,12 +14,10 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mods_folder" x="28" y="125"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_record_replays" x="28" y="150"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_theater" x="28" y="175"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_graphics" x="28" y="200"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_assets" x="28" y="225"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7" x="28" y="256"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" x="28" y="278"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9" x="28" y="309"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" x="28" y="331"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5" x="28" y="206"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" x="28" y="228"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7" x="28" y="259"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" x="28" y="281"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/button_bar" x="0" y="448"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs" x="0" y="46"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/tabs_search" x="0" y="46"/>
@@ -145,25 +143,11 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/theater_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="4" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_graphics" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
-		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_graphics_label" x="0" y="0"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5_title" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_graphics_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="5" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_prism_assets" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
-		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets_label" x="0" y="0"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/prism_assets_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="6" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7_title" x="0" y="0"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="7" scale="1 1.2"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_5_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="5" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_add_maps" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
@@ -171,22 +155,22 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="8" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="6" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_value" type="text" box="0 0 140 16" wide="40 120" past="60 60">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/add_maps_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9_title" x="0" y="0"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7_title" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_9_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="9" scale="1 1.2"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/section_7_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="7" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/op_mcc_packages" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label" x="0" y="0"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/mcc_packages_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="10" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/mods_settings/labels" index="8" scale="1 1.2"/>
 	</look>
 </model>

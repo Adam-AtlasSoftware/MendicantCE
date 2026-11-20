@@ -10,8 +10,9 @@ is sent from here, in the v4 modes that read a bake (display.lighting
 "raster"), never with "ce":
 
 - each frame, PRISM_BAKE's control: the map and the BSP drawn, display.bake
-  ("auto" bakes in the background while playing, "ask" only when asked,
-  "off" never), display.bake_quality, the rebakes asked for
+  ("auto" bakes in the background while playing, "off" never; the older
+  "ask" is "auto": the main menu bakes the campaign's levels before they are
+  played, prism_bake_menu.c), display.bake_quality, the rebakes asked for
   (display.bake_rebake: each change starts the BSP's bake again from
   nothing), the bake folder (display.bake_folder; <data>/prism_bake), the
   GPU time a frame may give the bake, and where the host writes how the
@@ -25,7 +26,9 @@ is sent from here, in the v4 modes that read a bake (display.lighting
   sets its texels' density, and the bricks of the irradiance volume.
 
 debug.bake_exit: the bake in the foreground, the game quitting once the
-BSP's is done (the measurements' runs). Nothing here changes what the game
+BSP's is done (the measurements' runs). debug.bake_worker (the main menu's
+worker, prism_bake_menu.c): in the foreground too, at its own budget; the
+worker goes from BSP to BSP and quits itself. Nothing here changes what the game
 simulates: it reads the scenario and the BSP, read-only once loaded, and
 the settings. Nothing crosses the network.
 */
@@ -51,6 +54,7 @@ the settings. Nothing crosses the network.
 #include "shaders/shader_definitions.h"
 #include "shaders/shaders.h"
 #include "prism_deferred.h"
+#include "prism_bake_menu.h"
 #include "../src/xgpu_coverage.h"
 
 #include <xtl.h>
@@ -167,7 +171,7 @@ static struct
 {
 	unsigned long settings_read;
 	boolean active;
-	int mode, quality, foreground;
+	int mode, quality, foreground, exit_when_done;
 	long request;
 	float budget, threshold, noise_floor;
 	char folder[XGPU_BAKE_PATH];
@@ -205,8 +209,8 @@ static void settings_read(
 	}
 	prism_bake.settings_read = config_changes() + 1;
 	value = config_string("display.bake");
-	prism_bake.mode = value && !strcmp(value, "off") ? XGPU_BAKE_MODE_OFF : value && !strcmp(value, "ask") ?
-		XGPU_BAKE_MODE_ASK : XGPU_BAKE_MODE_AUTO;
+	/* ("ask", the older word, is read as "auto": port_config.c) */
+	prism_bake.mode = value && !strcmp(value, "off") ? XGPU_BAKE_MODE_OFF : XGPU_BAKE_MODE_AUTO;
 	value = config_string("display.bake_quality");
 	prism_bake.quality = !value ? 3 : !strcmp(value, "draft") ? 0 : !strcmp(value, "high") ? 1 :
 		!strcmp(value, "ultra") ? 2 : 3;
@@ -224,7 +228,8 @@ static void settings_read(
 	{
 		prism_bake.noise_floor = 0.1f;
 	}
-	prism_bake.foreground = config_boolean("debug.bake_exit");
+	prism_bake.exit_when_done = config_boolean("debug.bake_exit");
+	prism_bake.foreground = prism_bake.exit_when_done || prism_bake_worker_map() != NULL;
 	value = config_string("display.bake_folder");
 	if (value && *value)
 	{
@@ -1287,7 +1292,8 @@ static void control_fill(
 	bake->bsp_index = global_structure_bsp_index_get();
 	bake->folder = (uint32_t)(unsigned long)prism_bake.folder;
 	bake->status = (uint32_t)(unsigned long)prism_bake.status;
-	bake->budget_milliseconds = prism_bake.foreground ? 60.0f : prism_bake_menus_up() ? 30.0f : prism_bake.budget;
+	bake->budget_milliseconds = prism_bake_worker_map() ? prism_bake_worker_budget() : prism_bake.foreground ? 60.0f :
+		prism_bake_menus_up() ? 30.0f : prism_bake.budget;
 	bake->threshold = prism_bake.threshold;
 	bake->noise_floor = prism_bake.noise_floor;
 	if (!map)
@@ -1438,7 +1444,7 @@ void prism_bake_frame(
 	xgpu_backend_prism_bake(&bake, NULL, 0);
 	/* debug.bake_exit: the game quits once the BSP's bake is done (as
 	debug.exit_after ends a run, with exit) */
-	if (prism_bake.foreground)
+	if (prism_bake.exit_when_done)
 	{
 		unsigned long state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 

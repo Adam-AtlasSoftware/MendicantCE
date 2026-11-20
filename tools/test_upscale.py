@@ -166,11 +166,11 @@ def test_settings():
     for name in ("display.upscaler", "display.upscaler_scale", "display.upscaler_sharpness", "display.denoiser"):
         assert f"| `{name}` |" in readme, name
     folder = ROOT / "port/assets/menus/ce"
-    menus = (folder / "main_menu.settings_select.player_setup.player_profile_edit.video_settings.lighting.xml"
-             ).read_text()
-    upscaling = (folder / "main_menu.settings_select.player_setup.player_profile_edit.video_settings.lighting."
+    menus = (folder / "main_menu.settings_select.player_setup.player_profile_edit.video_settings.prism."
+             "path_tracing.xml").read_text()
+    upscaling = (folder / "main_menu.settings_select.player_setup.player_profile_edit.video_settings.prism."
                  "upscaling.xml").read_text()
-    # (Lighting Settings' DENOISER and its UPSCALING page's rows: the DLSS choices last, which menu_tags.c's
+    # (PRISM's Path Tracing's DENOISER and its UPSCALING page's rows: the DLSS choices last, which menu_tags.c's
     # spinner_expand leaves out where the plugin is not ready (sdl_platform.c's platform_prism_plugin_ready); PRISM's
     # own denoiser first, the default)
     assert 'setting="display.upscaler" values="off|fsr3|plugin:dlss"' in upscaling
