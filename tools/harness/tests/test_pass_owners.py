@@ -86,7 +86,9 @@ def test_owners_named_by_their_settings():
     assert owners == {"PASS_OWNER_FXAA": "FXAA", "PASS_OWNER_SMAA": "SMAA", "PASS_OWNER_MSAA_RESOLVE": "MSAA RESOLVE",
                       "PASS_OWNER_PANINI": "PANINI", "PASS_OWNER_AO": "AO", "PASS_OWNER_FINAL": "FINAL PASS",
                       # (the terrain overhaul's HQ layers, display.terrain_layers "hq": docs/prism_terrain.md)
-                      "PASS_OWNER_TERRAIN": "TERRAIN"}
+                      "PASS_OWNER_TERRAIN": "TERRAIN",
+                      # (the water layer, display.water "prism": docs/prism_terrain.md, T7 and T8)
+                      "PASS_OWNER_WATER": "WATER"}
     # (capitals: pass_times_owned tells them from the passes' own labels)
     assert all(re.fullmatch(r"[A-Z][A-Z ]*", name) for name in owners.values())
 
