@@ -139,12 +139,12 @@ def test_sizes_multiples_of_four(driver64):
         "xgpu_stream_upscale": 36 + 32 + 128 + 16,
         "xgpu_stream_terrain_event": 32,
         "xgpu_stream_terrain_wader": 32,
-        "xgpu_stream_prism_terrain": 176,
+        "xgpu_stream_prism_terrain": 180,
     }
 
 
 def test_stream_types(constants):
-    # (40: the terrain overhaul's PRISM_TERRAIN (T0), after UPSCALE (39 on its own branch), the last scene record;
+    # (41: PRISM_TERRAIN's FRAME carries the terrain pack's folder (T1); 40: the terrain overhaul's PRISM_TERRAIN (T0), after UPSCALE (39 on its own branch), the last scene record;
     # 39: the integration of M5's UPSCALE (38 on its own branch), after the scene's types; 38: the merge with GOAT H1
     # (OpenH1/goath1 ff83e8d62), whose own 20 to 23 come first in the list, PRISM's records after them, the scene
     # records still last; 37: prism-v4-raster-int's RT_FRAME flag RASTER_OBJECTS, 32, and GBUFFER_DRAW's STATIC_SCENERY; 36: M3's
@@ -153,9 +153,9 @@ def test_stream_types(constants):
     # SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends
     # SCENE_MATERIAL and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was GBUFFER_PHASE, its first
     # record)
-    assert constants["version"] == 40
+    assert constants["version"] == 41
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 40\b", text)
+    assert re.search(r"#define XGPU_STREAM_VERSION 41\b", text)
     # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
     # the decoder takes every one of them)
     assert constants["rt_frame"] == constants["record_types"] - 15
@@ -329,13 +329,13 @@ def terrain_fixed(constants, size, phase, count, winds):
             pack_floats([1.0 / 30.0, math.nan, -70.0, 22.0, 3.5]) + struct.pack("<i3Ii", 0, 1 | 2 | (1 << 17), 3, 1, 0) +
             pack_floats([1.0, 1.0, 0.0, 0.0]) + struct.pack("<I", winds) +
             pack_floats([v if i // 3 < winds and v != 5 else 0.0 for i, v in enumerate(float(n) for n in range(24))]) +
-            struct.pack("<I", 0x12345678))
+            struct.pack("<2I", 0x12345678, 0))
 
 
 def test_terrain_frame(encoded, constants):
     # (wind_count 12 cut to the 8 there are; the second's z, a NaN, written 0)
-    assert record(encoded, "terrain_frame") == terrain_fixed(constants, 176, 0, 0, 8)
-    assert record(encoded, "terrain_frame_winds") == terrain_fixed(constants, 176, 0, 0, 2)
+    assert record(encoded, "terrain_frame") == terrain_fixed(constants, 180, 0, 0, 8)
+    assert record(encoded, "terrain_frame_winds") == terrain_fixed(constants, 180, 0, 0, 2)
 
 
 def terrain_event(index, z=0.25, magnitude=1.0):
@@ -345,20 +345,20 @@ def terrain_event(index, z=0.25, magnitude=1.0):
 
 
 def test_terrain_events(encoded, constants):
-    size = 176 + 3 * 32
+    size = 180 + 3 * 32
     expected = terrain_fixed(constants, size, 1, 3, 2) + terrain_event(0) + terrain_event(1, z=math.nan) + \
         terrain_event(2, magnitude=math.inf)
     assert record(encoded, "terrain_events") == expected
     # (a frame's most: 256 events, under 12 KB, the design's bound; one more, refused; too little room, or no
     # events given, refused)
-    assert encoded["terrain_events_most"] == str(176 + 256 * 32)
-    assert 176 + 256 * 32 < 12 * 1024
+    assert encoded["terrain_events_most"] == str(180 + 256 * 32)
+    assert 180 + 256 * 32 < 12 * 1024
     for name in ("terrain_events_many", "terrain_events_room", "terrain_events_none"):
         assert record(encoded, name) == b""
 
 
 def test_terrain_waders(encoded, constants):
-    size = 176 + 3 * 32
+    size = 180 + 3 * 32
     body = terrain_fixed(constants, size, 2, 3, 2)
     for index in range(3):
         velocity = [-0.0, -1.0, -2.0]

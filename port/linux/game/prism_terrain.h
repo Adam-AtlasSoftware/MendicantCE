@@ -46,6 +46,26 @@ void prism_terrain_explosion(real_point3d const *centre, real radius);
 weather (display.weather "prism") or the water (display.water "prism") in
 CE's place; FALSE (CE draws them) until those milestones (T12, T7) */
 boolean prism_terrain_weather_draw(void);
+/* (T1) rasterizer_xbox_environment.c's texture pass: the border colour
+(D3DTSS_BORDERCOLOR, unseen with the detail maps' wrapped addressing) that
+marks a ground shader's detail maps for the renderer's near fade while the
+terrain pack's HQ layers draw over it (an environment shader of CE's dirt,
+sand, stone, snow or ice type, display.terrain_layers "hq", the pack's file
+there: xgpu_shader.h's XGPU_TERRAIN_FADE_BORDER_COLOR); 0 as CE draws */
+long prism_terrain_detail_level(void const *shader);
+/* (the texels a base map's repeat past which a detail map is CE's grain:
+its scale times its width; below it the map draws shapes, which stay CE's.
+Of the campaign's ground shaders: b30's sand and grass 76800 and 92160,
+a30's 61440 and 122880, b40's sandstone 40960 and d40's grain 204800 are
+past it; d20's cracked mud and cliff rock (25600 and 38400: its cracks),
+CE's "detail ground" maps (3072 to 10240) and b40's snow (1536 to 15360)
+are not) */
+#define PRISM_TERRAIN_FINE_DETAIL 40000.0f
+/* (T1) whether a ground shader's fine detail map fades under the HQ layers:
+not a map of grass or moss on a ground CE did not type sand (a30's and
+c10's cover is their look, which no layer of the pack stands in for; b30's
+beach grass is sparse in its sand) */
+boolean prism_terrain_detail_fades(void const *shader, long bitmap_tag_index);
 boolean prism_terrain_water_draw(void const *group);
 
 #endif

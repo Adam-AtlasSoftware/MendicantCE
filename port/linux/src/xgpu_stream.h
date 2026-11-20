@@ -44,8 +44,9 @@ render times, the capabilities' ray_queries to device) merged with PRISM v4's 20
 after GOAT H1's, the scene records still last (docs/prism_scene_records.md);
 39: PRISM v4 M5's UPSCALE (display.upscaler and display.denoiser's plugin, docs/prism_plugin.md), which
 was 38 on its own branch, after 38's records; 40: the terrain overhaul's PRISM_TERRAIN (T0,
-docs/prism_terrain.md), 39 on its own branch, after UPSCALE, the last scene record */
-#define XGPU_STREAM_VERSION 40
+docs/prism_terrain.md), 39 on its own branch, after UPSCALE, the last scene record; 41: PRISM_TERRAIN's
+FRAME carries the terrain pack's folder (T1) */
+#define XGPU_STREAM_VERSION 41
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -3039,6 +3040,7 @@ enum
 #define XGPU_TERRAIN_WADERS_MOST 64u
 #define XGPU_TERRAIN_WINDS 8u
 #define XGPU_TERRAIN_WADER_RANGE 25.0f
+#define XGPU_TERRAIN_PATH 1024u
 /* FRAME's flags: the mode, campaign, the settings (display.terrain_tracks,
 _drifts, _layers "hq", display.weather and display.water "prism"), the
 game paused, and the debug views (debug.gbuffer_view "terrain_class",
@@ -3148,6 +3150,10 @@ struct xgpu_stream_prism_terrain
 	uint32_t wind_count;
 	float winds[XGPU_TERRAIN_WINDS][3];
 	uint32_t map_checksum;
+	/* (T1, version 41) the terrain pack's folder (display.terrain_pack_folder;
+	<data>/prism_terrain): a guest address of a NUL-terminated UTF-8 string of
+	at most XGPU_TERRAIN_PATH bytes, the guest's to keep; 0 none. FRAME's */
+	uint32_t pack_folder;
 	struct xgpu_stream_terrain_event items[];
 };
 
@@ -3349,7 +3355,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_material_maps, 20 + 4 * XGPU_SC
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_upscale, 36 + 32 + 128 + 16);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_terrain_event, 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_terrain_wader, 32);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_terrain, 80 + 12 * XGPU_TERRAIN_WINDS);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_terrain, 84 + 12 * XGPU_TERRAIN_WINDS);
 /* (the scene records' types still fit the header's 8 bits) */
 _Static_assert(XGPU_STREAM_SCENE_RECORD_TYPES <= 256, "the scene records' types fit a header");
 

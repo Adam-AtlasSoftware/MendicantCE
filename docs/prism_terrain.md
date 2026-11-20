@@ -134,3 +134,92 @@ Scripted actions (the game live, the AI erased, the camera held at a pose, the p
   script it by; T5 can teleport `jeep` with a cutscene flag once one is found.)
 
 The run folder's `tools/tcap.py` and `jobs/actions.sh` make them (`work/openh1_eval/v4_terrain_runs`).
+
+## T1: the HQ layers
+
+The level's ground (sand, dirt, mud, rock, snow, ice) gets fine detail from CC0 scans while CE's colour, its painted
+variation and its large shapes stay exactly CE's. It works in PRISM Rebaked and Path Traced alike, because both read
+the same targets.
+
+### The terrain pack
+
+`tools/prism_terrain_layers/prism_terrain_layers.py build --data <data folder>` fetches the scans named in
+`tools/prism_terrain_layers/manifest.json` (it asks first; `--yes` does not), checks each archive's SHA-256, refuses an
+albedo that still holds light (its high-passed lightness following the normal map's shading), and writes
+`<data folder>/prism_terrain/layers.ptl` with `manifest.json` and `LICENSES.txt` beside it. Nothing of the game's data
+goes in. The sources and their licences are in `port/assets/prism_terrain/LICENSES.md`; all are CC0 1.0
+(ambientCG).
+
+| Layer | Scan | Tile | Used by |
+| --- | --- | --- | --- |
+| `sand` | Ground054 | 3.5 m | b30's beach and sea bed |
+| `dirt` | Ground103 | 2.5 m | a30, a50, c10, d20 grounds |
+| `mud` | Ground025 | 2.5 m | c10's mud |
+| `rock` | Rock023 | 4.0 m | cliffs (b30, b40/c40, a30, a50, d20), scenery debris on d40 |
+| `snow` | Snow005 | 3.0 m | b40/c40 snow |
+| `ice` | Snow014 | 4.0 m | b40/c40 ice |
+| `sand_desert` | Ground080 | 2.0 m | d40's sand (`classes.json` names it) |
+
+Each layer is two RGBA8 images at 1024 (the renderer makes their levels): the detail (the scan's linear albedo
+divided by its own low-pass, so its mean is 1, stored as half) and its height; the normal (x, y), the roughness over
+its mean and the occlusion. A 512 macro map of our own noise varies the detail's strength over tens of metres. The
+file is about 60 MB; the GPU holds about 80 MB with levels. `display.terrain_pack_folder` moves it.
+
+### The pass
+
+At the texture pass's end (`GBUFFER_PHASE_BASE_TEXTURED`, after the pack materials' albedo and before the decals; at
+the resolve where that phase did not come), `xgpu_vulkan_terrain_layers` draws `TERRAIN_LAYERS`
+(`tools/vulkan_post_shaders.py`) over every level pixel whose material has a layer, into the base target and the
+G-buffer's normal and roughness. Where the device reads a target where it is drawn (dynamic rendering's local reads)
+the words are the pass's first target, read there and written through a mask of their normal and roughness, and only
+the base is copied (`TERRAIN_LAYERS_LOCAL`); elsewhere both are copied and the words written whole. For each
+pixel:
+
+- the point is found from the G-buffer's distance and `SCENE_VIEW`'s camera, and its footprint on the surface's
+  plane (no derivative instructions, so the discards cost nothing);
+- the layer is sampled in world space: from above where the surface is flatter than 41 degrees, from all three axes
+  (whiteout-blended normals) where it is steeper; each projection hex-tiled (Mikkelsen 2022: three offset and turned
+  samples on a triangle grid, weighted by their place and height; rock is not turned, so its strata stay level);
+- detail transfer (design 3.2): CE's base colour times the detail in linear light, its lightness and a little of its
+  own hue (the layer's chroma), by the layer's strength, the macro map and the fade (whole within 15 world units,
+  none past 60). Its mean is 1, so CE's colour and the bake's mean albedo (`material_hash`) do not change: no rebake;
+- the normal: the HQ normal whiteout-blended over the G-buffer's (CE's bump), its lookups isotropic, faded from 1 to
+  6 world units (further off, the relief of a scan's grain reads as streaks in a low sun, and CE's own light is
+  the ground's); the roughness: the G-buffer's times the layer's variation;
+- a material of two classes (CE's blended shaders) takes its second class by CE's colour's lightness against each
+  class's (and, with rock, by the slope), then by the two layers' heights.
+
+`debug.pass_times` labels it `TERRAIN`. `HALO_TERRAIN_LAYERS_VIEW=1` shows the second class's weight, the fade and
+the layer instead.
+
+### CE's own detail maps up close
+
+CE's ground draws fine detail maps (b30's sand speckle, 7.8 mm texels) that turn into large blocky noise within a few
+metres; with the HQ layers on, that noise and the scan's grain would fight. In the PRISM modes with the pack there,
+the texture pass (`source/rasterizer/xbox/rasterizer_xbox_environment.c`, `prism_terrain_detail_level`) marks a
+ground shader's fine detail maps (texels a base map's repeat past `PRISM_TERRAIN_FINE_DETAIL`, so CE's grain and not
+its large shapes; not grass or moss on a ground CE did not type sand) by a border colour their wrapped addressing
+never shows. The renderer gives such a stage `XGPU_BORDER_TERRAIN_FADE` (`xgpu_vulkan_stream.c`, `border_axes`), and
+the shader mixes its texel toward the mean of five lookups of its second level within 2.5 texels (CE's coarser
+levels fade toward grey, so they cannot stand in), wholly where a texel covers four pixels or more (level of detail
+-2) and not at all once it covers less than 1.4 (-0.5); the lookups run only where it is mixed in. From mid range
+on, CE's ground is exactly its own. `debug.terrain_detail_fade` `false` turns it off, for checking.
+
+### What is not done in T1
+
+- The blend weight of two-class shaders is not in `extras.z` bits 24 to 31 as the design planned: those bits are
+  taken (Raster's CE light code, `bake_glsl.inc`'s `ce_code`). T1 derives the weight in the pass instead (above).
+- Objects and static scenery get no layer (their pixels are not the level's).
+- The quality tiers are not used yet: the layers are 1024 on every card.
+- The settings are not in the settings menu yet.
+- `debug.gbuffer_view` `"terrain_class"` turns the pass off (the class view shows the classes, not the layers).
+
+### Cost and checks (RTX 2060)
+
+At 1280x720 in Path Traced (`performance`, the 2060's tier in design section 10) the pass takes 0.31 ms at B1's
+1 m pose (every pixel sand, the normals drawn) and 0.37 ms at its 10 m pose (sand and its grass detail: two layers),
+the base's copy included (`debug.pass_times`: `TERRAIN`, `TERRAIN COPIES`). The 60 m view of every T1 pose is
+within 0.92 ΔE (Oklab x100, the worst 32-pixel tile of one class) of Classic; Classic stays byte-identical, PRISM
+Rebaked with `display.terrain` `"off"` or `display.terrain_layers` `"ce"` is the previous build's frame byte for
+byte, b30's bake still loads whole, and the game's simulation is the same with the terrain on and off
+(`determinism_compare.py --simulation`).

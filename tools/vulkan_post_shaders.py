@@ -63,16 +63,18 @@ OUTPUT = ROOT / "port/linux/vulkan/xgpu_vulkan_post_shaders.c"
 STRINGS = re.compile(r'"(?:\\.|[^"\\])*"')
 COMMENTS = re.compile(r"/\*.*?\*/", re.S)
 UNIFORM = re.compile(r"^uniform vec4 (\w+);\n", re.M)
-SAMPLER = re.compile(r"^uniform (u?sampler2D) (\w+);\n", re.M)
+SAMPLER = re.compile(r"^uniform (u?sampler2D(?:Array)?) (\w+);\n", re.M)
 # the uniforms' block: each pass's vec4s, in this order (std140), as far as
 # the last its program uses (hdr in display.hdr's passes, window, panini
 # and tangents in display.panini's; gamut, display.hdr_gamut's, in the
 # encoding's)
-UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents", "gamut")
+UNIFORMS = ("metrics", "bounds", "hdr", "window", "panini", "tangents", "gamut", "view_eye", "view_axis",
+            "view_across", "view_down", "view_corners", "class_cue0", "class_cue1") + \
+    tuple(f"layer{index}" for index in range(16))
 # the fragment programs, in xgpu_vulkan_post_shaders.h's order
 PROGRAMS = ("fxaa", "smaa_edges", "smaa_weights", "smaa_blend", "rotate", "hdr_tone_map", "hdr_tone_map_ms",
             "hdr_encode", "panini", "bloom_down", "bloom_up", "prism_tone", "deferred_resolve", "albedo_over",
-            "terrain_debug")
+            "terrain_debug", "terrain_layers", "terrain_layers_local")
 # one triangle over the whole viewport
 VERTEX_SOURCE = (
     "void main()\n"
@@ -226,7 +228,8 @@ SMAA_PREFIX = (
 # each sampler's texture unit, which becomes its binding
 UNITS = {"color_texture": 0, "edges_texture": 0, "area_texture": 1, "search_texture": 2, "weights_texture": 1,
          "local_texture": 1, "base_texture": 1, "additions_texture": 2, "gbuffer_texture": 3, "albedo_texture": 0,
-         "classes_texture": 1, "events_texture": 2}
+         "classes_texture": 1, "events_texture": 2, "extras_texture": 2, "detail_texture": 4,
+         "surface_texture": 5, "macro_texture": 6}
 # display.lighting "ce_deferred"'s resolve (Vulkan's: xgpu_vulkan_post_
 # deferred_resolve): each pixel the copy of the light (the colour target's
 # pixels) times the base plus the additions, the additions' alpha (CE's
@@ -420,6 +423,322 @@ TERRAIN_DEBUG_SOURCE = (
     "\tresult = vec4(color, frame.a);\n"
     "}\n"
 )
+# the terrain overhaul's HQ layers (T1; Vulkan's: xgpu_vulkan_post_terrain_layers; port/linux/vulkan/
+# xgpu_vulkan_terrain.c), drawn at the texture pass's end (BASE_TEXTURED) into the base target (its colour) and the
+# G-buffer's words (location 1, all four: the copy's, the normal and the roughness changed). Each level pixel (the
+# words' copy at gbuffer_texture: present, instance 0) whose material has a layer (classes_texture's blue: the first
+# class's layer + 1, the second's from bit 4) and that is nearer than bounds.z world units (extras_texture's
+# distance) is found in the world (SCENE_VIEW's camera: view_*), and the pack's layers (detail_texture: the detail,
+# its mean 1, as half, and the height; surface_texture: the normal's x and y, the roughness over its mean as half,
+# the occlusion) are sampled in world space: from above on the ground, from all three axes on steep faces (whiteout
+# blended), each projection hex-tiled (Mikkelsen 2022: three offset and turned samples on a triangle grid, weighted
+# by their place and height), the macro map (macro_texture) varying the strength over tens of metres. CE's base
+# colour is multiplied by the detail (detail transfer, design 3.2: in linear light, its lightness and some of its
+# own hue by the layer's chroma, faded from bounds.y to bounds.z world units), so its mean and CE's colour stay; the
+# normal is the HQ normal's whiteout blend over the G-buffer's (its lookups isotropic, faded from 1 to 6 world
+# units: at mid range CE's light is the surface's own); the roughness is scaled by the layer's. A material
+# of two classes takes the second by its lightness against the classes' cues (class_cue0, 1: Oklab L by class)
+# and, with rock, by the slope, then by the layers' heights. layer{2i}: per world unit, strength, chroma, normal;
+# layer{2i+1}: roughness, height contrast, turn, the steepness triplanar starts at. bounds.w 1: the weight shown.
+TERRAIN_LAYERS_SOURCE = """uniform sampler2D color_texture;
+uniform sampler2D classes_texture;
+uniform usampler2D extras_texture;
+uniform usampler2D gbuffer_texture;
+uniform sampler2DArray detail_texture;
+uniform sampler2DArray surface_texture;
+uniform sampler2D macro_texture;
+uniform vec4 metrics;
+uniform vec4 bounds;
+uniform vec4 hdr;
+uniform vec4 window;
+uniform vec4 panini;
+uniform vec4 tangents;
+uniform vec4 gamut;
+uniform vec4 view_eye;
+uniform vec4 view_axis;
+uniform vec4 view_across;
+uniform vec4 view_down;
+uniform vec4 view_corners;
+uniform vec4 class_cue0;
+uniform vec4 class_cue1;
+uniform vec4 layer0;
+uniform vec4 layer1;
+uniform vec4 layer2;
+uniform vec4 layer3;
+uniform vec4 layer4;
+uniform vec4 layer5;
+uniform vec4 layer6;
+uniform vec4 layer7;
+uniform vec4 layer8;
+uniform vec4 layer9;
+uniform vec4 layer10;
+uniform vec4 layer11;
+uniform vec4 layer12;
+uniform vec4 layer13;
+uniform vec4 layer14;
+uniform vec4 layer15;
+out vec4 result;
+layout(location = 1) out uvec4 words_out;
+
+vec4 layer_a(int i)
+{
+	return i == 0 ? layer0 : i == 1 ? layer2 : i == 2 ? layer4 : i == 3 ? layer6 : i == 4 ? layer8 : i == 5 ? layer10 :
+		i == 6 ? layer12 : layer14;
+}
+
+vec4 layer_b(int i)
+{
+	return i == 0 ? layer1 : i == 1 ? layer3 : i == 2 ? layer5 : i == 3 ? layer7 : i == 4 ? layer9 : i == 5 ? layer11 :
+		i == 6 ? layer13 : layer15;
+}
+
+float cue(uint c)
+{
+	return c < 4u ? class_cue0[c] : class_cue1[c - 4u];
+}
+
+vec3 unfold(vec2 e)
+{
+	vec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));
+	float t = max(-n.z, 0.0);
+	n.xy += vec2(n.x >= 0.0 ? -t : t, n.y >= 0.0 ? -t : t);
+	return normalize(n);
+}
+
+vec2 fold(vec3 n)
+{
+	vec2 f = n.xy / max(abs(n.x) + abs(n.y) + abs(n.z), 1.0e-24);
+	if (n.z < 0.0)
+		f = (1.0 - abs(f.yx)) * vec2(f.x >= 0.0 ? 1.0 : -1.0, f.y >= 0.0 ? 1.0 : -1.0);
+	return f;
+}
+
+vec2 hash2(ivec2 p)
+{
+	uvec2 q = uvec2(p) * uvec2(1597334673u, 3812015801u);
+	uint n = (q.x ^ q.y) * 1597334673u;
+	uvec2 r = uvec2(n, n * 3812015801u);
+	return vec2(r >> 8) * (1.0 / 16777216.0);
+}
+
+struct taps
+{
+	vec4 detail;
+	vec4 surface;
+};
+
+/* a layer sampled hex-tiled at uv (tile units) with its gradients: the detail (rgb mean 1, height) and the surface
+(normal xy in the projection's frame, -1..1; roughness ratio; occlusion) */
+taps hex_sample(int layer, vec2 uv, vec2 gx, vec2 gy, float turn, float contrast, bool surfaced)
+{
+	vec2 st = uv * 1.7320508;
+	vec2 skew = vec2(st.x - 0.57735027 * st.y, 1.15470054 * st.y);
+	ivec2 base = ivec2(floor(skew));
+	vec3 t = vec3(fract(skew), 0.0);
+	t.z = 1.0 - t.x - t.y;
+	float s = t.z < 0.0 ? 1.0 : 0.0;
+	float s2 = 2.0 * s - 1.0;
+	vec3 w = vec3(-t.z * s2, s - t.y * s2, s - t.x * s2);
+	ivec2 v[3] = ivec2[3](base + ivec2(int(s), int(s)), base + ivec2(int(s), int(1.0 - s)),
+		base + ivec2(int(1.0 - s), int(s)));
+	vec4 d[3];
+	vec4 f[3];
+	/* (the surface's lookups isotropic, at the footprint's longer side: a normal map filtered along a long
+	footprint aliases into streaks toward the horizon, which the lit ground shows) */
+	vec2 iso = vec2(max(length(gx), length(gy)), 0.0);
+	vec3 h = vec3(0.5);
+	/* (a tap whose place leaves it no weight, whatever its height, is not looked up) */
+	vec3 reach = pow(max(w + contrast * 0.5, vec3(1.0e-4)), vec3(6.0));
+	reach /= reach.x + reach.y + reach.z;
+	for (int k = 0; k < 3; k++)
+	{
+		d[k] = vec4(0.5);
+		f[k] = vec4(0.0, 0.0, 0.5, 1.0);
+		if (reach[k] < 0.01)
+		{
+			w[k] = 0.0;
+			continue;
+		}
+		vec2 r = hash2(v[k]);
+		/* (the turn a unit vector of the hash's, no sine or cosine: the taps' cost) */
+		vec2 q = vec2(r.y - 0.5, fract(r.x * 7.13 + r.y * 3.71) - 0.5);
+		q = turn > 0.5 && dot(q, q) > 1.0e-6 ? normalize(q) : vec2(1.0, 0.0);
+		mat2 m = mat2(q.x, q.y, -q.y, q.x);
+		vec2 at = m * uv + r * 7.31;
+		d[k] = textureGrad(detail_texture, vec3(at, float(layer)), m * gx, m * gy);
+		if (surfaced)
+		{
+			f[k] = textureGrad(surface_texture, vec3(at, float(layer)), iso, iso.yx);
+			f[k].xy = m * (f[k].xy * 2.0 - 1.0);
+		}
+		h[k] = d[k].a;
+	}
+	vec3 W = pow(max(w + contrast * (h - 0.5), vec3(1.0e-4)), vec3(6.0)) * step(vec3(1.0e-6), w);
+	W /= max(W.x + W.y + W.z, 1.0e-6);
+	taps result_taps;
+	result_taps.detail = d[0] * W.x + d[1] * W.y + d[2] * W.z;
+	result_taps.surface = f[0] * W.x + f[1] * W.y + f[2] * W.z;
+	return result_taps;
+}
+
+/* a layer at a point: from above, or from all three axes where the surface is steep (whiteout normals); the
+detail, the world normal and the roughness ratio */
+void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, out vec4 detail, out vec3 normal,
+	out float rough)
+{
+	vec4 a = layer_a(layer), b = layer_b(layer);
+	float scale = a.x;
+	float strength = a.w;
+	vec3 blend = pow(abs(n), vec3(4.0));
+	blend /= blend.x + blend.y + blend.z;
+	bool planar = abs(n.z) >= b.w;
+	if (planar)
+		blend = vec3(0.0, 0.0, 1.0);
+	detail = vec4(0.0);
+	vec3 nsum = vec3(0.0);
+	rough = 0.0;
+	if (blend.z > 0.01)
+	{
+		taps z = hex_sample(layer, vec2(p.x, -p.y) * scale, vec2(dpx.x, -dpx.y) * scale, vec2(dpy.x, -dpy.y) * scale,
+			b.z, b.y, surfaced);
+		vec2 txy = z.surface.xy * strength;
+		vec3 tz = vec3(txy + n.xy, abs(n.z) + 1.0e-4);
+		tz.z *= n.z >= 0.0 ? 1.0 : -1.0;
+		detail += z.detail * blend.z;
+		nsum += tz * blend.z;
+		rough += z.surface.z * blend.z;
+	}
+	if (blend.x > 0.01)
+	{
+		taps x = hex_sample(layer, vec2(p.y, -p.z) * scale, vec2(dpx.y, -dpx.z) * scale, vec2(dpy.y, -dpy.z) * scale,
+			0.0, b.y, surfaced);
+		vec2 txy = x.surface.xy * strength;
+		vec3 tx = vec3(txy + n.yz, abs(n.x));
+		detail += x.detail * blend.x;
+		nsum += vec3(tx.z * (n.x >= 0.0 ? 1.0 : -1.0), tx.x, tx.y) * blend.x;
+		rough += x.surface.z * blend.x;
+	}
+	if (blend.y > 0.01)
+	{
+		taps y = hex_sample(layer, vec2(p.x, -p.z) * scale, vec2(dpx.x, -dpx.z) * scale, vec2(dpy.x, -dpy.z) * scale,
+			0.0, b.y, surfaced);
+		vec2 txy = y.surface.xy * strength;
+		vec3 ty = vec3(txy + n.xz, abs(n.y));
+		detail += y.detail * blend.y;
+		nsum += vec3(ty.x, ty.z * (n.y >= 0.0 ? 1.0 : -1.0), ty.y) * blend.y;
+		rough += y.surface.z * blend.y;
+	}
+	normal = normalize(nsum);
+	rough *= 2.0;
+}
+
+float oklab_l(vec3 c)
+{
+	/* (Oklab's lightness of a grey of the colour's luminance: its cube root; near enough for the cues) */
+	vec3 lin = c * c;
+	return pow(max(dot(lin, vec3(0.2126, 0.7152, 0.0722)), 0.0), 1.0 / 3.0);
+}
+
+void main()
+{
+	ivec2 texel = ivec2(gl_FragCoord.xy);
+	uvec4 w = texelFetch(gbuffer_texture, texel, 0);
+	uint material = w.w & 0xfffu;
+	if ((w.w & 0x8000u) == 0u || (w.w >> 16) != 0u || material == 0u)
+		discard;
+	uvec4 c = uvec4(texelFetch(classes_texture, ivec2(int(material & 63u), int(material >> 6)), 0) * 255.0 + 0.5);
+	int la = int(c.b & 15u) - 1, lb = int(c.b >> 4) - 1;
+	if (la < 0 && lb < 0)
+		discard;
+	if (la < 0)
+		la = lb;
+	if (lb < 0)
+		lb = la;
+	uvec4 x = texelFetch(extras_texture, texel, 0);
+	float dist = uintBitsToFloat(x.w);
+	float fade = 1.0 - smoothstep(bounds.y, bounds.z, dist);
+	uint flags = (w.z >> 24) >> 4;
+	if (fade <= 0.0 || !(dist > 0.0) || (flags & 8u) == 0u)
+		discard;
+	vec3 n = unfold(unpackSnorm2x16(w.y));
+	vec4 corners = view_corners;
+	vec2 span = max(corners.zw - corners.xy, vec2(1.0));
+	vec2 sxy = 2.0 * (gl_FragCoord.xy - corners.xy) / span - 1.0;
+	vec3 ray = view_axis.xyz + sxy.x * view_across.xyz + sxy.y * view_down.xyz;
+	vec3 p = view_eye.xyz + dist * ray;
+	/* (the point's change a pixel across and down, on the surface's plane: no derivative instructions, so that the
+	discards above cost nothing) */
+	vec3 rx = view_across.xyz * (2.0 / span.x), ry = view_down.xyz * (2.0 / span.y);
+	/* (the plane: level where the ground is, not the bumped normal, whose noise would make the footprints
+	noisy and the lookups streak) */
+	vec3 plane = abs(n.z) >= 0.75 ? vec3(0.0, 0.0, n.z >= 0.0 ? 1.0 : -1.0) : n;
+	float rn = dot(ray, plane);
+	rn = abs(rn) < 0.05 ? (rn < 0.0 ? -0.05 : 0.05) : rn;
+	vec3 dpx = dist * (rx - ray * (dot(rx, plane) / rn));
+	vec3 dpy = dist * (ry - ray * (dot(ry, plane) / rn));
+	vec4 base = texelFetch(color_texture, texel, 0);
+	float weight = 0.0;
+	if (lb != la)
+	{
+		uint ca = c.r, cb = c.g;
+		float lightness = oklab_l(base.rgb);
+		float span_l = cue(cb) - cue(ca);
+		weight = abs(span_l) > 0.08 ? clamp((lightness - cue(ca)) / span_l, 0.0, 1.0) : 0.5;
+		if (cb == 4u)
+			weight = max(weight, smoothstep(0.75, 0.5, abs(n.z)));
+		if (ca == 4u)
+			weight = min(weight, smoothstep(0.5, 0.75, abs(n.z)));
+	}
+	vec4 detail, detail_b;
+	vec3 normal, normal_b;
+	float rough, rough_b;
+	/* (the surface (normal, roughness) only near, where it is drawn; one class alone where the other has
+	little of the pixel) */
+	float near = 1.0 - smoothstep(1.0, 6.0, dist);
+	bool surfaced = near > 0.0;
+	if (lb != la && weight >= 0.85)
+		la = lb;
+	layer_at(la, p, dpx, dpy, n, surfaced, detail, normal, rough);
+	if (lb != la && weight > 0.15)
+	{
+		layer_at(lb, p, dpx, dpy, n, surfaced, detail_b, normal_b, rough_b);
+		float hb = smoothstep(-0.25, 0.25, (detail_b.a + weight * 1.4) - (detail.a + (1.0 - weight) * 1.4));
+		detail = mix(detail, detail_b, hb);
+		normal = normalize(mix(normal, normal_b, hb));
+		rough = mix(rough, rough_b, hb);
+		weight = hb;
+		la = hb > 0.5 ? lb : la;
+	}
+	vec4 a = layer_a(la), b = layer_b(la);
+	vec4 macro = texture(macro_texture, p.xy * (1.0 / 24.0));
+	float k = a.y * fade * clamp(0.7 + (macro.r - 0.5) * 1.2 + (macro.g - 0.5) * 0.6, 0.35, 1.25);
+	vec3 ratio = detail.rgb * 2.0;
+	float lum = max(dot(ratio, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
+	ratio = lum * mix(vec3(1.0), ratio / lum, a.z);
+	ratio = max(mix(vec3(1.0), ratio, k), vec3(0.0));
+	vec3 color = clamp(base.rgb * pow(ratio, vec3(1.0 / 2.2)), 0.0, 1.0);
+	normal = normalize(mix(n, normal, fade * near));
+	float r = float(w.z & 255u) / 255.0;
+	r = clamp(r * mix(1.0, rough, b.x * fade * near), 0.02, 1.0);
+	if (bounds.w > 0.5)
+		color = vec3(weight, fade, float(la) / 6.0);
+	result = vec4(color, base.a);
+	words_out = uvec4(w.x, packSnorm2x16(fold(normal)), (w.z & 0xffffff00u) | uint(r * 255.0 + 0.5), w.w);
+}
+"""
+# the same, where the device reads a target where it is drawn (dynamic rendering's local reads: Vulkan's
+# xgpu_vulkan_post_terrain_layers, capabilities color_read): the G-buffer's words are the pass's first target,
+# read where it is drawn (input attachment 0 of set 2) and written through a mask of their second and third words
+# (the normal and the roughness), the base the second target, written whole (its alpha the copy's), so that the
+# words are not copied.
+TERRAIN_LAYERS_LOCAL_SOURCE = TERRAIN_LAYERS_SOURCE.replace(
+    "uniform usampler2D gbuffer_texture;\n",
+    "layout(input_attachment_index = 0, set = 2, binding = 0) uniform usubpassInput words_input;\n").replace(
+    "out vec4 result;\nlayout(location = 1) out uvec4 words_out;\n",
+    "layout(location = 1) out vec4 base_out;\nlayout(location = 0) out uvec4 words_out;\n").replace(
+    "\tuvec4 w = texelFetch(gbuffer_texture, texel, 0);\n", "\tuvec4 w = subpassLoad(words_input);\n").replace(
+    "\tresult = vec4(color, base.a);\n", "\tbase_out = vec4(color, base.a);\n")
+assert TERRAIN_LAYERS_LOCAL_SOURCE.count("words_input") == 2 and "base_out" in TERRAIN_LAYERS_LOCAL_SOURCE
 # Vulkan's own program: the frame turned for a swapchain the display turns
 # (a phone held sideways: xgpu_vulkan_post_rotate). Each pixel takes the
 # texel the bounds' matrix (its rows xy and zw) turns it to, about the
@@ -732,6 +1051,8 @@ def generate(args):
     programs["deferred_resolve"] = ("frag", DEFERRED_RESOLVE_SOURCE)
     programs["albedo_over"] = ("frag", ALBEDO_OVER_SOURCE)
     programs["terrain_debug"] = ("frag", TERRAIN_DEBUG_SOURCE)
+    programs["terrain_layers"] = ("frag", TERRAIN_LAYERS_SOURCE)
+    programs["terrain_layers_local"] = ("frag", TERRAIN_LAYERS_LOCAL_SOURCE)
     programs["clear"] = ("frag", CLEAR)
     text = [
         "/* Generated by tools/vulkan_post_shaders.py from its GLSL, xgpu_hdr.c and port/third_party/smaa. "

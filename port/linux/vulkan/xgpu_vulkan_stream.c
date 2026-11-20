@@ -158,6 +158,8 @@ pre-pass, and the frame's last pass (its composition, encoding, present) */
 #define PASS_OWNER_PANINI "PANINI"
 #define PASS_OWNER_AO "AO"
 #define PASS_OWNER_FINAL "FINAL PASS"
+/* (the terrain overhaul's HQ layers, T1) */
+#define PASS_OWNER_TERRAIN "TERRAIN"
 
 struct stream_target
 {
@@ -1103,6 +1105,12 @@ static uint8_t border_axes(const struct xgpu_stream_sampler *sampler)
 	sampler can do) */
 	if (sampler->address[2] == XGPU_VULKAN_ADDRESS_MSDF)
 		return XGPU_BORDER_MSDF;
+	/* (a ground shader's detail map under the terrain's HQ layers, which the
+	game marks by a border colour its wrapped addressing never shows: the
+	shader's near fade, xgpu_shader.h) */
+	if (sampler->border_color == XGPU_TERRAIN_FADE_BORDER_COLOR && sampler->address[0] == XGPU_VULKAN_ADDRESS_WRAP &&
+		sampler->address[1] == XGPU_VULKAN_ADDRESS_WRAP)
+		return XGPU_BORDER_TERRAIN_FADE;
 	if (stream.capabilities.custom_border_colors)
 		return 0;
 	for (axis = 0; axis < 3; axis++)
@@ -4630,8 +4638,8 @@ static void prepass_prepare(void)
 		(void)xgpu_vulkan_pipeline_prepare(&prepass.rays);
 }
 
-static struct xgpu_vulkan_image *prepass_image(struct xgpu_vulkan_image *image, uint8_t format, uint32_t width,
-	uint32_t height)
+static struct xgpu_vulkan_image *prepass_image_of(struct xgpu_vulkan_image *image, uint8_t format, uint32_t width,
+	uint32_t height, uint8_t usage)
 {
 	struct xgpu_vulkan_image_description description;
 
@@ -4642,12 +4650,18 @@ static struct xgpu_vulkan_image *prepass_image(struct xgpu_vulkan_image *image, 
 	memset(&description, 0, sizeof(description));
 	description.type = XGPU_VULKAN_IMAGE_2D;
 	description.format = format;
-	description.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET;
+	description.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_TARGET | usage;
 	description.width = width;
 	description.height = height;
 	description.depth_or_layers = 1;
 	description.levels = 1;
 	return xgpu_vulkan_image_create(&description);
+}
+
+static struct xgpu_vulkan_image *prepass_image(struct xgpu_vulkan_image *image, uint8_t format, uint32_t width,
+	uint32_t height)
+{
+	return prepass_image_of(image, format, width, height, 0);
 }
 
 /* the twins' definitions and entries, made once (0: none can be) */
@@ -5696,7 +5710,10 @@ static void deferred_start(struct xgpu_vulkan_image *from, struct xgpu_vulkan_im
 /* the G-buffer's words and depth, the colour target's size: 1 if they are */
 static int gbuffer_images(const struct stream_target *color)
 {
-	gbuffer.words = prepass_image(gbuffer.words, XGPU_VULKAN_FORMAT_RGBA32_UINT, color->width, color->height);
+	/* (the terrain's HQ layers read and write the words where they are
+	drawn, where the device can: an input attachment too) */
+	gbuffer.words = prepass_image_of(gbuffer.words, XGPU_VULKAN_FORMAT_RGBA32_UINT, color->width, color->height,
+		XGPU_VULKAN_USAGE_INPUT);
 	gbuffer.depth = prepass_image(gbuffer.depth, XGPU_VULKAN_FORMAT_D24S8, color->width, color->height);
 	gbuffer.extras = prepass_image(gbuffer.extras, XGPU_VULKAN_FORMAT_RGBA32_UINT, color->width, color->height);
 	gbuffer.width = color->width;
@@ -5807,6 +5824,8 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 		gbuffer.color = stream.color;
 		gbuffer.ready = 1;
 		gbuffer.drawn = 0;
+		/* (the terrain's HQ layers are this window's to draw again) */
+		xgpu_vulkan_terrain_window();
 		/* (port: "pathtraced": the objects' capture opened) */
 		gbuffer.objects = xgpu_vulkan_rt_objects_only();
 		if (gbuffer.objects)
@@ -5870,6 +5889,15 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			deferred.albedo_over = xgpu_vulkan_post_albedo_over(deferred.base, gbuffer.albedo, words);
 			targets_bind();
 		}
+		/* (the terrain overhaul's HQ layers over the level's ground, under the
+		decals: xgpu_vulkan_terrain.c, where this frame's PRISM_TERRAIN asks) */
+		if (deferred.phase == XGPU_GBUFFER_PHASE_BASE && stream.color == deferred.color && words)
+		{
+			xgpu_vulkan_pass_owner(PASS_OWNER_TERRAIN);
+			xgpu_vulkan_terrain_layers(deferred.base, words, gbuffer.extras, gbuffer.view_known ? &gbuffer.view : NULL);
+			xgpu_vulkan_pass_owner(NULL);
+			targets_bind();
+		}
 	}
 	else if (phase == XGPU_GBUFFER_PHASE_ADDITIONS && deferred.phase == XGPU_GBUFFER_PHASE_BASE &&
 		stream.color == deferred.color)
@@ -5918,6 +5946,14 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			if (words && gbuffer.albedo_drawn && gbuffer.albedo && !deferred.albedo_over)
 				xgpu_vulkan_post_albedo_over(deferred.base, gbuffer.albedo, words);
 			deferred.albedo_over = 0;
+			/* (and the terrain's HQ layers, where that phase did not come) */
+			if (words)
+			{
+				xgpu_vulkan_pass_owner(PASS_OWNER_TERRAIN);
+				xgpu_vulkan_terrain_layers(deferred.base, words, gbuffer.extras,
+					gbuffer.view_known ? &gbuffer.view : NULL);
+				xgpu_vulkan_pass_owner(NULL);
+			}
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
 				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
 				pathtraced && words ? pt_relight : raster && words ? raster_relight : NULL, &context);

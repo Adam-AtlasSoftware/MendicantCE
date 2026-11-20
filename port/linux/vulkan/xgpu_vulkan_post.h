@@ -120,5 +120,18 @@ none); bounds: the views (1 the classes, 2 the events), the events' count,
 0 if it cannot be drawn */
 int xgpu_vulkan_post_terrain_debug(struct xgpu_vulkan_image *target, struct xgpu_vulkan_image *gbuffer,
 	struct xgpu_vulkan_image *classes, struct xgpu_vulkan_image *events, const float bounds[4]);
+/* the terrain overhaul's HQ layers (T1; xgpu_vulkan_terrain.c): the level's
+pixels of a material with a layer in the base target (BGRA8 or RGBA16F, one
+sample) take CE's colour times the layers' detail, and their G-buffer words
+(RGBA32UI, the base's size) the layers' normal and roughness, from the
+second target's words (extras: the distance), the classes' table, the
+layers' detail and surface arrays and the macro map; values: the uniforms
+(the camera, the cues, the layers; metrics are the pass's). The words are
+the second target while it draws (none after). 0 if it cannot be drawn */
+struct xgpu_vulkan_post_uniforms;
+int xgpu_vulkan_post_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulkan_image *words,
+	struct xgpu_vulkan_image *extras, struct xgpu_vulkan_image *classes, struct xgpu_vulkan_image *detail,
+	struct xgpu_vulkan_image *surface, struct xgpu_vulkan_image *macro,
+	const struct xgpu_vulkan_post_uniforms *values);
 
 #endif

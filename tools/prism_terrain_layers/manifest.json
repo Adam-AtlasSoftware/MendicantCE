@@ -1,0 +1,147 @@
+{
+ "format": 1,
+ "about": "PRISM terrain HQ layers v1 (docs/prism_terrain.md): one CC0 scan per surface class, in the classes' order (xgpu_vulkan_terrain.h), then the named layers the class table asks for (d40's desert sand). tile_metres: one tile's side; strength: the detail transfer's k; chroma: how much of the scan's own colour variation is kept (0 its lightness alone: CE's hue); normal, roughness: their strengths; lowpass: the detail's low-pass, a fraction of the tile; lit_limit: the de-lit check's refusal.",
+ "macro_seed": 1,
+ "layers": [
+  {
+   "name": "sand",
+   "source": {
+    "asset": "Ground054",
+    "author": "ambientCG (Lennart Demes)",
+    "page": "https://ambientcg.com/view?id=Ground054",
+    "archive": "https://ambientcg.com/get?file=Ground054_2K-JPG.zip",
+    "sha256": "643e7c8689bac041f17c660eff6a5459bfe0535d4466737beb0e64902b23235a",
+    "licence": "CC0-1.0",
+    "checked": "2026-11-19"
+   },
+   "tile_metres": 3.5,
+   "strength": 2.0,
+   "chroma": 0.25,
+   "normal": 0.5,
+   "roughness": 0.5,
+   "height_contrast": 0.5,
+   "lowpass": 0.125,
+   "lit_limit": 0.6
+  },
+  {
+   "name": "dirt",
+   "source": {
+    "asset": "Ground103",
+    "author": "ambientCG (Lennart Demes)",
+    "page": "https://ambientcg.com/view?id=Ground103",
+    "archive": "https://ambientcg.com/get?file=Ground103_2K-JPG.zip",
+    "sha256": "6557e7cd452a1dc0d402c69a13b32f9ae082e7ef3dfab4fb1b49a4ffc7b1afa5",
+    "licence": "CC0-1.0",
+    "checked": "2026-11-19"
+   },
+   "tile_metres": 2.5,
+   "strength": 0.6,
+   "chroma": 0.3,
+   "normal": 0.8,
+   "roughness": 0.6,
+   "height_contrast": 0.5,
+   "lowpass": 0.125,
+   "lit_limit": 0.6
+  },
+  {
+   "name": "mud",
+   "source": {
+    "asset": "Ground025",
+    "author": "ambientCG (Lennart Demes)",
+    "page": "https://ambientcg.com/view?id=Ground025",
+    "archive": "https://ambientcg.com/get?file=Ground025_2K-JPG.zip",
+    "sha256": "ebc7c8e25a297197164edad754bd66fb256b4cd6cc2070c4aa329cd36d109c08",
+    "licence": "CC0-1.0",
+    "checked": "2026-11-19"
+   },
+   "tile_metres": 2.5,
+   "strength": 1.0,
+   "chroma": 0.3,
+   "normal": 0.7,
+   "roughness": 0.6,
+   "height_contrast": 0.5,
+   "lowpass": 0.125,
+   "lit_limit": 0.6
+  },
+  {
+   "name": "rock",
+   "source": {
+    "asset": "Rock023",
+    "author": "ambientCG (Lennart Demes)",
+    "page": "https://ambientcg.com/view?id=Rock023",
+    "archive": "https://ambientcg.com/get?file=Rock023_2K-JPG.zip",
+    "sha256": "00fccc07eda464a2c22cf7d8b684272f3127e56ae97fb44868d7cea866ea9d09",
+    "licence": "CC0-1.0",
+    "checked": "2026-11-19"
+   },
+   "tile_metres": 4.0,
+   "strength": 1.0,
+   "chroma": 0.2,
+   "normal": 1.0,
+   "roughness": 0.6,
+   "height_contrast": 0.5,
+   "lowpass": 0.125,
+   "lit_limit": 0.6
+  },
+  {
+   "name": "snow",
+   "source": {
+    "asset": "Snow005",
+    "author": "ambientCG (Lennart Demes)",
+    "page": "https://ambientcg.com/view?id=Snow005",
+    "archive": "https://ambientcg.com/get?file=Snow005_2K-JPG.zip",
+    "sha256": "768aa080b299a0edf9c9f04f53a4a9c752392fba39bded5581939e292f9bca8d",
+    "licence": "CC0-1.0",
+    "checked": "2026-11-19"
+   },
+   "tile_metres": 3.0,
+   "strength": 2.0,
+   "chroma": 0.0,
+   "normal": 0.6,
+   "roughness": 0.4,
+   "height_contrast": 0.5,
+   "lowpass": 0.125,
+   "lit_limit": 0.6
+  },
+  {
+   "name": "ice",
+   "source": {
+    "asset": "Snow014",
+    "author": "ambientCG (Lennart Demes)",
+    "page": "https://ambientcg.com/view?id=Snow014",
+    "archive": "https://ambientcg.com/get?file=Snow014_2K-JPG.zip",
+    "sha256": "363ceceed3287d14e8d7f7c118a6c9f76370cd3e9930e7ff5cb7bef477ef5330",
+    "licence": "CC0-1.0",
+    "checked": "2026-11-19"
+   },
+   "tile_metres": 4.0,
+   "strength": 0.8,
+   "chroma": 0.0,
+   "normal": 0.4,
+   "roughness": 0.4,
+   "height_contrast": 0.5,
+   "lowpass": 0.125,
+   "lit_limit": 0.6
+  },
+  {
+   "name": "sand_desert",
+   "source": {
+    "asset": "Ground080",
+    "author": "ambientCG (Lennart Demes)",
+    "page": "https://ambientcg.com/view?id=Ground080",
+    "archive": "https://ambientcg.com/get?file=Ground080_2K-JPG.zip",
+    "sha256": "7b8593f653a782eaa31e3cd504594b3eb7f940a742b11d91681ae28c7914f67f",
+    "licence": "CC0-1.0",
+    "checked": "2026-11-19"
+   },
+   "tile_metres": 2.0,
+   "strength": 3.0,
+   "chroma": 0.2,
+   "normal": 0.6,
+   "roughness": 0.5,
+   "height_contrast": 0.5,
+   "lowpass": 0.125,
+   "lit_limit": 0.6
+  }
+ ]
+}

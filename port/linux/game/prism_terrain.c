@@ -41,12 +41,17 @@ makes of it comes back. HALO_PORT_NETWORK_VERSION is unchanged.
 #include "scenario/wind.h"
 #include "structures/structure_bsp_definitions.h"
 #include "tag_files/tag_files.h"
+#include "shaders/shader_definitions.h"
 #include "prism_deferred.h"
 #include "prism_terrain.h"
 #include "../src/xgpu_stream.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
+
+/* (the data folder: port/linux/src/platform.h's) */
+char const *platform_data_root(void);
 
 /* ---------- prototypes */
 
@@ -85,7 +90,7 @@ static struct
 	/* the settings (read when they change) */
 	unsigned long changes;
 	int read;
-	boolean on, tracks, drifts, layers_hq, weather, water, view_class, view_events;
+	boolean on, tracks, drifts, layers_hq, weather, water, view_class, view_events, detail_fade;
 	unsigned long quality;
 	/* the frame's events since the last frame, those left out (the ring
 	full), and the foot whose ground comes next (-1 none) */
@@ -102,6 +107,11 @@ static struct
 	long game_time;
 	unsigned long long real_ns;
 	boolean active;
+	/* (T1) the terrain pack's folder (display.terrain_pack_folder; the data
+	folder's prism_terrain), sent with each FRAME */
+	char pack_folder[XGPU_TERRAIN_PATH];
+	/* (whether its layers.ptl is there, looked for when the settings change) */
+	boolean pack_found, pack_checked, detail_logged;
 } prism_terrain;
 
 /* ---------- private code */
@@ -134,6 +144,36 @@ static void settings_read(void)
 	value = config_string("debug.gbuffer_view");
 	prism_terrain.view_class = value && !strcmp(value, "terrain_class");
 	prism_terrain.view_events = config_boolean("debug.terrain_events") != 0;
+	prism_terrain.detail_fade = config_boolean("debug.terrain_detail_fade") != 0;
+	value = config_string("display.terrain_pack_folder");
+	if (value && value[0])
+	{
+		snprintf(prism_terrain.pack_folder, sizeof(prism_terrain.pack_folder), "%s", value);
+	}
+	else
+	{
+		snprintf(prism_terrain.pack_folder, sizeof(prism_terrain.pack_folder), "%s/prism_terrain", platform_data_root());
+	}
+	{
+		char path[XGPU_TERRAIN_PATH + 16];
+		FILE *file;
+
+		/* (the game's files are named from the data folder: the default
+		pack's file looked for there; a folder named elsewhere is the
+		renderer's to find, and taken as there) */
+		snprintf(path, sizeof(path), "%s/layers.ptl", prism_terrain.pack_folder);
+		file = value && value[0] ? NULL : fopen("prism_terrain/layers.ptl", "rb");
+		if (!(value && value[0]) && ((file != NULL) != prism_terrain.pack_found || !prism_terrain.pack_checked))
+		{
+			platform_log("prism terrain: the terrain pack %s %s", path, file ? "found" : "not found: CE's ground alone");
+		}
+		prism_terrain.pack_found = file != NULL || (value && value[0]);
+		prism_terrain.pack_checked = TRUE;
+		if (file)
+		{
+			fclose(file);
+		}
+	}
 }
 
 /* a direction, octahedral, 2x16 snorm (the G-buffer's normal's encoding);
@@ -370,6 +410,57 @@ static void frame_weather(struct xgpu_stream_prism_terrain *frame)
 
 /* ---------- public code */
 
+/* (T1: the border colour that marks a ground shader's detail maps for the
+renderer's near fade under the HQ layers: xgpu_shader.h's
+XGPU_TERRAIN_FADE_BORDER_COLOR; their wrapped addressing never shows it) */
+#define TERRAIN_FADE_BORDER_COLOR 0x01fade01L
+
+boolean prism_terrain_detail_fades(
+	void const *shader,
+	long bitmap_tag_index)
+{
+	char const *name;
+	char lower[256];
+	int index;
+
+	if (!shader || bitmap_tag_index == NONE)
+	{
+		return FALSE;
+	}
+	if (((struct shader const *)shader)->base.physics.material_type == 1)
+	{
+		return TRUE;
+	}
+	name = tag_get_name(bitmap_tag_index);
+	for (index = 0; name && name[index] && index < (int)sizeof(lower) - 1; index++)
+	{
+		lower[index] = (char)(name[index] >= 'A' && name[index] <= 'Z' ? name[index] + 32 : name[index]);
+	}
+	lower[name ? index : 0] = 0;
+	return !strstr(lower, "grass") && !strstr(lower, "moss");
+}
+
+long prism_terrain_detail_level(
+	void const *shader)
+{
+	short material_type;
+
+	if (!shader || !prism_terrain_wanted() || !prism_terrain.layers_hq || !prism_terrain.pack_found ||
+		!prism_terrain.detail_fade)
+	{
+		return 0;
+	}
+	/* (CE's material types: dirt 0, sand 1, stone 2, snow 3, ice 31) */
+	material_type = ((struct shader const *)shader)->base.physics.material_type;
+	if (!prism_terrain.detail_logged)
+	{
+		prism_terrain.detail_logged = TRUE;
+		platform_log("prism terrain: CE's detail maps faded near the camera under the HQ layers");
+	}
+	return material_type == 0 || material_type == 1 || material_type == 2 || material_type == 3 ||
+		material_type == 31 ? TERRAIN_FADE_BORDER_COLOR : 0;
+}
+
 boolean prism_terrain_wanted(
 	void)
 {
@@ -443,6 +534,7 @@ void prism_terrain_frame(
 		(prism_terrain.view_events ? XGPU_TERRAIN_FLAG_VIEW_EVENTS : 0);
 	frame.quality = (uint32_t)prism_terrain.quality;
 	frame.map_checksum = (uint32_t)checksum;
+	frame.pack_folder = (uint32_t)(unsigned long)prism_terrain.pack_folder;
 	frame_weather(&frame);
 	prism_terrain.game_time = game_time;
 	prism_terrain.real_ns = now_ns;

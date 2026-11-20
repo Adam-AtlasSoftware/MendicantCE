@@ -191,6 +191,7 @@ static void layout(void)
 	FIELD(xgpu_stream_prism_terrain, wind_count);
 	FIELD(xgpu_stream_prism_terrain, winds);
 	FIELD(xgpu_stream_prism_terrain, map_checksum);
+	FIELD(xgpu_stream_prism_terrain, pack_folder);
 	printf("xgpu_stream_prism_terrain.items %u 0\n", (unsigned)offsetof(struct xgpu_stream_prism_terrain, items));
 }
 

@@ -57,6 +57,16 @@ enum xgpu_vulkan_post_program_id
 	classes' table at 1, the events at 2, the G-buffer's words at 3:
 	xgpu_vulkan_post_terrain_debug) */
 	XGPU_VULKAN_POST_TERRAIN_DEBUG,
+	/* (the terrain overhaul, T1: the HQ layers over the level's base colour
+	and the G-buffer's normal and roughness, the base's copy at unit 0, the
+	classes' table at 1, the second target's words (extras) at 2, the words'
+	copy at 3, the layers' arrays at 4 and 5, the macro map at 6; into the
+	base and, at location 1, the words: xgpu_vulkan_post_terrain_layers) */
+	XGPU_VULKAN_POST_TERRAIN_LAYERS,
+	/* (the same where the device reads a target where it is drawn: the
+	words its first target, read as input attachment 0 of set 2 and written
+	through a mask of their normal and roughness, the base its second) */
+	XGPU_VULKAN_POST_TERRAIN_LAYERS_LOCAL,
 	XGPU_VULKAN_POST_PROGRAM_COUNT
 };
 
@@ -85,6 +95,17 @@ struct xgpu_vulkan_post_uniforms
 	/* display.hdr_gamut's (#1124): the encoding's expansion (1, 0 none)
 	and its target (xgpu_hdr_frame.gamut_target) */
 	float gamut[4];
+	/* the terrain's HQ layers' (T1): SCENE_VIEW's camera (the eye, the view's
+	axis, its change a unit of the screen's x and y) and its corners; each
+	class's lightness cue (Oklab L, class 0 to 7); each layer's two vec4s
+	(xgpu_vulkan_terrain.c) */
+	float view_eye[4];
+	float view_axis[4];
+	float view_across[4];
+	float view_down[4];
+	float view_corners[4];
+	float class_cue[2][4];
+	float layer[16][4];
 };
 
 struct xgpu_vulkan_post_module

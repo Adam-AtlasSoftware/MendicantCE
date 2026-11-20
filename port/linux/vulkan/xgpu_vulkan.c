@@ -7311,8 +7311,11 @@ static VkDescriptorSet input_set(void)
 	write.pImageInfo = &image;
 	vkUpdateDescriptorSets(vk.device, 1, &write, 0, NULL);
 	/* (the interlocked draws': the same view as a storage image,
-	XGPU_SPIRV_BINDING_STORE) */
-	if (vk.capabilities.pixel_interlock)
+	XGPU_SPIRV_BINDING_STORE, where the image is one: display.hdr's half
+	floats, as image_make gives them storage; not the terrain's G-buffer
+	words, read where they are drawn but never stored) */
+	if (vk.capabilities.pixel_interlock && (vk.color->description.format == XGPU_VULKAN_FORMAT_RGBA16F ||
+		(vk.color->description.usage & XGPU_VULKAN_USAGE_STORAGE)))
 	{
 		write.dstBinding = XGPU_VULKAN_BINDING_STORE;
 		write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
