@@ -65,5 +65,11 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 void xgpu_vulkan_terrain_window(void);
 /* the frame's end: a FRAME is this frame's alone */
 void xgpu_vulkan_terrain_frame_end(void);
+/* (T1) whether the terrain pack of that folder (FRAME's pack folder) is
+loaded: 1 loaded and drawn from, -1 tried and not loaded (no file, or not a
+whole pack), 0 not tried yet (or another folder's state); any thread (the
+game's asks through host_vulkan_terrain_pack before it fades CE's detail
+maps, which it must not do with no layers to stand in for them) */
+int xgpu_vulkan_terrain_pack_state(const char *folder);
 
 #endif

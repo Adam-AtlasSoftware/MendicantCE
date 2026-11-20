@@ -84,7 +84,9 @@ def test_owners_named_by_their_settings():
     stream = read(STREAM)
     owners = dict(re.findall(r'#define (PASS_OWNER_\w+) "([^"]+)"', stream))
     assert owners == {"PASS_OWNER_FXAA": "FXAA", "PASS_OWNER_SMAA": "SMAA", "PASS_OWNER_MSAA_RESOLVE": "MSAA RESOLVE",
-                      "PASS_OWNER_PANINI": "PANINI", "PASS_OWNER_AO": "AO", "PASS_OWNER_FINAL": "FINAL PASS"}
+                      "PASS_OWNER_PANINI": "PANINI", "PASS_OWNER_AO": "AO", "PASS_OWNER_FINAL": "FINAL PASS",
+                      # (the terrain overhaul's HQ layers, display.terrain_layers "hq": docs/prism_terrain.md)
+                      "PASS_OWNER_TERRAIN": "TERRAIN"}
     # (capitals: pass_times_owned tells them from the passes' own labels)
     assert all(re.fullmatch(r"[A-Z][A-Z ]*", name) for name in owners.values())
 

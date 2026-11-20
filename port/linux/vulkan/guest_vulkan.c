@@ -17,3 +17,6 @@ int host_vulkan_plugins_choose(const char *upscaler, const char *denoiser, const
 /* whether the plugin of that name is ready to be offered in Settings (its
 PRISM_CAP_*, else 0; host_vulkan.c) */
 unsigned int host_vulkan_plugin_ready(const char *name);
+/* whether the renderer loaded the terrain pack of that folder: 1 loaded, -1
+not, 0 not tried yet (host_vulkan.c) */
+int host_vulkan_terrain_pack(const char *folder);

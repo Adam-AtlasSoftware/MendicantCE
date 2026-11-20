@@ -439,7 +439,10 @@ TERRAIN_DEBUG_SOURCE = (
 # units: at mid range CE's light is the surface's own); the roughness is scaled by the layer's. A material
 # of two classes takes the second by its lightness against the classes' cues (class_cue0, 1: Oklab L by class)
 # and, with rock, by the slope, then by the layers' heights. layer{2i}: per world unit, strength, chroma, normal;
-# layer{2i+1}: roughness, height contrast, turn, the steepness triplanar starts at. bounds.w 1: the weight shown.
+# layer{2i+1}: roughness, height contrast, the grain's weight (a second, finer, turned lookup of the layer from
+# above, FINE_SCALE times as many tiles, within 1 to 12 world units: the sand's grain, which one tile at its size
+# draws too large and soft up close), the steepness triplanar starts at, negative where the taps are not turned
+# (rock: its strata stay level). bounds.w 1: the weight shown.
 TERRAIN_LAYERS_SOURCE = """uniform sampler2D color_texture;
 uniform sampler2D classes_texture;
 uniform usampler2D extras_texture;
@@ -521,6 +524,9 @@ vec2 hash2(ivec2 p)
 	return vec2(r >> 8) * (1.0 / 16777216.0);
 }
 
+/* (the grain's lookup: this many times the layer's tiles; not a whole number, so that the two never line up) */
+#define FINE_SCALE 3.71
+
 struct taps
 {
 	vec4 detail;
@@ -583,15 +589,16 @@ taps hex_sample(int layer, vec2 uv, vec2 gx, vec2 gy, float turn, float contrast
 
 /* a layer at a point: from above, or from all three axes where the surface is steep (whiteout normals); the
 detail, the world normal and the roughness ratio */
-void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, out vec4 detail, out vec3 normal,
-	out float rough)
+void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, float fine, out vec4 detail,
+	out vec3 normal, out float rough)
 {
 	vec4 a = layer_a(layer), b = layer_b(layer);
 	float scale = a.x;
 	float strength = a.w;
+	float turn = b.w > 0.0 ? 1.0 : 0.0;
 	vec3 blend = pow(abs(n), vec3(4.0));
 	blend /= blend.x + blend.y + blend.z;
-	bool planar = abs(n.z) >= b.w;
+	bool planar = abs(n.z) >= abs(b.w);
 	if (planar)
 		blend = vec3(0.0, 0.0, 1.0);
 	detail = vec4(0.0);
@@ -600,7 +607,21 @@ void layer_at(int layer, vec3 p, vec3 dpx, vec3 dpy, vec3 n, bool surfaced, out 
 	if (blend.z > 0.01)
 	{
 		taps z = hex_sample(layer, vec2(p.x, -p.y) * scale, vec2(dpx.x, -dpx.y) * scale, vec2(dpy.x, -dpy.y) * scale,
-			b.z, b.y, surfaced);
+			turn, b.y, surfaced);
+		/* (the grain: the layer's detail again FINE_SCALE times finer and turned (one lookup, not hex-tiled: at
+		a grain's size under the hex-tiled layer its repeat does not show, and the pass's cost is its lookups;
+		its normal left out, a millimetre's relief the lit ground does not show), its mean 1 multiplied in by its
+		weight, near the camera alone) */
+		float wf = b.z * fine;
+		if (wf > 0.01)
+		{
+			float fs = scale * FINE_SCALE;
+			const mat2 gm = mat2(0.8, 0.6, -0.6, 0.8);
+			vec2 at = gm * (vec2(p.x, -p.y) * fs) + vec2(0.37, 0.61);
+			vec2 ggx = gm * vec2(dpx.x, -dpx.y) * fs, ggy = gm * vec2(dpy.x, -dpy.y) * fs;
+			vec4 gd = textureGrad(detail_texture, vec3(at, float(layer)), ggx, ggy);
+			z.detail.rgb *= mix(vec3(1.0), gd.rgb * 2.0, wf);
+		}
 		vec2 txy = z.surface.xy * strength;
 		vec3 tz = vec3(txy + n.xy, abs(n.z) + 1.0e-4);
 		tz.z *= n.z >= 0.0 ? 1.0 : -1.0;
@@ -696,12 +717,13 @@ void main()
 	little of the pixel) */
 	float near = 1.0 - smoothstep(1.0, 6.0, dist);
 	bool surfaced = near > 0.0;
+	float fine = 1.0 - smoothstep(1.0, 12.0, dist);
 	if (lb != la && weight >= 0.85)
 		la = lb;
-	layer_at(la, p, dpx, dpy, n, surfaced, detail, normal, rough);
+	layer_at(la, p, dpx, dpy, n, surfaced, fine, detail, normal, rough);
 	if (lb != la && weight > 0.15)
 	{
-		layer_at(lb, p, dpx, dpy, n, surfaced, detail_b, normal_b, rough_b);
+		layer_at(lb, p, dpx, dpy, n, surfaced, fine, detail_b, normal_b, rough_b);
 		float hb = smoothstep(-0.25, 0.25, (detail_b.a + weight * 1.4) - (detail.a + (1.0 - weight) * 1.4));
 		detail = mix(detail, detail_b, hb);
 		normal = normalize(mix(normal, normal_b, hb));
@@ -715,7 +737,10 @@ void main()
 	vec3 ratio = detail.rgb * 2.0;
 	float lum = max(dot(ratio, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
 	ratio = lum * mix(vec3(1.0), ratio / lum, a.z);
-	ratio = max(mix(vec3(1.0), ratio, k), vec3(0.0));
+	ratio = mix(vec3(1.0), ratio, k);
+	/* (a strength past 1 carries a scan's darkest grains past black: below 0.3 the ratio rolls off toward 0 along
+	an exponential that meets it there with its slope, so a pebble stays a dark grain and never a black hole) */
+	ratio = max(ratio, 0.3 * exp(min(ratio - 0.3, vec3(0.0)) / 0.3));
 	vec3 color = clamp(base.rgb * pow(ratio, vec3(1.0 / 2.2)), 0.0, 1.0);
 	normal = normalize(mix(n, normal, fade * near));
 	float r = float(w.z & 255u) / 255.0;

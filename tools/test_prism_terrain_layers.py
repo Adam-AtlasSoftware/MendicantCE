@@ -56,7 +56,7 @@ def manifest(work, digest, name="sand"):
                                  "archive": "https://example.invalid/get?file=X_2K-JPG.zip", "sha256": digest,
                                  "licence": "CC0-1.0", "checked": "2026-11-19"},
         "tile_metres": 2.0, "strength": 1.0, "chroma": 0.2, "normal": 1.0, "roughness": 0.5,
-        "height_contrast": 0.5, "lowpass": 0.125, "lit_limit": 0.6}]}
+        "height_contrast": 0.5, "grain": 0.8, "lowpass": 0.125, "lit_limit": 0.6}]}
 
 
 def build(module, tmp_path, lit=False, digest=None):
@@ -82,6 +82,9 @@ def test_pack_whole_and_mean_kept(tmp_path):
     assert len(blob) == 32 + 48 + 2 * 256 * 256 * 4 + 512 * 512 * 4
     name, tile = struct.unpack("<16sf", blob[32:52])
     assert name.rstrip(b"\0") == b"sand" and tile == 2.0
+    # (the grain's weight in the first spare float, the renderer's values[6])
+    values = struct.unpack("<8f", blob[48:80])
+    assert abs(values[6] - 0.8) < 1e-6 and values[7] == 0.0
     detail = np.frombuffer(blob[80:80 + 256 * 256 * 4], np.uint8).reshape(256, 256, 4)
     # (half of the detail: its mean 1 is 127.5 within the bytes' rounding)
     assert np.allclose(detail[..., :3].reshape(-1, 3).mean(axis=0), 127.5, atol=1.5)
@@ -106,6 +109,13 @@ def test_manifest_cc0_only():
     names = [layer["name"] for layer in m["layers"]]
     assert names[:6] == ["sand", "dirt", "mud", "rock", "snow", "ice"]
     assert len(names) <= 8
+    # (the named layers the class table asks for: d40's desert sand, d20's cracked mud)
+    assert {"sand_desert", "dirt_cracked"} <= set(names)
+    classes = (ROOT / "port/linux/vulkan/xgpu_vulkan_terrain_classes.inc").read_text()
+    for name in names:
+        assert f'"{name}"' in classes or name in ("sand", "dirt", "mud", "rock", "snow", "ice")
+    for layer in m["layers"]:
+        assert 0.0 <= layer.get("grain", 0.0) <= 1.0
     for layer in m["layers"]:
         assert layer["source"]["licence"] == "CC0-1.0"
         assert len(layer["source"]["sha256"]) == 64
@@ -113,3 +123,20 @@ def test_manifest_cc0_only():
     credits = (ROOT / "port/assets/prism_terrain/LICENSES.md").read_text()
     for layer in m["layers"]:
         assert layer["source"]["asset"] in credits
+
+
+def test_detail_fade_waits_for_the_renderers_pack():
+    """CE's detail maps fade under the HQ layers only once the renderer says it loaded the pack (a folder named
+    by display.terrain_pack_folder is no longer taken as there): host_vulkan_terrain_pack, a host import"""
+    assert "host_vulkan_terrain_pack" in (ROOT / "port/linux/vulkan/host_imports.list").read_text().split()
+    terrain = (ROOT / "port/linux/game/prism_terrain.c").read_text()
+    level = terrain.split("long prism_terrain_detail_level(", 1)[1].split("\n}\n", 1)[0]
+    assert "prism_terrain.pack_state != 1" in level
+    assert "fopen" not in terrain
+    platform = (ROOT / "port/linux/src/sdl_platform.c").read_text()
+    assert "return host_vulkan_terrain_pack(folder);" in platform
+    renderer = (ROOT / "port/linux/vulkan/xgpu_vulkan_terrain.c").read_text()
+    loader = renderer.split("static int pack_load(void)", 1)[1].split("\nint xgpu_vulkan_terrain_pack_state", 1)[0]
+    # (every way out of the loader says what came of it: loaded, or not)
+    assert loader.count("__atomic_store_n(&terrain.pack.state, -1") == 3
+    assert loader.count("__atomic_store_n(&terrain.pack.state, 1") == 1

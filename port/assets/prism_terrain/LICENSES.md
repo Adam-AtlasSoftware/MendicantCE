@@ -16,6 +16,7 @@ done with these files, including shipping them with the game. The credits are a 
 | snow | Snow005 | ambientCG (Lennart Demes) | <https://ambientcg.com/view?id=Snow005> | CC0 1.0 | 2026-11-19 |
 | ice | Snow014 | ambientCG (Lennart Demes) | <https://ambientcg.com/view?id=Snow014> | CC0 1.0 | 2026-11-19 |
 | sand_desert (d40) | Ground080 | ambientCG (Lennart Demes) | <https://ambientcg.com/view?id=Ground080> | CC0 1.0 | 2026-11-19 |
+| dirt_cracked (d20) | Ground031 | ambientCG (Lennart Demes) | <https://ambientcg.com/view?id=Ground031> | CC0 1.0 | 2026-11-19 |
 
 Each archive is the asset's `2K-JPG` download, checked against the SHA-256 in the manifest before it is used.
 

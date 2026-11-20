@@ -1727,6 +1727,9 @@ int host_vulkan_plugins_choose(const char *upscaler, const char *denoiser, const
 /* (host_vulkan.c's) whether a plugin of that name is ready for Settings to
 offer: its PRISM_CAP_* (prism_plugin.h), else 0 */
 unsigned int host_vulkan_plugin_ready(const char *name);
+/* (host_vulkan.c's) whether the renderer loaded the terrain pack of that
+folder (prism_terrain.c's, FRAME's): 1 loaded, -1 not, 0 not tried yet */
+int host_vulkan_terrain_pack(const char *folder);
 /* (host_vulkan.c's) debug.gpu_stats, debug.gpu_validation (or debug.gl_debug) */
 #define HOST_VULKAN_DEBUG_STATISTICS 1
 #define HOST_VULKAN_DEBUG_VALIDATION 2
@@ -2227,6 +2230,16 @@ int platform_prism_plugin_ready(char const *name)
 	return 0;
 #else
 	return host_vulkan_plugin_ready(name) != 0;
+#endif
+}
+
+int platform_prism_terrain_pack(char const *folder)
+{
+#if defined(HALO_METAL) || defined(HALO_ANDROID) || defined(HALO_VR) || !defined(HALO_VULKAN)
+	(void)folder;
+	return -1;
+#else
+	return host_vulkan_terrain_pack(folder);
 #endif
 }
 

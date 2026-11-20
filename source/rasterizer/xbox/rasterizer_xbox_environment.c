@@ -1787,9 +1787,8 @@ void _rasterizer_environment_diffuse_texture_draw(
 				if (texture_transform_constants[0].k * secondary_detail_map_size.x >= PRISM_TERRAIN_FINE_DETAIL &&
 					prism_terrain_detail_fades(shader, shader_environment->environment.diffuse.secondary_detail_map.index))
 					terrain_detail_stages |= 4;
-				if (texture_transform_constants[1].k * micro_detail_map_size.x >= PRISM_TERRAIN_FINE_DETAIL &&
-					prism_terrain_detail_fades(shader, shader_environment->environment.diffuse.micro_detail_map.index))
-					terrain_detail_stages |= 8;
+				/* (never the micro detail map: CE's relief at the finest scale,
+				d40's lumps and pits, which the layers do not stand in for) */
 				for (terrain_stage = 1; terrain_stage < 4; terrain_stage++)
 				{
 					if (terrain_detail_stages & (1 << terrain_stage))

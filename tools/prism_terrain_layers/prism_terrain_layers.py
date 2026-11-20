@@ -29,7 +29,8 @@ The macro map is ours: four octaves of tileable value noise (R 1, G 2, B 4, A 8 
 
 layers.ptl, little-endian:
     char magic[4] = "PTL1"; uint32 version = 1, size, layers, macro_size, reserved[3]
-    per layer: char name[16]; float tile_metres, strength, chroma, normal, roughness, height_contrast, spare[2]
+    per layer: char name[16]; float tile_metres, strength, chroma, normal, roughness, height_contrast, grain, spare
+    (grain: the weight of the pass's second, finer lookup of the layer near the camera; 0 none)
     the detail images (layers x size x size x RGBA8), the surface images (the same), the macro map
     (macro_size x macro_size x RGBA8); the levels below are the renderer's to make.
 
@@ -196,7 +197,7 @@ def write_pack(path, size, layers, images, macro):
         for layer in layers:
             f.write(struct.pack("<16s8f", layer["name"].encode()[:15], layer["tile_metres"], layer["strength"],
                                 layer["chroma"], layer["normal"], layer["roughness"], layer["height_contrast"],
-                                0.0, 0.0))
+                                layer.get("grain", 0.0), 0.0))
         for which in (0, 1):
             for image in images:
                 f.write(image[which].tobytes())

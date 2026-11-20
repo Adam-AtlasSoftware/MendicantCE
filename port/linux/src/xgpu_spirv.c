@@ -2217,8 +2217,9 @@ static unsigned int sample(struct module *m, struct pixel_state *state, int stag
 		is mixed in) */
 		m->image_query = TRUE;
 		lod = extract(m, op2(m, OP_IMAGE_QUERY_LOD, m->t_v2, image, uv), 1);
-		fade = fsub(m, 1, constant_float(m, 1.0f), ext3(m, GLSL_SMOOTH_STEP, m->t_float,
-			constant_float(m, XGPU_TERRAIN_FADE_NEAR), constant_float(m, XGPU_TERRAIN_FADE_FAR), lod));
+		fade = fmul(m, 1, constant_float(m, XGPU_TERRAIN_FADE_MOST), fsub(m, 1, constant_float(m, 1.0f),
+			ext3(m, GLSL_SMOOTH_STEP, m->t_float, constant_float(m, XGPU_TERRAIN_FADE_NEAR),
+			constant_float(m, XGPU_TERRAIN_FADE_FAR), lod)));
 		store(m, faded, texel);
 		/* (the condition first: the merge must be just before the branch) */
 		near = compare(m, OP_F_ORD_GREATER_THAN, fade, constant_float(m, 0.0f));

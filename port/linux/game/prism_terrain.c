@@ -24,8 +24,10 @@ in a campaign (no game engine runs) being played (prism_terrain_wanted);
 never in Classic, multiplayer or the menus. Every hook's first act is that
 test, and none writes the game's state, calls a random function or the
 seeds: the hooks read their arguments and append to this file's ring, and
-the frame reads objects, the scenario and the wind. Nothing the renderer
-makes of it comes back. HALO_PORT_NETWORK_VERSION is unchanged.
+the frame reads objects, the scenario and the wind. Of what the renderer
+makes of it only one thing comes back, whether it loaded the terrain pack
+(T1: the texture pass fades CE's detail maps only then), and that reaches
+no state of the game's. HALO_PORT_NETWORK_VERSION is unchanged.
 */
 
 #include "cseries.h"
@@ -52,6 +54,9 @@ makes of it comes back. HALO_PORT_NETWORK_VERSION is unchanged.
 
 /* (the data folder: port/linux/src/platform.h's) */
 char const *platform_data_root(void);
+/* (sdl_platform.c's: whether the renderer loaded the terrain pack of that
+folder, 1 loaded, -1 not, 0 not tried yet) */
+int platform_prism_terrain_pack(char const *folder);
 
 /* ---------- prototypes */
 
@@ -110,8 +115,12 @@ static struct
 	/* (T1) the terrain pack's folder (display.terrain_pack_folder; the data
 	folder's prism_terrain), sent with each FRAME */
 	char pack_folder[XGPU_TERRAIN_PATH];
-	/* (whether its layers.ptl is there, looked for when the settings change) */
-	boolean pack_found, pack_checked, detail_logged;
+	/* (whether the renderer loaded its pack: platform_prism_terrain_pack,
+	asked each frame the HQ layers are asked for; 1 loaded, -1 not, 0 not
+	tried yet. CE's detail maps fade only where it is 1, since only then do
+	the layers stand in for them) */
+	int pack_state;
+	boolean detail_logged;
 } prism_terrain;
 
 /* ---------- private code */
@@ -154,26 +163,23 @@ static void settings_read(void)
 	{
 		snprintf(prism_terrain.pack_folder, sizeof(prism_terrain.pack_folder), "%s/prism_terrain", platform_data_root());
 	}
-	{
-		char path[XGPU_TERRAIN_PATH + 16];
-		FILE *file;
+}
 
-		/* (the game's files are named from the data folder: the default
-		pack's file looked for there; a folder named elsewhere is the
-		renderer's to find, and taken as there) */
-		snprintf(path, sizeof(path), "%s/layers.ptl", prism_terrain.pack_folder);
-		file = value && value[0] ? NULL : fopen("prism_terrain/layers.ptl", "rb");
-		if (!(value && value[0]) && ((file != NULL) != prism_terrain.pack_found || !prism_terrain.pack_checked))
-		{
-			platform_log("prism terrain: the terrain pack %s %s", path, file ? "found" : "not found: CE's ground alone");
-		}
-		prism_terrain.pack_found = file != NULL || (value && value[0]);
-		prism_terrain.pack_checked = TRUE;
-		if (file)
-		{
-			fclose(file);
-		}
+/* (T1) what the renderer made of the terrain pack's folder, asked each
+frame the HQ layers are: CE's detail maps fade only once it says the pack
+is loaded (prism_terrain_detail_level); a change logged */
+static void pack_state_read(
+	void)
+{
+	int state = prism_terrain.layers_hq ? platform_prism_terrain_pack(prism_terrain.pack_folder) : 0;
+
+	if (state != prism_terrain.pack_state && state != 0)
+	{
+		platform_log("prism terrain: the renderer %s the terrain pack in %s%s", state > 0 ? "loaded" : "did not load",
+			prism_terrain.pack_folder, state > 0 ? ": CE's fine detail maps fade near the camera" :
+			": CE's ground alone, its detail maps unfaded");
 	}
+	prism_terrain.pack_state = state;
 }
 
 /* a direction, octahedral, 2x16 snorm (the G-buffer's normal's encoding);
@@ -427,10 +433,6 @@ boolean prism_terrain_detail_fades(
 	{
 		return FALSE;
 	}
-	if (((struct shader const *)shader)->base.physics.material_type == 1)
-	{
-		return TRUE;
-	}
 	name = tag_get_name(bitmap_tag_index);
 	for (index = 0; name && name[index] && index < (int)sizeof(lower) - 1; index++)
 	{
@@ -445,7 +447,7 @@ long prism_terrain_detail_level(
 {
 	short material_type;
 
-	if (!shader || !prism_terrain_wanted() || !prism_terrain.layers_hq || !prism_terrain.pack_found ||
+	if (!shader || !prism_terrain_wanted() || !prism_terrain.layers_hq || prism_terrain.pack_state != 1 ||
 		!prism_terrain.detail_fade)
 	{
 		return 0;
@@ -535,6 +537,7 @@ void prism_terrain_frame(
 	frame.quality = (uint32_t)prism_terrain.quality;
 	frame.map_checksum = (uint32_t)checksum;
 	frame.pack_folder = (uint32_t)(unsigned long)prism_terrain.pack_folder;
+	pack_state_read();
 	frame_weather(&frame);
 	prism_terrain.game_time = game_time;
 	prism_terrain.real_ns = now_ns;
