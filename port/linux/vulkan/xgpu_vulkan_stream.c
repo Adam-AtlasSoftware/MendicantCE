@@ -4788,7 +4788,21 @@ then, drawn opaque) */
 		origin[0] = stream.constants[60][3];
 		origin[1] = stream.constants[61][3];
 		origin[2] = stream.constants[62][3];
-		if (count >= 0 && !xgpu_vulkan_rt_replacement_traced(count > 0 ? pieces[0].origin : origin, triangles))
+		if (count > 0 && !xgpu_vulkan_rt_replacement_traced(pieces[0].origin, triangles))
+		{
+			/* (port: the mesh's least detailed level in the drawn one's place:
+			the mesh store draws no stock part in a carrier's place, so the
+			game's model was a carrier's stub there, nothing: the remodelled
+			boulders past the share cast no shadow and took no sky from the
+			sand at their feet, once the traced scene no longer held their
+			stock rock) */
+			count = xgpu_vulkan_meshes_rt_pieces_coarse(pieces, XGPU_VULKAN_MESHES_RT_PIECES);
+			for (piece = 0, triangles = 0; piece < count; piece++)
+				triangles += pieces[piece].index_count / 3u;
+			if (count > 0 && !xgpu_vulkan_rt_replacement_traced(pieces[0].origin, triangles))
+				count = -1;
+		}
+		else if (count == 0 && !xgpu_vulkan_rt_replacement_traced(origin, 0))
 			count = -1;
 		if (count == 0)
 			return;
