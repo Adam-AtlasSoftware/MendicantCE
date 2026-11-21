@@ -213,6 +213,19 @@ pixel:
 `debug.pass_times` labels it `TERRAIN`. `HALO_TERRAIN_LAYERS_VIEW=1` shows the second class's weight, the fade and
 the layer instead.
 
+### The frequency split (a pack's second spare)
+
+A layer's header value 8 (the pack's second spare, 0 in every pack the tools build) is the share of CE's own fine
+paint the layer replaces. One layer of the pack may ask (`xgpu_vulkan_terrain.c` passes its index and the share in
+`tangents.w`); for its pixels the pass takes CE's local mean colour, about a metre across, from the base itself:
+twelve taps on an ellipse in the surface's plane (0.2 world units along the level, 0.11 up the face), each projected
+to the screen and kept only where the G-buffer there is the same material (under local reads, where only the
+pixel's words are read, the distance alone decides) at the distance expected. The colour is then that mean, by the
+share and the pass's fade (fewer than six taps kept: less of it), times the layer's detail as before. So below about
+a metre the colour is CE's, and above it the scan's high-passed lightness (its own low pass, the layer's
+`lowpass`) stands in for CE's painted streaks. The taps are fixed in the world, so the mean does not crawl as the
+camera turns. Made for b30's cliffs (`v4_rock_ref_runs`, round 4); no pack the tools build sets it.
+
 ### CE's own detail maps up close
 
 CE's ground draws fine detail maps (b30's sand speckle, 7.8 mm texels) that turn into large blocky noise within a few

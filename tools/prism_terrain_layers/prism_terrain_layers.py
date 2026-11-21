@@ -266,7 +266,7 @@ def licences_text(m, built):
 
 
 def build(args):
-    m = manifest(args.manifest)
+    m = manifest(getattr(args, "manifest", None))
     size = args.size
     if size & (size - 1) or not 256 <= size <= 4096:
         raise SystemExit("--size is a power of two from 256 to 4096")
@@ -274,7 +274,7 @@ def build(args):
     if not data.is_dir():
         raise SystemExit(f"{data}: no such data folder")
     work = Path(args.work) if args.work else data / "prism_terrain" / "work"
-    out = Path(args.out) if args.out else data / "prism_terrain"
+    out = Path(args.out) if getattr(args, "out", None) else data / "prism_terrain"
     images, made = [], {}
     for layer in m["layers"]:
         if "files" in layer["source"]:

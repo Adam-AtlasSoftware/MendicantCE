@@ -978,6 +978,11 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 		values.layer[index * 2 + 1][1] = v[5];
 		values.layer[index * 2 + 1][2] = v[6] > 0.0f && v[6] <= 1.0f ? v[6] : 0.0f;
 		values.layer[index * 2 + 1][3] = strcmp(terrain.pack.names[index], "rock") ? 0.75f : -0.75f;
+		/* (the pack's second spare, 0 to 1: the share of CE's colour's own fine detail (under about a metre) the
+		layer replaces by its own; one layer may ask, its index the whole part of tangents.w; 0 none, as every
+		pack before) */
+		if (v[7] > 0.0f && v[7] <= 1.0f && values.tangents[3] == 0.0f)
+			values.tangents[3] = (float)index + (v[7] < 0.999f ? v[7] : 0.999f);
 	}
 	/* (T4: the prints, where display.terrain_tracks is on and a page of them
 	lies about the eye: the pass's prints variant, its micro-shadows into

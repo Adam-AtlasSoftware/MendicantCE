@@ -149,3 +149,59 @@ def test_breaks_jog_the_bedding_by_at_most_half_the_break():
     b = L.breaks(p, q)
     assert np.abs(b).max() <= q["break"] / 2 + 1e-9
     assert (np.abs(b) > 0.45 * q["break"]).mean() > 0.4  # (mostly a whole jog either way, short transitions)
+
+
+def _min_angle(V, T):
+    out = []
+    for k in range(3):
+        a, b, c = V[T[:, k]], V[T[:, (k + 1) % 3]], V[T[:, (k + 2) % 3]]
+        u, v = b - a, c - a
+        cs = (u * v).sum(1) / (np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1))
+        out.append(np.degrees(np.arccos(np.clip(cs, -1, 1))))
+    return np.min(out, 0)
+
+
+def test_round4_cut_puts_vertices_on_the_riser_lines_and_keeps_the_surface():
+    q = L.params({"ledges": {"preset": "a4"}})
+    assert q["cut"] and q["block_soft"] > 0 and q["chunk_amp"] > 0
+    assert not L.params({"ledges": {"preset": "a3"}}).get("cut")
+    f = field()
+    V, T, inner = wall(0.15, w=10.0, ht=8.0)
+    n = np.tile([0.0, -1.0, 0.0], (len(V), 1))
+    h = np.full(len(V), 0.15)
+    V2, T2, par, lerps, rep = L.cut_risers(V, T, n, h, inner, np.ones(len(T), bool), q, f)
+    assert rep["top"]["cut"] > 50 and rep["foot"]["cut"] > 50
+    # every new vertex on a line (phase k + 1 - riser or k + 1), on its edge, between two free vertices
+    nn = len(V2) - len(V)
+    ph, _ = L.phase(V2[len(V):], n[:1].repeat(nn, 0), np.full(nn, 0.15), q, f)
+    fr = ph - np.floor(ph)
+    wr = L.riser_width(q)
+    off = np.minimum.reduce([np.abs(fr - (1 - wr)), fr, 1 - fr])
+    assert off.max() < 2e-3
+    # the same surface: area kept, no face turned, each face inside its parent
+    def nrm(X, TT):
+        return np.cross(X[TT[:, 1]] - X[TT[:, 0]], X[TT[:, 2]] - X[TT[:, 0]])
+    a0, a2 = nrm(V, T), nrm(V2, T2)
+    assert abs(np.linalg.norm(a2, axis=1).sum() - np.linalg.norm(a0, axis=1).sum()) < 1e-6
+    assert ((a2 * a0[par]).sum(1) > 0).all()
+    # no needle made: the cut faces' smallest angle not under the lattice's own by much
+    assert np.percentile(_min_angle(V2, T2), 1) > 8.0
+    # the lerps rebuild the new vertices
+    X = V.copy()
+    for a_, b_, t_ in lerps:
+        X = np.concatenate([X, X[a_] + (X[b_] - X[a_]) * t_[:, None]])
+    assert np.allclose(X, V2)
+
+
+def test_round4_soft_blocks_and_chunks_are_continuous():
+    q = L.params({"ledges": {"preset": "a4"}})
+    xs = np.linspace(0.0, 30.0, 30001)
+    k = np.full(len(xs), 3, np.int64)
+    p = np.stack([xs, np.zeros_like(xs), np.full_like(xs, 6.5)], 1)
+    off = L.block_offset(p, k, q)
+    # (no jump: over 1 mm at most a hundredth of the set-back; round 3's walls jumped by the whole of it)
+    assert np.abs(np.diff(off)).max() < 0.01 * q["block_setback"] + 1e-6
+    assert np.abs(off).max() <= q["block_setback"] + 1e-9 and off.std() > 0.01
+    n = np.tile([0.0, -1.0, 0.0], (len(xs), 1))
+    c = L.chunks(p, n, q)
+    assert np.abs(np.diff(c)).max() < 0.002 and 0.01 < c.std() < 0.08

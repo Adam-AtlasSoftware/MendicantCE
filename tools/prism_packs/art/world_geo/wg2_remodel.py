@@ -742,6 +742,62 @@ def main():
         if moved.any():
             V = V2
             bc, phong, Ns, plane, vshaped = surface_frame(V)
+    # round 4: the risers' lines cut into the mesh (a rock recipe's ledges "cut"): new vertices on the lines, only
+    # between vertices free to move (as the slide's), so no stock edge to another class, pinned or fading vertex is
+    # touched; their per-vertex values interpolated, each new face its parent's stock triangle and material
+    for name, r in recipes.items():
+        if not (r.get("ledges") and kind[name] == "rock"):
+            continue
+        q = ledges.params(r)
+        if not q.get("cut"):
+            continue
+        rock_face = np.array([c_ == name for c_ in tcls]) & shaped
+        rock_v = np.zeros(nV, bool)
+        rock_v[T[rock_face].ravel()] = True
+        steep_v = 1.0 - shp.smoothstep(r.get("floor_cos_lo", 0.55), r.get("floor_cos_hi", 0.85), Ns[:, 2])
+        free = rock_v & vshaped & ~pin & (weight > 0.999) & (ledge_bw > 0.999) & (steep_v > 0.6)
+        V3, T3, par, lerps, cut_rep = ledges.cut_risers(V, T, Ns, ledge_h, free, rock_face, q, ledges.field_for(q))
+        n_new = len(V3) - nV
+
+        def grow(arr, fill=None):
+            out = arr
+            for a_, b_, t_ in lerps:
+                if fill is not None:
+                    ext = np.full((len(a_),) + arr.shape[1:], fill, dtype=arr.dtype)
+                elif arr.dtype == bool or arr.dtype.kind in "iuO":
+                    ext = out[a_]
+                else:
+                    ta = t_.reshape((-1,) + (1,) * (arr.ndim - 1))
+                    ext = out[a_] + (out[b_] - out[a_]) * ta
+                out = np.concatenate([out, ext])
+            return out
+        pinned = grow(pinned, False)
+        relief_h = grow(relief_h, 0.0)
+        relief_v = grow(relief_v, False)
+        alpha, cap_in, cap_out = grow(alpha), grow(cap_in), grow(cap_out)
+        pin = grow(pin, False)
+        weight = grow(weight)
+        ledge_bw = grow(ledge_bw)
+        ledge_h = grow(ledge_h)
+        V, T = V3, T3
+        tsrc, tmat = tsrc[par], tmat[par]
+        nV = len(V)
+        E = np.unique(np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), 1), axis=0)
+        stock_tri = stock_tri[par]
+        PA, PB, PC = PA[par], PB[par], PC[par]
+        tcls = [tcls[f_] for f_ in par]
+        tkind, shaped = tkind[par], shaped[par]
+        owner = np.full(nV, -1)
+        for sel in (np.nonzero(~shaped)[0], np.nonzero(shaped)[0]):
+            for k in range(3):
+                owner[T[sel, k]] = sel
+        o = owner
+        bc, phong, Ns, plane, vshaped = surface_frame(V)
+        bcn = barycentric(V, PA[o], PB[o], PC[o])
+        cut_rep.update({"new_vertices": int(n_new), "triangles": int(len(T)),
+                        "outside_stock": int((bcn.min(1) < -1e-4).sum())})
+        ledge_rep.setdefault(name, {})["cut"] = cut_rep
+        log("ledges cut", name, cut_rep)
     if ledge_rep:
         report["ledges"] = ledge_rep
 
@@ -883,19 +939,44 @@ def main():
     inc[vids, slot] = fids
     cornerN = np.zeros((len(T), 3, 3))
     log("normals: largest valence", int(K))
+    # round 4 (a rock recipe's ledges "cut"): needles in 3D (a face stretched along the normal over a step or a
+    # block's wall: thin slivers at their corners) neither weigh in their neighbours' normals nor keep their own
+    # (which points anywhere, and caught stray light in shade): their corners take the vertex's normal of the
+    # well-shaped rock faces around it
+    sliver_fix = any(r.get("ledges") and kind[c_] == "rock" and ledges.params(r).get("cut")
+                     for c_, r in recipes.items())
+    nweight = area.copy()
+    vref = None
+    if sliver_fix:
+        a_, b_, c_ = X[T[:, 0]], X[T[:, 1]], X[T[:, 2]]
+        e2 = ((b_ - a_) ** 2).sum(1) + ((c_ - b_) ** 2).sum(1) + ((a_ - c_) ** 2).sum(1)
+        qual = 4.0 * math.sqrt(3.0) * area / np.maximum(e2, 1e-20)
+        rockf = family == 0
+        nweight = np.where(rockf, area * shp.smoothstep(0.04, 0.25, qual), area)
+        vacc = np.zeros((nV, 3))
+        for k in range(3):
+            np.add.at(vacc, T[rockf, k], fnu[rockf] * nweight[rockf, None])
+        vref = normalize(np.where(np.linalg.norm(vacc, axis=1, keepdims=True) > 1e-12, vacc, 1.0))
+        needle = rockf & (qual < 0.12)
+        report["slivers"] = {"rock_faces": int(rockf.sum()), "needles": int(needle.sum()),
+                             "quality_p1": float(np.percentile(qual[rockf], 1)) if rockf.any() else 0.0}
+        log("slivers", report["slivers"])
     # in batches of faces, so that the (faces, valence, 3) temporaries stay a few hundred MB
     step_ = max(1024, int(4e7 // max(K, 1)))
     for s0 in range(0, len(T), step_):
         s1 = min(len(T), s0 + step_)
-        fb = fnu[s0:s1]
+        fb0 = fnu[s0:s1]
         for k in range(3):
+            fb = fb0
+            if vref is not None:
+                fb = np.where(needle[s0:s1, None], vref[T[s0:s1, k]], fb0)
             g = inc[T[s0:s1, k]]
             valid = g >= 0
             gg = np.where(valid, g, 0)
             fg = fnu[gg]
             dots = (fg * fb[:, None, :]).sum(2)
             ok = valid & (dots >= smooth_cos[s0:s1, None]) & (family[gg] == family[s0:s1, None])
-            wsum = (fg * (area[gg] * ok)[..., None]).sum(1)
+            wsum = (fg * (nweight[gg] * ok)[..., None]).sum(1)
             cornerN[s0:s1, k] = normalize(np.where(np.linalg.norm(wsum, axis=1, keepdims=True) > 0, wsum, fb))
             del g, valid, gg, fg, dots, ok, wsum
     del inc

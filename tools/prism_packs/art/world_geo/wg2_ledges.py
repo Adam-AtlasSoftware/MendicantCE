@@ -60,6 +60,15 @@ DEFAULTS = {
     "fine_tile": 1.3,        # ... the scan's tile across the bedding (wu) ...
     "fine_stretch": 4.0,     # ... this many times longer along it ...
     "fine_band": 1.0,        # ... band-limited by the edge times this (1: the v3 rule, 3 to 6 edges a wavelength)
+    # round 4
+    "cut": False,            # the risers' two edges cut into the mesh along their lines (cut_risers) ...
+    "cut_tmin": 0.2,         # ... an edge cut only between this share of it and 1 - it (no needle; nearer, the
+                             #     vertex itself stands for the line)
+    "block_soft": 0.0,       # the blocks' walls blended over this (wu; 0: a hard jump, round 3)
+    "chunk_amp": 0.0,        # the kit's chunks again, low frequency only: soft-creased tilted facets (times) ...
+    "chunk_scale": 1.6,      # ... cells this many wu across ...
+    "chunk_tilt": 0.14,      # ... each facet's tilt (wu a wu) ...
+    "chunk_soft": 0.08,      # ... its creases blended over this (wu)
 }
 
 # round 3's variants (b30a): A2 the round-2 layers with steps about 1.9 times deeper; A3 thinner layers (1.25 wu)
@@ -72,6 +81,10 @@ PRESETS = {
            "scan_amp": 0.03, "break": 0.28, "break_len": 3.0, "block": 2.0, "block_share": 0.45,
            "block_setback": 0.09, "fine_amp": 0.028, "fine_tile": 1.1, "fine_stretch": 4.0},
 }
+# round 4: A4 is A3 with the risers cut into the mesh along their lines (no sawtooth), soft block walls (no jump for
+# a triangle to stretch over: the slivers), and the kit's chunks back at low frequency under the ledges
+PRESETS["a4"] = dict(PRESETS["a3"], cut=True, block_soft=0.10, chunk_amp=1.0, chunk_scale=1.6, chunk_tilt=0.14,
+                     chunk_soft=0.08)
 
 
 def params(r):
@@ -153,10 +166,53 @@ def block_offset(p, k, q):
         return np.zeros(len(p))
     s = q["block"]
     p3 = np.stack([p[:, 0], p[:, 1], (k.astype(np.float64) * 7.31 + 0.5) * s], 1)
+
+    def cell_value(cid):
+        u = _hash01(cid, k, np.zeros_like(k) + 13, 241)
+        on = u < q["block_share"]
+        return np.where(on, q["block_setback"] * (2.0 * u / max(q["block_share"], 1e-6) - 1.0), 0.0)
+    if q.get("block_soft", 0.0) > 0.0:
+        # (round 4: the walls blended over block_soft, so no triangle spans a jump)
+        return soft_cells(p3, s, 239, q["block_soft"], lambda cid, fp: cell_value(cid), plan=True)
     _, _, cid, _ = shp.worley(p3, s, salt=239)
-    u = _hash01(cid, k, np.zeros_like(k) + 13, 241)
-    on = u < q["block_share"]
-    return np.where(on, q["block_setback"] * (2.0 * u / max(q["block_share"], 1e-6) - 1.0), 0.0)
+    return cell_value(cid)
+
+
+def soft_cells(p, scale, salt, soft, value, plan=False):
+    """shp.worley's jittered cells, each cell's value(cid, feature point) blended by exp(-(d - F1) / soft): a
+    Voronoi pattern with its walls soft over about `soft` wu (continuous, so a mesh of any density carries it
+    without teeth). plan: the distance in x, y only (vertical walls; the cells of p's own z layer)"""
+    q = np.floor(p / scale).astype(np.int64)
+    ds, vs = [], []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for dz in ((0,) if plan else (-1, 0, 1)):
+                c = q + np.array([dx, dy, dz])
+                jit = np.stack([shp.hash01(c[:, 0], c[:, 1], c[:, 2], salt=salt + j) for j in range(3)], 1)
+                fp = (c + 0.1 + 0.8 * jit) * scale
+                dd = p - fp
+                d = np.linalg.norm(dd[:, :2] if plan else dd, axis=1)
+                ident = ((c[:, 0] * 73856093) ^ (c[:, 1] * 19349663) ^ (c[:, 2] * 83492791)).astype(np.int64)
+                ds.append(d)
+                vs.append(value(ident, fp))
+    D = np.stack(ds, 1)
+    Vv = np.stack(vs, 1)
+    w = np.exp(-(D - D.min(1, keepdims=True)) / soft)
+    return (w * Vv).sum(1) / w.sum(1)
+
+
+def chunks(p, n, q):
+    """the kit's chipped facets at low frequency (round 4): tilted planes in cells chunk_scale across, set in, their
+    creases soft over chunk_soft (about the kit's chips at twice their size, chunk_amp times)"""
+    if q.get("chunk_amp", 0.0) <= 0.0:
+        return np.zeros(len(p))
+
+    def facet(cid, fp):
+        ch = shp.hash01(cid, salt=443)
+        g = np.stack([shp.hash01(cid, salt=447 + j) for j in range(3)], 1) * 2.0 - 1.0
+        g = g - n * (g * n).sum(1, keepdims=True)
+        return -0.06 * (0.35 + 0.65 * ch) + q["chunk_tilt"] * ((p - fp) * g).sum(1)
+    return q["chunk_amp"] * soft_cells(p, q["chunk_scale"], 441, q["chunk_soft"], facet)
 
 
 def layer_values(p, k, q):
@@ -198,6 +254,10 @@ def relief(p, n, h, steep, q, field):
     fade = shp.smoothstep(q["rows_lo"], q["rows_hi"], rows)
     d = fade * (profile(ph, p, q) + q["bias"]) + q["scan_amp"] * hs
     parts = {"fade": fade}
+    if q.get("chunk_amp", 0.0) > 0.0:
+        dc = chunks(p, n, q)
+        d = d + dc
+        parts["chunks"] = dc * steep
     if q.get("fine_amp", 0.0) > 0.0:
         hf = aniso_scan(field, p + 11.3, n, h * q["fine_band"], q["fine_tile"], q["fine_stretch"])
         d = d + q["fine_amp"] * hf
@@ -306,3 +366,106 @@ def up_tangent(plane):
 
 def boundary_weight(dist, q):
     return shp.smoothstep(q["boundary_lo"], q["boundary_hi"], dist)
+
+
+def cut_risers(V, T, Ns, h, splittable, face_ok, q, field):
+    """round 4: the risers' two lines (a layer's top, phase k + 1 - riser_width, and the next one's foot, phase
+    k + 1) cut into the mesh: every edge between two splittable vertices whose faces are all face_ok, that a line
+    crosses, gets a vertex on the line (the crossing found on the phase by regula falsi), and its faces are split
+    (one edge cut: two triangles through the opposite corner; two: the corner's triangle and the quad left by its
+    shorter diagonal; three: four). A crossing within cut_tmin of an end is left to that vertex (no needle). So a
+    step's edges are the lines themselves, smooth curves at any density: no tooth where a triangle spanned them.
+    Returns V, T, parent (each face's old face), lerps [(a, b, t)] (each pass's new vertices, in order:
+    lerp(X[a], X[b], t) of the arrays as they stood) and a report."""
+    wr = riser_width(q)
+    tmin = q.get("cut_tmin", 0.15)
+    V = V.copy()
+    Ns = Ns.copy()
+    h = h.copy()
+    splittable = splittable.copy()
+    parent = np.arange(len(T))
+    lerps = []
+    rep = {}
+
+    def key(x):
+        return x[:, 0].astype(np.int64) * (1 << 31) + x[:, 1]
+    for c, label in ((1.0 - wr, "top"), (0.0, "foot")):
+        ph, _ = phase(V, Ns, h, q, field)
+        side = np.floor(ph - c)
+        Fo = np.nonzero(face_ok)[0]
+        e = np.sort(np.concatenate([T[Fo][:, [0, 1]], T[Fo][:, [1, 2]], T[Fo][:, [2, 0]]]), 1)
+        ko, koc = np.unique(key(e), return_counts=True)
+        eu = np.stack([ko >> 31, ko & ((1 << 31) - 1)], 1)
+        ea = np.sort(np.concatenate([T[:, [0, 1]], T[:, [1, 2]], T[:, [2, 0]]]), 1)
+        ka, kc = np.unique(key(ea), return_counts=True)
+        a_, b_ = eu[:, 0], eu[:, 1]
+        cand = splittable[a_] & splittable[b_] & (np.abs(side[a_] - side[b_]) == 1)
+        cand &= kc[np.searchsorted(ka, ko)] == koc
+        a_, b_ = a_[cand], b_[cand]
+        target = np.maximum(side[a_], side[b_]) + c
+        lo, hi = np.zeros(len(a_)), np.ones(len(a_))
+        flo, fhi = ph[a_] - target, ph[b_] - target
+
+        def secant(lo, hi, flo, fhi):
+            den = np.where(np.abs(flo - fhi) > 1e-12, flo - fhi, 1e-12)
+            return np.clip(lo + (hi - lo) * flo / den, lo, hi)
+        t = secant(lo, hi, flo, fhi)
+        for _ in range(4):
+            pm = V[a_] + (V[b_] - V[a_]) * t[:, None]
+            nm = Ns[a_] + (Ns[b_] - Ns[a_]) * t[:, None]
+            nm /= np.maximum(np.linalg.norm(nm, axis=1, keepdims=True), 1e-12)
+            hm = h[a_] + (h[b_] - h[a_]) * t
+            fm = phase(pm, nm, hm, q, field)[0] - target
+            same = np.sign(fm) == np.sign(flo)
+            lo, flo = np.where(same, t, lo), np.where(same, fm, flo)
+            hi, fhi = np.where(same, hi, t), np.where(same, fhi, fm)
+            t = secant(lo, hi, flo, fhi)
+        keep = (t > tmin) & (t < 1.0 - tmin)
+        a_, b_, t = a_[keep], b_[keep], t[keep]
+        newid = len(V) + np.arange(len(a_))
+        V = np.concatenate([V, V[a_] + (V[b_] - V[a_]) * t[:, None]])
+        nn = Ns[a_] + (Ns[b_] - Ns[a_]) * t[:, None]
+        Ns = np.concatenate([Ns, nn / np.maximum(np.linalg.norm(nn, axis=1, keepdims=True), 1e-12)])
+        h = np.concatenate([h, h[a_] + (h[b_] - h[a_]) * t])
+        splittable = np.concatenate([splittable, np.ones(len(a_), bool)])
+        lerps.append((a_, b_, t))
+        ck = key(np.stack([a_, b_], 1))
+        order = np.argsort(ck)
+        ck, cid = ck[order], newid[order]
+        mids = np.full((len(T), 3), -1, np.int64)
+        if len(ck):
+            for j, (i0, i1) in enumerate(((0, 1), (1, 2), (2, 0))):
+                ek = key(np.sort(T[:, [i0, i1]], 1))
+                at = np.clip(np.searchsorted(ck, ek), 0, len(ck) - 1)
+                mids[:, j] = np.where(ck[at] == ek, cid[at], -1)
+        ncut = (mids >= 0).sum(1)
+        cutc = np.zeros(4, np.int64)
+        out_T, out_P, out_ok = [T[ncut == 0]], [parent[ncut == 0]], [face_ok[ncut == 0]]
+        for f in np.nonzero(ncut > 0)[0]:
+            v = T[f]
+            m = mids[f]  # m[0] on v0-v1, m[1] on v1-v2, m[2] on v2-v0
+            k_ = int(ncut[f])
+            cutc[k_] += 1
+            if k_ == 1:
+                j = int(np.nonzero(m >= 0)[0][0])
+                tris = [(v[j], m[j], v[(j + 2) % 3]), (m[j], v[(j + 1) % 3], v[(j + 2) % 3])]
+            elif k_ == 2:
+                u = int(np.nonzero(m < 0)[0][0])  # the uncut edge v[u]-v[u+1]; the corner v[u+2]
+                c0 = (u + 2) % 3
+                v0, v1, v2 = v[c0], v[(c0 + 1) % 3], v[(c0 + 2) % 3]
+                m1, m2 = m[c0], m[(c0 + 2) % 3]  # on v0-v1 and on v2-v0
+                tris = [(v0, m1, m2)]
+                if np.linalg.norm(V[m1] - V[v2]) <= np.linalg.norm(V[v1] - V[m2]):
+                    tris += [(m1, v1, v2), (m1, v2, m2)]
+                else:
+                    tris += [(m1, v1, m2), (v1, v2, m2)]
+            else:
+                tris = [(v[0], m[0], m[2]), (m[0], v[1], m[1]), (m[2], m[1], v[2]), (m[0], m[1], m[2])]
+            out_T.append(np.array(tris, np.int64))
+            out_P.append(np.full(len(tris), parent[f]))
+            out_ok.append(np.ones(len(tris), bool))
+        T = np.concatenate(out_T)
+        parent = np.concatenate(out_P)
+        face_ok = np.concatenate(out_ok)
+        rep[label] = {"edges_crossed": int(cand.sum()), "cut": int(len(a_)), "faces_cut_1_2_3": cutc[1:].tolist()}
+    return V, T, parent, lerps, rep

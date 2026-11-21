@@ -848,6 +848,13 @@ vec2 ripple_tilt(vec3 p, vec3 n, float footprint)
 	return wind * (slope * 0.18 * tangents.z * level * sharp * patches);
 }
 
+/* (the frequency split's taps: the same material there; under local reads (TERRAIN_LAYERS_LOCAL) the words are
+read only at the pixel, so the distance alone decides) */
+bool tap_same(ivec2 tp, uint material)
+{
+	return (texelFetch(gbuffer_texture, tp, 0).w & 0xfffu) == material;
+}
+
 void main()
 {
 	ivec2 texel = ivec2(gl_FragCoord.xy);
@@ -986,6 +993,47 @@ void main()
 		cls = hb > 0.5 ? cb : ca;
 	}
 	vec4 a = layer_a(la), b = layer_b(la);
+	/* (the frequency split, for the one layer whose pack asks (tangents.w: its index, plus the share): CE's colour
+	kept under about a metre, its own finer paint (b30's cliffs: streaks smeared along a stretched v) replaced by
+	the layer's detail. CE's local mean is taken from the base itself: twelve taps on an ellipse in the surface's
+	plane (wider along the level than up the face, the streaks' way), each projected to the screen and kept only
+	where the G-buffer there is the same material at the distance expected (no other surface's colour, no sky);
+	fixed in the world, so it does not crawl as the camera moves. Fewer than six kept: less of it) */
+	vec3 base_rgb = base.rgb;
+	float rep_index = floor(tangents.w);
+	float rep = tangents.w - rep_index;
+	if (rep > 0.0 && float(la) == rep_index)
+	{
+		vec3 t1 = abs(plane.z) > 0.9 ? normalize(cross(plane, vec3(1.0, 0.0, 0.0))) :
+			normalize(cross(vec3(0.0, 0.0, 1.0), plane));
+		vec3 t2 = cross(plane, t1);
+		float aa = dot(view_axis.xyz, view_axis.xyz), ac = dot(view_across.xyz, view_across.xyz),
+			ad = dot(view_down.xyz, view_down.xyz);
+		vec3 sum = base.rgb;
+		float kept = 1.0;
+		for (int i = 0; i < 12; i++)
+		{
+			float ang = float(i) * 0.5235988 + (i >= 6 ? 0.2617994 : 0.0);
+			float rr = i >= 6 ? 1.0 : 0.5;
+			vec3 q = p + (t1 * (cos(ang) * 0.20) + t2 * (sin(ang) * 0.11)) * rr;
+			vec3 dq = q - view_eye.xyz;
+			float tq = dot(dq, view_axis.xyz) / aa;
+			if (tq <= 0.05)
+				continue;
+			vec2 sq = vec2(dot(dq, view_across.xyz) / (tq * ac), dot(dq, view_down.xyz) / (tq * ad));
+			vec2 px = corners.xy + (sq + 1.0) * 0.5 * span;
+			if (any(lessThan(px, corners.xy)) || any(greaterThanEqual(px, corners.zw)))
+				continue;
+			ivec2 tp = ivec2(px);
+			float d2 = uintBitsToFloat(texelFetch(extras_texture, tp, 0).w);
+			if (!tap_same(tp, material) || !(abs(d2 - tq) < 0.04 * tq + 0.03))
+				continue;
+			sum += texelFetch(color_texture, tp, 0).rgb;
+			kept += 1.0;
+		}
+		vec3 low = sum / kept;
+		base_rgb = mix(base.rgb, low, rep * fade * smoothstep(3.0, 7.0, kept));
+	}
 	vec4 macro = texture(macro_texture, p.xy * (1.0 / 24.0));
 	float k = a.y * fade * clamp(0.7 + (macro.r - 0.5) * 1.2 + (macro.g - 0.5) * 0.6, 0.35, 1.25);
 /*PRINTS{*/	/* (a print's floor pressed smooth: the sand's grain and relief less where the foot packed it) */
@@ -998,7 +1046,7 @@ void main()
 	/* (a strength past 1 carries a scan's darkest grains past black: below 0.3 the ratio rolls off toward 0 along
 	an exponential that meets it there with its slope, so a pebble stays a dark grain and never a black hole) */
 	ratio = max(ratio, 0.3 * exp(min(ratio - 0.3, vec3(0.0)) / 0.3));
-	vec3 color = clamp(base.rgb * pow(ratio, vec3(1.0 / 2.2)), 0.0, 1.0);
+	vec3 color = clamp(base_rgb * pow(ratio, vec3(1.0 / 2.2)), 0.0, 1.0);
 	normal = normalize(mix(n, normal, fade * near));
 	/* (sand's ripples, over the HQ normal and beyond its reach, as far as the footprint resolves them) */
 	if (cls == 1u && tangents.z > 0.0)
@@ -1058,8 +1106,9 @@ def terrain_local(source: str) -> str:
         "out vec4 result;\nlayout(location = 1) out uvec4 words_out;\n",
         "layout(location = 1) out vec4 base_out;\nlayout(location = 0) out uvec4 words_out;\n").replace(
         "\tuvec4 w = texelFetch(gbuffer_texture, texel, 0);\n", "\tuvec4 w = subpassLoad(words_input);\n").replace(
-        "result = vec4(", "base_out = vec4(")
-    assert local.count("words_input") == 2 and "base_out" in local
+        "result = vec4(", "base_out = vec4(").replace(
+        "\treturn (texelFetch(gbuffer_texture, tp, 0).w & 0xfffu) == material;\n", "\treturn true;\n")
+    assert local.count("words_input") == 2 and "base_out" in local and "gbuffer_texture" not in local
     return local
 
 
