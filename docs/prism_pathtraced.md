@@ -57,8 +57,14 @@ Why nothing is counted twice:
 - **The lamps.** A lamp's light reaches a point by next-event estimation only: a ray that meets a lamp's triangle takes
   only its glow (a self-illumination map's), never its radiosity's light, in the bake, the reference and the live trace
   alike.
-- **The probes** see the lamps as the bake's paths do (by their glow), so a rough surface's reflection of a lamp is its
-  RIS's specular, once.
+- **The probes** see the lamps' faces as the bake's paths do (by their glow), and ReSTIR DI gives a rough pixel the
+  lamps' specular light as well, shadowed and sharp. Counted by both, c20's lamp-lit Library walls had 47% more
+  specular light than R (the live estimator's own 256-frame mean against R: 0.0552 against 0.0375). Since the dark
+  interiors' round the probe's light on a pixel with a texel is kept by the share of the bake's light there that is
+  not the lamps' own (its indirect layer over its whole, `luma(indirect) / luma(total)`), and ReSTIR DI keeps the
+  lamps' specular light: c20's still error against R 0.0576 to 0.0099, its blotch 0.0516 to 0.0285, the other poses
+  unchanged. Taking the lamps' specular light from the probes alone instead (`HALO_PT_PROBE_NEE=2`) lost the lamps'
+  glow pools on the walls that R has (c20 0.110); both, as before, is `HALO_PT_PROBE_NEE=1`.
 
 An object's normal turned from the eye (its vertices' normal at a silhouette, a two-sided card seen from behind) is
 mirrored about the plane square to the eye before anything is lit (the level's, one-sided, is turned to the eye as
@@ -221,6 +227,24 @@ found safe:
   confidence cap (8 frames by default).
 - `HALO_PT_CANDIDATES` (1 to 8; 4 by default with the spatial reuse, else 8): the live frames' initial lamp candidates a pixel.
 - `HALO_PT_RESTIR=0` turns the reuse off (each pixel's own candidates alone), for comparison.
+
+### The lamp ray (the dark interiors' round)
+
+A rough pixel whose reflection the probes give (roughness above the traced reflection's 0.35, up to
+`HALO_PT_LAMP_RAY`, 0.7 by default, 0 none) traces one GGX ray (60 units at most) that only looks for a lamp's face
+(`lamp_met`); what it meets is shared with ReSTIR DI's specular light by the same power heuristic as the traced
+reflection's (`lamp_mis_nee`), the rest of the reflection is the probe's. Semi-rough, normal-mapped walls (roughness
+0.4 to 0.5: b30's G4 walls) showed every small lamp's highlight as white sparkles: ReSTIR's candidates are drawn by
+the lamps' light at the cell, so the lamp a glint's lobe holds was met once in hundreds of frames, each time far
+brighter than the pixel's mean. The GGX ray's weight is bounded (Fresnel by G2 / G1), so the lamp it meets adds its
+radiance at most. **The lamps' weights** (`HALO_PT_LAMP_MIS`, on by default) take the lamp's own density as the
+chance ReSTIR DI finds it: 1 over its solid angle (as before) by its unshadowed diffuse light here over the bake's
+direct light at the pixel (the texel's whole less its indirect layer) by twice the candidates, at most 1; a small
+lamp that adds little light but a bright glint goes to the ray, a lamp that lights the pixel stays ReSTIR's. Any
+weights that sum to 1 keep the estimate unbiased. At 720p, against the probes' fix alone (single frames, whose
+spread at b30 is wide): b30_g4k1's still error 0.267 to 0.163 and dark blotch 0.175 to 0.092, b30_g4k2's still
+error 0.124 to 0.047; the other poses unchanged. b30's walls still sparkle in motion; their lamps' glints are not
+all the ray's to find (b30 has 32 fixtures, of which ReSTIR draws 8 at random a pixel: the next thing to look at).
 
 ## ReSTIR GI
 
@@ -532,6 +556,25 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
   against the pixel's by the variance (the diffuse's prefiltered over the pixel's cross, as SVGF prefilters it); the
   specular's kernel narrowed by the roughness and stopped after three steps (none on a mirror).
+- **stabilize** (the dark interiors' round, `HALO_PT_STABILIZE`, 8 frames by default, 0 none; ReBLUR's temporal
+  stabilisation, written from Zhdan's published talks): after the a-trous steps the filtered diffuse and specular
+  light as shown keep a history of their own (`stab_*`, by parity), taken from the last frame where the guide finds
+  the surface (the temporal pass's test, bilinear over the kept taps), held to the filtered frame's 3 × 3 on the same
+  surface (its mean ± 1.5 standard deviations, by channel), blended by 1 / its frames, at most 8 and never more than
+  the light's own history (so every reset, the dynamic lights' cut and the fast history's hold shorten it too: the
+  flashlight comes and goes as fast as before, `v4_dark_interiors_runs`' flash runs). The composite reads it
+  (`parameters.y` 1). The light's histories are not touched. It lowered the moving frames' flicker at most dark poses
+  (median 1.19 to 1.13 of Classic's at 720p); at 16 frames a10's door windows lagged (its moving error 0.101 to
+  0.121), at 8 less (0.114).
+  **The histories' lengths**: the slow history is at most 32 frames while the eye moves (`HALO_PT_HISTORY`) and 128
+  for a still eye (`HALO_PT_HISTORY_STILL`: the camera exactly the last frame's), and ReSTIR DI's reservoirs'
+  confidence 20 frames for a still eye (`HALO_PT_RESTIR_M_STILL`, 8 moving): at 32 a still view never passed 32
+  samples of a light few rays find (c10's lab still error 0.054 to 0.035 against R); 64 for a moving eye lagged
+  (a10's and c10's moving error 15 to 25% up) and was left at 32. A rotated Poisson disc in place of the stride-16
+  step (ReBLUR's blur, its radius by the history's length) and spatiotemporal blue noise (an in-tree
+  void-and-cluster mask, animated by the golden ratio) were tried in that round and not kept: the disc spread the
+  remaining sparkles into round blobs in motion (moving blotch up 15 to 55%), and the blue noise changed nothing
+  measurable at the nine poses.
 - **the sun's visibility**: its own slow and fast history, held to the range the frame's own visibility spans over the
   pixel's 5 × 5 on the same surface (a lit pixel among lit neighbours is lit, whatever the reprojection's bilinear taps
   brought from a shadow beside it: round 1's G2 lost up to 8% of its foreground's light over its first leg's forward

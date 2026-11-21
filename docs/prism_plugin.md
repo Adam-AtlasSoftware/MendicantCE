@@ -260,6 +260,14 @@ maps its output afterwards:
   in-tree denoiser and the upscaler: under display.upscaler `"off"` it runs at the screen's pixels (DLAA), under an
   upscaler at display.upscaler_scale (its Quality at 0.67). The denoiser's history is dropped where the mode changes
   (its images held the guides); ReSTIR's reservoirs, the light pass's, are kept.
+- **Ray Reconstruction's brightness** (the dark interiors' round, measured under NGX on Atlas's RTX 3090s): its frames
+  are brighter than R at the dark interior poses (prism-9 1.04 to 1.37 of R's light, 1.22 the median at 720p), and
+  the brighter the noisier its input: with ReSTIR DI's reuse off altogether 1.5, without its spatial reuse alone (8
+  candidates in its place) about as bright but with b30's walls left a salt of sparkles (b30_g4k2's moving error
+  0.068 to 0.557), so the spatial reuse stays. The host's round trip is not the cause: the passthrough plugin as a
+  denoiser that upscales (`PRISM_PASSTHROUGH_CAPABILITIES=rr`, chosen as the game starts) gives back the frame the
+  denoiser off draws. With the probes' lamps no longer counted twice and the lamp ray (`docs/prism_pathtraced.md`)
+  c20's 1.33 is 1.15; the median stays about 1.2.
 - **Resets.** The view's history (the plugin's `reset`) is dropped where the guest says the camera has none (a cut, a
   teleport, a map loaded, the view not drawn the frame before), and where the sizes or the upscaler change.
 
