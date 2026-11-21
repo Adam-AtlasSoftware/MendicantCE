@@ -67,7 +67,7 @@ diagnostics), four words in the job's block before its lights */
 #define JOB_COUNTERS_OFFSET 960u
 #define SET_SLOTS 16u
 /* the bindings (xgpu_vulkan_pt.glsl's) */
-#define BINDINGS 38u
+#define BINDINGS 42u
 /* the reference's floats a pixel (the GLSL's SUMS), its noise's bound (the
 gates' reference_noise, as the gates' frames measure it), the frames
 between its noise's measures, the fewest it sums, the gates' frames' width
@@ -97,6 +97,15 @@ indirect light's clamp by default (0 none) */
 them take strides 1, 2, 4 and 16 (HALO_PT_ATROUS_WIDE; else 1 to 8) */
 #define ATROUS_STEPS_DEFAULT 4
 #define ATROUS_WIDE_DEFAULT 1
+/* the temporal stabilisation's history at most by default (HALO_PT_STABILIZE,
+frames; 0 none); the
+slow history's frames at most, a moving eye's and a
+still one's (HALO_PT_HISTORY, HALO_PT_HISTORY_STILL) and ReSTIR DI's
+reservoirs' confidence at most for a still eye (HALO_PT_RESTIR_M_STILL) */
+#define STABILIZE_DEFAULT 8
+#define HISTORY_DEFAULT 32
+#define HISTORY_STILL_DEFAULT 128
+#define RESTIR_M_STILL_DEFAULT 20
 /* whether the temporal pass holds a moving eye's glossy specular history to
 this frame's 3 x 3 by default (HALO_PT_SPEC_HOLD) */
 #define SPEC_HOLD_DEFAULT 1
@@ -148,6 +157,7 @@ enum
 	PASS_LAMPS,
 	PASS_CACHE,
 	PASS_WATER,
+	PASS_STABILIZE,
 	PASSES
 };
 
@@ -189,6 +199,11 @@ enum
 	IMAGE_GI_DATA_NOW,
 	/* the frame's exposure and curve (1x1), for a plugin that upscales */
 	IMAGE_EXPOSURE,
+	/* the temporal stabilisation's histories (the pass "stabilize") */
+	IMAGE_STAB_DIFF_LAST,
+	IMAGE_STAB_DIFF_NOW,
+	IMAGE_STAB_SPEC_LAST,
+	IMAGE_STAB_SPEC_NOW,
 };
 
 /* the job block's flags (xgpu_vulkan_pt.glsl's FLAG_*) */
@@ -303,6 +318,8 @@ static struct
 	radiance, confidence and weight), the last frame's and this one's */
 	struct xgpu_vulkan_image *gi_point[2], *gi_data[2];
 	struct xgpu_vulkan_image *diff_a, *diff_b, *spec_a, *spec_b, *sun_a, *sun_b, *out;
+	/* the temporal stabilisation's histories, by parity */
+	struct xgpu_vulkan_image *stab_diff[2], *stab_spec[2];
 	/* the frame's exposure and curve (1x1: xgpu_vulkan_upscale_pt_frame's);
 	whether the last frame gave its light raw to display.denoiser's plugin
 	(the denoiser's images were then its guides: no history across a change) */
@@ -453,6 +470,7 @@ static const char *const pass_names[] =
 	"Path Traced's light pass", "Path Traced's temporal pass", "Path Traced's fix pass", "Path Traced's atrous pass",
 	"Path Traced's composite pass", "Path Traced's reference pass", "Path Traced's reference statistics",
 	"Path Traced's lamps copy", "Path Traced's radiance cache", "Path Traced's water rays",
+	"Path Traced's stabilisation",
 };
 typedef char pass_names_complete[sizeof(pass_names) / sizeof(pass_names[0]) == PASSES ? 1 : -1];
 #define BREADCRUMB_BEGUN 20u
@@ -663,6 +681,7 @@ static int make(void)
 		!pipeline_make(PASS_LAMPS, xgpu_vulkan_pt_lamps_words, xgpu_vulkan_pt_lamps_count) ||
 		!pipeline_make(PASS_CACHE, xgpu_vulkan_pt_cache_words, xgpu_vulkan_pt_cache_count) ||
 		!pipeline_make(PASS_WATER, xgpu_vulkan_pt_water_words, xgpu_vulkan_pt_water_count) ||
+		!pipeline_make(PASS_STABILIZE, xgpu_vulkan_pt_stabilize_words, xgpu_vulkan_pt_stabilize_count) ||
 		!pipeline_make(PASS_REFERENCE_STATS, xgpu_vulkan_pt_reference_stats_words,
 		xgpu_vulkan_pt_reference_stats_count))
 	{
@@ -751,7 +770,7 @@ static int images_make(uint32_t width, uint32_t height)
 		&pt.noisy_diffuse, &pt.noisy_specular, &pt.clean_diffuse, &pt.clean_specular, &pt.sun_raw, &pt.diff[0],
 		&pt.diff[1], &pt.spec[0], &pt.spec[1], &pt.moments[0], &pt.moments[1], &pt.spec_moments[0],
 		&pt.spec_moments[1], &pt.sun[0], &pt.sun[1], &pt.diff_a, &pt.diff_b, &pt.spec_a, &pt.spec_b, &pt.sun_a,
-		&pt.sun_b, &pt.out,
+		&pt.sun_b, &pt.out, &pt.stab_diff[0], &pt.stab_diff[1], &pt.stab_spec[0], &pt.stab_spec[1],
 	};
 	uint32_t index;
 
@@ -1350,6 +1369,20 @@ static uint32_t spec_hold(void)
 	return (uint32_t)hold;
 }
 
+/* the temporal stabilisation after the filter: its history's frames at most
+(HALO_PT_STABILIZE; 0 none) */
+static int stabilize_on(void)
+{
+	static int most = -1;
+
+	if (most < 0)
+	{
+		most = env_int("HALO_PT_STABILIZE", STABILIZE_DEFAULT);
+		most = most < 0 ? 0 : most > 64 ? 64 : most;
+	}
+	return most;
+}
+
 /* whether four a-trous steps skip stride 8 for 16 (HALO_PT_ATROUS_WIDE) */
 static int atrous_wide(void)
 {
@@ -1546,7 +1579,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	uint32_t groups_x, groups_y, pt_view, flags = 0, source;
 	const struct xgpu_stream_scene_light *lights;
 	float *dynamic_lights;
-	int reference, denoiser_off, steps, step, raw;
+	int reference, denoiser_off, steps, step, raw, still;
+	uint32_t stabilized = 0;
+	static int history_moving = -1, history_still = -1;
+	static float most_still = -1.0f;
 	uint64_t scene;
 
 	if (whole)
@@ -1750,6 +1786,19 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	pt.job_moved[slot] = sqrtf((view->now[0][0] - view->last[0][0]) * (view->now[0][0] - view->last[0][0]) +
 		(view->now[0][1] - view->last[0][1]) * (view->now[0][1] - view->last[0][1]) +
 		(view->now[0][2] - view->last[0][2]) * (view->now[0][2] - view->last[0][2]));
+	/* (a still eye: this frame's camera the last one's, its history kept;
+	the histories may then be longer, the light being the same) */
+	still = (view->flags & XGPU_SCENE_VIEW_HISTORY) && (flags & FLAG_HISTORY) &&
+		!memcmp(view->now, view->last, sizeof(view->now));
+	if (history_moving < 0)
+	{
+		history_moving = env_int("HALO_PT_HISTORY", HISTORY_DEFAULT);
+		history_moving = history_moving < 8 ? 8 : history_moving > 255 ? 255 : history_moving;
+		history_still = env_int("HALO_PT_HISTORY_STILL", HISTORY_STILL_DEFAULT);
+		history_still = history_still < history_moving ? history_moving : history_still > 255 ? 255 : history_still;
+		most_still = (float)env_int("HALO_PT_RESTIR_M_STILL", RESTIR_M_STILL_DEFAULT);
+		most_still = most_still > 64.0f ? 64.0f : most_still;
+	}
 	/* (the exposure: the frame's, metered in the frame, not in the views) */
 	exposure_settings(job->exposure);
 	/* the settings: the sun's ray within 60 world units in "performance"
@@ -1830,9 +1879,14 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		}
 	}
 	job->settings[3] = 4.0f;
-	/* the histories: the slow one at most 32 frames, the fast 4, the fast
-	one's hold at 2 standard deviations of its mean */
-	job->denoise[0] = 32.0f;
+	/* the histories: the slow one at most HALO_PT_HISTORY frames for a
+	moving eye (32: 64 lagged in the dark interiors' strafes, a10's and c10's
+	moving error 15 to 25% up) and HALO_PT_HISTORY_STILL for a still one
+	(128: at 32 a still eye's view never passed 32 samples of a light few
+	rays find; c10's lab 0.054 to 0.035 against R), the fast 4, the fast
+	one's hold at 2 standard deviations of its mean (the anti-lag: a light
+	that changes is followed within the fast history's frames) */
+	job->denoise[0] = (float)(still ? history_still : history_moving);
 	job->denoise[1] = 4.0f;
 	job->denoise[3] = 2.0f;
 	/* (ReSTIR GI's reservoirs' confidence at most 20 frames, the quality
@@ -1873,7 +1927,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			most = getenv("HALO_PT_RESTIR_M") ? (float)atof(getenv("HALO_PT_RESTIR_M")) : 8.0f;
 			most = most < 1.0f ? 1.0f : most > 64.0f ? 64.0f : most;
 		}
-		job->extra[2] = restir ? most : 0.0f;
+		job->extra[2] = restir ? (still && most_still > most ? most_still : most) : 0.0f;
 	}
 	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on:
 	the place and reach, the colour by its intensity, a spot's inner cone's
@@ -1973,6 +2027,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	bound[IMAGE_GI_DATA_LAST] = pt.gi_data[last];
 	bound[IMAGE_GI_DATA_NOW] = pt.gi_data[now];
 	bound[IMAGE_EXPOSURE] = pt.exposure;
+	bound[IMAGE_STAB_DIFF_LAST] = pt.stab_diff[last];
+	bound[IMAGE_STAB_DIFF_NOW] = pt.stab_diff[now];
+	bound[IMAGE_STAB_SPEC_LAST] = pt.stab_spec[last];
+	bound[IMAGE_STAB_SPEC_NOW] = pt.stab_spec[now];
 	set = pt.sets[set_slot];
 	for (index = 0; index < BINDINGS; index++)
 		write_image(&writes[index], &infos[index], set, index, bound[index], index < 4 || index == IMAGE_LIGHT_IN);
@@ -2149,9 +2207,18 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 					level < 3 ? 7u : 5u, 0, groups_x, groups_y);
 				barrier(commands);
 			}
-			stamp(commands, time_slot, 4);
 			/* (an even count of steps ends in b, an odd one in a) */
 			source = (steps & 1) == 0 ? 1u : 0u;
+			/* (the temporal stabilisation of the filtered light: the
+			composite then reads its result) */
+			if (stabilize_on())
+			{
+				dispatch(commands, PASS_STABILIZE, scene, slot_buffer->address, source, (uint32_t)stabilize_on(), 0, 0,
+					groups_x, groups_y);
+				barrier(commands);
+				stabilized = 1u;
+			}
+			stamp(commands, time_slot, 4);
 		}
 		else
 		{
@@ -2160,7 +2227,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			stamp(commands, time_slot, 4);
 			source = 2u;
 		}
-		dispatch(commands, PASS_COMPOSITE, scene, slot_buffer->address, source, 0, 0, 0, groups_x, groups_y);
+		dispatch(commands, PASS_COMPOSITE, scene, slot_buffer->address, source, stabilized, 0, 0, groups_x, groups_y);
 		stamp(commands, time_slot, TIMED);
 		/* (the exposure's step: the next frame's exposure from this one's
 		meter, as Raster's frame makes it) */
@@ -2314,6 +2381,7 @@ void xgpu_vulkan_pt_shutdown(void)
 		&pt.sun_a, &pt.sun_b, &pt.out, &pt.reservoir_point[0], &pt.reservoir_point[1], &pt.reservoir_info[0],
 		&pt.reservoir_info[1], &pt.gi_point[0], &pt.gi_point[1], &pt.gi_data[0], &pt.gi_data[1], &pt.exposure,
 		&pt.water_up, &pt.water_down, &pt.water_sum_up, &pt.water_sum_down, &pt.water_aux, &pt.water_sum_aux,
+		&pt.stab_diff[0], &pt.stab_diff[1], &pt.stab_spec[0], &pt.stab_spec[1],
 	};
 	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
 		&pt.tree, &pt.cache };

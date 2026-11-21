@@ -194,6 +194,13 @@ layout(set = 0, binding = 36, rgba32f) uniform image2D gi_data_now;
 the view (xgpu_vulkan_upscale.c: it takes the frame as linear light before
 the tone mapping and its output is tone mapped again by these) */
 layout(set = 0, binding = 37, rgba16f) uniform image2D exposure_out;
+/* the temporal stabilisation's histories (the pass "stabilize"): the
+filtered diffuse and specular light as shown, the last frame's and this
+frame's, their frames in alpha */
+layout(set = 0, binding = 38, rgba16f) uniform image2D stab_diff_last;
+layout(set = 0, binding = 39, rgba16f) uniform image2D stab_diff_now;
+layout(set = 0, binding = 40, rgba16f) uniform image2D stab_spec_last;
+layout(set = 0, binding = 41, rgba16f) uniform image2D stab_spec_now;
 
 ivec2 size_of() { return ivec2(job.counts.y, job.counts.z); }
 bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(job.counts.y) && p.y < int(job.counts.z); }
@@ -3783,6 +3790,13 @@ void main()
             imageLoad(diff_a, pixel);
         vec4 ds = raw ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
             imageLoad(spec_a, pixel);
+        /* (parameters.y 1: the diffuse and specular light as the
+        stabilisation left them, the sun's visibility from the source) */
+        if (!raw && push.parameters.y == 1u)
+        {
+            dd = imageLoad(stab_diff_now, pixel);
+            ds = imageLoad(stab_spec_now, pixel);
+        }
         vec4 dv = raw ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
             imageLoad(sun_a, pixel);
         float v = clamp(dv.x, 0.0, 1.0);
@@ -4374,4 +4388,119 @@ void main()
     imageStore(noisy_diffuse, h, vec4(up_shown * met, met));
     imageStore(noisy_specular, h, vec4(down_shown * share, share));
     imageStore(sun_raw, h, vec4(sun_seen, up_miss, down_length, 1.0) * share);
+}
+
+//@pass stabilize
+layout(local_size_x = 8, local_size_y = 8) in;
+/* the temporal stabilisation (ReBLUR's, from Zhdan's published talks on
+NVIDIA's denoisers, written from their descriptions; a TAA on the denoised
+light): the filtered light as shown keeps a history of its own, taken from
+the last frame where the guide finds this surface (the temporal pass's
+test, bilinear over the kept taps), held to the filtered frame's 3 x 3 on
+the same surface (its mean and STAB_SIGMA standard deviations, by channel),
+and blended with it by 1 / its frames, at most parameters.y and never more
+than the light's own history holds (the temporal pass's length, which every
+reset, the dynamic lights' cut and the fast history's hold shorten: the
+flashlight and a disocclusion begin again at once). The spatial filter's
+patterns, made each frame from that frame's samples, then move less from
+frame to frame (the crawl). The light's histories are not touched.
+parameters.x the filter's source (0 a, 1 b), y its frames at most
+(HALO_PT_STABILIZE); writes stab_*_now, which the
+composite reads (its parameters.y 1) */
+const float STAB_SIGMA = 1.5;
+bool stab_tap(ivec2 q, Surface g, float tolerance)
+{
+    if (!inside(q))
+        return false;
+    uvec4 gl = imageLoad(guide_last, q);
+    if (gl.x != (g.instance | 0x10000u))
+        return false;
+    vec3 nl = unfold(unpackSnorm2x16(gl.y));
+    if (dot(nl, g.normal) < 0.9)
+        return false;
+    float dl = uintBitsToFloat(gl.z);
+    if (g.instance == 0u)
+        return abs(dot(last_point(q, dl) - g.point, g.normal)) <= tolerance;
+    return abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
+}
+void main()
+{
+    s = Scene(push.scene);
+    job = Job(push.job);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (!inside(pixel))
+        return;
+    bool from_b = push.parameters.x == 1u;
+    Surface g = surface_at(pixel);
+    vec4 dc = from_b ? imageLoad(diff_b, pixel) : imageLoad(diff_a, pixel);
+    vec4 sc = from_b ? imageLoad(spec_b, pixel) : imageLoad(spec_a, pixel);
+    if (!g.present)
+    {
+        imageStore(stab_diff_now, pixel, vec4(dc.rgb, 0.0));
+        imageStore(stab_spec_now, pixel, vec4(sc.rgb, 0.0));
+        return;
+    }
+    /* (the filtered frame's 3 x 3 on this surface: its moments by channel) */
+    uint here = imageLoad(guide_now, pixel).x;
+    vec3 m1d = vec3(0.0), m2d = vec3(0.0), m1s = vec3(0.0), m2s = vec3(0.0);
+    float count = 0.0;
+    for (int k = 0; k < 9; k++)
+    {
+        ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
+        if (!inside(q) || imageLoad(guide_now, q).x != here)
+            continue;
+        vec3 d = max((from_b ? imageLoad(diff_b, q) : imageLoad(diff_a, q)).rgb, vec3(0.0));
+        vec3 sp = max((from_b ? imageLoad(spec_b, q) : imageLoad(spec_a, q)).rgb, vec3(0.0));
+        m1d += d;
+        m2d += d * d;
+        m1s += sp;
+        m2s += sp * sp;
+        count += 1.0;
+    }
+    m1d /= max(count, 1.0);
+    m2d /= max(count, 1.0);
+    m1s /= max(count, 1.0);
+    m2s /= max(count, 1.0);
+    vec3 sd = sqrt(max(m2d - m1d * m1d, vec3(0.0))), ss = sqrt(max(m2s - m1s * m1s, vec3(0.0)));
+    /* (the last frame's stabilised light at this surface's place there) */
+    vec4 hd = vec4(0.0), hs = vec4(0.0);
+    float weights = 0.0;
+    if ((job.frame.y & FLAG_HISTORY) != 0u && g.has_history)
+    {
+        vec2 at = last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u);
+        ivec2 a = ivec2(floor(at));
+        vec2 f = at - vec2(a);
+        float tolerance = 0.02 + 0.004 * g.distance;
+        for (int k = 0; k < 4; k++)
+        {
+            ivec2 o = ivec2(k & 1, k >> 1);
+            float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+            if (w <= 1.0e-4 || !stab_tap(a + o, g, tolerance))
+                continue;
+            hd += w * imageLoad(stab_diff_last, a + o);
+            hs += w * imageLoad(stab_spec_last, a + o);
+            weights += w;
+        }
+    }
+    float n_light_d = imageLoad(diff_now, pixel).a, n_light_s = imageLoad(spec_now, pixel).a;
+    vec3 out_d = dc.rgb, out_s = sc.rgb;
+    float n_d = 1.0, n_s = 1.0;
+    if (weights >= 0.05)
+    {
+        hd /= weights;
+        hs /= weights;
+        vec3 held_d = clamp(hd.rgb, m1d - STAB_SIGMA * sd, m1d + STAB_SIGMA * sd);
+        vec3 held_s = clamp(hs.rgb, m1s - STAB_SIGMA * ss, m1s + STAB_SIGMA * ss);
+        float most = float(push.parameters.y);
+        n_d = min(min(hd.a + 1.0, most), max(n_light_d, 1.0));
+        n_s = min(min(hs.a + 1.0, most), max(n_light_s, 1.0));
+        out_d = mix(held_d, dc.rgb, 1.0 / n_d);
+        out_s = mix(held_s, sc.rgb, 1.0 / n_s);
+    }
+    if (any(isnan(out_d)) || any(isinf(out_d)))
+        out_d = dc.rgb;
+    if (any(isnan(out_s)) || any(isinf(out_s)))
+        out_s = sc.rgb;
+    imageStore(stab_diff_now, pixel, vec4(out_d, n_d));
+    imageStore(stab_spec_now, pixel, vec4(out_s, n_s));
 }
