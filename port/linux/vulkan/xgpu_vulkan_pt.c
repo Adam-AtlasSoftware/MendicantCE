@@ -116,6 +116,13 @@ this frame's 3 x 3 by default (HALO_PT_SPEC_HOLD) */
 #define RESTIR_SPATIAL_DEFAULT 1
 #define CANDIDATES_SPATIAL_DEFAULT 4
 #define RESTIR_RADIUS_DEFAULT 16
+/* the lamp ray's roughness at most by default (HALO_PT_LAMP_RAY); the job
+block's flag (xgpu_vulkan_pt.glsl's FLAG_LAMP_MIS): the lamps' specular light
+shared between ReSTIR DI and the reflection's ray by the chance ReSTIR DI
+finds each lamp (HALO_PT_LAMP_MIS, on by default; 0: by its solid angle alone,
+as before) */
+#define LAMP_RAY_DEFAULT 0.7
+#define FLAG_LAMP_MIS 256u
 /* the light pass's specialization constants (xgpu_vulkan_pt.glsl's
 SPEC_*); whether half the level's 8 x 8 blocks (1) or half its pixels (2)
 take the bake's indirect light as their bounce by default
@@ -1780,6 +1787,25 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->frame[0] = ++pt.frame;
 	job->frame[1] = flags;
 	job->frame[2] = pt_view;
+	/* (the lamp ray's roughness at most, in hundredths: a GGX ray of the
+	pixels whose reflection the probes give, meeting the lamps' faces;
+	HALO_PT_LAMP_RAY, 0.7 by default, 0 none) */
+	{
+		static int lamp_ray = -1, lamp_mis = -1;
+
+		if (lamp_ray < 0)
+		{
+			const char *value = getenv("HALO_PT_LAMP_RAY");
+
+			lamp_ray = (int)((value ? atof(value) : LAMP_RAY_DEFAULT) * 100.0 + 0.5);
+			lamp_ray = lamp_ray < 0 ? 0 : lamp_ray > 100 ? 100 : lamp_ray;
+		}
+		job->frame[3] = (uint32_t)lamp_ray;
+		if (lamp_mis < 0)
+			lamp_mis = env_int("HALO_PT_LAMP_MIS", 1) != 0;
+		if (lamp_mis)
+			job->frame[1] |= FLAG_LAMP_MIS;
+	}
 	pt.job_frame[slot] = pt.frame;
 	pt.job_flags[slot] = flags;
 	pt.job_view_flags[slot] = view->flags;

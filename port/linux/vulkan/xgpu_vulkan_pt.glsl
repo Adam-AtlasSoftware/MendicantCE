@@ -402,13 +402,37 @@ that sum to 1 at every direction keeps the light unbiased, and this one
 gives a lamp wider than the lobe to the ray (a mirror's highlight, which a
 point on the lamp rarely finds) and a lamp narrower than the lobe to the
 lamp's point (a rough floor's, which the ray rarely meets) */
-float lamp_mis_nee(Surface g, vec3 l, float solid)
+/* (FLAG_LAMP_MIS: the lamp's own density taken as the chance next-event
+estimation finds it, not 1: the lamp's unshadowed diffuse light here over
+the bake's direct light at the pixel (the lamps' light the texel holds: its
+whole less its indirect layer), by the candidates a pixel draws, at most 1.
+A small lamp that adds little light but a bright highlight on a glossy
+surface (a semi-glossy wall's glints of a lamp beside it, c10's lab and
+b30's G4 walls) is drawn by few candidates; with the weight of 1 / its solid
+angle its highlight was left to next-event estimation, which met it once in
+hundreds of frames as a white sparkle. Now the reflection's ray, which meets
+it every frame its lobe holds it, takes it. Any weights that sum to 1 over
+the two strategies keep the estimate unbiased; both sides compute these the
+same way at a pixel: lamp_direct_total, the bake's direct light here, set by
+the light pass; 0 (no texel, the flag off) the old weight) */
+const uint FLAG_LAMP_MIS = 256u;
+/* the lamp ray's roughness at most (job.frame.w, in hundredths:
+HALO_PT_LAMP_RAY; 0 none) and its reach */
+float lamp_ray_roughness() { return float(job.frame.w) / 100.0; }
+const float LAMP_RAY_REACH = 60.0;
+float lamp_direct_total = 0.0;
+float lamp_mis_nee(Surface g, vec3 l, float solid, float radiance)
 {
     if (lamps_probe)
         return 0.0;
     if (!lamps_mis)
         return 1.0;
     float pb = ggx_pdf(g, l), q = 1.0 / max(solid, 1.0e-8);
+    if (lamp_direct_total > 0.0)
+    {
+        float own = radiance * solid * max(dot(g.normal, l), 0.0) / PI;
+        q *= clamp(max(job.extra.x, 1.0) * 2.0 * own / lamp_direct_total, 1.0e-3, 1.0);
+    }
     return q * q / (q * q + pb * pb);
 }
 
@@ -951,7 +975,7 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         if (ce <= 0.0)
             return false;
         parts(g, l, radiance * c, false, dif, spe);
-        spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * ce / d2);
+        spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * ce / d2, luma(radiance));
         float geometry = ce / d2;
         dif *= geometry;
         spe *= geometry;
@@ -1023,7 +1047,8 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
                 continue;
             vec3 dif, spe;
             parts(g, l, radiance * c_, false, dif, spe);
-            spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * max(dot(ne, -l), 0.0) / max(d * d, 1.0e-8));
+            spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * max(dot(ne, -l), 0.0) / max(d * d, 1.0e-8),
+                luma(radiance));
             float target = luma(dif) + luma(spe);
             float w = target * inverse_pdf / probability / float(lamp_count);
             if (!(w > 0.0) || isinf(w))
@@ -2485,6 +2510,18 @@ void main()
     reflections (G5's second pose); by the ray alone a semi-glossy wall's
     pool of a small lamp's light is met by few rays (G4's second pose)) */
     bool glossy = g.roughness <= job.settings.y && indirect_on;
+    /* (a rough pixel whose reflection the probes give, up to job.frame.w's
+    roughness (HALO_PT_LAMP_RAY): one GGX ray meets the lamps' faces as the
+    traced reflection does, its lamps' light shared with ReSTIR DI by the same
+    multiple importance sampling (lamp_mis_nee), the rest of the reflection
+    the probe's. A small lamp's highlight on a semi-rough, normal-mapped wall
+    (roughness about 0.4 to 0.5: b30's G4 walls, c10's lab) was ReSTIR's
+    alone: its candidates, drawn by the lamps' light at the cell, met the
+    lamp the lobe holds once in hundreds of frames, each time a white
+    sparkle the denoiser spread into a dot. The GGX ray's weight is bounded
+    (Fresnel by G2 / G1), so a lamp it meets is its radiance at most) */
+    bool lamp_ray = indirect_on && !glossy && g.roughness <= lamp_ray_roughness() &&
+        (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u;
     /* (the reflection ray's length, for the specular history's virtual
     motion: 0 where none is traced, far where it leaves the level) */
     float spec_hit = 0.0;
@@ -2503,7 +2540,9 @@ void main()
         lamps_probe = indirect_on && !(g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION)) &&
             (job.frame.y & FLAG_PROBE_ONLY) != 0u;
         seed_for(pixel, frame, 3u);
-        lamps_mis = glossy;
+        lamps_mis = glossy || lamp_ray;
+        lamp_direct_total = texel && (job.frame.y & FLAG_LAMP_MIS) != 0u ?
+            max(luma(bake_total - bake_indirect), 0.0) : 0.0;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
         lamps_mis = false;
         lamps_probe = false;
@@ -2591,7 +2630,7 @@ void main()
                         lamp's sample measures it) */
                         vec3 to = o + r * hd - g.point;
                         lamps_mis = true;
-                        met += lamp * (1.0 - lamp_mis_nee(g, r, area * ce / max(dot(to, to), 1.0e-8)));
+                        met += lamp * (1.0 - lamp_mis_nee(g, r, area * ce / max(dot(to, to), 1.0e-8), luma(lamp)));
                         lamps_mis = false;
                     }
                 }
@@ -2601,6 +2640,30 @@ void main()
         else
         {
             float found;
+            if (lamp_ray && direct_on && !part_off(PARTS_REFLECTION))
+            {
+                vec3 weight;
+                seed_for(pixel, frame, 10u);
+                vec3 rl = ggx_sample(g, weight);
+                vec3 nh, object_albedo;
+                uint t;
+                vec2 b;
+                float hd = dot(weight, weight) > 0.0 ? scene_hit(o, rl, LAMP_RAY_REACH, nh, t, b, object_albedo) : -1.0;
+                if (hd > 0.0 && t != OBJECT_HIT)
+                {
+                    vec3 lamp = lamp_met(t, rl);
+                    if (dot(lamp, lamp) > 0.0)
+                    {
+                        vec3 e = cross(corner(t, 1u) - corner(t, 0u), corner(t, 2u) - corner(t, 0u));
+                        float ce = abs(dot(normalize(e), rl));
+                        vec3 to = o + rl * hd - g.point;
+                        lamps_mis = true;
+                        noisy_s += weight * lamp * (1.0 - lamp_mis_nee(g, rl, 0.5 * length(e) * ce /
+                            max(dot(to, to), 1.0e-8), luma(lamp)));
+                        lamps_mis = false;
+                    }
+                }
+            }
             vec3 r = reflect(-g.eye, g.normal);
             vec3 probe = reflection_at(o, r, g.roughness, found);
             if (found <= 0.0)
