@@ -69,6 +69,9 @@ DEFAULTS = {
     "chunk_scale": 1.6,      # ... cells this many wu across ...
     "chunk_tilt": 0.14,      # ... each facet's tilt (wu a wu) ...
     "chunk_soft": 0.08,      # ... its creases blended over this (wu)
+    # round 6
+    "kit_base": False,       # the kit's relief kept whole and the ledges added to it (not blended in its place) ...
+    "ledge_gain": 1.0,       # ... times this
 }
 
 # round 3's variants (b30a): A2 the round-2 layers with steps about 1.9 times deeper; A3 thinner layers (1.25 wu)
@@ -89,6 +92,12 @@ PRESETS["a4"] = dict(PRESETS["a3"], cut=True, block_soft=0.10, chunk_amp=1.0, ch
 # cells (1.2 wu, the kit's 0.9), up to 2.5 times as deep (0.15 wu, the kit's 0.14) and tilted 0.4 (the kit's 0.45),
 # their creases soft over 0.08 wu as A4's (band-limited: no sparkle)
 PRESETS["a5"] = dict(PRESETS["a4"], chunk_amp=2.5, chunk_scale=1.2, chunk_tilt=0.16, chunk_soft=0.08)
+# round 6: A6, the hybrid: the kit's own relief (strata, chips, cracks, CE's paint; wg2_shape.rock exactly as the kit
+# builds it) kept whole as the base, A5's ledges (layers, risers, blocks, the scan's height, fine detail; no chunks:
+# the kit's chips stand for them) added on top at ledge_gain (wg2_remodel.py: kit_base), set in less (the kit's
+# strata already set the face in); the bedding breaks' jogs softer (break_sharp 0.12 -> 0.35, round 5's boxy notch at
+# D1 where a jog met a riser)
+PRESETS["a6"] = dict(PRESETS["a5"], chunk_amp=0.0, kit_base=True, ledge_gain=0.55, bias=-0.03, break_sharp=0.35)
 
 
 def params(r):

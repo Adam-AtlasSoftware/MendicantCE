@@ -1023,9 +1023,9 @@ void main()
 			ad = dot(view_down.xyz, view_down.xyz);
 		vec3 sum = base.rgb;
 		float kept = 1.0;
-		/* (round 5: the ellipse widens with distance, 1x to 4 units, 2x by 20, as the far octave below takes over
-		the band it leaves: CE's streaks replaced where they carry the look; wider left a blur the scan could not fill) */
-		float widen = 1.0 + clamp((dist - 4.0) / 16.0, 0.0, 1.0);
+		/* (round 6: the ellipse 0.6x and the same at every distance: round 5's, widening to 2x by 20 units, took
+		more of CE's paint away than the scan put back, and H2's middle read as a smeared average) */
+		const float widen = 0.6;
 		for (int i = 0; i < 12; i++)
 		{
 			float ang = float(i) * 0.5235988 + (i >= 6 ? 0.2617994 : 0.0);
@@ -1047,9 +1047,11 @@ void main()
 			kept += 1.0;
 		}
 		vec3 low = sum / kept;
-		/* (round 5: none of it within 2 units, all of it past 10: up close CE's fine paint and the scan's detail
-		together read best (round 4's S1 and D1, where the split had never run); at 10 to 40 units the streaks go) */
-		base_rgb = mix(base.rgb, low, rep * fade * smoothstep(3.0, 7.0, kept) * smoothstep(2.0, 10.0, dist));
+		/* (round 5: none of it within 2 units (up close CE's fine paint and the scan's detail together read best);
+		round 6: all of it from 6 units, and gone again from 12 to 20, where CE's own colour and the scan's detail
+		over it carry the cliff rather than a smoothed mean) */
+		base_rgb = mix(base.rgb, low, rep * fade * smoothstep(3.0, 7.0, kept) * smoothstep(2.0, 6.0, dist) *
+			(1.0 - smoothstep(12.0, 20.0, dist)));
 	}
 	vec4 macro = texture(macro_texture, p.xy * (1.0 / 24.0));
 	float k = a.y * fade * clamp(0.7 + (macro.r - 0.5) * 1.2 + (macro.g - 0.5) * 0.6, 0.35, 1.25);
@@ -1069,16 +1071,24 @@ void main()
 		if (wfar > 0.01)
 		{
 			const mat3 fm = mat3(0.8, -0.6, 0.0, 0.6, 0.8, 0.0, 0.0, 0.0, 1.0);
+			/* (round 6: the far octave from the pack's layer named "rock_far" where it has one (its own scan and
+			tile; b.w -2 marks it, xgpu_vulkan_terrain.c), at its own scale, its header's strength the contrast
+			power; else round 5's, the same layer FAR_OCTAVE times larger at power 1.8) */
+			int fl = la;
+			for (int i = 0; i < 8; i++)
+				if (float(i) < bounds.x && layer_b(i).w < -1.5)
+					fl = i;
 			const float FAR_OCTAVE = 3.5;
+			float fo = fl == la ? FAR_OCTAVE : 1.0;
 			vec4 fd;
 			vec3 fnrm;
 			float frough, fao;
-			layer_at(la, fm * p / FAR_OCTAVE + vec3(5.17, 2.93, 1.31), fm * dpx / FAR_OCTAVE, fm * dpy / FAR_OCTAVE,
+			layer_at(fl, fm * p / fo + vec3(5.17, 2.93, 1.31), fm * dpx / fo, fm * dpy / fo,
 				fm * n, false, 0.0, fd, fnrm, frough, fao);
 			vec3 rf = fd.rgb * 2.0;
 			float lf = max(dot(rf, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
-			/* (its lightness's contrast raised (power 1.8): a scan's broad band is faint beside its fine one) */
-			ratio *= pow(lf, 1.8 * wfar);
+			/* (its lightness's contrast raised: a scan's broad band is faint beside its fine one) */
+			ratio *= pow(lf, (fl == la ? 1.8 : layer_a(fl).y) * wfar);
 		}
 		k *= 1.0 - 0.6 * up;
 	}

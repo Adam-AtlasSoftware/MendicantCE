@@ -235,6 +235,15 @@ mask, which a remodel's tilted facets smear along CE's stretched coordinates: th
 b30's D1 in both modes) replaced by plain rock's, a 4 % dielectric times the layer's occlusion, never metal, its
 roughness at least 0.6. Round 4's split had never been compiled into `xgpu_vulkan_post_shaders.c`; round 5's is.
 
+Round 6: the ellipse 0.6x at every distance (round 5's widening took more of CE's paint than the scan put back), the
+mean in from 2 to 6 units and out again from 12 to 20; and a far octave of its own: a pack layer named `rock_far`
+(no class's; `xgpu_vulkan_terrain.c` marks it with -2 in its steepness slot) is the far octave's scan, at its own
+tile, its header's strength the power on its lightness (round 6's test pack: Cliff Side, CC0, 12 m, power 0.5, in
+place of b30's unused ice layer). Without one the far octave is round 5's. The captures showed the mean itself, at
+any share past about 0.5, blotching b30's cliffs at 6 to 15 units (taps kept on some chips and not their
+neighbours), so round 6's pack sets the share to 0.001: the gate (specular fix, held detail, far octave) on, the mean
+off.
+
 ### CE's own detail maps up close
 
 CE's ground draws fine detail maps (b30's sand speckle, 7.8 mm texels) that turn into large blocky noise within a few

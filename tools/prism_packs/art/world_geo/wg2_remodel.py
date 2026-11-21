@@ -841,7 +841,11 @@ def main():
             q = ledges.params(r)
             dl, lparts = ledges.relief(V[sel], Ns[sel], ledge_h[sel], parts["steep"], q, ledges.field_for(q))
             mix = ledge_bw[sel] * parts["steep"]
-            dd = dd * (1.0 - mix) + dl * mix
+            if q.get("kit_base"):
+                # (round 6: the kit's relief whole, the ledges on top of it at ledge_gain)
+                dd = dd + dl * mix * q.get("ledge_gain", 1.0)
+            else:
+                dd = dd * (1.0 - mix) + dl * mix
             parts = {"steep": parts["steep"], "kit": parts["strata"] + parts["chip"] + parts["tex"],
                      "ledges": lparts["ledges"], "fade": lparts["fade"]}
         d[sel] = dd
