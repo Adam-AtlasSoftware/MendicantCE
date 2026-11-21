@@ -315,7 +315,8 @@ same (5.6% both), so the normal stays 1.0 and its relief with it.
 
 B1 1 m, the share of the ground's pixels bluer than Oklab b -0.5 (`tools/cmpsheet.py`'s "cold"): Classic 5.7%
 (CE's own sand has blue-white texels, lower left), prism-8 Path Traced 8.3%, now 5.6%: the patches beyond CE's own
-are gone.
+are gone. In Path Traced, prism-9's `ground_sun` (below) gives a little of this back (6.9% against prism-8's
+7.7% on that later measure); Rebaked keeps it.
 
 ### Path Traced's sand and soil (prism-9)
 
