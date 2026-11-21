@@ -14,6 +14,13 @@ stock triangle's plane, within the stock triangle, never one on a stock edge, a 
 riser's two edges, a riser's height apart: one row at the foot, one at the top. The ledge is then hard at any
 density, and no triangle is added. A slide that would turn or collapse a triangle is undone.
 
+Round 3 (all off by default, so a recipe without them builds round 2's A): breaks in the bedding (a layer line
+jogs up or down by a share of a layer over a short run along the face, where a slow noise crosses zero), blocks
+(each layer cut into jittered cells in plan, some of which set in or out, so short vertical fractures cross a layer
+and stop at the next), and fine detail on the faces between ledges (a second, smaller and more stretched copy of the
+scan, band-limited by the edge like the first, so it adds only what the mesh carries near the player). PRESETS name
+the variants compared in round 3 ("a2", "a3"); a recipe's "preset" picks one, its other keys override it.
+
 Lengths in world units (1 wu = 3.05 m); d is along the surface normal, negative into the rock.
 """
 import numpy as np
@@ -42,12 +49,37 @@ DEFAULTS = {
     "snap_band": 0.55,       # vertices within this many edges of a riser slide onto it
     "boundary_lo": 0.3,      # near another class's faces: the kit's shape kept within this (wu) ...
     "boundary_hi": 1.2,      # ... the ledges in full past this (wu)
+    # round 3
+    "break": 0.0,            # a bedding break's jog (layers; 0 none) ...
+    "break_len": 3.5,        # ... where a noise this long along the face (wu) crosses zero ...
+    "break_sharp": 0.12,     # ... over this share of the noise (smaller: a shorter jog)
+    "block": 0.0,            # the blocks' cells in plan (wu across; 0 none) ...
+    "block_share": 0.4,      # ... this share of them set in or out ...
+    "block_setback": 0.0,    # ... by up to this (wu)
+    "fine_amp": 0.0,         # fine detail on the faces (wu, deviation) ...
+    "fine_tile": 1.3,        # ... the scan's tile across the bedding (wu) ...
+    "fine_stretch": 4.0,     # ... this many times longer along it ...
+    "fine_band": 1.0,        # ... band-limited by the edge times this (1: the v3 rule, 3 to 6 edges a wavelength)
+}
+
+# round 3's variants (b30a): A2 the round-2 layers with steps about 1.9 times deeper; A3 thinner layers (1.25 wu)
+# with steps about 1.5 times deeper. Both: breaks, blocks (short vertical fractures), fine detail on the faces.
+PRESETS = {
+    "a2": {"layer": 2.0, "setback": 0.38, "setback_drift": 0.12, "lean": 0.20, "riser": 0.14, "bias": -0.11,
+           "scan_amp": 0.035, "break": 0.22, "break_len": 3.5, "block": 2.6, "block_share": 0.4,
+           "block_setback": 0.10, "fine_amp": 0.028, "fine_tile": 1.3, "fine_stretch": 4.0},
+    "a3": {"layer": 1.25, "setback": 0.30, "setback_drift": 0.10, "lean": 0.15, "riser": 0.11, "bias": -0.09,
+           "scan_amp": 0.03, "break": 0.28, "break_len": 3.0, "block": 2.0, "block_share": 0.45,
+           "block_setback": 0.09, "fine_amp": 0.028, "fine_tile": 1.1, "fine_stretch": 4.0},
 }
 
 
 def params(r):
     p = dict(DEFAULTS)
-    p.update(r.get("ledges", {}) if isinstance(r.get("ledges"), dict) else {})
+    own = r.get("ledges", {}) if isinstance(r.get("ledges"), dict) else {}
+    if own.get("preset"):
+        p.update(PRESETS[own["preset"]])
+    p.update({k: v for k, v in own.items() if k != "preset"})
     return p
 
 
@@ -99,7 +131,32 @@ def phase(p, n, h, q, field):
     hs = aniso_scan(field, p, n, h, q["tile_v"], q["stretch_u"])
     hb = aniso_scan(field, p, n, np.maximum(h, q["phase_band"] * q["layer"]), q["tile_v"], q["stretch_u"])
     warp = q["warp"] * shp.fbm(p * np.array([1.0, 1.0, 0.25]), q["warp_scale"], 2, salt=211)
-    return (p[:, 2] + warp) / q["layer"] + q["wander"] * hb, hs
+    ph = (p[:, 2] + warp) / q["layer"] + q["wander"] * hb
+    if q.get("break", 0.0) > 0.0:
+        ph = ph + breaks(p, q)
+    return ph, hs
+
+
+def breaks(p, q):
+    """the bedding's breaks (layers): a slow noise along the face (changing over about two layers in height), its
+    zero crossings turned into short jogs of +-break/2"""
+    zs = q["break_len"] / (2.0 * q["layer"])
+    nz = shp.value_noise(p * np.array([1.0, 1.0, zs]), q["break_len"], salt=233)
+    b = q["break_sharp"]
+    return q["break"] * (shp.smoothstep(-b, b, nz) - 0.5)
+
+
+def block_offset(p, k, q):
+    """each layer's blocks: jittered cells in plan (their walls vertical, a different set in every layer), a share of
+    them set in or out (wu)"""
+    if q.get("block", 0.0) <= 0.0 or q.get("block_setback", 0.0) <= 0.0:
+        return np.zeros(len(p))
+    s = q["block"]
+    p3 = np.stack([p[:, 0], p[:, 1], (k.astype(np.float64) * 7.31 + 0.5) * s], 1)
+    _, _, cid, _ = shp.worley(p3, s, salt=239)
+    u = _hash01(cid, k, np.zeros_like(k) + 13, 241)
+    on = u < q["block_share"]
+    return np.where(on, q["block_setback"] * (2.0 * u / max(q["block_share"], 1e-6) - 1.0), 0.0)
 
 
 def layer_values(p, k, q):
@@ -109,6 +166,7 @@ def layer_values(p, k, q):
     off = q["setback"] * (_hash01(k, z + 7, z + 3, 223) - 0.5) + \
         q["setback_drift"] * layer_noise(xy, k, q["drift_scale"], 227)
     lean = q["lean"] * (0.4 + 0.6 * _hash01(k, z + 11, z + 5, 229))
+    off = off + block_offset(p, k, q)
     return off, lean
 
 
@@ -139,7 +197,13 @@ def relief(p, n, h, steep, q, field):
     rows = q["layer"] / np.maximum(h, 1e-6)
     fade = shp.smoothstep(q["rows_lo"], q["rows_hi"], rows)
     d = fade * (profile(ph, p, q) + q["bias"]) + q["scan_amp"] * hs
-    return d * steep, {"ledges": d * steep, "fade": fade}
+    parts = {"fade": fade}
+    if q.get("fine_amp", 0.0) > 0.0:
+        hf = aniso_scan(field, p + 11.3, n, h * q["fine_band"], q["fine_tile"], q["fine_stretch"])
+        d = d + q["fine_amp"] * hf
+        parts["fine"] = q["fine_amp"] * hf * steep
+    parts["ledges"] = d * steep
+    return d * steep, parts
 
 
 def snap_targets(V, up, h, eligible, q, field, n):

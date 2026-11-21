@@ -106,3 +106,46 @@ def test_layers_fade_on_a_coarse_mesh_and_stay_within_the_caps():
             assert parts["fade"].max() == 0.0 and np.abs(d).max() < 4 * q["scan_amp"] * 2
         # (the builder's soft caps, cap_out 0.08 and cap_in 0.5, take the rest)
         assert d.max() < 0.12 and d.min() > -0.5
+
+
+def test_round3_features_are_off_by_default_and_presets_switch_them_on():
+    q = L.params({"ledges": {}})
+    assert q["break"] == 0.0 and q["block"] == 0.0 and q["fine_amp"] == 0.0
+    f = field()
+    V, T, inner = wall(0.15, w=10.0, ht=8.0)
+    n = np.tile([0.0, -1.0, 0.0], (len(V), 1))
+    h = np.full(len(V), 0.15)
+    d0, p0 = L.relief(V, n, h, np.ones(len(V)), q, f)
+    assert "fine" not in p0
+    for pre in ("a2", "a3"):
+        qp = L.params({"ledges": {"preset": pre, "riser": 0.12}})
+        assert qp["riser"] == 0.12 and qp["layer"] == L.PRESETS[pre]["layer"]
+        d, parts = L.relief(V, n, h, np.ones(len(V)), qp, f)
+        # deeper steps than round 2's A, and still mostly behind the collision surface
+        assert d.std() > 1.3 * d0.std()
+        assert np.percentile(d, 95) < 0.12 and np.percentile(d, 50) < 0.0
+        assert parts["fine"].std() > 0.0
+
+
+def test_blocks_make_vertical_breaks_inside_a_layer():
+    q = L.params({"ledges": {"preset": "a2"}})
+    xs = np.linspace(0.0, 30.0, 3000)
+    k = np.full(len(xs), 3, np.int64)
+    p = np.stack([xs, np.zeros_like(xs), np.full_like(xs, 6.5)], 1)
+    off = L.block_offset(p, k, q)
+    jumps = np.abs(np.diff(off)) > 1e-6
+    # (a few cells set in or out along 30 wu; elsewhere the layer's own set-back)
+    assert 2 <= jumps.sum() <= 40
+    assert np.abs(off).max() <= q["block_setback"] + 1e-9
+    # another layer cuts other blocks
+    off2 = L.block_offset(p, k + 1, q)
+    assert not np.allclose(off, off2)
+
+
+def test_breaks_jog_the_bedding_by_at_most_half_the_break():
+    q = L.params({"ledges": {"preset": "a3"}})
+    rng = np.random.default_rng(2)
+    p = rng.uniform(-20, 20, (5000, 3))
+    b = L.breaks(p, q)
+    assert np.abs(b).max() <= q["break"] / 2 + 1e-9
+    assert (np.abs(b) > 0.45 * q["break"]).mean() > 0.4  # (mostly a whole jog either way, short transitions)
