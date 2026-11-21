@@ -2732,6 +2732,21 @@ long prism_world_geometry_surface_triangles(
 	float *lightmap,
 	long most)
 {
+	return prism_world_geometry_surface_triangles_from(lightmap_index, material_index, surface, level, positions, base,
+		lightmap, 0, most);
+}
+
+long prism_world_geometry_surface_triangles_from(
+	short lightmap_index,
+	short material_index,
+	long surface,
+	int level,
+	float *positions,
+	float *base,
+	float *lightmap,
+	long skip,
+	long most)
+{
 	long local, vertex_size, lightmap_size, written = 0;
 	struct world_material const *made = surface_part(lightmap_index, material_index, surface, &local);
 	unsigned long first, count, near_first, near_count, triangle;
@@ -2770,7 +2785,11 @@ long prism_world_geometry_surface_triangles(
 	{
 		return (long)count;
 	}
-	for (triangle = first; triangle < first + count; triangle++)
+	if (skip < 0 || (unsigned long)skip >= count)
+	{
+		return 0;
+	}
+	for (triangle = first + (unsigned long)skip; triangle < first + count; triangle++)
 	{
 		float normal[3] = { 0.0f, 0.0f, 0.0f };
 		int corner;

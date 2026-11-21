@@ -115,6 +115,9 @@ next */
 struct cursor
 {
 	long lightmap_index, material_index, surface;
+	/* (the current surface's triangles sent already, near level then far:
+	a remodelled surface past a slice goes in parts) */
+	long done;
 };
 
 /* ---------- globals */
@@ -651,47 +654,58 @@ static long slice_make(
 				cursor->surface++;
 				continue;
 			}
-			if (made + near_count + far_count > SLICE)
+			/* (a surface whole in a slice where it fits; one past a slice (a
+			remodelled cliff's, 100,000 triangles and more) begun on a slice of
+			its own and sent in parts, near level then far, so that every
+			triangle counted is sent: a surface left out had left the set
+			unwhole, and the bake waiting for it) */
+			if (made > 0 && made + near_count + far_count - cursor->done > SLICE)
 			{
-				if (!made)
-				{
-					/* (a surface past a slice whole: none is; cut, so the set goes on) */
-					cursor->surface++;
-					continue;
-				}
 				return made;
 			}
-			for (level = 0; level < 2; level++)
 			{
-				long count = level ? far_count : near_count, written, index;
+				long take = MIN(near_count + far_count - cursor->done, SLICE - made), from = cursor->done;
 
-				if (!count)
+				for (level = 0; level < 2; level++)
 				{
-					continue;
-				}
-				written = prism_world_geometry_surface_triangles((short)cursor->lightmap_index,
-					(short)cursor->material_index, surface, level ? PRISM_WORLD_GEOMETRY_LEVEL_FAR :
-					PRISM_WORLD_GEOMETRY_LEVEL_NEAR, scene_static.positions + made * 9, scene_static.base + made * 6,
-					scene_static.lightmap + made * 6, count);
-				for (index = MAX(written, 0); index < count; index++)
-				{
-					memset(scene_static.positions + (made + index) * 9, 0, 9 * sizeof(float));
-					memset(scene_static.base + (made + index) * 6, 0, 6 * sizeof(float));
-					memset(scene_static.lightmap + (made + index) * 6, 0, 6 * sizeof(float));
-				}
-				if (attributes)
-				{
-					for (index = 0; index < count; index++)
+					long start = level ? near_count : 0, whole = level ? far_count : near_count, written, index;
+					long low = MAX(from, start), high = MIN(from + take, start + whole), count = high - low;
+
+					if (count <= 0)
 					{
-						attributes_write(scene_static.attributes + (made + index) * ATTRIBUTE_WORDS, id,
-							material->first_surface_index + surface, kind,
-							!far_count ? LEVEL_BOTH : level ? LEVEL_FAR : LEVEL_NEAR, lightmap->bitmap_index,
-							scene_static.lightmap + (made + index) * 6, scene_static.base + (made + index) * 6, traced,
-							triangle_indoor(bsp, scene_static.positions + (made + index) * 9));
+						continue;
 					}
+					written = prism_world_geometry_surface_triangles_from((short)cursor->lightmap_index,
+						(short)cursor->material_index, surface, level ? PRISM_WORLD_GEOMETRY_LEVEL_FAR :
+						PRISM_WORLD_GEOMETRY_LEVEL_NEAR, scene_static.positions + made * 9, scene_static.base + made * 6,
+						scene_static.lightmap + made * 6, low - start, count);
+					for (index = MAX(written, 0); index < count; index++)
+					{
+						memset(scene_static.positions + (made + index) * 9, 0, 9 * sizeof(float));
+						memset(scene_static.base + (made + index) * 6, 0, 6 * sizeof(float));
+						memset(scene_static.lightmap + (made + index) * 6, 0, 6 * sizeof(float));
+					}
+					if (attributes)
+					{
+						for (index = 0; index < count; index++)
+						{
+							attributes_write(scene_static.attributes + (made + index) * ATTRIBUTE_WORDS, id,
+								material->first_surface_index + surface, kind,
+								!far_count ? LEVEL_BOTH : level ? LEVEL_FAR : LEVEL_NEAR, lightmap->bitmap_index,
+								scene_static.lightmap + (made + index) * 6, scene_static.base + (made + index) * 6, traced,
+								triangle_indoor(bsp, scene_static.positions + (made + index) * 9));
+						}
+					}
+					made += count;
 				}
-				made += count;
+				cursor->done += take;
 			}
+			if (cursor->done < near_count + far_count)
+			{
+				/* (the slice full in the middle of the surface: the rest next) */
+				return made;
+			}
+			cursor->done = 0;
 			cursor->surface++;
 		}
 	}

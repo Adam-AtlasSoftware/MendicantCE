@@ -67,6 +67,18 @@ long prism_world_geometry_surface_triangles(
 	float *base,
 	float *lightmap,
 	long most);
+/* ... from its skip-th triangle of that level on (a surface past a slice of
+the scene sent in parts) */
+long prism_world_geometry_surface_triangles_from(
+	short lightmap_index,
+	short material_index,
+	long surface,
+	int level,
+	float *positions,
+	float *base,
+	float *lightmap,
+	long skip,
+	long most);
 /* ... the level the surface is drawn at for this frame's camera (1 far, 0
 near: the rule the drawn surfaces follow, off screen too), -1 where it has
 no far level */
