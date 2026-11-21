@@ -686,7 +686,10 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
   `prism_bake_object_static`: a placement of the static kinds at its place, by `scenery_static`'s rule). So the
   vehicles, the characters, weapons on the ground and in hands, the Pelican, projectiles with a model, the machines
   (doors and lifts, which the bake leaves out since prism-v4-m2 c50d3b3d3), equipment and scenery that can move or
-  break are traced as drawn, in their pose and level of detail. A draw is passed over (counted) where its vertices are
+  break are traced as drawn, in their pose and level of detail. So is static scenery a mod's mesh draws (b30's boulders): the frame's
+  traced scene leaves its stock triangles out (`docs/prism_bake.md`, the static scenery), and past
+  `display.prism_rt_objects`' reach a replacement drawn at a level of at most 4096 triangles is still traced as drawn,
+  never by the game's model under it. A draw is passed over (counted) where its vertices are
   not the stock layout, or it is alpha-tested with no cutout coverage; a cutout (foliage on an object) is traced by its
   share of texels drawn. Transparent draws (effects, particles, shields, glass) are not in the G-buffer pass and so not
   traced.
