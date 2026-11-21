@@ -362,7 +362,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -487,7 +493,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -612,7 +624,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -737,7 +755,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -862,7 +886,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -987,7 +1017,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -1112,7 +1148,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -2624,7 +2666,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "near": {
@@ -8325,7 +8373,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   }
  },
@@ -8497,7 +8551,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "budget": {
@@ -8676,7 +8736,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   },
   "budget": {
@@ -8855,7 +8921,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   }
  },
@@ -9027,7 +9099,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   }
  },
@@ -9199,7 +9277,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   }
  },
@@ -9371,7 +9455,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   }
  },
@@ -9543,7 +9633,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   }
  },
@@ -9715,7 +9811,13 @@
     "groove_depth": 0.02,
     "lines_u": 2,
     "lines_v": 2,
-    "max_repeats": 2
+    "max_repeats": 2,
+    "relief": true,
+    "relief_scale": 0.5,
+    "relief_max": 0.012,
+    "relief_reach": 8.0,
+    "relief_tile_triangles": 1000,
+    "relief_budget": 100000
    }
   }
  },
