@@ -255,7 +255,8 @@ static boolean file_exists(char const *path)
 world's geometry bakes again only the BSPs it changes): "geo:pwg:<tag>:
 <size>:<time>" where display.prism_world_geometry is "remodel" and the BSP
 has a remodel (<data>/prism_world/<its tag>.pwg, prism_world_geometry.c),
-else "geo:stock:<tag>"; its tag's path with / for \ */
+else "geo:stock:<tag>"; its tag's path with / for \ (the note keeps the
+rest of a line as the key, so a space in it is kept) */
 static void geometry_token(char const *tag, char *token, unsigned long size)
 {
 	char name[160], path[BAKE_PATH + 200];
@@ -264,12 +265,12 @@ static void geometry_token(char const *tag, char *token, unsigned long size)
 	unsigned long k;
 
 	snprintf(name, sizeof(name), "%s", tag ? tag : "");
+	/* (the path as prism_world_geometry.c opens it: / for \, nothing else
+	changed, so that a tag with a space finds its remodel) */
 	for (k = 0; name[k]; k++)
 	{
 		if (name[k] == '\\')
 			name[k] = '/';
-		else if (name[k] == ' ')
-			name[k] = '_';
 	}
 	snprintf(path, sizeof(path), "%s/prism_world/%s.pwg", platform_data_root(), name);
 	if (geometry && !strcmp(geometry, "remodel") && name[0] && posix_stat(path, &information) == 0)
