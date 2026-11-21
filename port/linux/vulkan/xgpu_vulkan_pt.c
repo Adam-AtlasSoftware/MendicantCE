@@ -96,7 +96,13 @@ lists, ranked by each lamp's light at the cell's few points, do not: at
 0.036, a10's door windows moving 0.112 to 0.030, b30's G4 moving 0.156 to
 0.076 and 0.116 to 0.060, the frames' energy back to within 5% of R's. 1 to
 4 measured in v4_dark_interiors_runs (U1 to U4). Its cost is a descent of
-the tree a candidate in place of a cell's lookup */
+the tree a candidate in place of a cell's lookup: the light pass about 8 to
+16% longer a tree candidate (whole-card Atlas runs, the light pass against
+the denoiser's passes in the same run), so 4 cost it about 30 to 50% (an
+estimate of +3 ms of the RTX 3070 Ti's at G4, 1080p; not yet timed on it).
+2 in the performance profile were tried and not kept: b30's G4 frames
+darker than prism-9's (energy 0.70 to 0.77 of R's); one descent shared by
+the 4 was slower (its stack in local memory) */
 #define TREE_CANDIDATES_DEFAULT 4
 /* whether the tree's importance takes its nodes' emitter cones (round 6:
 1.5 ms of the RTX 3070 Ti's light pass at G4, 1080p) */

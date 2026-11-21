@@ -64,7 +64,14 @@ Why nothing is counted twice:
   not the lamps' own (its indirect layer over its whole, `luma(indirect) / luma(total)`), and ReSTIR DI keeps the
   lamps' specular light: c20's still error against R 0.0576 to 0.0099, its blotch 0.0516 to 0.0285, the other poses
   unchanged. Taking the lamps' specular light from the probes alone instead (`HALO_PT_PROBE_NEE=2`) lost the lamps'
-  glow pools on the walls that R has (c20 0.110); both, as before, is `HALO_PT_PROBE_NEE=1`.
+  glow pools on the walls that R has (c20 0.110); both, as before, is `HALO_PT_PROBE_NEE=1`. Since the second round
+  the probe is scaled only in an indoor cluster (`XGPU_SCENE_INDOOR`, the structure's flag at the pixel), with the
+  units rig's floor kept beside the indirect layer: the bake's direct light holds the domes' sky as well as the
+  lamps, and outdoors that share is the sky's, which no lamp sample gives back. Measured at 720p against R, the
+  scaling was never visibly darker outdoors (b30's beach and a30's cliffs, sunlit: still error and energy within 6% and
+  1% with it, without it and indoor-only; a10's cryo bay within 1%); c20 keeps most of its gain (still error 0.060
+  unscaled, 0.010 scaled everywhere, 0.013 indoor-only). A fixture's light on the wall still dims the probe by its
+  share (only the lamps' faces are in a probe); a lamp mask in the probes' bake would end that.
 
 An object's normal turned from the eye (its vertices' normal at a silhouette, a two-sided card seen from behind) is
 mirrored about the plane square to the eye before anything is lit (the level's, one-sided, is turned to the eye as
@@ -123,8 +130,36 @@ found safe:
   as Conty Estevez and Kulla's orientation bounds; a leaf's, its triangle's normal), and a node's importance takes the
   best cosine any of its lamps can have toward the point (the angle to the cone's axis less its half angle and the
   sphere's angle from the point; nought past a right angle, the lamps being one-sided): a wall's lamps facing away
-  from the point no longer draw its picks. `HALO_PT_TREE_CANDIDATES` (1 to 8, 1 by default) sets how many of the 8
-  initial candidates come from the tree (the rest the grid's), each weighed by its own source's probability.
+  from the point no longer draw its picks. `HALO_PT_TREE_CANDIDATES` (1 to 8, 4 by default) sets how many of the
+  initial candidates come from the tree (the rest the grid's), each weighed by its own source's probability. Until the
+  dark interiors' second round that count and the cones' switch sat in the job's `volume.w`, which the recent dynamic
+  lights' count then overwrote: the tree gave 1 + that count (mod 16) candidates and its cones came on past 16 recent
+  lights. They are the reuse flags' bits 4 to 7 and 3 now.
+- **The specular lobe in the tree** (the dark interiors' second round, `HALO_PT_TREE_LOBE`, on by default): for a
+  surface under a roughness of 0.9, a node's importance adds the surface's specular lobe to the cosine bound: the
+  GGX distribution at the half angle nearest the node's bounding cone about the mirror direction, by the surface's F0,
+  over 4 n.v (Conty Estevez and Kulla 2018's importance with a BRDF term). Only the descent's choices change; its
+  probability is the product of the choices it made, so each candidate's weight stays exact
+  (`tools/test_prism_pt.py`). **All 4 candidates are the tree's by default.** The grid's lists rank a cell's lamps by
+  the light they give its few points: a small lamp whose glint a semi-glossy, normal-mapped wall shows but whose
+  diffuse light there is little was a candidate in hundreds of frames, each find a white sparkle the denoiser held
+  (b30's G4 walls, c10's lab door, a10's corridor floor through the door windows), and the frames lost that light
+  (energy 0.80 to 0.90 of R's at those poses). The tree, with the lobe, finds those lamps most frames. At 720p
+  against R (`v4_dark_interiors_runs`, variants T0, U1 to U4): c10's lab still error 0.045 to 0.015 and moving
+  0.084 to 0.036, a10_g5k1's moving error 0.112 to 0.030, b30_g4k1's moving 0.156 to 0.076, b30_g4k2's 0.116 to
+  0.060, the frames' energy back within about 5% of R's; c10's corridor, c20 and a30 unchanged. 2 tree candidates
+  without the lobe left a10 at 0.083; 2 with it, 0.044; 1 with it, 0.056. The final build at 1080p against
+  prism-9 (variant G): moving error at b30_g4k1 0.132 to 0.070, b30_g4k2 0.101 to 0.050, c10's lab 0.079 to 0.027,
+  a10_g5k1 0.102 to 0.025, c20 0.064 to 0.023; still error at c10's lab 0.047 to 0.012 and b30_g4k2 0.053 to 0.027;
+  the bright and outdoor poses unchanged within the runs' spread. b30's still frames are now slightly brighter than R
+  (1.07 to 1.10 of its energy; prism-9 0.80 to 0.92). **Cost**: a descent of the tree a candidate in place of a cell's
+  lookup. Whole-card Atlas runs, the light pass against the denoiser's passes of the same run (the cards' clocks
+  varied threefold from run to run), put each tree candidate at 8 to 16% of the light pass, 4 at 30 to 50%: an
+  estimate of about +3 ms of the RTX 3070 Ti's at G4, 1080p, not yet timed on that card. `HALO_PT_TREE_CANDIDATES=1`
+  gives back the old count. 2 in the performance profile left b30's G4 darker than prism-9 (0.70 to 0.77 of R's
+  energy) and were not kept; one descent shared by the 4 picks was slower than four. Under DLSS Ray Reconstruction the
+  salt is gone too, but its frames are brighter than before at b30 and c10's lab (1.34 to 1.46 of R's energy, from
+  1.16 to 1.19), the brightening of RR noted in prism_plugin.md.
 - **Temporal reuse by default.** The last frame's reservoir at the surface's place there (the G-buffer's motion), reused only
   where its guide is this surface's (the same instance, the normal, the plane: as the denoiser's history, so no sample
   crosses an edge or an opening), its sample's target evaluated again at this pixel, its confidence capped at 8
@@ -231,7 +266,7 @@ found safe:
 ### The lamp ray (the dark interiors' round)
 
 A rough pixel whose reflection the probes give (roughness above the traced reflection's 0.35, up to
-`HALO_PT_LAMP_RAY`, 0.7 by default, 0 none) traces one GGX ray (60 units at most) that only looks for a lamp's face
+`HALO_PT_LAMP_RAY`, 0 by default since the second round, 0.7 as measured here) traces one GGX ray (60 units at most) that only looks for a lamp's face
 (`lamp_met`); what it meets is shared with ReSTIR DI's specular light by the same power heuristic as the traced
 reflection's (`lamp_mis_nee`), the rest of the reflection is the probe's. Semi-rough, normal-mapped walls (roughness
 0.4 to 0.5: b30's G4 walls) showed every small lamp's highlight as white sparkles: ReSTIR's candidates are drawn by
@@ -245,6 +280,10 @@ weights that sum to 1 keep the estimate unbiased. At 720p, against the probes' f
 spread at b30 is wide): b30_g4k1's still error 0.267 to 0.163 and dark blotch 0.175 to 0.092, b30_g4k2's still
 error 0.124 to 0.047; the other poses unchanged. b30's walls still sparkle in motion; their lamps' glints are not
 all the ray's to find (b30 has 32 fixtures, of which ReSTIR draws 8 at random a pixel: the next thing to look at).
+**Off by default since the second round**: its cost was never measured (about 1 to 1.5 ms of the RTX 3070 Ti's at G4
+estimated) and the lobe-aware tree candidates find the same lamps at no ray; with them the ray changed nothing
+measurable. Weighing all 32 of b30's fixtures each frame instead of 8 at random was tried and left out: the live
+estimator's own 1024-frame mean fell to 0.89 of R's at b30_g4k2 (0.99 with 8), and the blotch rose.
 
 ## ReSTIR GI
 
@@ -556,7 +595,8 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   plane's distance, its normal, the same instance (never across an object's or the level's edge) and its luminance
   against the pixel's by the variance (the diffuse's prefiltered over the pixel's cross, as SVGF prefilters it); the
   specular's kernel narrowed by the roughness and stopped after three steps (none on a mirror).
-- **stabilize** (the dark interiors' round, `HALO_PT_STABILIZE`, 8 frames by default, 0 none; ReBLUR's temporal
+- **stabilize** (the dark interiors' round, `HALO_PT_STABILIZE`, 0 (none) by default since the second round, 8
+  frames as measured here; ReBLUR's temporal
   stabilisation, written from Zhdan's published talks): after the a-trous steps the filtered diffuse and specular
   light as shown keep a history of their own (`stab_*`, by parity), taken from the last frame where the guide finds
   the surface (the temporal pass's test, bilinear over the kept taps), held to the filtered frame's 3 × 3 on the same
@@ -565,7 +605,17 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   flashlight comes and goes as fast as before, `v4_dark_interiors_runs`' flash runs). The composite reads it
   (`parameters.y` 1). The light's histories are not touched. It lowered the moving frames' flicker at most dark poses
   (median 1.19 to 1.13 of Classic's at 720p); at 16 frames a10's door windows lagged (its moving error 0.101 to
-  0.121), at 8 less (0.114).
+  0.121), at 8 less (0.114). Off by default since the second round: alone it raised b30_g4k2's moving error 1.22
+  times (the first round's 1080p regression there, 1.25 times, was its), its cost is unmeasured, and the tree's
+  candidates took most of the flicker it was for.
+  Tried in the second round and not kept (720p, the dark poses): ReSTIR DI's permutation (still error 1.3 to 2.8
+  times), the boiling filter at 0.2 (darker, c10's lab still error 1.9 times), the pre-blur (`HALO_PT_PREBLUR=1`) and
+  a pre-blur of only each sample's excess over its neighbourhood: both turned the sparkles into larger glitter the
+  history kept (c10's lab still blotch 1.45 to 1.6 times); 8 grid candidates (c10's lab worse 1.65 times); ReSTIR DI
+  without its spatial reuse (worse everywhere). The still eye's 128-frame history and confidence of 20 were checked
+  against motion in front of a still camera (the player strafing and firing through the view, `stillfx` runs): the
+  trail once the motion stops was shorter than prism-9's (its summed difference to the settled frame 172 against
+  208 at b30, 221 against 276 at c10's lab), the muzzle flashes lit and gone as fast.
   **The histories' lengths**: the slow history is at most 32 frames while the eye moves (`HALO_PT_HISTORY`) and 128
   for a still eye (`HALO_PT_HISTORY_STILL`: the camera exactly the last frame's), and ReSTIR DI's reservoirs'
   confidence 20 frames for a still eye (`HALO_PT_RESTIR_M_STILL`, 8 moving): at 32 a still view never passed 32
