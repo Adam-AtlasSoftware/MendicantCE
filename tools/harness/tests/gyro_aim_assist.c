@@ -101,6 +101,8 @@ static int halo_linux_flick_look(short gamepad_index, real *yaw)
 	*yaw = world_flick_yaw;
 	return *yaw != 0.0f;
 }
+/* (the third-person camera's reticle assist: the view only, chase_camera.c) */
+static void chase_camera_assist_turn(short local_player_index, real yaw, real pitch, boolean target, real seconds) {}
 
 #include "under_test.inc"
 

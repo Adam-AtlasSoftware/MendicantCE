@@ -111,8 +111,11 @@ def test_settings_layout(aspect, folder, root, tab, platforms):
     all on the screen, none over another; 21:9 as 16:9. In each lighting mode, the rows packed as the engine packs
     them (menu_functions.c's settings_rows_pack after lighting_rows_show): the files' places are every mode's rows
     and every platform's, which the list does not show at once."""
-    for mode in port_settings.LIGHTING_MODES:
-        _check_settings_layout(WIDTHS[aspect], root, tab, platforms, mode)
+    shown = [mode for mode in port_settings.LIGHTING_MODES
+             if _check_settings_layout(WIDTHS[aspect], root, tab, platforms, mode)]
+    # (a page of one lighting mode's rows (Video > PRISM's Classic Lighting, Path Tracing, Light Bake...) has none in
+    # the other modes, where its link on PRISM's page is hidden: it is checked in the modes that reach it)
+    assert shown, f"{root}: no rows in any lighting mode"
 
 
 def _check_settings_layout(width, root, tab, platforms, mode):
@@ -123,7 +126,8 @@ def _check_settings_layout(width, root, tab, platforms, mode):
     rows = [box for box in boxes if box.name.startswith("op_") and box.path[-1] == "options_menu"]
     sections = [box for box in boxes if re.fullmatch(r"section_\d+", box.name)]
     panel = one(boxes, "tab_panel" if tab else "page_panel")
-    assert rows
+    if not rows:
+        return False
     for box in rows + sections + [panel]:
         assert box.inside(area), f"{box} is within the margin of the screen's edge {area}"
     for box in rows + sections:
@@ -173,6 +177,7 @@ def _check_settings_layout(width, root, tab, platforms, mode):
         for value in [box for box in boxes if box.name.endswith(("_spinner", "_track"))]:
             before = [box for box in narrow if box.name == value.name and box.path == value.path]
             assert before and value.x1 - value.x0 > before[0].x1 - before[0].x0, value
+    return True
 
 
 @pytest.mark.parametrize("aspect", WIDTHS)

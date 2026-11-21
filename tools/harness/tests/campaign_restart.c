@@ -200,6 +200,43 @@ static boolean mcc_cache_require(char const *name, unsigned long checksum)
 	return FALSE;
 }
 
+/* PRISM's light bake (menu_functions.c's bake_question, prism_bake_menu.c):
+every level is baked here, so campaign_start never asks */
+static struct
+{
+	char const *open;
+	char map[256];
+	short difficulty, controller;
+	boolean confirmed;
+} bake_question;
+
+static boolean prism_bake_menu_level_unbaked(char const *map_name)
+{
+	(void)map_name;
+	return FALSE;
+}
+
+static boolean menu_screen_open_ready(char const *name)
+{
+	(void)name;
+	return FALSE;
+}
+
+static void prism_bake_menu_asked(char const *map_name)
+{
+	(void)map_name;
+}
+
+static void prism_bake_menu_level_started(char const *map_name)
+{
+	(void)map_name;
+}
+
+static void platform_log(char const *format, ...)
+{
+	(void)format;
+}
+
 #include "under_test.inc"
 
 /* the map change (main.c's main_new_map): TRUE if the saved game was loaded */
