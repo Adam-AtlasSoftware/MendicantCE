@@ -893,11 +893,8 @@ bool structure_flag_hit(vec3 o, vec3 d, float t_max, out bool inside)
     }
     return false;
 }
-vec3 floor_light(Surface g)
+bool surface_inside(Surface g)
 {
-    vec3 outdoor = ambient(), inside_light = ambient_indoor();
-    if (!units_rig() || all(equal(outdoor, inside_light)))
-        return outdoor;
     bool inside = false;
     if (g.instance == 0u)
     {
@@ -906,7 +903,14 @@ vec3 floor_light(Surface g)
     }
     else
         structure_flag_hit(g.point + vec3(0.0, 0.0, 0.01), vec3(0.0, 0.0, -1.0), 64.0, inside);
-    return inside ? inside_light : outdoor;
+    return inside;
+}
+vec3 floor_light(Surface g)
+{
+    vec3 outdoor = ambient(), inside_light = ambient_indoor();
+    if (!units_rig() || all(equal(outdoor, inside_light)))
+        return outdoor;
+    return surface_inside(g) ? inside_light : outdoor;
 }
 /* the floor the bake added at a ray's hit: its texel's triangle's (flag 8 in
 the bake's setup), or the volume's probes' (where they stand: the bake's
@@ -2678,8 +2682,21 @@ void main()
             (its indirect layer over its whole), so that the lamps are not
             counted twice (c20's Library walls: 47% too much specular light
             against R) and their pools on the walls stay ReSTIR's) */
-            if (texel && (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u)
-                probe *= clamp(luma(bake_indirect) / max(luma(bake_total), 1.0e-6), 0.0, 1.0);
+            /* (Only in an indoor cluster (XGPU_SCENE_INDOOR), and the
+            units rig's floor kept with the indirect layer: the bake's
+            direct light holds the domes' sky and the floor as well as the
+            lamps, and outdoors that share is the sky's, which no lamp
+            sample gives: the whole share taken there dimmed a rough
+            surface's reflected sky. Indoors the clusters have no sky, so
+            the direct share less the floor is the lamps' and the
+            fixtures'. Only the lamps' faces are in the probe: where a
+            fixture lights the wall the probe is dimmed by its share too,
+            an approximation a lamp mask in the probes' bake would end) */
+            if (texel && (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u && surface_inside(g))
+            {
+                vec3 kept = bake_indirect + ambient_indoor();
+                probe *= clamp(luma(kept) / max(luma(bake_total), 1.0e-6), 0.0, 1.0);
+            }
             clean_s += probe * share;
         }
     }
