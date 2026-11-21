@@ -105,7 +105,7 @@ extern "C" {
 
 enum
 {
-	PRISM_BAKE_CACHE_VERSION = 3, /* (1: 32-bit job indices, no plan generations; 2: no packed records: not read) */
+	PRISM_BAKE_CACHE_VERSION = 3, /* (1: 32-bit job indices, no plan generations: not read; 2: no packed records, read) */
 	PRISM_BAKE_CACHE_HEADER_SIZE = 256,
 	PRISM_BAKE_CACHE_RECORD_HEADER_SIZE = 40,
 	/* a record's payload at most (a 1024 x 1024 tile of 64-byte texels) */

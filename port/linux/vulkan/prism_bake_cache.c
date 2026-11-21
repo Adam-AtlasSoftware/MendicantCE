@@ -179,7 +179,10 @@ static void header_write(unsigned char *h, struct prism_bake_cache_key const *ke
 version */
 static int header_read(unsigned char const *h, struct prism_bake_cache_key *key)
 {
-	if (memcmp(h, header_magic, 8) || get32(h + HEADER_VERSION) != PRISM_BAKE_CACHE_VERSION ||
+	/* (version 2, whose records are all plain, is read too: its key is a baker's
+	before, so it is stale, never resumed) */
+	if (memcmp(h, header_magic, 8) || (get32(h + HEADER_VERSION) != PRISM_BAKE_CACHE_VERSION &&
+		get32(h + HEADER_VERSION) != 2) ||
 		get32(h + HEADER_SIZE_FIELD) != PRISM_BAKE_CACHE_HEADER_SIZE ||
 		get32(h + HEADER_CRC) != prism_bake_crc32(0, h, HEADER_CRC))
 	{
