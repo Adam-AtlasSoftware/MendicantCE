@@ -1542,13 +1542,20 @@ static void run_cone(
 	return;
 }
 
-/* the part's surfaces' cones of facings: those of a surface whose mean
-facing is not its stock triangle's (some remodel written the other way
-about) are left at -1, never facing away; the count of those returned */
+/* the part's surfaces' cones of facings. A surface whose mean facing is
+not its stock triangle's front is marked in turned (bit 0 its near
+triangles, bit 1 its far ones; NULL: left at -1, never facing away): the
+remodel wound its triangles to its vertices' normals where CE's triangle
+is wound against its own (d40's steel, a10's panels: CE draws such a
+triangle by its winding, and its culling skips it by that front), so the
+GPU culled the remodel exactly where CE showed the stock face, and the sky
+showed through (d40g's ramp). Such a run is turned to the stock's winding
+(turn_triangles) and its cone with it. The count of those returned */
 static long part_cones(
 	struct structure_bsp *bsp,
 	struct pwg_material_view const *view,
-	struct world_material *made)
+	struct world_material *made,
+	byte *turned)
 {
 	long vertex_size = rasterizer_geometry_get_vertex_size(view->material->vertices.type);
 	byte const *stock_vertices = (byte const *)view->material->compressed_vertex_data.address;
@@ -1605,15 +1612,40 @@ static long part_cones(
 			stock.j = -(e0[2] * e1[0] - e0[0] * e1[2]);
 			stock.k = -(e0[0] * e1[1] - e0[1] * e1[0]);
 		}
-		if (near->cutoff > 0.0f && dot_product3d(&near->axis, &stock) <= 0.0f)
+		/* (a run with no facing, no area, has a zero axis: never turned) */
+		if (dot_product3d(&near->axis, &stock) < 0.0f)
 		{
-			near->cutoff = -1.0f;
+			if (turned)
+			{
+				turned[local] |= 1;
+				near->axis.i = -near->axis.i;
+				near->axis.j = -near->axis.j;
+				near->axis.k = -near->axis.k;
+			}
+			else
+			{
+				near->cutoff = -1.0f;
+			}
 			disagree++;
 		}
-		if (far->cutoff > 0.0f && dot_product3d(&far->axis, &stock) <= 0.0f)
+		if (made->far_triangles && dot_product3d(&far->axis, &stock) < 0.0f)
 		{
-			far->cutoff = -1.0f;
+			if (turned)
+			{
+				turned[local] |= 2;
+				far->axis.i = -far->axis.i;
+				far->axis.j = -far->axis.j;
+				far->axis.k = -far->axis.k;
+			}
+			else
+			{
+				far->cutoff = -1.0f;
+			}
 			disagree++;
+		}
+		else if (!made->far_triangles)
+		{
+			*far = *near;
 		}
 	}
 
@@ -1690,6 +1722,65 @@ static void fallback_vertices(
 its stock triangle (the stock surface's corners in their order: its front),
 the rest of no area (the GPU draws nothing of them), and its far level that
 same run (its own far triangles, if any, are left undrawn) */
+/* the runs part_cones marked turned wound as their stock triangles are
+(corners 1 and 2 swapped), each triangle once: a surface with no far level
+of its own shares its near run */
+static void turn_triangles(
+	struct world_material const *made,
+	byte const *turned,
+	word *indices)
+{
+	byte *mark;
+	long local;
+	unsigned long triangle;
+
+	if (!turned || made->triangle_count <= 0)
+	{
+		return;
+	}
+	mark = calloc((unsigned long)made->triangle_count + 1, 1);
+	if (!mark)
+	{
+		return;
+	}
+	for (local = 0; local < made->surface_count; local++)
+	{
+		unsigned long first, count;
+
+		if (turned[local] & 1)
+		{
+			first = made->surface_first_triangle[local];
+			count = made->surface_first_triangle[local + 1] - first;
+			if (first <= (unsigned long)made->triangle_count && count <= (unsigned long)made->triangle_count - first)
+			{
+				memset(mark + first, 1, count);
+			}
+		}
+		if ((turned[local] & 2) && made->far_triangles)
+		{
+			first = made->far_triangles[2 * local];
+			count = made->far_triangles[2 * local + 1];
+			if (first <= (unsigned long)made->triangle_count && count <= (unsigned long)made->triangle_count - first)
+			{
+				memset(mark + first, 1, count);
+			}
+		}
+	}
+	for (triangle = 0; triangle < (unsigned long)made->triangle_count; triangle++)
+	{
+		if (mark[triangle])
+		{
+			word swap = indices[3 * triangle + 1];
+
+			indices[3 * triangle + 1] = indices[3 * triangle + 2];
+			indices[3 * triangle + 2] = swap;
+		}
+	}
+	free(mark);
+
+	return;
+}
+
 static void fallback_triangles(
 	struct pwg_material_view const *view,
 	struct world_material *made,
@@ -1743,6 +1834,8 @@ static boolean world_geometry_make(
 	unsigned long *corner_sources = NULL;
 	unsigned long most_fallbacks = 0;
 	long fallen = 0;
+	/* (a part's surfaces turned to their stock triangles' winding: part_cones) */
+	byte *turned = NULL;
 
 	for (index = 0; index < view_count; index++)
 	{
@@ -1898,7 +1991,8 @@ static boolean world_geometry_make(
 				memset(made->far_state, 2, view->part_surface_count + 1);
 			}
 		}
-		disagree += part_cones(bsp, view, made);
+		turned = calloc(view->part_surface_count + 1, 1);
+		disagree += part_cones(bsp, view, made, turned);
 		if (made->cones)
 		{
 			/* (a surface drawn as its stock triangle: its cones are the
@@ -1975,6 +2069,9 @@ static boolean world_geometry_make(
 			indices[element] = (word)((unsigned long)view->triangles[2 * element] |
 				((unsigned long)view->triangles[2 * element + 1] << 8));
 		}
+		turn_triangles(made, turned, indices);
+		free(turned);
+		turned = NULL;
 		fallback_triangles(view, made, indices);
 		made->index_resource.common = D3DCOMMON_TYPE_INDEXBUFFER | 1;
 		made->index_resource.data = (unsigned long)indices;
@@ -2017,7 +2114,7 @@ static boolean world_geometry_make(
 	}
 	platform_log("prism world geometry: %s: %ld of %ld material parts remodelled, %lu triangles for %lu (%.1fx), "
 		"%lu vertices, %lu KB of contiguous memory; %.1f%% of the surfaces' levels can face away whole "
-		"(%ld turned the other way about from their stock triangles); %ld surfaces drawn as their stock triangles",
+		"(%ld levels wound against their stock triangles, turned to them); %ld surfaces drawn as their stock triangles",
 		path, world_geometry.material_count, view_count, triangles, stock_triangles,
 		stock_triangles ? (double)triangles / (double)stock_triangles : 0.0, vertices, total / 1024,
 		coned ? 100.0 * (double)facing / (double)coned : 0.0, disagree, fallen);
