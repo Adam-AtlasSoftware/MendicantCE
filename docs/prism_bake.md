@@ -423,8 +423,9 @@ a bake of the settings chosen, before they are played, as other games compile th
   Rebake Lightmaps and Progress on Screen rows are gone: `display.bake` `"ask"` is read as `"auto"` and written so;
   `"off"`, `display.bake_rebake` and `display.bake_indicator` stay config.toml's (and the console's).
 
-The default quality is `max`, whose time is the darkest texels' (above, "Measurements"): its estimate on the main menu
-can be hours a level; `ultra` bakes a level in minutes.
+The default quality is `ultra` (since prism-9): it bakes a level in minutes, so the main menu's bake feels like a
+game's shader compilation. `max`, whose time is the darkest texels' (below, "Measurements"), can take hours a level
+and stays for whoever asks for it; a config.toml that names a quality keeps it.
 
 ## How Raster reads the bake
 
