@@ -99,8 +99,9 @@ three cascades, both faces) draw every surface's far level
 (display.prism_world_geometry_shadows "far"; "remodel" or "stock" the
 map's triangles), and the world occlusion's pre-pass
 (render_world_ao_prepass), whose level gives only where objects darken it
-and what hides them, the map's own triangles
-(display.prism_world_geometry_occlusion "stock"; "far", "remodel"). Each
+and what hides them, the surfaces as drawn
+(display.prism_world_geometry_occlusion "remodel", by default: a
+pixel reads its own surface's occlusion; "far", "stock" cheaper). Each
 surface's near and far levels have a cone of facings (the bounds' sphere,
 the mean of the triangles' facings and the least cosine to it, made as the
 file loads): a level that faces away from the camera whole is skipped in
@@ -422,7 +423,7 @@ static void settings_read(
 	}
 	world_geometry.enabled = enabled;
 	world_geometry.shadow_proxy = proxy_setting("display.prism_world_geometry_shadows", _world_proxy_far);
-	world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", _world_proxy_stock);
+	world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", _world_proxy_remodel);
 	/* (port: display.prism_rt traces the remodel's level, prism_rt.c's
 	world_level: the pre-pass its rays start from draws the same, so that
 	they leave the surface they trace, not one inside or above it) */

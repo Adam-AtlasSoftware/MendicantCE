@@ -784,15 +784,17 @@ static const struct config_setting config_settings[] =
 		"shadows at a fraction of the cost); \"remodel\": as the surfaces are\n"
 		"drawn, near and far; \"stock\": the map's own triangles (cheapest).\n"
 		"Read each frame (prism_set \"world_geometry_shadows stock\")." },
-	{ "display.prism_world_geometry_occlusion", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
+	{ "display.prism_world_geometry_occlusion", _config_string, "\"remodel\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
 		_environment_value, _platform_desktop,
 		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
 		"display.ambient_occlusion \"world\": the level's shape the occlusion's\n"
 		"pre-pass is drawn from (where the objects darken the level, and what\n"
-		"hides them). \"stock\": the map's own triangles (cheapest; the\n"
-		"objects' contact shadows are as soft as the field); \"far\": every\n"
-		"surface's far level; \"remodel\": as the surfaces are drawn. Read each\n"
-		"frame (prism_set \"world_geometry_occlusion far\")." },
+		"hides them). \"remodel\" (default): as the surfaces are drawn, so each\n"
+		"pixel reads its own surface's occlusion; \"far\": every surface's far\n"
+		"level; \"stock\": the map's own triangles (cheapest, but a remodelled\n"
+		"surface then reads the occlusion of CE's shape about it, which\n"
+		"shimmers as the camera moves). Read each frame\n"
+		"(prism_set \"world_geometry_occlusion far\")." },
 	{ "display.prism_world_geometry_facing", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_FACING",
 		_environment_value, _platform_desktop,
 		"PRISM v2, with display.prism_world_geometry \"remodel\": true skips a\n"

@@ -3407,8 +3407,11 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 	if (!draw.pipeline)
 		return 1;
 	/* (display.prism_models: a part a mesh replaces, drawn as its pieces,
-	or not at all; a twin of the pre-pass as it is) */
-	if (!prepass.drawing)
+	or not at all; in the occlusion's pre-pass too, by the stock layout's
+	swap (its twins have no wide variant): before, the pre-pass drew the
+	stock part, so a remodel's pixels read the occlusion, distance and
+	normal of CE's shape about them, a shell of its facings that shimmered
+	as the upsample's nearest texel changed) */
 	{
 		mesh_verdict = xgpu_vulkan_meshes_verdict(&pipeline, draw.bindings,
 			primitive_class(input->primitive) == XGPU_VULKAN_CLASS_TRIANGLES);
@@ -3422,7 +3425,7 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		if (!stream.mesh_wide)
 			stream.mesh_wide = getenv("HALO_MESH_WIDE_OFF") ? 2 : 1;
 		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP && stream.definition->key.pixel.material_pbr &&
-			stream.mesh_wide == 1)
+			stream.mesh_wide == 1 && !prepass.drawing)
 		{
 			struct xgpu_vulkan_pipeline_description wide = pipeline;
 			unsigned long special = stream.definition->key.immediate ? 0 :
