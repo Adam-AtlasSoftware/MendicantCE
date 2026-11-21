@@ -67,7 +67,7 @@ The pages it opens:
 | Image | Exposure | Exposure, Exposure Bias, Tone Curve | R, P |
 | | Post Effects | Bloom, Tone Grade | C, R, P |
 | Upscaling | Resolution | Upscaler (`display.upscaler`: Off, FSR 3.1, DLSS once its plugin is ready), Upscale Quality (while an upscaler is on) | R, P |
-| Light Bake | Light Bake | Bake Quality, Sky Light (a change of either asks, then bakes every level again on the main menu) | R, P |
+| Light Bake | Light Bake | Bake Quality (a change asks, then bakes every level again on the main menu), Sky Light (applied at once: the layered bake recombines it, no rebake) | R, P |
 | | Levels | Each campaign level's bake (Baked, Baking 37%, Loading, Part Baked, Not Baked, No Map, Failed), Rebake All (asks first) | R, P |
 | Materials & Textures | Materials | Material Packs (`display.material_packs`) | R, P |
 | | | PBR Materials (`display.prism_materials`) | C, R, P |
@@ -100,8 +100,9 @@ Pro 2v2 game holds all three at Classic.
 **The light bake needs no asking** (`docs/prism_bake.md`, "The bake on the main menu"): under both PRISM modes the main
 menu bakes the campaign's levels that lack a bake of the settings chosen, as other games compile their shaders, with
 a line and a bar under the menu; a level started before its bake is done asks (PLAY NOW with Classic's light while it
-bakes in the background, or WAIT); a change of a setting the bake holds (Bake Quality, Sky Light, World Geometry,
-Cutout Shadows) asks (REBAKE or UNDO). Light Bake's old Bake (While Playing, When Asked, Never), Rebake Lightmaps and
+bakes in the background, or WAIT); a change of a setting the bake holds (Bake Quality, World Geometry, Cutout
+Shadows; World Geometry rebakes only the BSPs it changes) asks (REBAKE or UNDO); Sky Light and the lamps' brightness
+are recombined from the layered bake at once, with no rebake. Light Bake's old Bake (While Playing, When Asked, Never), Rebake Lightmaps and
 Progress on Screen rows are gone: `display.bake` `"ask"` is read as `"auto"` (and written so), `"off"` and
 `display.bake_indicator` stay config.toml's.
 

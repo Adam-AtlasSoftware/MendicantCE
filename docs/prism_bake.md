@@ -295,6 +295,55 @@ filter replayed on the bake's log with each texel's level its plain mean. A four
 A texel whose first rays meet mostly one-sided faces' backs is inside the level (the stock world's overlapping
 geometry); it and a texel no triangle holds take their light from their valid neighbours.
 
+## The layers
+
+The bake is layered (BAKE_VERSION 19, `prism_bake_layers.h`): settings that only scale or tint a light are applied as
+the bake loads, with no rebake, as a game applies a setting after compiling its shaders once. Every term of the
+estimator is linear in its light's colour x power, channel by channel, so a texel's light (less the sun's direct
+light, which Raster and Path Traced take live from the rig and the sun mask) is the sum of five layers, each with
+every bounce it starts:
+
+| Layer | Its weight at load (per channel: the live light over the one baked) |
+| --- | --- |
+| The sun's bounce | the rig's sun (colour x power x the rig's scale) |
+| The sky (its radiance where a path leaves the level) | the rig's sky; 0 under `display.prism_sky_light` `"flat"` |
+| The domes (the sky's other lights) | the domes' colour x power, summed |
+| The fixtures | the rig's fixtures' scale (0 in the fitted rig) |
+| The lamps and glows (light cards, lamp surfaces) | the lamps' materials' largest emission x `display.prism_rt_emissive_scale` |
+
+The lightmap pass and the volume pass keep the layers' means beside the light (`path_layers`, the lightmap's
+accumulators 28 to 39, the volume's 14 to 26). Each finished tile keeps, beside its words as before (`ATLS`), its
+texels' **shares** (`ATLY`: per channel, the sun's bounce, the sky, the domes and the fixtures as bytes of 255, the
+lamps the rest; a flag for an indoor cluster's texel): 13 bytes a texel; each brick its probes' shares of their SH L0
+(`VOLY`). At load, and again whenever the weights change:
+
+- a texel's light is its light as filtered times the sum of the weights by its shares, plus Tool's floor under
+  `"flat"` (the outdoor one, or sky 0's indoor one by the texel's flag; not in the indirect);
+- its indirect light (Path Traced's pool) is scaled by the sun's bounce's and the sky's weights (wholly indirect) and
+  the rest's (the domes', fixtures' and lamps' bounces, by their weights over their shares);
+- a probe's four SH coefficients by its ratio a channel, the flat floor added to its L0;
+- the reflection probes by the BSP's ratio a channel (the volume's light-weighted mean).
+
+At the bake's own light every weight is 1 and the words are copied: a layered bake drawn at the settings it was made
+with is the bake as it was. The direction (`k`, `a0`) stays the bake's. When a weight changes while a level is drawn
+(the Sky Light row, the lamps' brightness, a rig's scale), the log says so ("the light's weights now ...: what is
+drawn recombined, no rebake") and the host recombines every drawn tile (2048 a frame), brick and reflection probe
+from the file, on the CPU, with no GPU work. The bake itself is always made with the sky a light (rig[61] 2) and the
+fixtures at a scale of 1; its base (the light it was made with, `LYRB`) is in the file. A log begun with other
+colours (a changed `debug.prism_rig_scales`) is begun again rather than resumed.
+
+The key keeps only what changes the light's transport: the baker's version, the quality, the level's triangles,
+tiers and static scenery, the materials' albedo and alpha maps and their emission as shares of the largest, the
+cutouts, the sun's direction and disc, the domes' directions, cones and test distances, the sun's test distance,
+which kinds of light there are, the units or the fitted rig (their test distances differ), the lamps' and fixtures'
+places. The colours and powers, `display.prism_sky_light`, the rig's scales and the lamps' brightness are not in it.
+
+**A distributable bake.** The file holds lighting only: the texels' light, direction, indirect light, sun visibility
+and shares, the probes' SH and the reflection cubes (radiance at the mean albedo), the masks, the job ids, the lamp
+grid's lamp indices; never a triangle, an albedo map or the remodel. `LYRB` says whether the bake was of the stock
+world: a pack for a release is the files of a stock bake, keyed by the per-BSP hashes of its key, which the player's
+machine checks against its own maps before it uses the light (the plan is rebuilt from the player's map).
+
 ## What is baked
 
 Each a list of jobs (`prism_bake_cache.h`'s ids), in this order:
@@ -311,7 +360,7 @@ Each a list of jobs (`prism_bake_cache.h`'s ids), in this order:
 
 ## The bake file
 
-`<folder>/<map>/bsp<n>.pbk` (`prism_bake_cache.h`): a log of records, each with its job's id and checksum, appended as
+`<folder>/<map>/bsp<n>.pbk` (`prism_bake_cache.h`, version 3): a log of records, each with its job's id and checksum, appended as
 jobs finish. While the bake runs it is `bsp<n>.pbk.new`, and a quit, a crash or a GPU reset resumes it at the next
 unfinished job (the tiles of the batch then on the GPU are begun again); once every job is done, `DONE` is appended
 and the file renamed over `bsp<n>.pbk`. Its key (the header) holds what the bake was made from: the map's checksum and
@@ -331,6 +380,11 @@ at `display.prism_rt_emissive_scale` 1, and the albedo of `display.prism_rt_mate
 settings (and `display.prism_rt_style`, which picks their defaults) are, so a bake loads in every session of the same
 light settings: `display.prism_sky_light`, `display.prism_rig`, the quality. Those values are the settings' defaults
 with the faithful style: a bake made before at the defaults keeps its key.
+
+**Packed records** (version 3, `prism_bake_pack.h`): the finished file's large records (the tiles, their layers,
+the bricks, their layers, the reflection probes, the masks) are packed: a byte shuffle by the payload's word size, a
+byte delta per plane, then an LZ77 in LZ4's block format, no library needed. A record's header says its unpacked size
+and reading unpacks it, so every reader sees the payload as written; the log while baking stays plain.
 
 **The reach's file.** The walk that finds where the player can be (the reach: the bricks the probes fill, the
 surfaces' tiers) is kept beside the BSP's bake (`<map>/bsp<n>.reach`, keyed by a hash of its inputs), so a BSP drawn
@@ -357,7 +411,7 @@ the first traced window) and the beach stayed CE's light 16 s coming out.
 | `display.prism_raster_composition` | `"ce"`, `"materials"` | CE's shaders compose Raster's light (default), or PRISM's own materials |
 | `display.prism_raster_objects` | `"volume"`, `"classic"` | Objects by the volume's light (default), or never lit under Classic |
 | `display.prism_raster_object_shadows` | `"traced"`, `"classic"` | The moving objects' sun shadows traced (default), or CE's projected ones |
-| `display.prism_sky_light` | `"sky"`, `"flat"` | The sky a light, by what each point sees of it (default), or Tool's flat fill; a change bakes again |
+| `display.prism_sky_light` | `"sky"`, `"flat"` | The sky a light, by what each point sees of it (default), or Tool's flat fill; recombined from the layers, no rebake |
 | `display.prism_exposure`, `_range`, `_speed`, `_bias`, `display.prism_tone_curve` | as the path tracer's | Raster's exposure and tone curve (its style's: `"auto"` and `"filmic"`) |
 
 The bake's diagnostics (environment variables): `HALO_BAKE_TERMS` leaves terms out (1 the domes, 2 the lamps, 4 the
@@ -399,9 +453,12 @@ a bake of the settings chosen, before they are played, as other games compile th
 - **The order.** The level WAIT chose (below), the one played last (the bake folder's `last_played.txt`), the saved
   game's, the one after the last finished (player 1's profile), then the campaign's.
 - **What is baked** is noted beside each map's bake, `<folder>/<map>/baked.txt`: the map's BSPs, and each BSP baked
-  with its key (`prism_bake_key`: the baker's version, `XGPU_BAKE_VERSION`, `display.bake_quality`,
-  `prism_sky_light`, `prism_rig`, `prism_world_geometry`, `prism_rt_alpha`), written by whichever process saw that
-  BSP's bake `DONE` (the worker, or a game played). A level is baked when all its BSPs carry the settings' key. The
+  with its key (`prism_bake_key`: the baker's version, `XGPU_BAKE_VERSION`, `display.bake_quality`, the rig's class
+  (`units`, which `"auto"` is, or `fitted`), `prism_rt_alpha`) and its own geometry (`geo:stock:<tag>`, or
+  `geo:pwg:<tag>:<size>:<time>` where the world is the remodel and the BSP has a `.pwg`), written by whichever process
+  saw that BSP's bake `DONE` (the worker, or a game played). A level is baked when all its BSPs carry the settings'
+  key and their geometry is still what was noted: switching the world's geometry, or one BSP's remodel changing,
+  bakes again only the BSPs it changes. The
   baker checks the whole key as it loads a bake (the map, its geometry, its lights), so a bake the note calls good that
   is not (a map or a remodel changed) is baked again as the level is played.
 - **Resumed.** The bake file is a log the baker resumes at its next unfinished job, so a worker ended (the game quit
@@ -414,7 +471,8 @@ a bake of the settings chosen, before they are played, as other games compile th
   `menu_functions.c`'s `campaign_start`) asks first (`screens/bake_play.xml`): PLAY NOW plays it with Classic's light
   where its bake has nothing yet, the game's own baker going on with it in the background as it is played (the worker
   is ended as the level starts); WAIT (and B) goes back, the main menu baking that level next.
-- **A setting the bake holds changed** (Bake Quality, Sky Light, World Geometry, Cutout Shadows) under a PRISM
+- **A setting the bake holds changed** (Bake Quality, World Geometry, Cutout Shadows, the rig's class; not Sky
+  Light, which the layers recombine) under a PRISM
   lighting asks once it is written (`screens/bake_rebake.xml`): REBAKE (and B) keeps it, and the main menu bakes every
   level again; UNDO writes the settings back.
 - **Light Bake** has Bake Quality, Sky Light, each campaign level's bake (BAKED, BAKING 37%, LOADING, PART BAKED,
@@ -602,7 +660,9 @@ hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 144
 - The moving objects' traced sun shadows are one ray a pixel to the sun's centre: hard edged (CE's projected ones were
   soft blobs), and an object off screen casts none, as it is not drawn in the G-buffer pass.
 - `max`: the tail spread over a subgroup, but no path guiding or light cache yet (Adam's decision on the floor stands).
-- The indirect layer's use by M3's path tracer, BC6H for the layers and the reflection cubes.
+- The indirect layer's use by M3's path tracer; BC6H for the reflection cubes. The layered bake's indirect for the
+  domes', fixtures' and lamps' bounces is scaled by their mix (exact at the defaults), its direction kept as baked,
+  the reflection probes by one ratio for the BSP; the final gather (a diagnostic) is not layered.
 - The remodel needs no atlas of its own: its corners carry CE's lightmap coordinates of the point of their surface, so
   CE's chart map finds a remodel pixel's texels (b30's G2: every level pixel). Its charts are split finer than CE's
   (b30's first BSP: 17,224 against 8,378: its corners on a chart's inner edges need not meet in the same
