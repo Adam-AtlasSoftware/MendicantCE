@@ -197,7 +197,7 @@
 		<string text=""/>
 		<string text=""/>
 		<string text="Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller. A change bakes every level again on the main menu."/>
-		<string text="Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes every level again."/>
+		<string text="Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. Applied at once, with no rebake."/>
 		<string text=""/>
 		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>
 		<string text="The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is."/>

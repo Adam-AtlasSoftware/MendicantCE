@@ -22,8 +22,9 @@ resumes at the next unfinished job.
 		magic "PBKR", its type, its job (the 64-bit job id below), its
 		sequence number (0, 1, 2... in the file's order), its payload's
 		size, the payload's checksum, its generation (a plan's own; a
-		result's, the newest plan's when it was written), the record
-		header's checksum
+		result's, the newest plan's when it was written), the payload's
+		unpacked size where it is packed (prism_bake_pack.h; 0 a plain
+		one: version 3), the record header's checksum
 		the payload, padded to 8 bytes
 
 Job ids. A job's id is a 64-bit value that names the job for as long as
@@ -104,7 +105,7 @@ extern "C" {
 
 enum
 {
-	PRISM_BAKE_CACHE_VERSION = 2, /* (1: 32-bit job indices, no plan generations: not read) */
+	PRISM_BAKE_CACHE_VERSION = 3, /* (1: 32-bit job indices, no plan generations; 2: no packed records: not read) */
 	PRISM_BAKE_CACHE_HEADER_SIZE = 256,
 	PRISM_BAKE_CACHE_RECORD_HEADER_SIZE = 40,
 	/* a record's payload at most (a 1024 x 1024 tile of 64-byte texels) */
@@ -128,7 +129,15 @@ enum prism_bake_record_type
 	PRISM_BAKE_RECORD_PROBE = PRISM_BAKE_CACHE_FOURCC('P', 'R', 'O', 'B'),
 	PRISM_BAKE_RECORD_IMPORTANCE_GRID = PRISM_BAKE_CACHE_FOURCC('I', 'M', 'P', 'G'),
 	PRISM_BAKE_RECORD_REACHABLE = PRISM_BAKE_CACHE_FOURCC('R', 'E', 'A', 'C'),
-	PRISM_BAKE_RECORD_FOOTPRINTS = PRISM_BAKE_CACHE_FOURCC('F', 'O', 'O', 'T')
+	PRISM_BAKE_RECORD_FOOTPRINTS = PRISM_BAKE_CACHE_FOURCC('F', 'O', 'O', 'T'),
+	/* the layered bake (docs/prism_bake.md, "The layers"): the layers'
+	base (the light the bake was made with: what the weights at load are
+	relative to; job none), a lightmap tile's layers (its texels' shares of
+	the light by kind, beside its ATLS), a volume brick's layers (beside
+	its VOLB) */
+	PRISM_BAKE_RECORD_LAYER_BASE = PRISM_BAKE_CACHE_FOURCC('L', 'Y', 'R', 'B'),
+	PRISM_BAKE_RECORD_ATLAS_LAYERS = PRISM_BAKE_CACHE_FOURCC('A', 'T', 'L', 'Y'),
+	PRISM_BAKE_RECORD_VOLUME_LAYERS = PRISM_BAKE_CACHE_FOURCC('V', 'O', 'L', 'Y')
 };
 
 /* what a bake was made from: a change to any field makes it stale */
@@ -214,8 +223,9 @@ struct prism_bake_record
 	uint32_t generation;
 	uint32_t sequence;
 	uint64_t offset; /* the payload's, in the file */
-	uint32_t size;
-	uint32_t payload_crc;
+	uint32_t size; /* the payload's (unpacked: what a read gives) */
+	uint32_t stored; /* its bytes in the file (less than size where it is packed) */
+	uint32_t payload_crc; /* (of the bytes stored) */
 };
 
 struct prism_bake_cache
@@ -286,6 +296,12 @@ after the last whole record. The key must be the file's (else -1: a stale
 bake is rebaked into a new file, not resumed) */
 int prism_bake_cache_resume(struct prism_bake_cache_writer *writer, struct prism_bake_cache *cache, char const *path,
 	struct prism_bake_cache_key const *key, int sync);
+/* a record appended packed (prism_bake_pack.h: its payload words of stride
+bytes; one that does not pack is appended plain): 0, or -1. A read
+unpacks it: its record's size is the payload's, its stored the bytes
+written */
+int prism_bake_cache_append_packed(struct prism_bake_cache_writer *writer, uint32_t type, uint64_t job,
+	void const *payload, size_t size, uint32_t stride);
 /* a record appended: 0, or -1 */
 int prism_bake_cache_append(struct prism_bake_cache_writer *writer, uint32_t type, uint64_t job, void const *payload,
 	size_t size);

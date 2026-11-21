@@ -6,6 +6,7 @@ The baker's cache file: a header and a log of records
 */
 
 #include "prism_bake_cache.h"
+#include "prism_bake_pack.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -315,6 +316,9 @@ enum
 	RECORD_SIZE = 20,
 	RECORD_PAYLOAD_CRC = 24,
 	RECORD_GENERATION = 28,
+	/* (version 3: a packed payload's unpacked size, prism_bake_pack.h; 0 a
+	plain payload) */
+	RECORD_UNPACKED = 32,
 	RECORD_CRC = PRISM_BAKE_CACHE_RECORD_HEADER_SIZE - 4
 };
 
@@ -508,17 +512,20 @@ static int log_read(struct prism_bake_cache *cache, int verify_payloads)
 		record.job = get64(h + RECORD_JOB);
 		record.generation = get32(h + RECORD_GENERATION);
 		record.sequence = get32(h + RECORD_SEQUENCE);
-		record.size = get32(h + RECORD_SIZE);
+		record.stored = get32(h + RECORD_SIZE);
+		record.size = get32(h + RECORD_UNPACKED) ? get32(h + RECORD_UNPACKED) : record.stored;
 		record.payload_crc = get32(h + RECORD_PAYLOAD_CRC);
 		record.offset = offset + PRISM_BAKE_CACHE_RECORD_HEADER_SIZE;
-		if (record.size > PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD || record.offset + padded(record.size) > cache->file_size ||
+		if (record.size > PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD || record.stored > PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD ||
+			record.offset + padded(record.stored) > cache->file_size ||
+			(record.stored != record.size && record.type == PRISM_BAKE_RECORD_PLAN) ||
 			record.sequence != cache->next_sequence ||
 			(record.type == PRISM_BAKE_RECORD_PLAN && (record.generation != cache->plan_generation + 1 ||
 			record.size % 8)))
 		{
 			break;
 		}
-		if (verify_payloads && payload_check(cache->file, record.offset, record.size, record.payload_crc, NULL))
+		if (verify_payloads && payload_check(cache->file, record.offset, record.stored, record.payload_crc, NULL))
 			break;
 		if (cache->record_count == cache->record_capacity)
 		{
@@ -543,7 +550,7 @@ static int log_read(struct prism_bake_cache *cache, int verify_payloads)
 			cache->plan_generation = record.generation;
 			plan = cache->record_count - 1;
 		}
-		offset = record.offset + padded(record.size);
+		offset = record.offset + padded(record.stored);
 		cache->valid_end = offset;
 	}
 	cache->torn = cache->valid_end != cache->file_size;
@@ -588,9 +595,22 @@ void prism_bake_cache_close(struct prism_bake_cache *cache)
 int prism_bake_cache_read(struct prism_bake_cache const *cache, struct prism_bake_record const *record, void *buffer,
 	size_t size)
 {
+	void *packed;
+	int result;
+
 	if (!cache->file || !record || size < record->size)
 		return -1;
-	return payload_check(cache->file, record->offset, record->size, record->payload_crc, buffer);
+	if (record->stored == record->size)
+		return payload_check(cache->file, record->offset, record->size, record->payload_crc, buffer);
+	/* (a packed payload: checked as stored, then unpacked) */
+	packed = malloc(record->stored ? record->stored : 1);
+	if (!packed)
+		return -1;
+	result = payload_check(cache->file, record->offset, record->stored, record->payload_crc, packed);
+	if (!result && prism_bake_unpack(packed, record->stored, buffer, size) != record->size)
+		result = -1;
+	free(packed);
+	return result;
 }
 
 /* ---------- writing */
@@ -649,7 +669,7 @@ int prism_bake_cache_resume(struct prism_bake_cache_writer *writer, struct prism
 }
 
 static int record_append(struct prism_bake_cache_writer *writer, uint32_t type, uint64_t job, uint32_t generation,
-	void const *payload, size_t size)
+	void const *payload, size_t size, size_t unpacked)
 {
 	unsigned char h[PRISM_BAKE_CACHE_RECORD_HEADER_SIZE];
 	static unsigned char const zeros[8] = { 0 };
@@ -664,6 +684,7 @@ static int record_append(struct prism_bake_cache_writer *writer, uint32_t type, 
 	put32(h + RECORD_GENERATION, generation);
 	put32(h + RECORD_SEQUENCE, writer->sequence);
 	put32(h + RECORD_SIZE, (uint32_t)size);
+	put32(h + RECORD_UNPACKED, (uint32_t)unpacked);
 	put32(h + RECORD_PAYLOAD_CRC, prism_bake_crc32(0, payload, size));
 	put32(h + RECORD_CRC, prism_bake_crc32(0, h, RECORD_CRC));
 	if (bake_seek(writer->file, (bake_offset)writer->end, SEEK_SET) || fwrite(h, sizeof(h), 1, writer->file) != 1 ||
@@ -688,7 +709,29 @@ int prism_bake_cache_append(struct prism_bake_cache_writer *writer, uint32_t typ
 	/* (a plan has a generation of its own: prism_bake_cache_append_plan) */
 	if (type == PRISM_BAKE_RECORD_PLAN)
 		return -1;
-	return record_append(writer, type, job, writer->generation, payload, size);
+	return record_append(writer, type, job, writer->generation, payload, size, 0);
+}
+
+int prism_bake_cache_append_packed(struct prism_bake_cache_writer *writer, uint32_t type, uint64_t job,
+	void const *payload, size_t size, uint32_t stride)
+{
+	size_t bound = prism_bake_pack_bound(size), packed_size;
+	unsigned char *packed;
+	int result;
+
+	if (type == PRISM_BAKE_RECORD_PLAN || size < 64 || size > PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD)
+		return prism_bake_cache_append(writer, type, job, payload, size);
+	packed = (unsigned char *)malloc(bound);
+	if (!packed)
+		return prism_bake_cache_append(writer, type, job, payload, size);
+	packed_size = prism_bake_pack(payload, size, stride, packed, bound);
+	/* (one that does not pack is kept plain) */
+	if (!packed_size || packed_size >= size)
+		result = prism_bake_cache_append(writer, type, job, payload, size);
+	else
+		result = record_append(writer, type, job, writer->generation, packed, packed_size, size);
+	free(packed);
+	return result;
 }
 
 int prism_bake_cache_append_plan(struct prism_bake_cache_writer *writer, uint64_t const *jobs, size_t count)
@@ -704,7 +747,7 @@ int prism_bake_cache_append_plan(struct prism_bake_cache_writer *writer, uint64_
 		return -1;
 	for (k = 0; k < count; k++)
 		put64(bytes + k * 8, jobs[k]);
-	result = record_append(writer, PRISM_BAKE_RECORD_PLAN, 0, writer->generation + 1, bytes, count * 8);
+	result = record_append(writer, PRISM_BAKE_RECORD_PLAN, 0, writer->generation + 1, bytes, count * 8, 0);
 	free(bytes);
 	if (!result)
 		writer->generation++;
