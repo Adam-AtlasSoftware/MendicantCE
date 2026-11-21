@@ -152,9 +152,9 @@ def test_recipes_natural_classes_stay_near_collision():
         for cname, c in level["classes"].items():
             if c["kind"] == "rock":
                 seen += 1
-                assert c["cap_in"] <= 0.2 and c["cap_out"] <= 0.06, (name, cname)
+                assert c["cap_in"] <= 0.1 and c["cap_out"] <= 0.06, (name, cname)
                 assert c["floor_cap_in"] <= 0.05 and c["floor_cap_out"] <= 0.05, (name, cname)
-                assert c.get("cap_in_far", c["cap_in"]) <= 0.35
+                assert c.get("cap_in_far", c["cap_in"]) <= 0.15
                 assert "chip_depth" not in c and "strata_depth" not in c
             elif c["kind"] == "ground":
                 seen += 1
