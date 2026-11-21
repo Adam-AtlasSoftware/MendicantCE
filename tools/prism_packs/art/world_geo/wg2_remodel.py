@@ -451,6 +451,9 @@ def main():
     # of this one's (angle-weighted), so that Phong rounds CE's soft folds and leaves its sharp ones (a cliff's lip, a
     # boulder's edge) to the smoothing, where rounding across them would slide the fine triangles over each other
     crease = math.cos(math.radians(rec.get("crease_angle", 55.0)))
+    # (a boundary between two classes is always a crease: rounding sand into the cliff it meets lifted the sand's
+    # coarse lattice into a hump along the cliff's foot, squeezed by the ground's caps into a sawtooth (b30 H2))
+    fclass = np.array([cls[int(m_)] or "" for m_ in fmat], dtype=object)
     nfn = normalize(fn)
     angs = np.zeros((len(F), 3))
     for k in range(3):
@@ -468,7 +471,7 @@ def main():
     for lo_, hi_ in zip(np.concatenate([[0], bounds_]), np.concatenate([bounds_, [len(cv)]])):
         ff, kk = cf[lo_:hi_], ck[lo_:hi_]
         nn = nfn[ff]
-        agree = (nn @ nn.T) >= crease
+        agree = ((nn @ nn.T) >= crease) & (fclass[ff][:, None] == fclass[ff][None, :])
         acc = agree.astype(np.float64) @ (nn * angs[ff, kk][:, None])
         NC[ff, kk] = normalize(acc)
     face_start = {}
@@ -754,8 +757,19 @@ def main():
     tb_owner = np.array([bool(c_) and int(recipes[c_].get("taubin_iters", 0)) > 0 for c_ in tcls])
     tb_v = np.zeros(nV, bool)
     tb_v[T[tb_owner].ravel()] = True
-    if tb and (movable & tb_v).any():
-        Xb = nat.taubin_along(Xb, Nt, E, movable & tb_v, tb)
+    # (a vertex where two classes meet is held by the smoothing too: smoothing across it grew the same fillet)
+    vcls_first = np.full(nV, -1, np.int64)
+    cls_id = {c_: i_ for i_, c_ in enumerate(sorted(set(str(c_) for c_ in tcls)))}
+    tci = np.array([cls_id[str(c_)] for c_ in tcls], np.int64)
+    mixed = np.zeros(nV, bool)
+    for k in range(3):
+        vv = T[:, k]
+        unset = vcls_first[vv] < 0
+        vcls_first[vv[unset]] = tci[unset]
+    for k in range(3):
+        mixed[T[:, k][vcls_first[T[:, k]] != tci]] = True
+    if tb and (movable & tb_v & ~mixed).any():
+        Xb = nat.taubin_along(Xb, Nt, E, movable & tb_v & ~mixed, tb)
         log("taubin", tb, "iterations")
     # each shaped vertex's texture coordinates and texel size, from its owner's stock triangle
     uvv = np.zeros((nV, 2))
