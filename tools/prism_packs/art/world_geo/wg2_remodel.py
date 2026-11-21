@@ -47,6 +47,7 @@ import wg_common as wg  # noqa: E402
 import wg2_shape as shp  # noqa: E402
 import wg2_lod  # noqa: E402
 import wg2_relief as relief  # noqa: E402
+import wg2_ledges as ledges  # noqa: E402
 
 T0 = time.time()
 # the classes whose surfaces are subdivided and moved (metal's are cut and bevelled in place); "smooth": rounded by
@@ -348,6 +349,18 @@ def light_ratio(X, T, cornerN, Xref, refN, occ_X, occ_T, sun, r):
 
 # ---------- main
 
+def nat_spacing(X, E, n):
+    """each vertex's mean edge length"""
+    ln = np.linalg.norm(X[E[:, 0]] - X[E[:, 1]], axis=1)
+    s = np.zeros(n)
+    c = np.zeros(n)
+    np.add.at(s, E[:, 0], ln)
+    np.add.at(s, E[:, 1], ln)
+    np.add.at(c, E[:, 0], 1)
+    np.add.at(c, E[:, 1], 1)
+    return s / np.maximum(c, 1)
+
+
 def main():
     gltf, extract_root, recipes_path, out_path, report_path = args()
     info, mats = wg.load_bsp(gltf)
@@ -634,22 +647,27 @@ def main():
         for k in range(3):
             owner[T[sel, k]] = sel
     o = owner
-    bc = barycentric(V, PA[o], PB[o], PC[o])
-    # Phong rounding over CE's welded normals (displaced classes) and the smooth normal field
-    phong = np.zeros_like(V)
-    Ns = np.zeros_like(V)
-    for k in range(3):
-        Pi = W[wid[stock_tri[o, k]]]
-        Ni = Nw[wid[stock_tri[o, k]]]
-        proj = V - ((V - Pi) * Ni).sum(1, keepdims=True) * Ni
-        phong += bc[:, k:k + 1] * proj
-        Ns += bc[:, k:k + 1] * Ni
-    vshaped = np.zeros(nV, bool)
-    vshaped[T[shaped].ravel()] = True
-    plane = normalize(np.cross(PB[o] - PA[o], PC[o] - PA[o]))
-    sref = stockN[stock_tri[o, 0]] + stockN[stock_tri[o, 1]] + stockN[stock_tri[o, 2]]
-    plane = np.where(((plane * sref).sum(1) < 0)[:, None], -plane, plane)
-    Ns = np.where(vshaped[:, None] & (np.linalg.norm(Ns, axis=1, keepdims=True) > 1e-6), normalize(Ns), plane)
+
+    def surface_frame(V):
+        bc = barycentric(V, PA[o], PB[o], PC[o])
+        # Phong rounding over CE's welded normals (displaced classes) and the smooth normal field
+        phong = np.zeros_like(V)
+        Ns = np.zeros_like(V)
+        for k in range(3):
+            Pi = W[wid[stock_tri[o, k]]]
+            Ni = Nw[wid[stock_tri[o, k]]]
+            proj = V - ((V - Pi) * Ni).sum(1, keepdims=True) * Ni
+            phong += bc[:, k:k + 1] * proj
+            Ns += bc[:, k:k + 1] * Ni
+        vshaped = np.zeros(nV, bool)
+        vshaped[T[shaped].ravel()] = True
+        plane = normalize(np.cross(PB[o] - PA[o], PC[o] - PA[o]))
+        sref = stockN[stock_tri[o, 0]] + stockN[stock_tri[o, 1]] + stockN[stock_tri[o, 2]]
+        plane = np.where(((plane * sref).sum(1) < 0)[:, None], -plane, plane)
+        Ns = np.where(vshaped[:, None] & (np.linalg.norm(Ns, axis=1, keepdims=True) > 1e-6), normalize(Ns), plane)
+        return bc, phong, Ns, plane, vshaped
+
+    bc, phong, Ns, plane, vshaped = surface_frame(V)
 
     # per-vertex recipe: the most cautious class around it
     vcls_rank = {}
@@ -684,6 +702,48 @@ def main():
         weight[free_ids] = shp.smoothstep(0.0, fade_r, dist)
         weight[pin_ids] = 0.0
     log("fade computed")
+
+    # rock ledges (a rock recipe's "ledges", wg2_ledges.py): the vertices next to a riser slide along the face onto
+    # its edges (interior to their stock triangle, not pinned, not fading, away from other classes' faces)
+    ledge_rep = {}
+    ledge_bw = None
+    ledge_h = None
+    for name, r in recipes.items():
+        if not (r.get("ledges") and kind[name] == "rock"):
+            continue
+        q = ledges.params(r)
+        field = ledges.field_for(q)
+        ledge_h = nat_spacing(V, E, nV)
+        rock_face = np.array([c_ == name for c_ in tcls])
+        other_v = np.unique(T[~rock_face])
+        ledge_bw = np.ones(nV)
+        if len(other_v):
+            kd2 = KDTree(len(other_v))
+            for j, vi in enumerate(other_v):
+                kd2.insert(V[vi], j)
+            kd2.balance()
+            rv = np.unique(T[rock_face])
+            dist2 = np.array([kd2.find(V[vi])[2] for vi in rv])
+            ledge_bw[rv] = ledges.boundary_weight(dist2, q)
+            ledge_bw[other_v] = 0.0
+        rock_v = np.zeros(nV, bool)
+        rock_v[T[rock_face].ravel()] = True
+        steep_v = 1.0 - shp.smoothstep(r.get("floor_cos_lo", 0.55), r.get("floor_cos_hi", 0.85), Ns[:, 2])
+        bcv = barycentric(V, PA[o], PB[o], PC[o])
+        interior = bcv.min(1) > 1e-5
+        eligible = rock_v & vshaped & ~pin & (weight > 0.999) & (ledge_bw > 0.999) & (steep_v > 0.6) & interior
+        up = ledges.up_tangent(plane)
+        eligible &= np.linalg.norm(up, axis=1) > 0.5
+        slide = ledges.snap_targets(V, up, ledge_h, eligible, q, field, Ns)
+        V2, moved = ledges.slide_vertices(V, T, np.nonzero(rock_face)[0], up, slide, (PA[o], PB[o], PC[o]))
+        ledge_rep[name] = {"eligible": int(eligible.sum()), "asked": int((slide != 0).sum()),
+                           "slid": int(moved.sum()), "rock_vertices": int(rock_v.sum())}
+        log("ledges", name, ledge_rep[name])
+        if moved.any():
+            V = V2
+            bc, phong, Ns, plane, vshaped = surface_frame(V)
+    if ledge_rep:
+        report["ledges"] = ledge_rep
 
     # base: Phong-rounded position and the smooth normal there
     Xb = V + (phong - V) * (alpha * weight)[:, None]  # (none at pinned vertices: they stay on their neighbours')
@@ -720,6 +780,14 @@ def main():
             continue
         fnc = {"rock": shp.rock, "ground": shp.ground, "smooth": shp.smooth}[kind[name]]
         dd, parts = fnc(Xb[sel], Ns[sel], r, tex_c[sel], tex_f[sel])
+        if r.get("ledges") and kind[name] == "rock":
+            # the ledges on the steep faces, the kit's shape on faces one stands on and near other classes' faces
+            q = ledges.params(r)
+            dl, lparts = ledges.relief(V[sel], Ns[sel], ledge_h[sel], parts["steep"], q, ledges.field_for(q))
+            mix = ledge_bw[sel] * parts["steep"]
+            dd = dd * (1.0 - mix) + dl * mix
+            parts = {"steep": parts["steep"], "kit": parts["strata"] + parts["chip"] + parts["tex"],
+                     "ledges": lparts["ledges"], "fade": lparts["fade"]}
         d[sel] = dd
         parts_rep[name] = {k: [float(np.percentile(v, 5)), float(np.percentile(v, 95))] for k, v in parts.items()}
     d = shp.soft_clamp(d, -cap_in, cap_out) * weight

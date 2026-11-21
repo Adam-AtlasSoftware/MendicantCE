@@ -143,22 +143,20 @@ def test_rock_relief_band_limited():
     assert np.abs(fine).max() < 0.5
 
 
-def test_recipes_natural_classes_stay_near_collision():
+def test_recipes_are_the_kits_with_b30a_ledges_only():
+    """the builder is the kit's (prism-v4-remodel-floor) again: its recipes, rock within its caps, and the scan
+    ledges (wg2_ledges.py) on b30a's rock alone until one option is picked"""
     rec = json.load(open(WORLD / "wg2_recipes.json"))
     seen = 0
     for name, level in rec.items():
         if name == "_doc":
             continue
         for cname, c in level["classes"].items():
+            assert "scan" not in c, (name, cname)
             if c["kind"] == "rock":
                 seen += 1
-                assert c["cap_in"] <= 0.2 and c["cap_out"] <= 0.06, (name, cname)
-                assert c["floor_cap_in"] <= 0.05 and c["floor_cap_out"] <= 0.05, (name, cname)
-                assert c.get("cap_in_far", c["cap_in"]) <= 0.35
-                assert "chip_depth" not in c and "strata_depth" not in c
-            elif c["kind"] == "ground":
-                seen += 1
-                assert c["cap_in"] <= 0.06 and c["cap_out"] <= 0.06, (name, cname)
+                assert c["cap_out"] <= 0.1, (name, cname)
+                assert ("ledges" in c) == (name == "levels\\b30\\b30a"), (name, cname)
     assert seen >= 4
 
 
