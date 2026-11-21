@@ -9,10 +9,11 @@ environment: WG_VARIANT (recipe key suffix), WG_GPU ("OPTIX" or "NONE"), WG_GPU_
 
 What it does, after v1 (wg_remodel.py):
   1. The BSP's opaque materials become one welded mesh, every face tagged with its material and stock surface.
-  2. Topology (bmesh): deep bevels on the sharp edges CE's metal mesh already has; for metal, grooves cut along the
-     panel lines of the material's own texture (iso-u and iso-v lines found in its luminance or bump profile); then
-     adaptive subdivision of the displaced classes to a target edge length (crack-free: edges are split, so both
-     faces of an edge always agree), within a triangle budget.
+  2. Topology (bmesh): deep bevels on the sharp edges CE's metal mesh already has (the grooves once cut along a
+     metal texture's panel lines, "grooves" in a recipe, are off everywhere: they drew a grid into CE's flat
+     surfaces); then adaptive subdivision of the displaced classes to a target edge length (crack-free: edges are
+     split, so both faces of an edge always agree), within a triangle budget; then the metal relief (wg2_relief.py):
+     the texture's bump map channels clipped into its flat triangles near where one walks, set in later.
   3. Shape (numpy, wg2_shape.py, a function of position only): rock gets strata (layers with their own set-back,
      notches whose lips make overhang undersides and ledges), chipped facets and the CE texture's painted relief at
      two scales; ground gets wind ripples, swells from the texture and small lumps; metal grooves are set in.
@@ -45,6 +46,7 @@ import packs_env as E  # noqa: E402
 import wg_common as wg  # noqa: E402
 import wg2_shape as shp  # noqa: E402
 import wg2_lod  # noqa: E402
+import wg2_relief as relief  # noqa: E402
 
 T0 = time.time()
 # the classes whose surfaces are subdivided and moved (metal's are cut and bevelled in place); "smooth": rounded by
@@ -610,6 +612,15 @@ def main():
     bpy.data.meshes.remove(me)
     log("topology", nV, "vertices", len(T), "triangles", rounds, "rounds")
 
+    # metal relief: the texture's own bump map as geometry (wg2_relief.py) in the flat metal triangles near where
+    # one walks
+    V, T, tsrc, tmat, E, pinned, relief_h, relief_v, relief_rep = relief_stage(
+        V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, extract_root, walk if pts else None)
+    nV = len(V)
+    if relief_rep:
+        report["relief"] = relief_rep
+        log("relief", json.dumps(relief_rep))
+
     # parent stock triangle of each face
     stock_tri = np.stack([mats[m].triangles[s] + offsets[m] for m, s in zip(tmat, tsrc)])
     PA, PB, PC = W[wid[stock_tri[:, 0]]], W[wid[stock_tri[:, 1]]], W[wid[stock_tri[:, 2]]]
@@ -777,6 +788,8 @@ def main():
             dk = np.clip(sample_wrap(dark, uv), 0.0, 1.5) / 1.5
             groove_depth[sel] = r["groove_depth"] * inner * (0.6 + 0.4 * dk)
     X = X - plane * groove_depth[:, None]
+    # the relief's channels set in along the face's plane normal (relief_h <= 0)
+    X = X + plane * relief_h[:, None]
     log("shaped")
 
     # ---------- normals per corner (smoothing angle per class, families kept apart)
@@ -870,6 +883,11 @@ def main():
             changed[T[bevel_face].ravel()] = True
         keep = is_metal_v & ~changed & ~moved
         ratio[keep] = 1.0
+        # the relief: its plates (and the lips around its channels) keep CE's light; its channels darken by their
+        # shape's own shadowing, at most to light.relief_ratio_min
+        ratio[relief_v & (relief_h > -1e-6)] = 1.0
+        sunk = relief_v & (relief_h <= -1e-6)
+        ratio[sunk] = np.clip(ratio[sunk], light.get("relief_ratio_min", 0.6), 1.0)
         for name in recipes:
             selv = np.zeros(nV, bool)
             selv[T[np.array([c_ == name for c_ in tcls])].ravel()] = True
@@ -986,6 +1004,241 @@ def main():
     report["seconds"] = round(time.time() - T0, 1)
     json.dump(report, open(report_path, "w"), indent=1)
     log("WG2_REPORT", json.dumps(report))
+
+
+# ---------- metal relief
+
+def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, extract_root, walk):
+    """The flat triangles of the metal classes whose recipe has "relief" (and whose material has a bump map) cut by
+    the texture's relief mesh in texture space (wg2_relief.py), nearest to where one walks first, within the level's
+    relief_budget_triangles. Returns the new V, T, tsrc, tmat, E, pinned, the relief's depth per vertex (wu, <= 0:
+    0 where a vertex is on an edge the relief does not continue across) and a report."""
+    nV0 = len(V)
+    zero = np.zeros(nV0)
+
+    def edges_of(T_):
+        e = np.concatenate([T_[:, [0, 1]], T_[:, [1, 2]], T_[:, [2, 0]]])
+        e.sort(1)
+        return np.unique(e, axis=0)
+
+    names = [n for n, r in recipes.items() if r.get("relief") and r["kind"] == "metal"]
+    r_cap = rec.get("relief_surface_vertices", 40000)
+    if not names:
+        return V, T, tsrc, tmat, edges_of(T), pinned, zero, np.zeros(nV0, bool), None
+    budget = rec.get("relief_budget_triangles", 1.5e6)
+    tiles, rep = {}, {"materials": {}, "triangles_cut": 0, "triangles_made": 0}
+    cand = []
+    a, b, c = V[T[:, 0]], V[T[:, 1]], V[T[:, 2]]
+    fn = np.cross(b - a, c - a)
+    fl = np.linalg.norm(fn, axis=1)
+    for m in sorted(set(tmat.tolist())):
+        name = cls[m]
+        if name not in names:
+            continue
+        r = recipes[name]
+        mm = mats[m]
+        bump = mm.maps.get("bump_map", {}).get("png")
+        if not bump or not os.path.exists(os.path.join(extract_root, bump)):
+            continue
+        if bump not in tiles:
+            # (Blender's rows run up the image; the game's v runs down it from the top row: the rows turned over)
+            H = relief.height_from_bump(image_lum(os.path.join(extract_root, bump))[::-1])
+            d = -float(np.percentile(H, 1))
+            if d < r.get("relief_min_depth", 0.3):
+                tiles[bump] = None
+            else:
+                tiles[bump] = relief.build_tile(H, r)
+                t_ = tiles[bump]
+                log("relief tile", bump.rsplit("/", 1)[-1], len(t_.tris), "triangles", t_.levels)
+        tile = tiles[bump]
+        if tile is None:
+            continue
+        sel = np.nonzero(tmat == m)[0]
+        st = mm.triangles[tsrc[sel]]
+        SA, SB, SC = (mm.position[st[:, k]].astype(np.float64) for k in range(3))
+        sn = np.cross(SB - SA, SC - SA)
+        sl = np.linalg.norm(sn, axis=1)
+        ok = (sl > 1e-12) & (fl[sel] > 1e-12)
+        cosang = np.abs((sn * fn[sel]).sum(1)) / np.maximum(sl * fl[sel], 1e-30)
+        ok &= cosang > math.cos(math.radians(1.0))
+        for i in np.nonzero(ok)[0]:
+            t = sel[i]
+            uv3 = np.stack([(barycentric(V[T[t, k]][None], SA[i][None], SB[i][None], SC[i][None])[0] @
+                             mm.uv0[st[i]].astype(np.float64)) for k in range(3)])
+            e1, e2 = uv3[1] - uv3[0], uv3[2] - uv3[0]
+            auv = abs(e1[0] * e2[1] - e1[1] * e2[0]) * 0.5
+            if auv < 1e-12:
+                continue
+            awu = fl[t] * 0.5
+            texel = math.sqrt(awu / (auv * tile.size[0] * tile.size[1]))
+            cen = (a[t] + b[t] + c[t]) / 3.0
+            rad = max(np.linalg.norm(a[t] - cen), np.linalg.norm(b[t] - cen), np.linalg.norm(c[t] - cen))
+            dist = walk.find(cen)[2] - rad if walk is not None else 0.0
+            if dist > r.get("relief_reach", 8.0):
+                continue
+            est = auv * len(tile.tris) * 1.4
+            # (floors first: where the eye goes and the light grazes)
+            # (facing up by CE's own vertex normals: the triangles' winding is not the side they face)
+            up = mm.normal[st[i]].astype(np.float64).sum(0)
+            floor_first = 0 if up[2] > 0.7 * np.linalg.norm(up) else 1
+            # (and the recipe's own first materials: relief_first, substrings of their shaders)
+            first = 0 if any(x.lower() in mm.shader.lower() for x in r.get("relief_first", [])) else 1
+            cand.append(((floor_first, first), max(dist, 0.0), t, m, name, uv3, texel, est))
+    # floors first, then nearest first, each class within its own share of the budget (relief_budget, else the
+    # level's) and the level within relief_budget_triangles
+    cand.sort(key=lambda x: (x[0], x[1], x[2]))
+    cand = [x[1:] for x in cand]
+    used, per_class, per_surface = 0.0, {}, {}
+    chosen = []
+    for item in cand:
+        dist, t, m, name, uv3, texel, est = item
+        key = (m, int(tsrc[t]))
+        if used + est > budget or per_surface.get(key, 0.0) + est > 100000 or \
+                per_class.get(name, 0.0) + est > recipes[name].get("relief_budget", budget):
+            continue
+        used += est
+        per_class[name] = per_class.get(name, 0.0) + est
+        per_surface[key] = per_surface.get(key, 0.0) + est
+        chosen.append(item)
+    rep["estimate_by_class"] = {k: int(v) for k, v in per_class.items()}
+    # (per material: candidates, chosen, the estimate of each)
+    bym = {}
+    for item in cand:
+        k_ = mats[item[2]].shader.rsplit("\\", 1)[-1]
+        e_ = bym.setdefault(k_, [0, 0, 0, 0])
+        e_[0] += 1
+        e_[2] += int(item[6])
+    for item in chosen:
+        e_ = bym[mats[item[2]].shader.rsplit("\\", 1)[-1]]
+        e_[1] += 1
+        e_[3] += int(item[6])
+    rep["candidates_by_material"] = bym
+    # every chosen triangle's clipped points: a triangle's own corners are its vertices; the other points are welded
+    # by position (a point on an edge two cut triangles share is made by both, the same where the texture runs on)
+    allP, allD, allCorner, triIdx, triMeta, cut = [], [], [], [], [], []
+    base = 0
+    for dist, t, m, name, uv3, texel, est in chosen:
+        r = recipes[name]
+        tile = tiles[mats[m].maps["bump_map"]["png"]]
+        res = relief.clip_tile(tile, uv3, r.get("relief_max_tiles", 400))
+        if res is None or not len(res[1]):
+            continue
+        pts3, tris = res
+        depth = np.maximum(pts3[:, 2] * r.get("relief_scale", 1.0) * texel, -r.get("relief_max", 0.03))
+        bc = barycentric_uv(pts3[:, :2], uv3)
+        k = np.argmax(bc, 1)
+        corner = np.where(bc[np.arange(len(bc)), k] > 1.0 - 1e-9, T[t][k], -1)
+        allP.append(bc @ V[T[t]])
+        allD.append(depth)
+        allCorner.append(corner)
+        triIdx.append(tris + base)
+        triMeta.append((t, m, len(tris)))
+        base += len(pts3)
+        cut.append(t)
+    if cut:
+        P_ = np.concatenate(allP)
+        D_ = np.concatenate(allD)
+        C_ = np.concatenate(allCorner)
+        ids = np.empty(len(P_), np.int64)
+        isc = C_ >= 0
+        ids[isc] = C_[isc]
+        corner_d = {}
+        for vid, dv in zip(C_[isc].tolist(), D_[isc].tolist()):
+            corner_d.setdefault(vid, dv)
+        q = np.round(P_[~isc] * 5e4).astype(np.int64)
+        uq, first, inv = np.unique(q, axis=0, return_index=True, return_inverse=True)
+        ids[~isc] = nV0 + inv.ravel()
+        newP = list(P_[~isc][first])
+        newD = list(D_[~isc][first])
+        TT = ids[np.concatenate(triIdx)]
+        # a stock surface is drawn from one part of at most 65535 vertices (16-bit indices): one whose relief would
+        # take it near that keeps its flat triangles (corner rows split further by their normals: a margin)
+        surf = {}
+        off = 0
+        for t, m, n_ in triMeta:
+            surf.setdefault((m, int(tsrc[t])), []).append(TT[off:off + n_].ravel())
+            off += n_
+        over = {k for k, v in surf.items() if len(np.unique(np.concatenate(v))) > r_cap}
+        rep["surfaces_over_vertex_cap"] = len(over)
+        newT, new_src, new_mat = [], [], []
+        off = 0
+        kept_cut = []
+        for t, m, n_ in triMeta:
+            tt = TT[off:off + n_]
+            off += n_
+            if (m, int(tsrc[t])) in over:
+                continue
+            kept_cut.append(t)
+            tt = tt[(tt[:, 0] != tt[:, 1]) & (tt[:, 1] != tt[:, 2]) & (tt[:, 0] != tt[:, 2])]
+            newT.append(tt)
+            new_src.append(np.full(len(tt), tsrc[t]))
+            new_mat.append(np.full(len(tt), m))
+            mrep = rep["materials"].setdefault(mats[m].shader.rsplit("\\", 1)[-1], {"cut": 0, "made": 0})
+            mrep["cut"] += 1
+            mrep["made"] += int(len(tt))
+        cut = kept_cut
+    if not cut:
+        return V, T, tsrc, tmat, edges_of(T), pinned, zero, np.zeros(nV0, bool), rep
+    keep = np.ones(len(T), bool)
+    keep[np.array(cut)] = False
+    nrelief = sum(len(x) for x in newT)
+    V2 = np.concatenate([V, np.array(newP).reshape(-1, 3)])
+    T2 = np.concatenate([T[keep]] + newT)
+    tsrc2 = np.concatenate([tsrc[keep]] + new_src)
+    tmat2 = np.concatenate([tmat[keep]] + new_mat)
+    is_rel = np.zeros(len(T2), bool)
+    is_rel[len(T2) - nrelief:] = True
+    pinned2 = np.concatenate([pinned, np.zeros(len(V2) - nV0, bool)])
+    dep = np.zeros(len(V2))
+    dep[nV0:] = np.array(newD)
+    for vid, dv in corner_d.items():
+        dep[vid] = dv
+    # a vertex keeps its depth only where every face around it is relief, in one plane, and every edge around it has
+    # two faces (no open edge, no crease, no neighbour left flat)
+    nV2 = len(V2)
+    free = np.ones(nV2, bool)
+    free[T2[~is_rel].ravel()] = False
+    a2, b2, c2 = V2[T2[:, 0]], V2[T2[:, 1]], V2[T2[:, 2]]
+    fn2 = np.cross(b2 - a2, c2 - a2)
+    fn2 = fn2 / np.maximum(np.linalg.norm(fn2, axis=1, keepdims=True), 1e-30)
+    ref = np.zeros((nV2, 3))
+    for k in range(3):
+        ref[T2[is_rel, k]] = fn2[is_rel]
+    for k in range(3):
+        dots = np.abs((fn2[is_rel] * ref[T2[is_rel, k]]).sum(1))
+        bad = T2[is_rel, k][dots < math.cos(math.radians(1.0))]
+        free[bad] = False
+    e = np.concatenate([T2[:, [0, 1]], T2[:, [1, 2]], T2[:, [2, 0]]])
+    e.sort(1)
+    ue, cnt = np.unique(e, axis=0, return_counts=True)
+    free[ue[cnt != 2].ravel()] = False
+    free &= ~pinned2
+    relief_h = np.where(free, dep, 0.0)
+    rep["triangles_cut"] = len(cut)
+    rep["triangles_made"] = int(nrelief)
+    rep["vertices_set_in"] = int((relief_h < -1e-6).sum())
+    rep["depth_wu"] = {"min": float(relief_h.min()), "p5": float(np.percentile(relief_h[relief_h < -1e-6], 5))
+                       if (relief_h < -1e-6).any() else 0.0}
+    rep["candidates"] = len(cand)
+    rep["chosen"] = len(chosen)
+    rep["estimate"] = int(used)
+    relief_v = np.zeros(nV2, bool)
+    relief_v[T2[is_rel].ravel()] = True
+    return V2, T2, tsrc2, tmat2, ue, pinned2, relief_h, relief_v, rep
+
+
+def barycentric_uv(p, tri):
+    """(n, 2) points' barycentric coordinates in a 2D triangle, exact 0 within 1e-9 of an edge"""
+    a, b, c = tri
+    v0, v1 = b - a, c - a
+    d = v0[0] * v1[1] - v0[1] * v1[0]
+    r = p - a
+    l1 = (r[:, 0] * v1[1] - r[:, 1] * v1[0]) / d
+    l2 = (v0[0] * r[:, 1] - v0[1] * r[:, 0]) / d
+    bc = np.stack([1.0 - l1 - l2, l1, l2], 1)
+    bc = np.where(np.abs(bc) < 1e-9, 0.0, bc)
+    bc = np.clip(bc, 0.0, 1.0)
+    return bc / bc.sum(1, keepdims=True)
 
 
 # ---------- metal grooves
