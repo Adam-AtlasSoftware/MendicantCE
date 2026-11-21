@@ -1618,10 +1618,15 @@ they are) */
 	/* (rig[62]: 1 where the bounces' albedo is the base maps' stored mean,
 	prism_rt_albedo_stored: the host's drawn objects' alike) */
 	rig[62] = prism_rt_albedo_stored() ? 1.0f : 0.0f;
-	/* (rig[63]: the sun's test distance where the rig is in the light's
-	units: its rays tested that far, as Tool's (c40's moon: 30 world units,
-	under a cliff 105 up along it); 0 the whole level) */
-	rig[63] = scales->units ? prism_rt.sun_reach : 0.0f;
+	/* (rig[63]: the sun's test distance, 0: its rays tested against the
+	whole level, every mode and the bake. Tool's sky lights carry a test
+	distance (c40's moon: 30 world units) and the rig once honoured it, but
+	then a roof further along the ray than that does not shade, and c40's
+	snow under its cliff took the full moon where Classic is black: a sun's
+	shadow is the whole level's, as a path tracer's is. The tag's figure is
+	still read (prism_rt.sun_reach) for the log and the domes keep theirs) */
+	rig[63] = 0.0f;
+	(void)prism_rt.sun_reach;
 	settings[PRISM_RT_SETTING_DYNAMIC_SHADOWS] = remix ? 1.0f : 0.6f;
 }
 
