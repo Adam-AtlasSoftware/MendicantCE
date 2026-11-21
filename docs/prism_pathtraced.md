@@ -550,6 +550,15 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
 The denoise step has one call site in `xgpu_vulkan_pt_frame`: the plugins' denoise and denoise-and-upscale entry points
 (`prism_plugin.h`) go there.
 
+Under an upscaler (FSR 3.1, DLSS, DLAA, Ray Reconstruction) the G-buffer is drawn jittered: every draw moved by the
+sequence's sub-pixel offset (`xgpu_vulkan_set_jitter`). The tracer finds each pixel's point again from its distance
+along the pixel's ray (`surface_at`, the reprojection, the filters' neighbours), so the job's two cameras are turned by
+their frames' jitter (`pt_camera_jitter`, `xgpu_vulkan_upscale_jitter`): the ray of a pixel's centre passes where the
+G-buffer drew it. Before, the point was off its surface by up to half a pixel's footprint, by a different amount on
+each of the sequence's eight frames: grazing sand and rock faces went in and out of their own shadow (the rays' offset
+is a centimetre or two) and b30's beach flickered with a still camera, 27 levels of frame-to-frame change on its rocks
+where the same frames without an upscaler had 0.1 (work/openh1_eval/v4_rock_stable_runs: 0.2 after).
+
 ## The reference
 
 `debug.pt_reference N` in this mode (the request comes as with `display.prism_rt`, RT_FRAME's, `prism_rt.c`) traces at

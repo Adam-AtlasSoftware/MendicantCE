@@ -301,6 +301,9 @@ static struct
 	(the denoiser's images were then its guides: no history across a change) */
 	struct xgpu_vulkan_image *exposure;
 	int raw_last;
+	/* the last frame's jitter (pixels of its view's target: an upscaler's,
+	xgpu_vulkan_upscale_jitter; 0 none), its camera's rays turned by it */
+	float last_jitter[2];
 	uint32_t parity;
 	int history_valid;
 	uint32_t frame;
@@ -1521,6 +1524,24 @@ static uint32_t dynamic_lights_rank(const struct xgpu_stream_scene_light *lights
 		ranked[kept] = found[ranked[kept]];
 	return LIGHTS_MOST;
 }
+/* a camera (SCENE_VIEW's: its eye, axis, step across and step down, the
+rays ray_of in xgpu_vulkan_pt.glsl makes of them) turned so that a pixel's
+centre is its ray moved by the jitter (pixels of the view's target, right
+and down): the axis less the jitter's share of the steps */
+static void pt_camera_jitter(float camera[4][4], const int32_t corners[4], const float jitter[2])
+{
+	float width = (float)(corners[2] - corners[0]), height = (float)(corners[3] - corners[1]);
+	float sx, sy;
+	int axis;
+
+	if ((jitter[0] == 0.0f && jitter[1] == 0.0f) || !(width >= 1.0f) || !(height >= 1.0f))
+		return;
+	sx = 2.0f * jitter[0] / width;
+	sy = 2.0f * jitter[1] / height;
+	for (axis = 0; axis < 3; axis++)
+		camera[1][axis] -= sx * camera[2][axis] + sy * camera[3][axis];
+}
+
 
 struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
@@ -1715,6 +1736,28 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	memcpy(job->corners, view->corners, sizeof(job->corners));
 	memcpy(job->last_corners, (view->flags & XGPU_SCENE_VIEW_HISTORY) ? view->last_corners : view->corners,
 		sizeof(job->last_corners));
+	/* (an upscaler's jitter: the G-buffer was drawn moved by it, so a pixel's
+	centre saw the surface the unjittered camera has at the centre less the
+	jitter; each camera's axis turned by its frame's jitter, so that every
+	point found again from a pixel's distance (the rays' origins, the
+	reprojection) is on the surface drawn there. Before, a pixel's point was
+	off its surface by up to half a pixel's footprint, by a different amount
+	each of the sequence's frames: grazing sand and rock faces went in and
+	out of their own shadow (the rays' offset is a centimetre or two), the
+	frame's light changing with the jitter's phase, eight frames over) */
+	{
+		float jitter[2];
+
+		if (!xgpu_vulkan_upscale_jitter(jitter))
+			jitter[0] = jitter[1] = 0.0f;
+		pt_camera_jitter(job->camera, job->corners, jitter);
+		if (view->flags & XGPU_SCENE_VIEW_HISTORY)
+			pt_camera_jitter(job->last_camera, job->last_corners, pt.last_jitter);
+		else
+			pt_camera_jitter(job->last_camera, job->last_corners, jitter);
+		pt.last_jitter[0] = jitter[0];
+		pt.last_jitter[1] = jitter[1];
+	}
 	job->counts[0] = lookup.page_count;
 	job->counts[1] = description->width;
 	job->counts[2] = description->height;
