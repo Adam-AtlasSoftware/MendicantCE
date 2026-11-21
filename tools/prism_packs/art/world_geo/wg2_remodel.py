@@ -5,19 +5,25 @@ port/linux/game/prism_world_geometry.c). Collision, pathing and visibility keep 
 usage: blender -b --factory-startup --python art/world_geo/wg2_remodel.py -- <bsp.gltf> <extract root> <recipes.json>
        <out.pwg> <report.json>
 environment: WG_VARIANT (recipe key suffix), WG_GPU ("OPTIX" or "NONE"), WG_GPU_NAME (substring of the device),
-       WG_DUMP (a .blend written for inspection)
+       WG_DUMP (a .blend written for inspection), WG_REACH (the game's bake's reach file for this BSP,
+       <data>/prism_bake/<map>/bsp<n>.reach: where the player can be; else the walkable faces stand for it)
 
 What it does, after v1 (wg_remodel.py):
   1. The BSP's opaque materials become one welded mesh, every face tagged with its material and stock surface.
-  2. Topology (bmesh): deep bevels on the sharp edges CE's metal mesh already has (the grooves once cut along a
+  2. Topology: deep bevels (bmesh) on the sharp edges CE's metal mesh already has (the grooves once cut along a
      metal texture's panel lines, "grooves" in a recipe, are off everywhere: they drew a grid into CE's flat
-     surfaces); then adaptive subdivision of the displaced classes to a target edge length (crack-free: edges are
-     split, so both faces of an edge always agree), within a triangle budget; then the metal relief (wg2_relief.py):
-     the texture's bump map channels clipped into its flat triangles near where one walks, set in later.
-  3. Shape (numpy, wg2_shape.py, a function of position only): rock gets strata (layers with their own set-back,
-     notches whose lips make overhang undersides and ledges), chipped facets and the CE texture's painted relief at
-     two scales; ground gets wind ripples, swells from the texture and small lumps; metal grooves are set in.
-     Mostly into the rock, behind the collision surface; steep faces take much more than faces one stands on.
+     surfaces); then the natural classes (rock, ground) tessellated (wg2_natural.py): each stock edge beside them cut
+     into equal segments (the same points on both sides: crack-free), each of their stock triangles a regular lattice
+     triangulated in its plane, the spacing finest where the player can be and coarser with distance, within the
+     level's triangle budget; then the metal relief (wg2_relief.py): the texture's bump map channels clipped into its
+     flat triangles near where one walks, set in later.
+  3. Shape: the natural classes rounded by Phong over CE's welded normals and smoothed along the normal (Taubin) on
+     the fine mesh, so CE's facets leave the rock and the hills; then their relief (wg2_natural.py), band-limited by
+     each vertex's own edge length and anchored in the base map: its painted shading at four scales (cracks deeper
+     than ridges), its rows as strata and ledges along v, runnels down the face, fractured facets blended over a few
+     edges, low swells; ground gets the texture's swells, soft ripples and small lumps. Caps keep rock within a few
+     tenths of a world unit behind and centimetres in front of the collision surface on faces one meets, and floors
+     and ground within centimetres; no triangle turns over. Metal grooves (off) are set in.
   4. Light that answers the new shape: Cycles bakes the remodel and the stock surface it stands for under the same
      sun and sky (the other geometry of the level casting shadows in both), and their ratio, per vertex, goes into
      each corner's incident radiosity (its direction and length), which CE's lightmap pass already reads:
@@ -44,9 +50,9 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import packs_env as E  # noqa: E402
 import wg_common as wg  # noqa: E402
-import wg2_shape as shp  # noqa: E402
 import wg2_lod  # noqa: E402
 import wg2_relief as relief  # noqa: E402
+import wg2_natural as nat  # noqa: E402
 
 T0 = time.time()
 # the classes whose surfaces are subdivided and moved (metal's are cut and bevelled in place); "smooth": rounded by
@@ -438,6 +444,33 @@ def main():
         ang = np.arccos(np.clip((normalize(e1) * normalize(e2)).sum(1), -1, 1))
         np.add.at(Nw, FW[shaped_face, k], (normalize(fn) * ang[:, None])[shaped_face])
     Nw = normalize(Nw)
+    # each shaped stock face's own corner normals: the faces about the corner whose facing is within the crease angle
+    # of this one's (angle-weighted), so that Phong rounds CE's soft folds and leaves its sharp ones (a cliff's lip, a
+    # boulder's edge) to the smoothing, where rounding across them would slide the fine triangles over each other
+    crease = math.cos(math.radians(rec.get("crease_angle", 55.0)))
+    nfn = normalize(fn)
+    angs = np.zeros((len(F), 3))
+    for k in range(3):
+        e1 = W[FW[:, (k + 1) % 3]] - W[FW[:, k]]
+        e2 = W[FW[:, (k + 2) % 3]] - W[FW[:, k]]
+        angs[:, k] = np.arccos(np.clip((normalize(e1) * normalize(e2)).sum(1), -1, 1))
+    NC = np.repeat(nfn[:, None, :], 3, 1)
+    sf = np.nonzero(shaped_face)[0]
+    cv = FW[sf].ravel()
+    cf = np.repeat(sf, 3)
+    ck = np.tile(np.arange(3), len(sf))
+    order_ = np.argsort(cv, kind="stable")
+    cv, cf, ck = cv[order_], cf[order_], ck[order_]
+    bounds_ = np.flatnonzero(np.diff(cv)) + 1
+    for lo_, hi_ in zip(np.concatenate([[0], bounds_]), np.concatenate([bounds_, [len(cv)]])):
+        ff, kk = cf[lo_:hi_], ck[lo_:hi_]
+        nn = nfn[ff]
+        agree = (nn @ nn.T) >= crease
+        acc = agree.astype(np.float64) @ (nn * angs[ff, kk][:, None])
+        NC[ff, kk] = normalize(acc)
+    face_start = {}
+    for f_ in range(len(F)):
+        face_start.setdefault(int(fmat[f_]), f_ - int(fsrc[f_]))
 
     # ---------- the triangle budget: the displaced classes' target edge lengths scaled to meet it
     report = {"bsp": info["tag"], "variant": os.environ.get("WG_VARIANT", ""), "classes": {}}
@@ -464,23 +497,30 @@ def main():
     walk.balance()
     log("walk samples", len(pts))
 
-    def mult_at(p_):
-        if not pts:
-            return 1.0
-        dist_ = walk.find(p_)[2]
-        t_ = min(1.0, max(0.0, (dist_ - nd) / max(fd - nd, 1e-6)))
-        return 1.0 + (fm - 1.0) * t_ * t_ * (3 - 2 * t_)
-
-    # estimate (edge splitting makes about 2.5 times the triangles of an even mesh)
+    # the natural classes' spacing per stock face (wg2_natural.py): the class's target edge times a factor for where
+    # the player can be (the bake's reach when WG_REACH names its file, else the walkable faces' samples), the near
+    # targets scaled together to meet the level's natural budget
+    bricks = nat.read_reach(os.environ["WG_REACH"], walk_only=True) if os.environ.get("WG_REACH") else None
+    reach = nat.Reach(bricks, 1.0) if bricks is not None else nat.Reach(np.array(pts) if pts else np.zeros((0, 3)), 0.0)
+    report["reach"] = {"source": "bake" if bricks is not None else "walkable faces", "points": int(len(reach.points))}
+    log("reach", report["reach"])
+    bud = rec.get("budget", {})
+    natural_f = np.array([cls[m] in recipes and recipes[cls[m]].get("target_edge") is not None for m in fmat])
     cent = (a + b + c) / 3.0
-    est = 0.0
-    for f_ in range(len(F)):
-        c_ = cls[fmat[f_]]
-        if c_ in recipes and recipes[c_].get("target_edge"):
-            t_ = recipes[c_]["target_edge"] * mult_at(cent[f_])
-            est += 2.5 * tri_area[f_] / (0.433 * t_ * t_)
+    face_mult = np.ones(len(F))
+    nf = np.nonzero(natural_f)[0]
+    if len(nf):
+        # (from the face's centre: a stock face is a couple of world units, so a cliff's foot and its top differ)
+        dmin = reach.distance(cent[nf])
+        seen = reach.seen(cent[nf], normalize(fn[nf]), bud.get("seen_radius", 40.0))
+        face_mult[nf] = nat.spacing_mult(dmin, seen, bud.get("near", 3.0), bud.get("far", 30.0),
+                                         bud.get("far_mult", 6.0), bud.get("unseen_mult", 6.0))
+        report["unseen_natural_faces"] = int((~seen).sum())
+    base_t = np.array([recipes[cls[m]]["target_edge"] if natural_f[i] else np.inf for i, m in enumerate(fmat)])
+    est = float((tri_area[nf] / (0.433 * (base_t[nf] * face_mult[nf]) ** 2)).sum()) if len(nf) else 0.0
     budget = rec.get("budget_triangles", 1.5e6)
     scale = max(1.0, math.sqrt(est / budget)) if est > 0 else 1.0
+    face_spacing = base_t * face_mult * scale
     targets = {n: recipes[n]["target_edge"] * scale for n in recipes if recipes[n].get("target_edge")}
     log("areas", {k: round(v, 1) for k, v in areas.items()}, "estimate", int(est), "scale %.2f" % scale)
     report["edge_scale"] = scale
@@ -556,26 +596,7 @@ def main():
     for name, n_ in groove_rep.items():
         report["classes"].setdefault(name, {})["groove_cut_surfaces"] = n_
 
-    # adaptive subdivision of the displaced classes: split every edge longer than its target, until none is
     rounds = 0
-    while True:
-        long_edges = []
-        for e in bm.edges:
-            tgt = math.inf
-            for f in e.link_faces:
-                c_ = face_cls(f)
-                if c_ in targets:
-                    tgt = min(tgt, targets[c_])
-            if tgt < math.inf:
-                ln_ = e.calc_length()
-                if ln_ > tgt and ln_ > tgt * mult_at((e.verts[0].co + e.verts[1].co) * 0.5):
-                    long_edges.append(e)
-        if not long_edges or rounds >= 14:
-            break
-        bmesh.ops.subdivide_edges(bm, edges=long_edges, cuts=1, use_grid_fill=True, use_single_edge=True)
-        bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
-        rounds += 1
-        log("subdivision round", rounds, "split", len(long_edges), "faces", len(bm.faces))
     bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 3])
     bm.verts.ensure_lookup_table()
     bm.faces.ensure_lookup_table()
@@ -612,6 +633,34 @@ def main():
     bpy.data.meshes.remove(me)
     log("topology", nV, "vertices", len(T), "triangles", rounds, "rounds")
 
+    # the natural classes tessellated (wg2_natural.py): each stock face's spacing from the budget above (a bevelled
+    # metal face keeps its own: inf)
+    src_key = {}
+    for f_ in np.nonzero(natural_f)[0]:
+        src_key[(int(fmat[f_]), int(fsrc[f_]))] = face_spacing[f_]
+    spc = np.array([src_key.get((int(m_), int(s_)), np.inf) for m_, s_ in zip(tmat, tsrc)])
+    if np.isfinite(spc).any():
+        nV0 = nV
+        # (each stock-topology edge pinned where a new point on it must hold: an open edge, one three faces share, or
+        # one beside a face of no class)
+        etab0, fe0, _ = nat._edge_table(T)
+        ecount = np.zeros(len(etab0), np.int64)
+        eclassless = np.zeros(len(etab0), bool)
+        noclass = np.array([cls[m_] is None for m_ in tmat])
+        for k in range(3):
+            np.add.at(ecount, fe0[:, k], 1)
+            np.logical_or.at(eclassless, fe0[:, k], noclass)
+        topo_edge_pinned = (ecount != 2) | eclassless
+        V, T, par, edge_of, etab, fans = nat.tessellate(V, T, spc, log=log)
+        tsrc, tmat = tsrc[par], tmat[par]
+        pinned = np.concatenate([pinned, np.zeros(len(V) - nV0, bool)])
+        on_edge = edge_of >= 0
+        if on_edge.any():
+            pinned[on_edge] = topo_edge_pinned[edge_of[on_edge]]
+        report["tessellation"] = {"vertices": int(len(V)), "triangles": int(len(T)), "fans": int(fans)}
+        nV = len(V)
+        E = nat.edges_of(T)
+
     # metal relief: the texture's own bump map as geometry (wg2_relief.py) in the flat metal triangles near where
     # one walks
     V, T, tsrc, tmat, E, pinned, relief_h, relief_v, relief_rep = relief_stage(
@@ -638,18 +687,24 @@ def main():
     # Phong rounding over CE's welded normals (displaced classes) and the smooth normal field
     phong = np.zeros_like(V)
     Ns = np.zeros_like(V)
+    gface = np.array([face_start.get(int(m_), 0) for m_ in tmat]) + tsrc
+    # (and the welded normals' field, smooth across creases too: the direction the smoothing moves along, so that a
+    # vertex on a sharp lip moves along its bisector, not along one side's normal over the other side)
+    Nt = np.zeros_like(V)
     for k in range(3):
         Pi = W[wid[stock_tri[o, k]]]
-        Ni = Nw[wid[stock_tri[o, k]]]
+        Ni = NC[gface[o], k]
         proj = V - ((V - Pi) * Ni).sum(1, keepdims=True) * Ni
         phong += bc[:, k:k + 1] * proj
         Ns += bc[:, k:k + 1] * Ni
+        Nt += bc[:, k:k + 1] * Nw[wid[stock_tri[o, k]]]
     vshaped = np.zeros(nV, bool)
     vshaped[T[shaped].ravel()] = True
     plane = normalize(np.cross(PB[o] - PA[o], PC[o] - PA[o]))
     sref = stockN[stock_tri[o, 0]] + stockN[stock_tri[o, 1]] + stockN[stock_tri[o, 2]]
     plane = np.where(((plane * sref).sum(1) < 0)[:, None], -plane, plane)
     Ns = np.where(vshaped[:, None] & (np.linalg.norm(Ns, axis=1, keepdims=True) > 1e-6), normalize(Ns), plane)
+    Nt = np.where(vshaped[:, None] & (np.linalg.norm(Nt, axis=1, keepdims=True) > 1e-6), normalize(Nt), Ns)
 
     # per-vertex recipe: the most cautious class around it
     vcls_rank = {}
@@ -681,75 +736,142 @@ def main():
         kd.balance()
         free_ids = np.nonzero(~pin)[0]
         dist = np.array([kd.find(V[vi])[2] for vi in free_ids])
-        weight[free_ids] = shp.smoothstep(0.0, fade_r, dist)
+        weight[free_ids] = nat.smoothstep(0.0, fade_r, dist)
         weight[pin_ids] = 0.0
     log("fade computed")
 
-    # base: Phong-rounded position and the smooth normal there
-    Xb = V + (phong - V) * (alpha * weight)[:, None]  # (none at pinned vertices: they stay on their neighbours')
-
-    # texture bands per vertex (from the owner face's material and its stock UVs)
-    tex_f = np.zeros(nV)
-    tex_c = np.zeros(nV)
-    for m in sorted(set(tmat.tolist())):
+    # ---------- the natural shape (wg2_natural.py): a smooth base (Phong over CE's welded normals, then Taubin along
+    # the normal on the fine mesh), the band-limited relief, the caps against the collision surface, no folds
+    hv = nat.vertex_spacing(V, E, nV)
+    phong_w = alpha * weight
+    Xb = V + (phong - V) * phong_w[:, None]
+    movable = vshaped & ~pin & (weight > 0)
+    tb = max([int(recipes[n_].get("taubin_iters", 0)) for n_ in recipes if is_displaced(n_)] + [0])
+    # (only the classes that ask for it: a pipe keeps its Phong rounding alone)
+    tb_owner = np.array([bool(c_) and int(recipes[c_].get("taubin_iters", 0)) > 0 for c_ in tcls])
+    tb_v = np.zeros(nV, bool)
+    tb_v[T[tb_owner].ravel()] = True
+    if tb and (movable & tb_v).any():
+        Xb = nat.taubin_along(Xb, Nt, E, movable & tb_v, tb)
+        log("taubin", tb, "iterations")
+    # each shaped vertex's texture coordinates and texel size, from its owner's stock triangle
+    uvv = np.zeros((nV, 2))
+    texel = np.full((nV, 2), np.inf)
+    bands = {}
+    for m in sorted(set(tmat[o].tolist())):
         c_ = cls[m]
         if not is_displaced(c_):
             continue
-        r = recipes[c_]
-        png = mats[m].maps.get("base_map", {}).get("png")
-        if not png:
-            continue
-        sel = np.nonzero(tmat[o] == m)[0]
+        sel = np.nonzero((tmat[o] == m) & vshaped)[0]
         if not len(sel):
             continue
-        fine, coarse = relief_bands(os.path.join(extract_root, png), r.get("tex_fine_px", 4), r.get("tex_coarse_px", 24))
-        st = mats[m].triangles[tsrc[o[sel]]]
-        uv = (bc[sel, :1] * mats[m].uv0[st[:, 0]] + bc[sel, 1:2] * mats[m].uv0[st[:, 1]] +
-              bc[sel, 2:3] * mats[m].uv0[st[:, 2]])
-        tex_f[sel] = sample_wrap(fine, uv)
-        tex_c[sel] = sample_wrap(coarse, uv)
-
-    # displacement per class of the owner face
+        mm = mats[m]
+        st = mm.triangles[tsrc[o[sel]]]
+        uvv[sel] = (bc[sel, :1] * mm.uv0[st[:, 0]] + bc[sel, 1:2] * mm.uv0[st[:, 1]] +
+                    bc[sel, 2:3] * mm.uv0[st[:, 2]])
+        png = mm.maps.get("base_map", {}).get("png")
+        tw, th = 256, 256
+        if png and os.path.exists(os.path.join(extract_root, png)):
+            if png not in bands:
+                px = image_lum(os.path.join(extract_root, png))
+                # (Blender's rows run up the image; the game's v from the top row: turned over, as sample_wrap reads)
+                bands[png] = nat.TextureBands(px[::-1, :, :3])
+            th, tw = bands[png].h, bands[png].w
+        Pst = np.stack([mm.position[st[:, k]].astype(np.float64) for k in range(3)], 1)
+        UVst = np.stack([mm.uv0[st[:, k]].astype(np.float64) for k in range(3)], 1)
+        texel[sel] = nat.texel_size(Pst, UVst, tw, th)
+    # the relief per class of the owner face
     d = np.zeros(nV)
     parts_rep = {}
+    vreach = np.zeros(nV)
+    if vshaped.any():
+        vreach[vshaped] = reach.distance(V[vshaped])
+    up = np.clip(Ns[:, 2], -1.0, 1.0)
     for name, r in recipes.items():
-        if not is_displaced(name):
+        if not is_displaced(name) or kind[name] == "smooth":
             continue
         sel = np.nonzero(vshaped & np.array([tcls[f_] == name for f_ in o]))[0]
         if not len(sel):
             continue
-        fnc = {"rock": shp.rock, "ground": shp.ground, "smooth": shp.smooth}[kind[name]]
-        dd, parts = fnc(Xb[sel], Ns[sel], r, tex_c[sel], tex_f[sel])
+        pngs = {mats[m].maps.get("base_map", {}).get("png") for m in set(tmat[o[sel]].tolist())}
+        tx = None
+        if kind[name] == "rock":
+            steep = 1.0 - nat.smoothstep(r.get("floor_cos_lo", 0.55), r.get("floor_cos_hi", 0.85), up[sel])
+            dd = np.zeros(len(sel))
+            for png in pngs:
+                ss = np.array([mats[tmat[o[v_]]].maps.get("base_map", {}).get("png") == png for v_ in sel])
+                if not ss.any():
+                    continue
+                q = sel[ss]
+                dd[ss], parts = nat.rock_relief(Xb[q], Ns[q], uvv[q], texel[q], hv[q], steep[ss], r, bands.get(png))
+        else:
+            flat = nat.smoothstep(0.75, 0.95, up[sel])
+            dd = np.zeros(len(sel))
+            for png in pngs:
+                ss = np.array([mats[tmat[o[v_]]].maps.get("base_map", {}).get("png") == png for v_ in sel])
+                if not ss.any():
+                    continue
+                q = sel[ss]
+                dd[ss], parts = nat.ground_relief(Xb[q], Ns[q], uvv[q], texel[q], hv[q], flat[ss], r, bands.get(png))
         d[sel] = dd
-        parts_rep[name] = {k: [float(np.percentile(v, 5)), float(np.percentile(v, 95))] for k, v in parts.items()}
-    d = shp.soft_clamp(d, -cap_in, cap_out) * weight
+        parts_rep[name] = {"p5": float(np.percentile(dd, 5)), "p95": float(np.percentile(dd, 95))}
+        # caps: tighter on floors one stands on and within reach, the class's own on steep faces, deeper out of reach
+        fl = nat.smoothstep(0.7, 0.85, up[sel])
+        far_t = nat.smoothstep(r.get("reach_near", 2.0), r.get("reach_far", 6.0), vreach[sel])
+        ci = r.get("cap_in", 0.18) * (1 - far_t) + r.get("cap_in_far", r.get("cap_in", 0.18)) * far_t
+        ci = ci * (1 - fl) + r.get("floor_cap_in", 0.04) * fl
+        co = r.get("cap_out", 0.05) * (1 - fl) + r.get("floor_cap_out", 0.03) * fl
+        cap_in[sel] = ci
+        cap_out[sel] = co
+    # (a band-limited field still has its last octave's grain at a vertex: two passes over the edges)
+    d = nat.smooth_scalar(d, E, movable, int(rec.get("relief_smooth", 1)))
+    d = d * weight
+    d = nat.limit_slope(d, Xb, E, movable, rec.get("relief_slope", 0.8))
+    base_off = Xb - V
+    # the relief goes along the smooth base's own normal (area-weighted over the shaped faces about each vertex), not
+    # CE's welded normal, which leans off the surface at a crease and would slide small triangles over each other
+    fb = np.cross(Xb[T[:, 1]] - Xb[T[:, 0]], Xb[T[:, 2]] - Xb[T[:, 0]])
+    fb = np.where(((fb * plane[T[:, 0]]).sum(1) < 0)[:, None], -fb, fb) * shaped[:, None]
+    Nb = np.zeros_like(V)
+    for k in range(3):
+        for j in range(3):
+            Nb[:, j] += np.bincount(T[:, k], fb[:, j], nV)
+    lnb = np.linalg.norm(Nb, axis=1, keepdims=True)
+    Nb = np.where((lnb > 1e-12) & ((Nb * Ns).sum(1, keepdims=True) > 0), Nb / np.maximum(lnb, 1e-12), Ns)
 
-    phong_w = alpha * weight
-
-    def place(d_):
-        Xb_ = V + (phong - V) * phong_w[:, None]
-        X_ = Xb_ + Ns * d_[:, None]
+    def place(s_base, s_d):
+        X_ = V + base_off * s_base[:, None] + Nb * (d * s_d)[:, None]
         X_ = np.where(vshaped[:, None], X_, V)
-        # the whole offset off the stock (collision) plane, Phong's rounding included, within the class's caps: what
-        # one sees stays within cap_out in front of and cap_in behind where one collides
+        # the whole offset off the stock (collision) plane within the caps: what one sees stays within cap_out in front
+        # of and cap_in behind where one collides
         off = ((X_ - V) * plane).sum(1)
-        off_c = shp.soft_clamp(off, -cap_in, cap_out)
+        off_c = nat.soft_clamp(off, -cap_in, cap_out)
         return X_ + plane * np.where(vshaped, off_c - off, 0.0)[:, None]
 
-    # no folds: where moving along the normal turns a triangle over (an inward move at a convex crease, or outward in
-    # a concave one, deeper than the crease's radius), its corners and their neighbours move less, until none does;
-    # a turned triangle would be culled and show what is behind the rock
+    # no folds: where the move turns a triangle over against the stock triangle it stands for, its corners and their
+    # neighbours move less, until none does (a turned triangle would be culled and show what is behind the rock)
     def tri_normals(XX, sel_):
         a_, b_, c_ = XX[T[sel_, 0]], XX[T[sel_, 1]], XX[T[sel_, 2]]
         return np.cross(b_ - a_, c_ - a_)
 
+    deg_ = np.maximum(np.bincount(E[:, 0], None, nV) + np.bincount(E[:, 1], None, nV), 1)
+
+    def taper(s_, passes=4):
+        # (a scale lowered somewhere ramps down to it over a few edges: never a step from full to none, which would
+        # turn the triangles between over in its turn)
+        for _ in range(passes):
+            m_ = (np.bincount(E[:, 0], s_[E[:, 1]], nV) + np.bincount(E[:, 1], s_[E[:, 0]], nV)) / deg_
+            s_ = np.minimum(s_, 0.5 * (s_ + m_))
+        return s_
+
     shaped_ids = np.nonzero(shaped)[0]
-    # (against the stock triangle each stands for: facing away from it, it would be culled)
     n_pre = normalize(np.cross(PB[shaped_ids] - PA[shaped_ids], PC[shaped_ids] - PA[shaped_ids]))
     n_pre = np.where(((n_pre * tri_normals(V, shaped_ids)).sum(1) < 0)[:, None], -n_pre, n_pre)
+    sb = np.ones(nV)
+    sd = np.ones(nV)
     folds_rep = []
     for it in range(20):
-        X = place(d)
+        X = place(sb, sd)
         n_post = tri_normals(X, shaped_ids)
         ln = np.linalg.norm(n_post, axis=1)
         cosv = (n_post * n_pre).sum(1) / np.maximum(ln, 1e-12)
@@ -759,17 +881,50 @@ def main():
             break
         hit = np.zeros(nV, bool)
         hit[T[bad].ravel()] = True
-        # and the ring around them
-        ring = hit[E[:, 0]] | hit[E[:, 1]]
-        hit[E[ring].ravel()] = True
-        d = np.where(hit, d * 0.6, d)
-        phong_w = np.where(hit, phong_w * 0.6, phong_w)
+        # (the ring around them; in the last rounds two rings, so that the vertices put back do not turn their
+        # neighbours' triangles over in turn)
+        for _ in range(2 if it >= 14 else 1):
+            ring = hit[E[:, 0]] | hit[E[:, 1]]
+            hit[E[ring].ravel()] = True
+        sd = np.where(hit, sd * 0.6, sd)
+        sb = np.where(hit, sb * 0.8, sb)
         if it >= 14:
-            # (the last rounds: those still turned go back onto the stock surface)
-            d = np.where(hit, 0.0, d)
-            phong_w = np.where(hit, 0.0, phong_w)
+            sd = np.where(hit, 0.0, sd)
+            sb = np.where(hit, 0.0, sb)
+        sd, sb = taper(sd), taper(sb)
+    # (any still turned: their corners and a widening ring around them go back onto the stock surface, which no
+    # triangle of it turns over, until none is)
+    for ring_n in range(1, 16):
+        if not folds_rep[-1]:
+            break
+        hit = np.zeros(nV, bool)
+        hit[T[bad].ravel()] = True
+        for _ in range(ring_n):
+            ring = hit[E[:, 0]] | hit[E[:, 1]]
+            hit[E[ring].ravel()] = True
+        sd = np.where(hit, sd * 0.4, sd)
+        if ring_n >= 4:
+            sb = np.where(hit, sb * 0.7, sb)
+        if ring_n >= 10:
+            sd = np.where(hit, 0.0, sd)
+            sb = np.where(hit, 0.0, sb)
+        sd, sb = taper(sd, 4 + ring_n), taper(sb, 4 + ring_n)
+        X = place(sb, sd)
+        n_post = tri_normals(X, shaped_ids)
+        ln = np.linalg.norm(n_post, axis=1)
+        cosv = (n_post * n_pre).sum(1) / np.maximum(ln, 1e-12)
+        bad = shaped_ids[(cosv < 0.25) & (ln > 1e-12)]
+        folds_rep.append(int(len(bad)))
     report["folds_fixed"] = folds_rep
     log("folds by round", folds_rep)
+    if folds_rep[-1] and os.environ.get("WG_FOLD_DEBUG"):
+        bt = bad[:20]
+        for f_ in bt:
+            vv = T[f_]
+            log("fold", int(f_), cls[tmat[f_]], "sb", sb[vv].round(2).tolist(), "sd", sd[vv].round(2).tolist(),
+                "pinned", pin[vv].tolist(), "moved", np.linalg.norm(X[vv] - V[vv], axis=1).round(4).tolist(),
+                "area", float(np.linalg.norm(tri_normals(V, np.array([f_])))), "cos", float(
+                    (normalize(tri_normals(X, np.array([f_]))) * n_pre[np.searchsorted(shaped_ids, f_)]).sum()))
     # metal grooves: inner groove vertices set in along the face's plane normal
     groove_depth = np.zeros(nV)
     for name, r in recipes.items():
