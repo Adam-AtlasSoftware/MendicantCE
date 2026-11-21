@@ -213,11 +213,11 @@ class Context:
     def python(self, script, *args, what="", check=True):
         return self.run([PYTHON, "-B", "-I", ART / script, *args], what=what, check=check)
 
-    def blender_run(self, script, *args, what=""):
+    def blender_run(self, script, *args, what="", extra=None):
         # (no bytecode beside the art scripts: Blender's Python reads no PYTHON* variable)
         return self.run([self.blender, "-b", "--factory-startup", "--python-exit-code", "1", "--python-expr",
                          "import sys; sys.dont_write_bytecode = True", "--python", ART / script, "--", *args],
-                        what=what)
+                        what=what, extra=extra)
 
     def inv(self, program):
         return str(Path(self.invader) / (program + EXE))
@@ -1146,12 +1146,13 @@ def step_rocks(ctx):
                     if ctx.w("extract", em, "bitmaps", png).is_file():
                         base = ctx.w("extract", em, "bitmaps", png)
                     break
-            ctx.python("prism_cast/rock_remodel.py", j, base, out, "--relief", 0.003, "--report",
+            ctx.python("prism_cast/rock_remodel.py", j, base, out, "--report",
                        mod / "reports" / f"{folder}.json", what=f"{folder}")
-    write_mod(mod, "prism_v3_rocks", "PRISM v3: rocks and boulders (meshes, local)", "0.3.0",
+    write_mod(mod, "prism_v3_rocks", "PRISM v3: rocks and boulders (meshes, local)", "0.4.0",
               "The scenery rocks and boulders of the campaign remodelled for the mesh store (display.prism_models "
-              "\\\"max\\\"): CE's mass rounded, chiselled into flat facets with crisp ridges, CE's painted cracks set "
-              "in; CE's collision. Built on this computer from your own maps: never shared or shipped.")
+              "\\\"max\\\"): CE's mass rounded and smoothed, CE's painted cracks and grain set in as the level's "
+              "own rock has them, the same rock at every level of detail; CE's collision. Built on this computer from "
+              "your own maps: never shared or shipped.")
 
 
 def level_bsps(ctx, level):
@@ -1167,18 +1168,22 @@ def bsp_gltf(ctx, level, name):
 def step_world(ctx):
     recipes = json.load(open(ART / "world_geo" / "wg2_recipes.json"))
     for level in ctx.levels:
-        for _index, name in level_bsps(ctx, level):
+        for index, name in level_bsps(ctx, level):
             if f"levels\\{level}\\{name}" not in recipes:
                 continue
             w = ctx.w("world", level)
             pwg = w / f"{name}.pwg"
 
-            def build(level=level, name=name, w=w, pwg=pwg):
+            def build(level=level, name=name, w=w, pwg=pwg, index=index):
                 w.mkdir(parents=True, exist_ok=True)
                 gltf = bsp_gltf(ctx, level, name)
+                # (where the player can be, from the game's bake of this BSP when there is one: the natural surfaces'
+                # triangles go where they are seen up close)
+                reach = ctx.data / "prism_bake" / level / f"bsp{index}.reach"
                 ctx.blender_run("world_geo/wg2_remodel.py", gltf, ctx.w("extract", level),
                                 ART / "world_geo" / "wg2_recipes.json", w / f"{name}.remodel.pwg",
-                                w / f"{name}.report.json", what=f"{level} {name}: remodel and its light (Cycles)")
+                                w / f"{name}.report.json", what=f"{level} {name}: remodel and its light (Cycles)",
+                                extra={"WG_REACH": str(reach)} if reach.is_file() else None)
                 ctx.python("world_geo/wg2_seal.py", gltf, w / f"{name}.remodel.pwg", w / f"{name}.sealed.pwg",
                            w / f"{name}.seal.json", what=f"{level} {name}: sealed")
                 ctx.blender_run("world_geo/wg2_far2.py", w / f"{name}.sealed.pwg", pwg, w / f"{name}.far2.json",

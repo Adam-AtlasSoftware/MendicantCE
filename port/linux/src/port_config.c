@@ -768,9 +768,9 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"PRISM v2: \"remodel\" draws the level's walls, rock and ground from a\n"
 		"denser remodel in the data folder (prism_world\\; none comes with the\n"
-		"game, and a level without one is drawn stock: cliff strata,\n"
-		"overhangs and chipped rock, sand\n"
-		"ripples, bevels on the metal's own edges and its bump map's channels\n"
+		"game, and a level without one is drawn stock: smooth rock and\n"
+		"cliffs with ledges, cracks and runnels, rounded hills and sand,\n"
+		"bevels on the metal's own edges and its bump map's channels\n"
 		"set into the flat metal, after the level's\n"
 		"own textures), lit by the level's own lightmaps with the light the new\n"
 		"shape takes; far surfaces drawn from a coarser level. Collision, paths\n"
