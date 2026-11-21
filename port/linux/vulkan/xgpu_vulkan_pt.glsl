@@ -1706,6 +1706,37 @@ void lights_ris_seen(Surface g, vec3 o, int lamp_count, int fixture_count, int d
     specular = kept_s / kept_t * sum;
 }
 
+/* the terrain overhaul's ground in the traced frame: its sun's diffuse
+factor. Snow's is TERRAIN_COMMON's (wrapped, its light crossing the snow).
+Sand and soil take the cosine, softened only where a facet turns from the
+sun (C1 from the cosine at GROUND_SOFT down to zero at -GROUND_SOFT: the
+grains' facets the HQ normal turns away still catch some sun, so they do not
+fall to the cold sky alone, prism-8's blue-grey patches), with GROUND_LOBE
+(0.35) of Raster's back-scattering lobe. The traced frame's HQ normal
+already turns each grain's facet to or from the sun; Raster's whole wrap and
+lobe on top of it (made for a frame composed over CE's held page) gave that
+light twice here, lifting the beach to a warm cream over prism-8's (Oklab L
++4.5, b +1.8 at 1 m) and washing out CE's green-grey flecks. With these the
+beach is back at prism-8's level (b30 B1 and B3, 1 m and 10 m: L within
+-0.4..+0.8, b +0.2..+0.5) with the flecks' contrast above it */
+const float GROUND_SOFT = 0.3;
+const float GROUND_LOBE = 0.35;
+vec3 ground_sun(Surface g)
+{
+    if (g.terrain.kind == 3u)
+        return terrain_sun(g.terrain, g.normal, s.sun.xyz, g.eye);
+    float c = dot(g.normal, s.sun.xyz);
+    float f = c >= GROUND_SOFT ? c : c > -GROUND_SOFT ? (c + GROUND_SOFT) * (c + GROUND_SOFT) / (4.0 * GROUND_SOFT) : 0.0;
+    if (GROUND_LOBE > 0.0 && f > 0.0)
+    {
+        float cg = clamp(dot(g.eye, s.sun.xyz), -1.0, 1.0);
+        float half_tan = sqrt(max(1.0 - cg, 0.0) / max(1.0 + cg, 1.0e-3));
+        float strength = GROUND_LOBE * (g.terrain.kind == 1u ? 1.0 : 0.6);
+        f *= 1.0 + strength * (0.2 * cg + 0.3 / (1.0 + half_tan / 0.08));
+    }
+    return vec3(f);
+}
+
 /* a point's sun: its visibility from o (a direction of the disc), its
 diffuse light (the rig's sun by the cosine) and specular light */
 void sun_parts(Surface g, out vec3 dif, out vec3 spe)
@@ -1713,13 +1744,12 @@ void sun_parts(Surface g, out vec3 dif, out vec3 spe)
     float c = dot(g.normal, s.sun.xyz);
     dif = vec3(0.0);
     spe = vec3(0.0);
-    /* (the terrain overhaul's ground: its sun's diffuse factor, wrapped and
-    back-scattering, TERRAIN_COMMON's) */
+    /* (the terrain overhaul's ground: its sun's diffuse factor, ground_sun's) */
     if (g.terrain.kind != 0u)
     {
         if (s.sun.w <= 0.0)
             return;
-        dif = s.rig[0].rgb * terrain_sun(g.terrain, g.normal, s.sun.xyz, g.eye);
+        dif = s.rig[0].rgb * ground_sun(g);
         spe = c > 0.0 ? ggx(g, s.sun.xyz) * s.rig[0].rgb * PI : vec3(0.0);
         return;
     }
@@ -2387,9 +2417,9 @@ void main()
 
     /* the sun: a ray near the eye and on the objects, the mask beyond */
     float v_sun = 0.0, blocker = 0.0, traced = 0.0;
-    /* (the ground's sun wraps past the cosine: its visibility wanted there too) */
+    /* (the ground's sun reaches past the cosine: its visibility wanted there too) */
     bool sun_side = dot(g.normal, s.sun.xyz) > 0.0 || (g.terrain.kind != 0u &&
-        dot(terrain_sun(g.terrain, g.normal, s.sun.xyz, g.eye), vec3(1.0)) > 0.0);
+        dot(ground_sun(g), vec3(1.0)) > 0.0);
     if (s.sun.w > 0.0 && sun_side && !part_off(PARTS_SUN))
     {
         /* (the ray where the mask is not read (the performance profile's

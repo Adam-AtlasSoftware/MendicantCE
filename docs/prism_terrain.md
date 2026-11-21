@@ -317,6 +317,20 @@ B1 1 m, the share of the ground's pixels bluer than Oklab b -0.5 (`tools/cmpshee
 (CE's own sand has blue-white texels, lower left), prism-8 Path Traced 8.3%, now 5.6%: the patches beyond CE's own
 are gone.
 
+### Path Traced's sand and soil (prism-9)
+
+T2's `terrain_sun` is made for Rebaked's frame, which composes its light over CE's held page. In the traced frame
+the HQ normal already turns each grain's facet to or from the sun, and the whole wrap and lobe on top of it gave
+that light twice: the beach went warm cream over prism-8's (b30 sand at 1 m: Oklab L 83.5 -> 88.0, b 3.4 -> 5.2)
+and CE's green-grey flecks washed out. The path tracer now takes `ground_sun` (`xgpu_vulkan_pt.glsl`) for sand and
+soil: the cosine, softened only below 0.3 (C1 down to zero at -0.3), times 0.35 of the back-scattering lobe; snow
+keeps `terrain_sun`. Rebaked is unchanged. Measured on b30 against prism-8's Path Traced, one card
+(`v4_int8_runs/caps/sand_*`, ground region of the frame): L -0.4 to +0.8, b +0.2 to +0.5, the flecks' L spread
+above prism-8's (sand 1 m 16.5 vs 16.1), the cold share below it (6.9% vs 7.7%; Classic 5.8%). Also tried:
+the plain cosine (L up to 1.2 under prism-8, cold share 7.3%), the softening with no lobe (the plain cosine's
+figures: few facets fall under 0.3), the lobe with no softening (within 0.1 of the choice) and the ambient share
+at half (no gain).
+
 ### T2: the granular look
 
 - **Back-scattering lobe** (`terrain_sun`): on sand (and at 0.6 on dirt) the wrapped sun term is brightened looking
