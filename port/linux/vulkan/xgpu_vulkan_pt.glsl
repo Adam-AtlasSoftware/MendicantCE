@@ -93,6 +93,13 @@ Job job;
 sampling between ReSTIR DI and the reflection's GGX ray (lamp_mis_nee): a
 pixel whose reflection is traced) */
 bool lamps_mis = false;
+/* (FLAG_PROBE_ONLY, a diagnosis: a pixel whose reflection is read from the
+bake's probes takes the lamps' specular light from the probes alone (their
+faces are in the probes' light: the bake's path() takes each hit's glow),
+ReSTIR DI giving it the lamps' diffuse light alone; the fixtures and the
+dynamic lights, which no probe holds, keep theirs. It lost the lamps' pools
+on c20's walls that R has; by default the probe is scaled instead, below) */
+bool lamps_probe = false;
 /* (hit_light_n's last triangle met on the level, else 0xffffffff) */
 uint hit_light_triangle = 0xffffffffu;
 
@@ -131,6 +138,8 @@ const uint FLAG_PERFORMANCE = 2u;
 const uint FLAG_DENOISER_OFF = 4u;
 const uint FLAG_REFERENCE = 8u;
 const uint FLAG_TILES = 16u;
+const uint FLAG_PROBE_NEE = 32u;
+const uint FLAG_PROBE_ONLY = 128u;
 /* the reference's sums: floats a pixel (the diffuse light's mean, the
 specular's, the luminance's mean and squared deviations, the distance, then
 the means and squared deviations of its parts' luminances: the direct, the
@@ -388,6 +397,8 @@ point on the lamp rarely finds) and a lamp narrower than the lobe to the
 lamp's point (a rough floor's, which the ray rarely meets) */
 float lamp_mis_nee(Surface g, vec3 l, float solid)
 {
+    if (lamps_probe)
+        return 0.0;
     if (!lamps_mis)
         return 1.0;
     float pb = ggx_pdf(g, l), q = 1.0 / max(solid, 1.0e-8);
@@ -2482,10 +2493,13 @@ void main()
         if (!part_off(PARTS_DOMES))
             noisy_d += domes_at(o, g.normal, m) * ambient_share;
         vec3 ld, ls;
+        lamps_probe = indirect_on && !(g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION)) &&
+            (job.frame.y & FLAG_PROBE_ONLY) != 0u;
         seed_for(pixel, frame, 3u);
         lamps_mis = glossy;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
         lamps_mis = false;
+        lamps_probe = false;
         noisy_d += ld;
         noisy_s += ls;
         seed_for(pixel, frame, 9u);
@@ -2587,6 +2601,15 @@ void main()
                 vec4 v;
                 probe = volume_at(o, r, v) ? v.rgb : texel ? bake_total : vec3(0.0);
             }
+            /* (the probes hold the lamps' faces (the bake's path() takes
+            each hit's glow), which ReSTIR DI's specular light already
+            gives this pixel, shadowed and sharp: the probe's light kept by
+            the share of the bake's light here that is not the lamps' own
+            (its indirect layer over its whole), so that the lamps are not
+            counted twice (c20's Library walls: 47% too much specular light
+            against R) and their pools on the walls stay ReSTIR's) */
+            if (texel && (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u)
+                probe *= clamp(luma(bake_indirect) / max(luma(bake_total), 1.0e-6), 0.0, 1.0);
             clean_s += probe * share;
         }
     }

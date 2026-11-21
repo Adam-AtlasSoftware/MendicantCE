@@ -198,6 +198,13 @@ enum
 	FLAG_PERFORMANCE = 2,
 	FLAG_DENOISER_OFF = 4,
 	FLAG_REFERENCE = 8,
+	/* (HALO_PT_PROBE_NEE=1, a diagnosis: the pixels whose reflection the
+	probes give keep the lamps' specular light by ReSTIR DI as well, counted
+	twice) */
+	FLAG_PROBE_NEE = 32,
+	/* (HALO_PT_PROBE_NEE=2, a diagnosis: the lamps' specular light from the
+	probes alone on their pixels, none by ReSTIR DI) */
+	FLAG_PROBE_ONLY = 128,
 };
 
 #define PT_FUNCTIONS(F) \
@@ -1588,6 +1595,15 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		flags |= FLAG_PERFORMANCE;
 	if (denoiser_off)
 		flags |= FLAG_DENOISER_OFF;
+	{
+		static int probe_nee = -1;
+
+		probe_nee = probe_nee < 0 ? env_int("HALO_PT_PROBE_NEE", 0) : probe_nee;
+		if (probe_nee == 1)
+			flags |= FLAG_PROBE_NEE;
+		else if (probe_nee == 2)
+			flags |= FLAG_PROBE_ONLY;
+	}
 	/* (the history: the last frame's, drawn by this, of the same window at
 	the same size, from the same bake's scene; a frame is a submission or a
 	few, so a gap of more than 16 is frames this mode did not draw) */
