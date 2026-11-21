@@ -213,6 +213,11 @@ draw's (never NULL there) */
 void mod_meshes_model_begin(long model_index, struct render_skinning const *skinning, real level_of_detail_pixels,
 	unsigned long flags, long unique_identifier, real const *function_values);
 void mod_meshes_model_end(void);
+/* whether a model tag is drawn by a mod's mesh (the host accepted its file
+for this map: drawn from the store once it is in, the stock part until
+then): the bake's static scenery leaves such a placement out of the scene
+the frame traces, which traces it as drawn (prism_bake.c) */
+boolean mod_meshes_model_replaced(long model_index);
 /* (models.c's render_model_parts, around an opaque, decal or shadow part's
 draws) the part the draws that follow are of; and none */
 void mod_meshes_part(short region_index, short permutation_index, short geometry_index, short part_index,

@@ -93,6 +93,8 @@ extern unsigned char render_enumerating;
 /* ui_widget.c's, game.c's */
 boolean main_menu_is_active(void);
 boolean game_in_progress(void);
+/* mod_meshes.c's: a model drawn by a mod's mesh (mods.h) */
+boolean mod_meshes_model_replaced(long model_index);
 
 /* ---------- constants */
 
@@ -127,6 +129,9 @@ levels (super low to super high) and its parts' most; the albedo's bounds
 #define SCENERY_DETAIL_LEVELS 5
 #define SCENERY_ALBEDO_LEAST 0.03f
 #define SCENERY_ALBEDO_MOST 0.85f
+/* the models a mod's mesh draws among the static scenery's, at most (b30's
+three boulders; past it the rest stay in the frame's traced scene) */
+#define SCENERY_REPLACED_MODELS 256
 #define STATUS_WORDS XGPU_BAKE_STATUS_WORDS
 
 /* what the reach's thread works from: copies of the tags' arrays */
@@ -158,6 +163,10 @@ struct reach_input
 	albedo, its coverage) */
 	float *scenery;
 	long scenery_count, scenery_room, scenery_placements;
+	/* the runs of those triangles that are of a placement a mod's mesh
+	draws (first triangle and count each), and their count */
+	int32_t *replaced;
+	long replaced_count, replaced_room;
 	/* the scenario's light fixtures in this BSP (FIXTURE_FLOATS each: the
 	place, the forward axis, the colour, the intensity, the falloff and
 	cutoff angles) */
@@ -187,6 +196,12 @@ static struct
 	unsigned long reach_bytes, reach_sent;
 	boolean reach_failed, reach_ended;
 	boolean logged_done;
+	/* the static scenery's models a mod's mesh draws, as the reach's inputs
+	last found them (scenery_copy), and that finding's number
+	(prism_bake_object_static's answers kept until it changes) */
+	long replaced_models[SCENERY_REPLACED_MODELS];
+	long replaced_model_count;
+	unsigned long replaced_generation;
 } prism_bake;
 
 /* ---------- private code */
@@ -403,6 +418,7 @@ static void input_free(
 	free(input->surfaces);
 	free(input->fighters);
 	free(input->scenery);
+	free(input->replaced);
 	free(input->fixtures);
 	memset(input, 0, sizeof(*input));
 }
@@ -546,7 +562,19 @@ geometry (each region's first permutation) is sent in the world, each
 triangle wound to face its vertices' normals, with its shader's albedo (the
 base map's mean colour, linear) and coverage (an alpha-tested model shader's
 share of its base map's texels drawn: its leaves' cards; 1 opaque; a
-transparent shader's triangles left out). */
+transparent shader's triangles left out).
+
+A placement whose model a mod's mesh draws (display.prism_models,
+mod_meshes_model_replaced) is sent as the others are, so that the bake's
+light and its geometry's hash are the stock scenery's whatever the remodels
+(a bake travels without them), and its triangles' run is named after the
+fixtures: the scene the frame traces (Rebaked's object pixels' sun, every
+ray of Path Traced) leaves those runs out, and the object is traced as it
+is drawn, its mesh's level as the frame's other objects are
+(prism_bake_object_static answers FALSE for it). Before, the stock rock
+stayed in the traced scene around the mesh drawn in its place: a shell of
+CE's facets just outside or inside the rounded remodel that shadowed it in
+patches, and flickered with each frame's jitter and sun sample. */
 
 /* this build's model geometry, part and shader reference (models.c's, as
 world_sdf.c and object_mesh.c read them) */
@@ -888,6 +916,47 @@ static boolean scenery_part_copy(
 	return good;
 }
 
+/* a placement's run of the static scenery's triangles, its model a mod's
+mesh draws: named for the frame's traced scene to leave out, its model kept
+for prism_bake_object_static (past SCENERY_REPLACED_MODELS models the rest
+stay as they are); FALSE if no memory */
+static boolean scenery_replaced_add(
+	struct reach_input *input,
+	long model_index,
+	long first,
+	long count)
+{
+	long index;
+
+	for (index = 0; index < prism_bake.replaced_model_count && prism_bake.replaced_models[index] != model_index; index++)
+	{
+	}
+	if (index == prism_bake.replaced_model_count)
+	{
+		if (index == SCENERY_REPLACED_MODELS)
+		{
+			return TRUE;
+		}
+		prism_bake.replaced_models[prism_bake.replaced_model_count++] = model_index;
+	}
+	if (input->replaced_count >= input->replaced_room)
+	{
+		long room = input->replaced_room ? input->replaced_room * 2 : 256;
+		int32_t *grown = (int32_t *)realloc(input->replaced, (size_t)room * 2 * sizeof(int32_t));
+
+		if (!grown)
+		{
+			return FALSE;
+		}
+		input->replaced = grown;
+		input->replaced_room = room;
+	}
+	input->replaced[input->replaced_count * 2] = (int32_t)first;
+	input->replaced[input->replaced_count * 2 + 1] = (int32_t)count;
+	input->replaced_count++;
+	return TRUE;
+}
+
 /* the static scenery's triangles (the scenery's, the controls' and the
 light fixtures' placements; not the machines': doors and lifts move, and
 Tool's radiosity never had them, so they neither block nor reflect the
@@ -908,6 +977,8 @@ static boolean scenery_copy(
 	palettes[2] = &scenario->control_palette;
 	placements[3] = &scenario->light_fixtures;
 	palettes[3] = &scenario->light_fixtures_palette;
+	prism_bake.replaced_model_count = 0;
+	prism_bake.replaced_generation++;
 	/* (HALO_BAKE_NO_SCENERY, a diagnostic: none, the structure alone, as the
 	path tracer's reference traces it with HALO_RT_NO_OBJECTS, for the
 	bake's gate on equal scenes) */
@@ -929,10 +1000,11 @@ static boolean scenery_copy(
 			struct model const *model;
 			real_matrix4x3 matrix;
 			short region_index, part_index;
+			long model_index, first = input->scenery_count;
 
-			if (definition_index == NONE ||
-				!(model = model_definition_get(object_definition_get(definition_index)->object.model.index)) ||
-				!model->regions.address || !model->geometries.address)
+			model_index = definition_index != NONE ? object_definition_get(definition_index)->object.model.index : NONE;
+			if (definition_index == NONE || !(model = model_definition_get(model_index)) || !model->regions.address ||
+				!model->geometries.address)
 			{
 				continue;
 			}
@@ -973,6 +1045,11 @@ static boolean scenery_copy(
 						return FALSE;
 					}
 				}
+			}
+			if (input->scenery_count > first && mod_meshes_model_replaced(model_index) &&
+				!scenery_replaced_add(input, model_index, first, input->scenery_count - first))
+			{
+				return FALSE;
 			}
 		}
 	}
@@ -1147,7 +1224,11 @@ host's reach_read in xgpu_vulkan_bake.c reads them):
 	(version 4) the static scenery: count, then (positions 9 floats, albedo 3
 		floats, coverage float); oriented to their vertices' normals
 	the light fixtures in this BSP: count, then (place 3 floats, forward 3,
-		colour 3, intensity, falloff and cutoff angles) */
+		colour 3, intensity, falloff and cutoff angles)
+	the static scenery's runs drawn by a mod's mesh: count, then (first
+		triangle, triangle count); after the inputs the reach's file and
+		the bake's key are made of (the host's hash ends before it), and
+		absent from an older game's, which the host reads as none */
 
 struct blob
 {
@@ -1248,6 +1329,8 @@ static unsigned char *reach_serialise(
 	blob_put(&blob, input->scenery, (unsigned long)input->scenery_count * SCENERY_FLOATS * 4);
 	blob_word(&blob, input->fixture_count);
 	blob_put(&blob, input->fixtures, (unsigned long)input->fixture_count * FIXTURE_FLOATS * 4);
+	blob_word(&blob, input->replaced_count);
+	blob_put(&blob, input->replaced, (unsigned long)input->replaced_count * 8);
 	/* (a whole number of words) */
 	while (blob.size & 3)
 	{
@@ -1356,9 +1439,11 @@ static void reach_frame(
 		else
 		{
 			platform_log("prism bake: bsp %d: the reach's inputs (%lu seeds, %lu triangles, %d nodes, %ld fighters; the static "
-				"scenery's %ld placements, %ld triangles): %lu KB", (int)bsp_index, (unsigned long)input.seed_count,
+				"scenery's %ld placements, %ld triangles, %ld placements of %ld models drawn by a mod's mesh): %lu KB",
+				(int)bsp_index, (unsigned long)input.seed_count,
 				(unsigned long)input.triangle_count, (int)input.bsp.node_count, input.fighter_count,
-				input.scenery_placements, input.scenery_count, prism_bake.reach_bytes / 1024);
+				input.scenery_placements, input.scenery_count, input.replaced_count, prism_bake.replaced_model_count,
+				prism_bake.reach_bytes / 1024);
 		}
 		input_free(&input);
 		return;
@@ -1470,13 +1555,18 @@ void prism_bake_map_unloaded(
 	void)
 {
 	reach_reset();
+	prism_bake.replaced_model_count = 0;
+	prism_bake.replaced_generation++;
 }
 
 /* port: whether an object is one the bake's static scenery holds (a
 placement of scenery, a control or a light fixture that scenery_static
 takes, the object at its placement and of its definition), for the path
 tracer's moving objects (prism_deferred.c's SCENE_INSTANCE flags): each
-object's answer kept by its datum index until the scenario changes */
+object's answer kept by its datum index until the scenario changes, or the
+static scenery's models a mod's mesh draws are found again. Such a model's
+placement is FALSE: the frame's traced scene leaves its stock triangles out
+(scenery_copy) and traces it as drawn, as a moving object */
 #define OBJECT_STATIC_KEPT 2048
 boolean prism_bake_object_static(
 	long object_index)
@@ -1484,6 +1574,7 @@ boolean prism_bake_object_static(
 	static long kept_index[OBJECT_STATIC_KEPT];
 	static char kept_answer[OBJECT_STATIC_KEPT];
 	static void const *kept_scenario;
+	static unsigned long kept_generation;
 	struct scenario *scenario = global_scenario_get();
 	struct object_datum *object = object_try_and_get_and_verify_type(object_index, _object_mask_all);
 	struct tag_block const *placements, *palette;
@@ -1494,10 +1585,11 @@ boolean prism_bake_object_static(
 	{
 		return FALSE;
 	}
-	if (kept_scenario != scenario)
+	if (kept_scenario != scenario || kept_generation != prism_bake.replaced_generation)
 	{
 		memset(kept_index, 0xff, sizeof(kept_index));
 		kept_scenario = scenario;
+		kept_generation = prism_bake.replaced_generation;
 	}
 	slot = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) % OBJECT_STATIC_KEPT;
 	if (kept_index[slot] == object_index)
@@ -1545,6 +1637,15 @@ boolean prism_bake_object_static(
 		if (entry->reference.index == object->definition_index && scenery_static(palette, placement) != NONE)
 		{
 			found = TRUE;
+		}
+	}
+	if (found)
+	{
+		long model_index = object_definition_get(object->definition_index)->object.model.index;
+
+		for (index = 0; index < prism_bake.replaced_model_count && found; index++)
+		{
+			found = prism_bake.replaced_models[index] != model_index;
 		}
 	}
 	kept_index[slot] = object_index;

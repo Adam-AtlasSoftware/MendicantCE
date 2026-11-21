@@ -1261,6 +1261,24 @@ void mod_meshes_part_name_again(
 	return;
 }
 
+boolean mod_meshes_model_replaced(
+	long model_index)
+{
+	long absolute;
+
+	if (!mod_meshes_globals.accepted || model_index == NONE || !mod_meshes_globals.models)
+	{
+		return FALSE;
+	}
+	absolute = (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(model_index);
+	if (absolute < 0 || absolute >= mod_meshes_globals.model_count)
+	{
+		return FALSE;
+	}
+
+	return mod_meshes_globals.models[absolute].id != 0 && mod_meshes_globals.models[absolute].tag_index == model_index;
+}
+
 /* (render_model, after its parts) */
 void mod_meshes_model_end(
 	void)

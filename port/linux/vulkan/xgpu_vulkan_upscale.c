@@ -1021,6 +1021,13 @@ void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct 
 	xgpu_vulkan_set_jitter(up.jitter[0], up.jitter[1], description->width, description->height);
 }
 
+int xgpu_vulkan_upscale_jitter(float jitter[2])
+{
+	jitter[0] = up.jittering ? up.jitter[0] : 0.0f;
+	jitter[1] = up.jittering ? up.jitter[1] : 0.0f;
+	return up.jittering;
+}
+
 float xgpu_vulkan_upscale_view_ratio(void)
 {
 	float ratio;

@@ -40,6 +40,15 @@ reach's inputs the game sends two more things only it has:
   structures in its scene: opaque, mask 4; cutouts, mask 8, a hit kept by 0.75 of its share, as R keeps an object's), so
   the ground under a tree takes its shade and the sun mask its shadow. They have no texels of their own: Raster lights
   them from the volume, as every object.
+  A placement whose model a mod's mesh draws (`display.prism_models`, the mesh store: b30's boulders) is sent and baked
+  as the others are (the bake's light and its geometry hash stay the stock scenery's, so a bake never depends on the
+  remodels), and its run of triangles is named in the reach's last section, which neither the reach's file nor the
+  bake's key covers. The scene the frame traces (Raster's light pass, Path Traced's lookup: `scene_runtime`) is the
+  bake's but for those runs: their triangles are uploaded after the others of their kind and the frame's two scenery
+  structures are built over the others alone. The game sends such an object as a moving one
+  (`prism_bake_object_static` answers FALSE), so it is captured from the G-buffer pass as drawn, the mesh's level.
+  Before, the stock rock stayed in the traced scene inside and around the rounded mesh drawn in its place, and
+  shadowed it in patches of CE's facets that flickered with the frame's jitter and sun samples.
 - **The light fixtures** (`fixtures_copy`): the scenario's light fixture placements in this BSP as placed (their colour,
   intensity, falloff and cutoff angles), CE's radiosity's point and spot lights. The bake takes every one that gives
   light, whether its device has power or not (the radiosity took them all), as a point light of inverse-square falloff

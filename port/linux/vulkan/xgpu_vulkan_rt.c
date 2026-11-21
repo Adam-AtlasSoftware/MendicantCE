@@ -89,6 +89,13 @@ taken this share of RT_OBJECT_TRIANGLES; the game's own model past either
 (a far object's shape, at a pixel or two, the same; never left out) */
 #define RT_REPLACEMENT_REACH 40.0f
 #define RT_REPLACEMENT_SHARE 0.75f
+/* port: past RT_REPLACEMENT_REACH a replacement drawn at a level of at most
+this many triangles is traced as drawn all the same (its far levels: the
+boulders' 84 to 888), not the game's model: a stock shape traced under a
+remodel drawn shadows it in patches of its facings (the stock rock's shell
+over the rounded one), which flicker as the frames' samples change; within
+the share only */
+#define RT_REPLACEMENT_FAR_TRIANGLES 4096u
 /* the node rows an entry compares (c[60] to c[191]) */
 #define RT_NODE_ROWS 132u
 /* the entries' memory: chunks of device memory (a larger entry has one of
@@ -1111,7 +1118,7 @@ int xgpu_vulkan_rt_replacement_traced(const float origin[3], uint32_t triangles)
 		rt.stock_stand_ins++;
 		return 0;
 	}
-	if (!rt.eye_known)
+	if (!rt.eye_known || triangles <= RT_REPLACEMENT_FAR_TRIANGLES)
 		return 1;
 	d[0] = origin[0] - rt.eye[0];
 	d[1] = origin[1] - rt.eye[1];

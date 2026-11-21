@@ -77,6 +77,11 @@ surface removal leaves the opaque layers' overdraw out, not the alpha-tested fol
   the pixel, by their bilinear weights and their closeness (distance, relative and scaled by how squarely the
   surface faces the eye, and normal); where none is close, the closest of the 4x4 about it (`world_ao_upsample`).
   A thin silhouette keeps its own value, and the wall behind keeps the wall's.
+  So the pre-pass must draw the shape the surfaces draw: a mod's mesh (`display.prism_models`) is drawn there as its
+  pieces (the stock layout's swap; the twins have no wide variant), and the remodelled level as drawn
+  (`display.prism_world_geometry_occlusion` `"remodel"`, the default). Before, the pre-pass drew the stock rock and
+  the stock level, and the surfaces read the occlusion, distance and normal of CE's shape about them: a translucent,
+  shimmering outer shell of the original geometry around every remodelled boulder (b30's beach).
 
 - **The dynamic objects by rays** (`world_ao_traced`). The pass no longer walks the dynamic objects' spheres,
   capsules and boxes: it casts `XGPU_WORLD_AO_RAYS` (4) short rays a pixel through the distance-field scene's objects

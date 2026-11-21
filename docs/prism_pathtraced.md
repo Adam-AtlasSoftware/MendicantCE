@@ -550,6 +550,33 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
 The denoise step has one call site in `xgpu_vulkan_pt_frame`: the plugins' denoise and denoise-and-upscale entry points
 (`prism_plugin.h`) go there.
 
+Under an upscaler (FSR 3.1, DLSS, DLAA, Ray Reconstruction) the G-buffer is drawn jittered: every draw moved by the
+sequence's sub-pixel offset (`xgpu_vulkan_set_jitter`). The tracer finds each pixel's point again from its distance
+along the pixel's ray (`surface_at`, the reprojection, the filters' neighbours), so the job's two cameras are turned by
+their frames' jitter (`pt_camera_jitter`, `xgpu_vulkan_upscale_jitter`): the ray of a pixel's centre passes where the
+G-buffer drew it. Before, the point was off its surface by up to half a pixel's footprint, by a different amount on
+each of the sequence's eight frames: grazing sand and rock faces went in and out of their own shadow (the rays' offset
+is a centimetre or two) and b30's beach flickered with a still camera, 27 levels of frame-to-frame change on its rocks
+where the same frames without an upscaler had 0.1 (work/openh1_eval/v4_rock_stable_runs: 0.2 after).
+
+A level pixel's rays start on the level as traced (`level_origin`). The G-buffer draws each remodelled surface at the
+level its distance picks (`prism_world_geometry.c`: the near level, the far one past its distance), while the traced
+scene holds the bake's level (the near one, two-sided where a far one exists). Where the two part, a far surface drawn
+under the near one's relief, the pixel's point lay a few centimetres under a traced face and every ray from it (the
+sun, the domes, the bounce) met that face's back at once: b30's wet shoreline and G2's landing beach went black, and
+with the jitter fixed they stayed black (the sun's blocker under half a unit over the band, `debug.gbuffer_view`
+`pt_sun`). So the pixel's ray is followed again over a short stretch about its point (as far as `LEVEL_GAP`, 0.15
+units of height, at its slant, at most 4 units), and the rays start at the traced face it meets there, off it by that
+face's normal; nothing met, at the point as drawn. The stretch is the eye's own ray, drawn through to the point, so no
+surface the pixel could have shown lies on it. G2's landing beach went from 91 to 143 (Rebaked 148, the stock world
+141) and the first beach's shoreline band from 123 to 187 (Rebaked 193), 8-bit luminance over the far dollies; the
+flicker figures stayed at the jitter fix's (still 0.22, cliffs 0.31 / 0.72 / 1.62). The domes' rays (`domes_objects_at`,
+the bake's estimator with the moving objects' rays added within 40 units) are stopped by the moving objects too, as the
+bounce's and the sun's already were. Open: the remodelled boulders, captured among the moving objects (their pieces in
+the objects' structure each frame), still cast almost no sun shadow on the sand (`HALO_PT_OBJECTS=0` changes the
+direct light on 1 to 2% of the pixels; the stock rock in the base build's static scenery cast them):
+work/openh1_eval/v4_rock_stable_runs/HANDOVER.md.
+
 ## The reference
 
 `debug.pt_reference N` in this mode (the request comes as with `display.prism_rt`, RT_FRAME's, `prism_rt.c`) traces at
@@ -686,7 +713,10 @@ that nothing moves or destroys, `prism_bake.c`'s `scenery_static`) plus this fra
   `prism_bake_object_static`: a placement of the static kinds at its place, by `scenery_static`'s rule). So the
   vehicles, the characters, weapons on the ground and in hands, the Pelican, projectiles with a model, the machines
   (doors and lifts, which the bake leaves out since prism-v4-m2 c50d3b3d3), equipment and scenery that can move or
-  break are traced as drawn, in their pose and level of detail. A draw is passed over (counted) where its vertices are
+  break are traced as drawn, in their pose and level of detail. So is static scenery a mod's mesh draws (b30's boulders): the frame's
+  traced scene leaves its stock triangles out (`docs/prism_bake.md`, the static scenery), and past
+  `display.prism_rt_objects`' reach a replacement drawn at a level of at most 4096 triangles is still traced as drawn,
+  never by the game's model under it. A draw is passed over (counted) where its vertices are
   not the stock layout, or it is alpha-tested with no cutout coverage; a cutout (foliage on an object) is traced by its
   share of texels drawn. Transparent draws (effects, particles, shields, glass) are not in the G-buffer pass and so not
   traced.

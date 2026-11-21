@@ -52,6 +52,16 @@ Besides the level the bake traces the static scenery (the reach's inputs:
 the scenario's unmoving placements' drawn triangles, with their albedo and
 coverage) and lights the scenario's light fixtures (also the reach's
 inputs); the rig is in the light's units (prism_rt.c's PRISM_RT_UNITS_*).
+
+The scene the frame traces (Rebaked's light pass, Path Traced: the lookup's
+scene block) is the bake's but for the static scenery's runs a mod's mesh
+draws (the reach's last section, prism_bake.c's scenery_copy): those
+placements' stock triangles are uploaded after the others of their kind,
+the bake's structures hold them all, and the frame's (scene_runtime) are
+built over the others alone, so that the bake's light and hash stay the
+stock scenery's while the frame traces each such rock as it is drawn (the
+game sends it as a moving object). The two blocks are alike but for their
+top level.
 */
 
 #include "xgpu_vulkan.h"
@@ -395,11 +405,21 @@ struct bake_state
 	struct bake_buffer vertices, info, materials, alpha, lamps, grid, scene;
 	struct bake_buffer blas_storage[4], tlas_storage, instances;
 	VkAccelerationStructureKHR blas[4], tlas;
+	/* the frame's traced scene where it differs (the static scenery a mod's
+	mesh draws left out): its scenery's two structures, its top level, and
+	its scene block (no buffer: the bake's own serves) */
+	struct bake_buffer runtime_blas_storage[2], runtime_tlas_storage, runtime_instances, scene_runtime;
+	VkAccelerationStructureKHR runtime_blas[2], runtime_tlas;
+	VkDeviceAddress runtime_tlas_address;
 	uint32_t opaque_count, alpha_count, material_count, lamp_count, grid_entries;
 	/* the static scenery's triangles (the reach's, copied: SCENERY_FLOATS
-	each), and its opaque and cutout counts as uploaded */
+	each), and its opaque and cutout counts as uploaded, and of them those
+	the frame traces (the first of each kind: the rest a mod's mesh draws);
+	the runs a mod's mesh draws (first and count each) */
 	float *scenery;
-	uint32_t scenery_count, scenery_opaque, scenery_cutout;
+	uint32_t scenery_count, scenery_opaque, scenery_cutout, scenery_opaque_kept, scenery_cutout_kept;
+	int32_t *scenery_replaced;
+	uint32_t scenery_replaced_count;
 	/* the fixtures (16 floats each: xgpu_vulkan_bake_glsl.inc's
 	fixture_light) and their buffer */
 	float *fixtures;
@@ -540,6 +560,9 @@ static struct
 	coverage), the reach's inputs' */
 	float *scenery;
 	uint32_t scenery_count;
+	/* of them the runs a mod's mesh draws (first triangle and count each) */
+	int32_t *scenery_replaced;
+	uint32_t scenery_replaced_count;
 	/* the scenario's light fixtures in the BSP (FIXTURE_FLOATS each), the
 	reach's inputs' */
 	float *fixtures_input;
@@ -1797,6 +1820,8 @@ static void bake_free(struct bake_state *b)
 		&b->accumulators, &b->states, &b->running, &b->tile_origins, &b->job, &b->cell_points, &b->cell_candidates,
 		&b->cell_weights, &b->mask_ranges, &b->mask_out, &b->probe_points, &b->probe_accumulators, &b->probe_states,
 		&b->probe_statistics, &b->compact_list, &b->compact_args, &b->plan_atlas, &b->cache_block,
+		&b->runtime_blas_storage[0], &b->runtime_blas_storage[1], &b->runtime_tlas_storage, &b->runtime_instances,
+		&b->scene_runtime,
 	};
 
 	if (!b)
@@ -1810,7 +1835,13 @@ static void bake_free(struct bake_state *b)
 	for (index = 0; index < 4; index++)
 		if (b->blas[index])
 			garbage_add(NULL, b->blas[index]);
+	for (index = 0; index < 2; index++)
+		if (b->runtime_blas[index])
+			garbage_add(NULL, b->runtime_blas[index]);
+	if (b->runtime_tlas)
+		garbage_add(NULL, b->runtime_tlas);
 	free(b->scenery);
+	free(b->scenery_replaced);
 	free(b->fixtures);
 	if (b->tlas)
 		garbage_add(NULL, b->tlas);
@@ -2071,6 +2102,13 @@ static struct bake_state *bake_begin(void)
 		b->scenery_count = bake.scenery_count;
 		b->key.geometry_hash = prism_bake_hash64(b->key.geometry_hash, b->scenery,
 			(size_t)b->scenery_count * SCENERY_FLOATS * 4);
+		/* (the runs a mod's mesh draws: not in the hash, the frame's alone) */
+		if (bake.scenery_replaced_count &&
+			(b->scenery_replaced = (int32_t *)malloc((size_t)bake.scenery_replaced_count * 8)) != NULL)
+		{
+			memcpy(b->scenery_replaced, bake.scenery_replaced, (size_t)bake.scenery_replaced_count * 8);
+			b->scenery_replaced_count = bake.scenery_replaced_count;
+		}
 	}
 	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, materials, (size_t)material_count *
 		XGPU_STREAM_RT_MATERIAL_FLOATS * 4);
@@ -2226,8 +2264,11 @@ static int structure_build(VkCommandBuffer commands, VkDeviceAddress vertices, u
 
 /* the top-level structure of the four (the level's opaque: mask 1, custom
 index 0; its alpha-tested: mask 2, custom index 1; the static scenery's
-opaque: mask 4, custom index 2; its cutouts: mask 8, custom index 3) */
-static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const VkDeviceAddress addresses[4])
+opaque: mask 4, custom index 2; its cutouts: mask 8, custom index 3), into
+the buffers and structure given (the bake's, or the frame's) */
+static int scene_structure_into(VkCommandBuffer commands, const VkDeviceAddress addresses[4],
+	struct bake_buffer *instances_buffer, struct bake_buffer *storage, VkAccelerationStructureKHR *tlas,
+	VkDeviceAddress *tlas_address)
 {
 	VkAccelerationStructureInstanceKHR instances[4];
 	VkAccelerationStructureGeometryKHR geometry;
@@ -2256,7 +2297,7 @@ static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const
 		instances[count].accelerationStructureReference = address;
 		count++;
 	}
-	if (!buffer_filled(commands, instances, sizeof(instances), &b->instances,
+	if (!buffer_filled(commands, instances, sizeof(instances), instances_buffer,
 		VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR))
 		return 0;
 	barrier(commands);
@@ -2264,7 +2305,7 @@ static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const
 	geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
 	geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
 	geometry.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
-	geometry.geometry.instances.data.deviceAddress = b->instances.address;
+	geometry.geometry.instances.data.deviceAddress = instances_buffer->address;
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
 	info.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
@@ -2277,19 +2318,19 @@ static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const
 	vkGetAccelerationStructureBuildSizesKHR(bake.device.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
 		&count, &sizes);
 	if (!buffer_make(sizes.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, 0,
-		&b->tlas_storage) || !buffer_make(sizes.buildScratchSize + bake.scratch_alignment, 0, 0, &scratch))
+		storage) || !buffer_make(sizes.buildScratchSize + bake.scratch_alignment, 0, 0, &scratch))
 		return 0;
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-	create.buffer = b->tlas_storage.buffer;
+	create.buffer = storage->buffer;
 	create.size = sizes.accelerationStructureSize;
 	create.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-	if (vkCreateAccelerationStructureKHR(bake.device.device, &create, NULL, &b->tlas) != VK_SUCCESS)
+	if (vkCreateAccelerationStructureKHR(bake.device.device, &create, NULL, tlas) != VK_SUCCESS)
 	{
 		buffer_free_now(&scratch);
 		return 0;
 	}
-	info.dstAccelerationStructure = b->tlas;
+	info.dstAccelerationStructure = *tlas;
 	info.scratchData.deviceAddress = (scratch.address + bake.scratch_alignment - 1) & ~(bake.scratch_alignment - 1);
 	memset(&range, 0, sizeof(range));
 	range.primitiveCount = count;
@@ -2297,9 +2338,41 @@ static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const
 	garbage_add(&scratch, VK_NULL_HANDLE);
 	memset(&where, 0, sizeof(where));
 	where.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-	where.accelerationStructure = b->tlas;
-	b->block.tlas = vkGetAccelerationStructureDeviceAddressKHR(bake.device.device, &where);
+	where.accelerationStructure = *tlas;
+	*tlas_address = vkGetAccelerationStructureDeviceAddressKHR(bake.device.device, &where);
 	return 1;
+}
+
+static int scene_structure(VkCommandBuffer commands, struct bake_state *b, const VkDeviceAddress addresses[4])
+{
+	VkDeviceAddress address = 0;
+
+	if (!scene_structure_into(commands, addresses, &b->instances, &b->tlas_storage, &b->tlas, &address))
+		return 0;
+	b->block.tlas = address;
+	return 1;
+}
+
+/* the scene's block uploaded (its own, and the frame's: the same but for
+its top level, where the frame traces another) */
+static int scene_block_upload(VkCommandBuffer commands, struct bake_state *b)
+{
+	struct bake_scene_block runtime;
+
+	if (!upload(commands, &b->scene, 0, &b->block, sizeof(b->block)))
+		return 0;
+	if (!b->scene_runtime.buffer)
+		return 1;
+	runtime = b->block;
+	runtime.tlas = b->runtime_tlas_address;
+	return upload(commands, &b->scene_runtime, 0, &runtime, sizeof(runtime));
+}
+
+/* the scene block the frame traces: the bake's, or its own where the static
+scenery a mod's mesh draws is left out */
+static VkDeviceAddress scene_runtime_address(const struct bake_state *b)
+{
+	return b->scene_runtime.buffer ? b->scene_runtime.address : b->scene.address;
 }
 
 /* the scene put on the GPU (the plan done): the triangles traced (the
@@ -2327,7 +2400,8 @@ static int bake_upload(struct bake_state *b)
 	const float *materials = (const float *)b->materials.mapped;
 	float *vertices = NULL, *tridata = NULL;
 	uint32_t *info = NULL, *pages = NULL, *vpages = NULL, *plan_atlas = NULL, index, opaque = 0, tested = 0, at[4];
-	uint32_t triangles, scenery_materials = 0;
+	uint32_t triangles, scenery_materials = 0, gone[2];
+	uint8_t *replaced = NULL;
 	VkDeviceAddress opaque_address = 0, tested_address = 0, addresses[4] = { 0, 0, 0, 0 };
 	void *host_materials = b->materials.mapped, *host_alpha = b->alpha.mapped;
 	VkDeviceSize alpha_bytes = b->alpha.size;
@@ -2357,12 +2431,28 @@ static int bake_upload(struct bake_state *b)
 	each its own material: its albedo, and its coverage in the alpha test's
 	place; the cutouts two-sided, cards) */
 	scenery_materials = 0;
+	/* (each kind's triangles of placements a mod's mesh draws after the
+	others: the frame's structures are built over the others, the first) */
+	if (b->scenery_replaced_count && (replaced = (uint8_t *)calloc(b->scenery_count + 1, 1)) != NULL)
+	{
+		for (index = 0; index < b->scenery_replaced_count; index++)
+			memset(replaced + b->scenery_replaced[index * 2], 1, (size_t)b->scenery_replaced[index * 2 + 1]);
+	}
 	for (index = 0; index < b->scenery_count; index++)
 	{
-		if (b->scenery[(size_t)index * SCENERY_FLOATS + 12] < 0.999f)
+		int cutout = b->scenery[(size_t)index * SCENERY_FLOATS + 12] < 0.999f;
+
+		if (cutout)
 			b->scenery_cutout++;
 		else
 			b->scenery_opaque++;
+		if (!replaced || !replaced[index])
+		{
+			if (cutout)
+				b->scenery_cutout_kept++;
+			else
+				b->scenery_opaque_kept++;
+		}
 	}
 	triangles = plan->triangle_count + b->scenery_count;
 	vertices = (float *)malloc(((size_t)triangles + 1) * 36);
@@ -2380,11 +2470,13 @@ static int bake_upload(struct bake_state *b)
 		materials = grown;
 		at[2] = opaque + tested;
 		at[3] = opaque + tested + b->scenery_opaque;
+		gone[0] = at[2] + b->scenery_opaque_kept;
+		gone[1] = at[3] + b->scenery_cutout_kept;
 		for (index = 0; index < b->scenery_count; index++)
 		{
 			const float *t = b->scenery + (size_t)index * SCENERY_FLOATS;
 			int cutout = t[12] < 0.999f;
-			uint32_t slot = at[cutout ? 3 : 2]++, m;
+			uint32_t slot = replaced && replaced[index] ? gone[cutout]++ : at[cutout ? 3 : 2]++, m;
 			uint32_t *to = info + (size_t)slot * 8;
 
 			/* (its material: one alike already made, else a new one) */
@@ -2495,6 +2587,30 @@ static int bake_upload(struct bake_state *b)
 	addresses[1] = tested_address;
 	if (!scene_structure(commands, b, addresses))
 		goto done;
+	/* (the frame's: the level's and the static scenery's but for the
+	placements a mod's mesh draws, the first of each kind's triangles) */
+	if (b->scenery_opaque_kept != b->scenery_opaque || b->scenery_cutout_kept != b->scenery_cutout)
+	{
+		VkDeviceAddress runtime[4];
+
+		runtime[0] = opaque_address;
+		runtime[1] = tested_address;
+		runtime[2] = runtime[3] = 0;
+		if (b->scenery_opaque_kept && !structure_build(commands, b->vertices.address + (VkDeviceSize)(opaque + tested) *
+			36, b->scenery_opaque_kept, 1, &b->runtime_blas_storage[0], &b->runtime_blas[0], &runtime[2]))
+			goto done;
+		if (b->scenery_cutout_kept && !structure_build(commands, b->vertices.address + (VkDeviceSize)(opaque + tested +
+			b->scenery_opaque) * 36, b->scenery_cutout_kept, 0, &b->runtime_blas_storage[1], &b->runtime_blas[1],
+			&runtime[3]))
+			goto done;
+		barrier(commands);
+		if (!scene_structure_into(commands, runtime, &b->runtime_instances, &b->runtime_tlas_storage, &b->runtime_tlas,
+			&b->runtime_tlas_address) || !buffer_make(sizeof(b->block), 0, 0, &b->scene_runtime))
+			goto done;
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the frame traces the static scenery but %u placements' %u "
+			"triangles a mod's mesh draws (traced as drawn)", b->map, (int)b->bsp, b->scenery_replaced_count,
+			(b->scenery_opaque - b->scenery_opaque_kept) + (b->scenery_cutout - b->scenery_cutout_kept));
+	}
 	barrier(commands);
 	/* the scene's block (the grid's address and entries once it is made) */
 	b->block.vertices = b->vertices.address;
@@ -2515,7 +2631,7 @@ static int bake_upload(struct bake_state *b)
 	b->block.settings[0] = BOUNCES;
 	/* (HALO_BAKE_TERMS: terms left out, for diagnosis: xgpu_vulkan_bake_glsl.inc's term_off) */
 	b->block.settings[1] = getenv("HALO_BAKE_TERMS") ? (uint32_t)strtoul(getenv("HALO_BAKE_TERMS"), NULL, 0) : 0u;
-	if (!buffer_make(sizeof(b->block), 0, 0, &b->scene) || !upload(commands, &b->scene, 0, &b->block, sizeof(b->block)))
+	if (!buffer_make(sizeof(b->block), 0, 0, &b->scene) || !scene_block_upload(commands, b))
 		goto done;
 	/* the raster lookup's tables: the pages (their chart maps' first words
 	and sizes), the chart maps, the virtual pages, the tile table, the
@@ -2618,6 +2734,7 @@ static int bake_upload(struct bake_state *b)
 	ok = 1;
 
 done:
+	free(replaced);
 	free(host_materials);
 	free(host_alpha);
 	free(vertices);
@@ -3863,7 +3980,7 @@ static void importance_finish(VkCommandBuffer commands, struct bake_state *b, co
 	b->block.settings[2] = entries;
 	b->grid_entries = entries;
 	barrier(commands);
-	upload(commands, &b->scene, 0, &b->block, sizeof(b->block));
+	scene_block_upload(commands, b);
 	barrier(commands);
 	b->grid_ready = 1;
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the light-importance grid: %u of %u cells with lamps seen (%u lamps; "
@@ -4866,7 +4983,7 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 				b->block.settings[2] = table[0];
 				b->grid_entries = b->block.settings[2];
 				barrier(commands);
-				upload(commands, &b->scene, 0, &b->block, sizeof(b->block));
+				scene_block_upload(commands, b);
 				b->grid_ready = 1;
 				b->cells_done = plan->cell_count * GRID_CANDIDATES;
 			}
@@ -5562,6 +5679,7 @@ static void *reach_thread(void *unused)
 	size_t triangle_count = 0, slot, t;
 	int built = 0, failed = 1, from_file = 0;
 	uint64_t input_hash = 0;
+	size_t hashed_words = 0;
 	double started = now_seconds();
 
 	(void)unused;
@@ -5663,6 +5781,33 @@ static void *reach_thread(void *unused)
 			memcpy(bake.fixtures_input, scenery, (size_t)count * FIXTURE_FLOATS * 4);
 			bake.fixtures_input_count = (uint32_t)count;
 		}
+		/* (the static scenery's runs a mod's mesh draws: after what the
+		reach's file and the bake's key are made of, none from an older
+		game; a run outside the scenery's triangles left out) */
+		hashed_words = r.at;
+		free(bake.scenery_replaced);
+		bake.scenery_replaced = NULL;
+		bake.scenery_replaced_count = 0;
+		if (!r.failed && r.at < r.count)
+		{
+			const int32_t *runs;
+			int32_t run;
+
+			count = reach_count(&r, 2);
+			runs = (const int32_t *)reach_take(&r, (size_t)count * 2);
+			if (runs && count > 0 && (bake.scenery_replaced = (int32_t *)malloc((size_t)count * 8)) != NULL)
+			{
+				for (run = 0; run < count; run++)
+				{
+					if (runs[run * 2] < 0 || runs[run * 2 + 1] <= 0 ||
+						(uint32_t)runs[run * 2] + (uint32_t)runs[run * 2 + 1] > bake.scenery_count)
+						continue;
+					bake.scenery_replaced[bake.scenery_replaced_count * 2] = runs[run * 2];
+					bake.scenery_replaced[bake.scenery_replaced_count * 2 + 1] = runs[run * 2 + 1];
+					bake.scenery_replaced_count++;
+				}
+			}
+		}
 	}
 	if (r.failed || !leaf_clusters || !leaf_counts || !leaf_first || !seeds || !positions || !surfaces)
 	{
@@ -5670,7 +5815,7 @@ static void *reach_thread(void *unused)
 		goto done;
 	}
 	/* (the walk these inputs made before, from its file: none to make) */
-	input_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.reach_input, (size_t)bake.reach_words * 4);
+	input_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.reach_input, hashed_words * 4);
 	if (reach_file_read(input_hash))
 	{
 		failed = 0;
@@ -6170,7 +6315,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		struct bake_push push;
 
 		memset(&push, 0, sizeof(push));
-		push.scene = b->scene.address;
+		push.scene = scene_runtime_address(b);
 		push.job = b->raster_job.address;
 		push.parameters[0] = bake_view;
 		push.parameters[1] = b->plan.page_count;
@@ -6196,7 +6341,7 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	memset(lookup, 0, sizeof(*lookup));
 	if (!bake.made || !bake_traceable(b) || !b->block.tlas)
 		return 0;
-	lookup->scene = b->scene.address;
+	lookup->scene = scene_runtime_address(b);
 	lookup->pages = b->pages.address;
 	lookup->charts = b->charts.address;
 	lookup->vpages = b->vpages.address;

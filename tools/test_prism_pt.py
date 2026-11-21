@@ -29,9 +29,20 @@ def test_the_glsl_has_every_pass_and_shares_the_bakes_scene():
     for name in ("light", "temporal", "fix", "atrous", "composite", "reference", "reference_stats", "lamps", "cache"):
         assert f"//@pass {name}\n" in text
     # (the bake's own functions, not copies: the scene traced and the bake made by one estimator)
-    for used in ("lamp_pick(", "lamp_direction(", "lamp_visible(", "domes_at(", "fixture_light(", "fixtures_ris(",
+    for used in ("lamp_pick(", "lamp_direction(", "lamp_visible(", "fixture_light(", "fixtures_ris(",
                  "sky_along(", "ambient()", "glow_of(", "albedo_of(", "sun_at("):
         assert used in text
+    # (the domes: the bake's estimator with the moving objects' rays added (domes_objects_at), its level's test
+    # the bake's own sky_blocked and dome_reach, and both the light pass and the reference take it)
+    domes = text[text.index("vec3 domes_objects_at("):]
+    domes = domes[:domes.index("\n}\n")]
+    for used in ("sky_blocked(o, d, dome_reach(r))", "objects_blocked(o, d, OBJECT_DOME_REACH)", "cone_dir("):
+        assert used in domes
+    assert text.count("domes_objects_at(o, g.normal, m)") == 2
+    # (a level pixel's rays start on the level as traced (level_origin: the eye's ray followed again about the
+    # point), in the light pass and the reference alike, never at the drawn point under a traced face)
+    assert text.count("vec3 o = level_origin(g, offset);") == 2
+    assert "vec3 o = g.point + g.normal * offset;" not in text.replace("    vec3 o = g.point + g.normal * offset;\n    if (g.instance", "")
     for copied in ("uint lamp_pick(", "uint list_pick(", "bool lamp_visible(", "bool lamp_direction(",
                    "vec3 domes_at(", "vec3 sky_along("):
         assert copied not in text

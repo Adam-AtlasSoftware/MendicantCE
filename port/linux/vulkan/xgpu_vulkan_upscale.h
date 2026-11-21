@@ -59,6 +59,11 @@ the passes that sample textures by their own footprints (the terrain's HQ
 layers) sample them as sharp as the screen's pixels would, as the game's
 mip bias samples CE's maps */
 float xgpu_vulkan_upscale_view_ratio(void);
+/* the view begun's jitter (the draws' offset in its target's pixels, right and
+down), 1 while its draws are jittered; 0 and none outside such a view: the
+passes that find a pixel's point again from its distance (the path tracer)
+find it along the jittered pixel's ray, where the G-buffer drew it */
+int xgpu_vulkan_upscale_jitter(float jitter[2]);
 void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view);
 void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view,
 	struct xgpu_vulkan_image *view_depth, struct xgpu_vulkan_image *output, struct xgpu_vulkan_image *output_depth,
