@@ -2196,6 +2196,34 @@ static VkDeviceSize capture_offsets(VkDeviceSize jobs, VkDeviceSize *groups, VkD
 	return *map + (VkDeviceSize)RT_WINDOW_DRAWS * 4;
 }
 
+/* a capture closed without its objects recorded (the pre-pass's window
+under "pathtraced", whose objects are the G-buffer pass's; a window that
+traced nothing): its jobs' entries made to be skinned and built again at
+their next capture (nothing where it is not open: a recorded capture's
+jobs are built). Left as they were, an entry whose first capture fell in
+such a window kept "skinned" with no structure, and a draw that does not
+move (the remodelled boulders, static scenery captured as drawn) was never
+skinned again, so never built nor traced: no sun shadow, no occlusion */
+static void capture_abandon(void)
+{
+	struct rt_capture *capture = &rt.capture;
+	uint32_t job;
+
+	if (!capture->open)
+		return;
+	if (capture->jobs)
+		for (job = 0; job < capture->job_count; job++)
+		{
+			struct rt_entry *entry = &rt.entries[capture->jobs[job * RT_JOB_WORDS + 18]];
+
+			entry->skinned = 0;
+			entry->mode = 0;
+			entry->job = -1;
+		}
+	capture->job_count = capture->job_groups = capture->job_triangles = 0;
+	capture->open = 0;
+}
+
 /* a window's capture begun where wanted (traced: the pre-pass's; the
 objects alone: the G-buffer pass's) */
 static void capture_begin(int wanted)
@@ -2204,6 +2232,8 @@ static void capture_begin(int wanted)
 	struct rt_capture *capture = &rt.capture;
 	VkDeviceSize groups, table, map;
 
+	if (capture->open)
+		capture_abandon();
 	capture->open = capture->full = 0;
 	capture->draw_count = capture->triangle_count = 0;
 	memcpy(rt.owner_last, rt.owner_now, sizeof(rt.owner_last));
@@ -2357,8 +2387,8 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 	/* whether it moved: its bytes, its pose, its node rows (those its
 	vertices name, once known) */
 	rows = entry->rows_known ? entry->rows_known : RT_NODE_ROWS;
-	changed = !cache || !entry->skinned || draw->volatile_source || entry->generation[0] != draw->generation[0] ||
-		entry->generation[1] != draw->generation[1] || entry->pose != draw->pose ||
+	changed = !cache || !entry->skinned || !entry->built || draw->volatile_source ||
+		entry->generation[0] != draw->generation[0] || entry->generation[1] != draw->generation[1] || entry->pose != draw->pose ||
 		(draw->constants && memcmp(entry->rows, draw->constants[60], rows * sizeof(entry->rows[0])));
 	entry->frame = rt.object_frame;
 	entry->mode = 0;
@@ -3477,13 +3507,16 @@ int xgpu_vulkan_rt_objects_end(const float eye[3])
 
 	if (!rt.capture.open || !xgpu_vulkan_rt_objects_only())
 	{
-		rt.capture.open = 0;
+		capture_abandon();
+		return 0;
+	}
+	commands = xgpu_vulkan_compute_commands();
+	if (!commands)
+	{
+		capture_abandon();
 		return 0;
 	}
 	rt.capture.open = 0;
-	commands = xgpu_vulkan_compute_commands();
-	if (!commands)
-		return 0;
 	first = slot->instances_used;
 	count = objects_record(commands, slot, eye, &table);
 	rt.eye[0] = eye[0];
@@ -3552,7 +3585,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_rt_window_end(struct xgpu_vulkan_image *in
 
 	if (!rt.capture.open || !xgpu_vulkan_rt_active() || !inputs || rt.objects_only)
 	{
-		rt.capture.open = 0;
+		capture_abandon();
 		return NULL;
 	}
 	rt.capture.open = 0;

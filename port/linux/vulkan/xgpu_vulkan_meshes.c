@@ -605,38 +605,14 @@ int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw)
 	return 0;
 }
 
-int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_piece *pieces, int most)
+/* the part's pieces of the instance's view, its skinned vertices */
+static int rt_pieces_fill(const struct instance *instance, uint32_t region, uint32_t permutation, uint64_t pose,
+	struct xgpu_vulkan_meshes_rt_piece *pieces, int most)
 {
-	struct instance *instance = meshes.part;
-	const struct xgpu_mesh_store_view *view;
-	uint32_t region = meshes.key.region, permutation = meshes.key.permutation, key, index, piece_index;
-	uint64_t pose;
+	const struct xgpu_mesh_store_view *view = &instance->view;
+	uint32_t piece_index;
 	int count = 0;
 
-	if (!instance || !instance->drawable || region >= 32 || permutation >= 32 ||
-		!(instance->view.present[(region * 32 + permutation) / 8] & (1u << ((region * 32 + permutation) % 8))))
-		return -1;
-	if (!(meshes.key.flags & XGPU_STREAM_MESH_DRAW_CARRIER))
-		return 0;
-	/* (a part drawn in several draws, or again in the window: once) */
-	key = (region << 24) ^ (permutation << 16) ^ (uint32_t)meshes.key.shader;
-	if (instance->rt_window != window)
-	{
-		instance->rt_window = window;
-		instance->rt_key_count = 0;
-	}
-	for (index = 0; index < instance->rt_key_count; index++)
-		if (instance->rt_keys[index] == key)
-			return 0;
-	if (instance->rt_key_count < sizeof(instance->rt_keys) / sizeof(instance->rt_keys[0]))
-		instance->rt_keys[instance->rt_key_count++] = key;
-	if (!instance_skin(instance, 0))
-		return -1;
-	view = &instance->view;
-	/* (its bones' matrices and level, and a rig's clock: its springs move
-	whatever the matrices) */
-	pose = ((uint64_t)instance->hash << 32) ^ (view->rig ? (uint64_t)(instance->game_seconds * 1000.0) : 0) ^
-		(uint64_t)view->lod;
 	for (piece_index = 0; piece_index < view->piece_count && count < most; piece_index++)
 	{
 		const struct xgpu_mesh_store_piece *piece = &view->pieces[piece_index];
@@ -664,6 +640,85 @@ int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_p
 			count++;
 	}
 	return count ? count : -1;
+}
+
+int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_piece *pieces, int most)
+{
+	struct instance *instance = meshes.part;
+	const struct xgpu_mesh_store_view *view;
+	uint32_t region = meshes.key.region, permutation = meshes.key.permutation, key, index;
+	uint64_t pose;
+
+	if (!instance || !instance->drawable || region >= 32 || permutation >= 32 ||
+		!(instance->view.present[(region * 32 + permutation) / 8] & (1u << ((region * 32 + permutation) % 8))))
+		return -1;
+	if (!(meshes.key.flags & XGPU_STREAM_MESH_DRAW_CARRIER))
+		return 0;
+	/* (a part drawn in several draws, or again in the window: once) */
+	key = (region << 24) ^ (permutation << 16) ^ (uint32_t)meshes.key.shader;
+	if (instance->rt_window != window)
+	{
+		instance->rt_window = window;
+		instance->rt_key_count = 0;
+	}
+	for (index = 0; index < instance->rt_key_count; index++)
+		if (instance->rt_keys[index] == key)
+			return 0;
+	if (instance->rt_key_count < sizeof(instance->rt_keys) / sizeof(instance->rt_keys[0]))
+		instance->rt_keys[instance->rt_key_count++] = key;
+	if (!instance_skin(instance, 0))
+		return -1;
+	view = &instance->view;
+	/* (its bones' matrices and level, and a rig's clock: its springs move
+	whatever the matrices) */
+	pose = ((uint64_t)instance->hash << 32) ^ (view->rig ? (uint64_t)(instance->game_seconds * 1000.0) : 0) ^
+		(uint64_t)view->lod;
+	return rt_pieces_fill(instance, region, permutation, pose, pieces, most);
+}
+
+/* port: a level of the part found by xgpu_mesh_store_use at a size below
+every cutoff (its least detailed), skinned in the instance's place and the
+instance's own level and skinning put back after, so that the frame's draws
+of it after this one keep the level drawn */
+#define RT_COARSE_PIXELS 1.0f
+int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *pieces, int most)
+{
+	struct instance *instance = meshes.part, kept;
+	struct xgpu_mesh_store_view coarse;
+	uint32_t region = meshes.key.region, permutation = meshes.key.permutation;
+	uint64_t pose;
+	int count;
+
+	if (!instance || !instance->drawable || !meshes.store || region >= 32 || permutation >= 32 ||
+		!(meshes.key.flags & XGPU_STREAM_MESH_DRAW_CARRIER) ||
+		!xgpu_mesh_store_use(meshes.store, instance->mesh, RT_COARSE_PIXELS, &coarse) ||
+		coarse.lod == instance->view.lod || coarse.node_count > instance->node_count ||
+		!(coarse.present[(region * 32 + permutation) / 8] & (1u << ((region * 32 + permutation) % 8))))
+		return -1;
+	memcpy(&kept, instance, offsetof(struct instance, matrices));
+	kept.hash = instance->hash;
+	kept.skinned = instance->skinned;
+	kept.wide = instance->wide;
+	kept.skinned_wide = instance->skinned_wide;
+	kept.skinned_serial = instance->skinned_serial;
+	instance->view = coarse;
+	instance->hash = bytes_hash(instance->matrices, instance->node_count * sizeof(instance->matrices[0]),
+		2166136261u ^ coarse.lod);
+	instance->skinned_serial = 0;
+	count = -1;
+	if (instance_skin(instance, 0))
+	{
+		pose = ((uint64_t)instance->hash << 32) ^ (coarse.rig ? (uint64_t)(instance->game_seconds * 1000.0) : 0) ^
+			(uint64_t)coarse.lod;
+		count = rt_pieces_fill(instance, region, permutation, pose, pieces, most);
+	}
+	memcpy(instance, &kept, offsetof(struct instance, matrices));
+	instance->hash = kept.hash;
+	instance->skinned = kept.skinned;
+	instance->wide = kept.wide;
+	instance->skinned_wide = kept.skinned_wide;
+	instance->skinned_serial = kept.skinned_serial;
+	return count;
 }
 
 void xgpu_vulkan_meshes_frame(void)

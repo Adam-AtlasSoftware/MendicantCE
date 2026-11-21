@@ -1797,12 +1797,29 @@ lit light after it (tone_curved: display.prism_tone_curve's). */
 	"/* display.prism_tone_curve over a lit colour (1 white): 1 filmic (CE's light\n" \
 	"as it is up to 0.6 of white, past it rolled off toward white, the colour's\n" \
 	"brightest channel's, its hue kept; \"local\" here as filmic), 2 Narkowicz's\n" \
-	"fit of ACES's, else as it is (\"ce\": the display clips it) */\n" \
+	"fit of ACES's, else as it is (\"ce\": the display clips it). ACES's curve\n" \
+	"(port) on the brightest channel with the hue kept, up to 1.5 past white,\n" \
+	"going over to its curve on each channel by 7.5 (a lamp's core, the sun's\n" \
+	"disc still burn to white): on each channel alone a sunlit colour (CE's tan\n" \
+	"sand, at 2 to 3 past white in Path Traced, whose curve takes the lit colour\n" \
+	"with its base colour in it) had its weaker channels lifted toward its\n" \
+	"brightest, washed out to near white */\n" \
+	"vec3 aces_fit(vec3 c)\n" \
+	"{\n" \
+	"    return clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);\n" \
+	"}\n" \
 	"vec3 tone_curved(vec3 c, int mode)\n" \
 	"{\n" \
 	"    c = max(c, vec3(0.0));\n" \
 	"    if (mode == 2)\n" \
-	"        return clamp((c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14), 0.0, 1.0);\n" \
+	"    {\n" \
+	"        float top = max(c.r, max(c.g, c.b));\n" \
+	"        if (top <= 1.0e-5)\n" \
+	"            return vec3(0.0);\n" \
+	"        vec3 kept = c * (aces_fit(vec3(top)).x / top);\n" \
+	"        float w = clamp((top - 1.5) / 6.0, 0.0, 1.0);\n" \
+	"        return mix(kept, aces_fit(c), w * w);\n" \
+	"    }\n" \
 	"    if (mode != 1 && mode != 3)\n" \
 	"        return c;\n" \
 	"    float brightest = max(c.r, max(c.g, c.b));\n" \

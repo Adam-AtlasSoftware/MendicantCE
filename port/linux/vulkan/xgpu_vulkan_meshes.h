@@ -90,5 +90,12 @@ struct xgpu_vulkan_meshes_rt_piece
 	float origin[3];
 };
 int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_piece *pieces, int most);
+/* port: the same part's pieces at its mesh's least detailed level, skinned
+for the traced scene alone (the frame's own draws keep the level drawn):
+where the level drawn is refused (display.prism_rt_objects "auto"'s reach or
+share), as the mesh store draws no stock part in a carrier's place to trace
+instead. Returns the pieces, or -1 where there is none coarser (or none
+resident yet) */
+int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *pieces, int most);
 
 #endif
