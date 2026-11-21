@@ -207,6 +207,9 @@ def estimate_sun(mats, use, extract_root, gltf_json):
         mag = np.linalg.norm(m.radiosity, axis=1)
         dirs.append(normalize(m.radiosity.astype(np.float64)))
         wts.append(lum * mag)
+    if not dirs or not sum(len(w) for w in wts):
+        # (no lit surface of the classes remodelled has a lightmap here, as in c40's shafts: light from above)
+        return np.array([0.0, 0.0, 1.0])
     D = np.concatenate(dirs)
     Wt = np.concatenate(wts)
     cut = np.percentile(Wt, 92)
