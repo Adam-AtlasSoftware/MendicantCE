@@ -950,6 +950,17 @@ void xgpu_vulkan_terrain_layers(struct xgpu_vulkan_image *base, struct xgpu_vulk
 	memcpy(values.view_down, view->now[3], sizeof(values.view_down));
 	for (index = 0; index < 4; index++)
 		values.view_corners[index] = (float)view->corners[index];
+	/* (the jittered draw's rays under an upscaler, so that the layers are
+	anchored to the point the G-buffer drew, not one moved by the jitter:
+	xgpu_vulkan_upscale_jittered_camera) */
+	{
+		float camera[4][4], jitter[2];
+
+		memcpy(camera, view->now, sizeof(camera));
+		(void)xgpu_vulkan_upscale_jitter(jitter);
+		xgpu_vulkan_upscale_jittered_camera(camera, view->corners, jitter);
+		memcpy(values.view_axis, camera[1], sizeof(values.view_axis));
+	}
 	for (index = 0; index < XGPU_TERRAIN_CLASSES; index++)
 		values.class_cue[index / 4][index % 4] = cues[index];
 	/* (T2: sand's ripples' direction and height, in the program's tangents;

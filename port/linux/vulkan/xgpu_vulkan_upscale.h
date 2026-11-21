@@ -59,6 +59,16 @@ the passes that sample textures by their own footprints (the terrain's HQ
 layers) sample them as sharp as the screen's pixels would, as the game's
 mip bias samples CE's maps */
 float xgpu_vulkan_upscale_view_ratio(void);
+/* the view begun's jitter (pixels: its draws' viewport moved by it, so a
+pixel's centre shows the unjittered view's point at the centre less the
+jitter), 0 outside such a view; and a view's camera (SCENE_VIEW's: the eye,
+the axis a unit along it, its change a unit of the screen's x and y, the
+corners) made the jittered draws' (the axis moved by the jitter), so that the
+passes that find a pixel's point from its distance (the path tracer, Rebaked,
+the terrain's layers) find the point the G-buffer drew there, not one beside
+it off the surface */
+int xgpu_vulkan_upscale_jitter(float jitter[2]);
+void xgpu_vulkan_upscale_jittered_camera(float camera[4][4], const int32_t corners[4], const float jitter[2]);
 void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view);
 void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view,
 	struct xgpu_vulkan_image *view_depth, struct xgpu_vulkan_image *output, struct xgpu_vulkan_image *output_depth,

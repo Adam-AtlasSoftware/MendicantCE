@@ -303,6 +303,8 @@ static struct
 	int raw_last;
 	uint32_t parity;
 	int history_valid;
+	/* the jitter of the view the last frame was drawn in (its camera's) */
+	float jitter_last[2];
 	uint32_t frame;
 	uint64_t scene_seen;
 	uint64_t last_serial;
@@ -1715,6 +1717,23 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	memcpy(job->corners, view->corners, sizeof(job->corners));
 	memcpy(job->last_corners, (view->flags & XGPU_SCENE_VIEW_HISTORY) ? view->last_corners : view->corners,
 		sizeof(job->last_corners));
+	/* (under an upscaler the G-buffer was drawn jittered: each frame's
+	pixels' rays the jittered draw's, this frame's and the last's, so that a
+	pixel's point is on the surface it shows. Without, a sloped surface seen
+	edge on (b30's hills under DLSS Ultra Performance) put the point inside
+	the ground at some phases of the jitter, its sun ray blocked by the ground
+	itself: the whole slope dark one frame in three, lit the next) */
+	{
+		float jitter[2];
+
+		(void)xgpu_vulkan_upscale_jitter(jitter);
+		xgpu_vulkan_upscale_jittered_camera(job->camera, job->corners, jitter);
+		if (view->flags & XGPU_SCENE_VIEW_HISTORY)
+			xgpu_vulkan_upscale_jittered_camera(job->last_camera, job->last_corners, pt.jitter_last);
+		else
+			xgpu_vulkan_upscale_jittered_camera(job->last_camera, job->last_corners, jitter);
+		memcpy(pt.jitter_last, jitter, sizeof(pt.jitter_last));
+	}
 	job->counts[0] = lookup.page_count;
 	job->counts[1] = description->width;
 	job->counts[2] = description->height;

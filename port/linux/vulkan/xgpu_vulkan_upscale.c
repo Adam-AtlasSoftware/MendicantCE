@@ -1031,6 +1031,29 @@ float xgpu_vulkan_upscale_view_ratio(void)
 	return ratio >= 0.2f && ratio < 1.0f ? ratio : 1.0f;
 }
 
+int xgpu_vulkan_upscale_jitter(float jitter[2])
+{
+	jitter[0] = up.jittering ? up.jitter[0] : 0.0f;
+	jitter[1] = up.jittering ? up.jitter[1] : 0.0f;
+	return up.jittering && (jitter[0] != 0.0f || jitter[1] != 0.0f);
+}
+
+void xgpu_vulkan_upscale_jittered_camera(float camera[4][4], const int32_t corners[4], const float jitter[2])
+{
+	float width = (float)(corners[2] - corners[0]), height = (float)(corners[3] - corners[1]);
+	float sx, sy;
+	int axis;
+
+	if (width < 1.0f || height < 1.0f || (jitter[0] == 0.0f && jitter[1] == 0.0f))
+		return;
+	/* (a pixel's ray is axis + sx across + sy down, sx = 2 (x + 0.5 - left)
+	/ width - 1: the jittered draw's pixel x shows the point at x - jitter) */
+	sx = -2.0f * jitter[0] / width;
+	sy = -2.0f * jitter[1] / height;
+	for (axis = 0; axis < 3; axis++)
+		camera[1][axis] += sx * camera[2][axis] + sy * camera[3][axis];
+}
+
 void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view)
 {
 	const struct xgpu_vulkan_image_description *description, *had;
