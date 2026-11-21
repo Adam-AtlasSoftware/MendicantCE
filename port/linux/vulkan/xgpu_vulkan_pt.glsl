@@ -2521,7 +2521,7 @@ void main()
     sparkle the denoiser spread into a dot. The GGX ray's weight is bounded
     (Fresnel by G2 / G1), so a lamp it meets is its radiance at most) */
     bool lamp_ray = indirect_on && !glossy && g.roughness <= lamp_ray_roughness() &&
-        (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u;
+        (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u && !part_off(PARTS_REFLECTION);
     /* (the reflection ray's length, for the specular history's virtual
     motion: 0 where none is traced, far where it leaves the level) */
     float spec_hit = 0.0;
@@ -2540,7 +2540,7 @@ void main()
         lamps_probe = indirect_on && !(g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION)) &&
             (job.frame.y & FLAG_PROBE_ONLY) != 0u;
         seed_for(pixel, frame, 3u);
-        lamps_mis = glossy || lamp_ray;
+        lamps_mis = (glossy || lamp_ray) && !part_off(PARTS_REFLECTION);
         lamp_direct_total = texel && (job.frame.y & FLAG_LAMP_MIS) != 0u ?
             max(luma(bake_total - bake_indirect), 0.0) : 0.0;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);

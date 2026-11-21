@@ -102,7 +102,7 @@ frames; 0 none); the
 slow history's frames at most, a moving eye's and a
 still one's (HALO_PT_HISTORY, HALO_PT_HISTORY_STILL) and ReSTIR DI's
 reservoirs' confidence at most for a still eye (HALO_PT_RESTIR_M_STILL) */
-#define STABILIZE_DEFAULT 8
+#define STABILIZE_DEFAULT 0
 #define HISTORY_DEFAULT 32
 #define HISTORY_STILL_DEFAULT 128
 #define RESTIR_M_STILL_DEFAULT 20
@@ -121,7 +121,7 @@ block's flag (xgpu_vulkan_pt.glsl's FLAG_LAMP_MIS): the lamps' specular light
 shared between ReSTIR DI and the reflection's ray by the chance ReSTIR DI
 finds each lamp (HALO_PT_LAMP_MIS, on by default; 0: by its solid angle alone,
 as before) */
-#define LAMP_RAY_DEFAULT 0.7
+#define LAMP_RAY_DEFAULT 0.0
 #define FLAG_LAMP_MIS 256u
 /* the light pass's specialization constants (xgpu_vulkan_pt.glsl's
 SPEC_*); whether half the level's 8 x 8 blocks (1) or half its pixels (2)
