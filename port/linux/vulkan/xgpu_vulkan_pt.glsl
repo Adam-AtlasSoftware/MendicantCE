@@ -822,6 +822,69 @@ float objects_hit(vec3 o, vec3 d, float t_max, out vec3 nh, out vec3 albedo)
     return rayQueryGetIntersectionTEXT(q, true);
 }
 
+/* (port: a level pixel's rays' origin on the level as traced. The G-buffer
+draws the remodel's level of each surface by its distance (prism_world_
+geometry.c: the near level, the far one past its distance), the traced scene
+holds the bake's level (its near level, two-sided where a far one exists):
+where the two part, a far surface drawn under the near one's relief, the
+pixel's point lay a few centimetres below a traced face, and every ray from
+it (the sun, the domes, the bounce) met that face's back at once. b30's wet
+shoreline and G2's landing beach went black in Path Traced and stayed so
+(before the upscaler's jitter fix they flickered between lit and dark:
+work/openh1_eval/v4_rock_stable_runs, the sun's blocker under half a unit
+over the band). So the pixel's ray is followed again over a short stretch
+about its point, as far as LEVEL_GAP of height at its slant, and the
+point is moved to the traced face it meets there, off it by the face's own
+normal; nothing met, the point as drawn. The stretch is the eye's own ray,
+which the frame drew through to the point, so nothing in front of the point
+on it is a surface the pixel could have shown. Objects are drawn as traced
+and keep their point) */
+const float LEVEL_GAP = 0.15;
+const float LEVEL_STRETCH_MOST = 4.0;
+vec3 level_origin(Surface g, float offset)
+{
+    vec3 o = g.point + g.normal * offset;
+    if (g.instance != 0u)
+        return o;
+    float slant = max(abs(dot(g.normal, g.eye)), 0.04);
+    float stretch = clamp(LEVEL_GAP / slant, 0.05, min(LEVEL_STRETCH_MOST, 0.5 * g.distance));
+    vec3 start = g.point + g.eye * stretch;
+    vec3 nh;
+    uint t;
+    vec2 b;
+    float h = hit(start, -g.eye, 2.0 * stretch, nh, t, b);
+    if (h < 0.0 || dot(nh, nh) <= 0.0)
+        return o;
+    return start - g.eye * h + nh * offset;
+}
+
+/* (port: the domes' light at a pixel as the bake's domes_at, each ray also
+stopped by the moving objects within OBJECT_DOME_REACH, as the bounce's and
+the sun's rays are: the remodelled boulders, traced as drawn among them
+since the traced scene left their stock rock out, and the vehicles take the
+open sky from the ground about them) */
+const float OBJECT_DOME_REACH = 40.0;
+vec3 domes_objects_at(vec3 o, vec3 n, inout vec3 moment)
+{
+    vec3 sum = vec3(0.0);
+    if (term_off(1u))
+        return sum;
+    for (int i = 0; i < 4; i++)
+    {
+        vec4 a = s.rig[2 + 2 * i], r = s.rig[3 + 2 * i];
+        if (dot(r.rgb, vec3(1.0)) <= 0.0)
+            continue;
+        vec3 d = cone_dir(normalize(a.xyz), a.w);
+        float c = dot(n, d);
+        if (c > 0.0 && !sky_blocked(o, d, dome_reach(r)) && !objects_blocked(o, d, OBJECT_DOME_REACH))
+        {
+            sum += r.rgb * c;
+            moment += luma(r.rgb) * d;
+        }
+    }
+    return sum;
+}
+
 /* the units rig's floor of light at a pixel (prism-v4-m2's rule, the bake's
 texels' and probes': its outdoor value in the structure's clusters with a
 sky, sky 0's indoor value in those with none, xgpu_stream.h's
@@ -2404,7 +2467,7 @@ void main()
         return;
     }
     float offset = 0.01 + 0.0005 * g.distance;
-    vec3 o = g.point + g.normal * offset;
+    vec3 o = level_origin(g, offset);
     bool level = g.instance == 0u;
     bool performance = (job.frame.y & FLAG_PERFORMANCE) != 0u;
     /* (the views of the direct light alone, the indirect light alone) */
@@ -2480,7 +2543,7 @@ void main()
         vec3 m = vec3(0.0);
         seed_for(pixel, frame, 2u);
         if (!part_off(PARTS_DOMES))
-            noisy_d += domes_at(o, g.normal, m) * ambient_share;
+            noisy_d += domes_objects_at(o, g.normal, m) * ambient_share;
         vec3 ld, ls;
         seed_for(pixel, frame, 3u);
         lamps_mis = glossy;
@@ -3899,7 +3962,7 @@ void main()
         return;
     }
     float offset = 0.01 + 0.0005 * g.distance;
-    vec3 o = g.point + g.normal * offset;
+    vec3 o = level_origin(g, offset);
     vec3 share = specular_share(g);
     vec3 kd = g.albedo * (1.0 - share);
     uint paths = push.parameters.y == 1u ? 0u : max(uint(job.extra.y), 1u);
@@ -3927,7 +3990,7 @@ void main()
         }
         vec3 m = vec3(0.0);
         seed_for(pixel, frame, 2u);
-        ld += domes_at(o, g.normal, m);
+        ld += domes_objects_at(o, g.normal, m);
         vec3 dl, sl;
         seed_for(pixel, frame, 3u);
         /* (a glossy lobe (roughness under REFERENCE_GLOSSY) takes the lamps'

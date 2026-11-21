@@ -559,6 +559,24 @@ each of the sequence's eight frames: grazing sand and rock faces went in and out
 is a centimetre or two) and b30's beach flickered with a still camera, 27 levels of frame-to-frame change on its rocks
 where the same frames without an upscaler had 0.1 (work/openh1_eval/v4_rock_stable_runs: 0.2 after).
 
+A level pixel's rays start on the level as traced (`level_origin`). The G-buffer draws each remodelled surface at the
+level its distance picks (`prism_world_geometry.c`: the near level, the far one past its distance), while the traced
+scene holds the bake's level (the near one, two-sided where a far one exists). Where the two part, a far surface drawn
+under the near one's relief, the pixel's point lay a few centimetres under a traced face and every ray from it (the
+sun, the domes, the bounce) met that face's back at once: b30's wet shoreline and G2's landing beach went black, and
+with the jitter fixed they stayed black (the sun's blocker under half a unit over the band, `debug.gbuffer_view`
+`pt_sun`). So the pixel's ray is followed again over a short stretch about its point (as far as `LEVEL_GAP`, 0.15
+units of height, at its slant, at most 4 units), and the rays start at the traced face it meets there, off it by that
+face's normal; nothing met, at the point as drawn. The stretch is the eye's own ray, drawn through to the point, so no
+surface the pixel could have shown lies on it. G2's landing beach went from 91 to 143 (Rebaked 148, the stock world
+141) and the first beach's shoreline band from 123 to 187 (Rebaked 193), 8-bit luminance over the far dollies; the
+flicker figures stayed at the jitter fix's (still 0.22, cliffs 0.31 / 0.72 / 1.62). The domes' rays (`domes_objects_at`,
+the bake's estimator with the moving objects' rays added within 40 units) are stopped by the moving objects too, as the
+bounce's and the sun's already were. Open: the remodelled boulders, captured among the moving objects (their pieces in
+the objects' structure each frame), still cast almost no sun shadow on the sand (`HALO_PT_OBJECTS=0` changes the
+direct light on 1 to 2% of the pixels; the stock rock in the base build's static scenery cast them):
+work/openh1_eval/v4_rock_stable_runs/HANDOVER.md.
+
 ## The reference
 
 `debug.pt_reference N` in this mode (the request comes as with `display.prism_rt`, RT_FRAME's, `prism_rt.c`) traces at
