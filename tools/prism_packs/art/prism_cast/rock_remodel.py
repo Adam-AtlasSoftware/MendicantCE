@@ -2,7 +2,7 @@
 """PRISM: a scenery rock or boulder remodelled for the mesh store (display.prism_models "max"), numpy only.
 
     python3 rock_remodel.py <model dump.json> <base map.png> <out.pmesh> [--seed N] [--levels 4,3,2]
-        [--cutoffs 140,45,0] [--planes 3] [--scan acg_Rock042L] [--relief 1.0] [--report out.json]
+        [--cutoffs 140,45,0] [--planes 4] [--scan acg_Rock042L] [--relief 1.0] [--report out.json]
 
 From the model as the game draws it (debug.prism_mesh_dump), each permutation's pieces:
   1. split into four at the edges' midpoints, the level's number of times, each midpoint set on the PN curve of its
