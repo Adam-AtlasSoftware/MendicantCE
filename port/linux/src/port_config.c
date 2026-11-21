@@ -293,7 +293,10 @@ static const struct config_setting config_settings[] =
 		"The graphics card drawn with (Vulkan: Linux, Windows): \"auto\" the\n"
 		"best (a discrete card before an integrated one); a number under 16, the\n"
 		"card's place in the log's list (\"vulkan: device 0: ...\"); \"0x\" and its PCI\n"
-		"device id (\"0x2482\"); or a part of its name (\"2060\", \"radeon\").\n"
+		"device id (\"0x2482\"); \"GPU-\" and its UUID (as nvidia-smi -L prints it,\n"
+		"whole or its first 8 digits or more) or \"pci:\" and its PCI address\n"
+		"(\"pci:0000:01:00.0\"), to pick one of several cards of one model; or a\n"
+		"part of its name (\"2060\", \"radeon\").\n"
 		"Read when the game starts; one not found is auto's." },
 	{ "display.low_latency", _config_string, "\"auto\"", "HALO_LOW_LATENCY", _environment_value, _platform_all,
 		"With vsync on (Vulkan: Linux, the Steam Deck, Windows, Android), start\n"

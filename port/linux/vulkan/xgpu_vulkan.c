@@ -11090,9 +11090,61 @@ static int required_features(const VkPhysicalDeviceFeatures2 *features,
 	return 1;
 }
 
+/* a physical device's UUID as nvidia-smi prints it ("GPU-" and 8-4-4-4-12 hex
+digits; other drivers' UUIDs print the same way without meaning the same) and
+its PCI address ("0000:01:00.0", "" without VK_EXT_pci_bus_info), for
+display.vulkan_device's "GPU-..." and "pci:..." forms and the log */
+struct device_identity
+{
+	char uuid[48];
+	char pci[16];
+};
+
+static void device_identify(VkPhysicalDevice device, struct device_identity *identity)
+{
+	VkPhysicalDevicePCIBusInfoPropertiesEXT bus = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT };
+	VkPhysicalDeviceIDProperties id = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
+	VkPhysicalDeviceProperties2 properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	VkExtensionProperties extensions[512];
+	uint32_t count = 0, at;
+	int has_bus = 0;
+	const unsigned char *u;
+
+	if (vkEnumerateDeviceExtensionProperties(device, NULL, &count, NULL) == VK_SUCCESS)
+	{
+		if (count > sizeof(extensions) / sizeof(extensions[0]))
+			count = sizeof(extensions) / sizeof(extensions[0]);
+		if (vkEnumerateDeviceExtensionProperties(device, NULL, &count, extensions) >= VK_SUCCESS)
+			for (at = 0; at < count && !has_bus; at++)
+				has_bus = !strcmp(extensions[at].extensionName, VK_EXT_PCI_BUS_INFO_EXTENSION_NAME);
+	}
+	properties.pNext = &id;
+	if (has_bus)
+		id.pNext = &bus;
+	vkGetPhysicalDeviceProperties2(device, &properties);
+	u = id.deviceUUID;
+	snprintf(identity->uuid, sizeof(identity->uuid),
+		"GPU-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
+	identity->pci[0] = 0;
+	if (has_bus)
+		snprintf(identity->pci, sizeof(identity->pci), "%04x:%02x:%02x.%x", bus.pciDomain & 0xffff,
+			bus.pciBus & 0xff, bus.pciDevice & 0x1f, bus.pciFunction & 0x7);
+}
+
+/* whether text begins with prefix, in any case */
+static int text_begins(const char *text, const char *prefix)
+{
+	for (; *prefix; text++, prefix++)
+		if (tolower((unsigned char)*text) != tolower((unsigned char)*prefix))
+			return 0;
+	return 1;
+}
+
 /* whether display.vulkan_device names the loader's device index (its
 xgpu_vulkan_options.device) */
-static int device_asked(const char *asked, uint32_t index, const VkPhysicalDeviceProperties *properties)
+static int device_asked(const char *asked, uint32_t index, const VkPhysicalDeviceProperties *properties,
+	const struct device_identity *identity)
 {
 	char wanted[256], name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
 	char *end;
@@ -11101,6 +11153,20 @@ static int device_asked(const char *asked, uint32_t index, const VkPhysicalDevic
 
 	if (!asked || !*asked || !strcmp(asked, "auto"))
 		return 0;
+	/* (its UUID, "GPU-b6f061f7-...", whole or a leading part of 8 digits or
+	more, in any case: one of several cards of one model) */
+	if (text_begins(asked, "GPU-") && strlen(asked) >= 12)
+		return text_begins(identity->uuid, asked);
+	/* (its PCI address, "pci:0000:01:00.0" or "pci:01:00.0") */
+	if (text_begins(asked, "pci:"))
+	{
+		asked += 4;
+		at = strlen(identity->pci);
+		if (!at || !*asked)
+			return 0;
+		return (strlen(asked) == at && text_begins(identity->pci, asked)) ||
+			(at > 5 && strlen(asked) == at - 5 && text_begins(identity->pci + 5, asked));
+	}
 	if ((asked[0] == '0' && (asked[1] == 'x' || asked[1] == 'X')) && asked[2])
 	{
 		number = strtoul(asked + 2, &end, 16);
@@ -11155,14 +11221,19 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 		VkPhysicalDeviceProperties properties;
 		VkQueueFamilyProperties families[16];
 		uint32_t family_count = 16, family, score;
+		struct device_identity identity;
 
 		vkGetPhysicalDeviceProperties(devices[index], &properties);
+		identity.uuid[0] = identity.pci[0] = 0;
+		if (!options->choose_physical && properties.apiVersion >= VK_API_VERSION_1_1)
+			device_identify(devices[index], &identity);
 		if (!options->choose_physical)
-			host_logf(HOST_LOG_INFO, "vulkan: device %u: %s (PCI 0x%04x, %s, Vulkan %u.%u)", index,
+			host_logf(HOST_LOG_INFO, "vulkan: device %u: %s (PCI 0x%04x, %s, Vulkan %u.%u, %s%s%s)", index,
 				properties.deviceName, properties.deviceID,
 				properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? "discrete" :
 				properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? "integrated" : "other",
-				VK_API_VERSION_MAJOR(properties.apiVersion), VK_API_VERSION_MINOR(properties.apiVersion));
+				VK_API_VERSION_MAJOR(properties.apiVersion), VK_API_VERSION_MINOR(properties.apiVersion),
+				identity.uuid, identity.pci[0] ? ", pci:" : "", identity.pci);
 		if (properties.apiVersion < VK_API_VERSION_1_3)
 			continue;
 		vkGetPhysicalDeviceQueueFamilyProperties(devices[index], &family_count, families);
@@ -11188,7 +11259,7 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 		score = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 3 :
 			properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1;
 		/* (display.vulkan_device: the one asked for above any other) */
-		if (!options->choose_physical && device_asked(options->device, index, &properties))
+		if (!options->choose_physical && device_asked(options->device, index, &properties, &identity))
 			score = 100;
 		if (score > best_score)
 		{

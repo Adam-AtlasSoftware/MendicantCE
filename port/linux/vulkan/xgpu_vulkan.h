@@ -124,7 +124,10 @@ swapchain takes where the surface has it (0: the swap interval's choice) */
 	/* display.vulkan_device: the graphics card drawn with ("auto" or empty
 	the best: a discrete card, else integrated, the first found of a kind;
 	a number under 16, the loader's index of it; 0x and four hex digits, its PCI
-	device id; any other text, a part of its name, in any case), where the
+	device id; "GPU-" and its UUID (nvidia-smi's, whole or its first 8
+	digits or more) or "pci:" and its PCI address ("pci:0000:01:00.0"), one
+	of several cards of one model; any other text, a part of its name, in any
+	case), where the
 	desktop chooses (not VR's runtime); one not found is auto's, logged */
 	const char *device;
 	/* the validation layers (VK_LAYER_KHRONOS_validation) and their
