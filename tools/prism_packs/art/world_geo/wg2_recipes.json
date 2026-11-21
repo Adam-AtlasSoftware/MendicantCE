@@ -1,5 +1,5 @@
 {
- "_doc": "PRISM world geometry recipes (wg2_remodel.py; the natural classes' shape wg2_natural.py, the metal relief wg2_relief.py). A class matches a material by a substring of its shader's name (first class wins; exclude: substrings that do not). Lengths in world units (1 wu = 3.05 m); groove widths in texture repeats. cap_in / cap_out: the most a point goes behind / in front of the stock (collision) surface. budget_triangles bounds the displaced classes' density (their target edges scale up together to meet it). light: Cycles' sun (estimated from CE's lightmap and incident radiosity unless given) and sky, and the clamp of the light ratio put into the incident radiosity. Metal grooves (grooves: true, cut along the texture's panel lines into CE's flat surface) are off in every recipe: CE's floors and walls are flat there, and the grooves drew a grid CE does not have; bevels stay on CE's own sharp edges (bevel_angle). relief: the metal texture's own bump map made geometry (wg2_relief.py): its channels set into flat metal triangles within relief_reach wu of where one walks, nearest first, within the level's relief_budget_triangles; relief_scale times the bump map's own depth (in texels times the texel's size on the surface), at most relief_max wu. The relief budgets keep each BSP's .pwg under the engine's 256 MB file limit and its geometry within the contiguous memory the game can give it at load (prism_world_geometry.c: b30a at 168 MB failed beside b30's textures, 115 MB loads; a30_a at 139 MB has loaded). relief_first: the shaders (substrings) a class's relief goes to first, after floors before walls. Natural classes (kind rock and ground, v3): target_edge is the edge within budget.near wu of where the player can be (the bake's reach, WG_REACH, else the walkable faces), rising smoothly to budget.far_mult times it at budget.far, and budget.unseen_mult for faces no reachable point within budget.seen_radius is in front of; budget_triangles bounds the natural classes' triangles (their targets scale up together to meet it). phong rounds over CE's welded normals and taubin_iters smooths along the normal on the fine mesh. The relief is band-limited by each vertex's edge length: tex_amps the base map's painted shading at four scales (crack_gain: its dark sunk deeper), strata_amps its rows (strata along v) with ledge, runnels along v, facet_depth / facet_scale / facet_tilt fractured facets (jittered cells, each a tilted plane, blended over a few edges), swell a world-space swell; floor_keep the share floors keep. Caps: cap_in / cap_out on steep faces within reach_near of the reach, cap_in_far past reach_far, floor_cap_in / floor_cap_out on faces one stands on.",
+ "_doc": "PRISM world geometry recipes (wg2_remodel.py; the natural classes' shape wg2_natural.py, the metal relief wg2_relief.py). A class matches a material by a substring of its shader's name (first class wins; exclude: substrings that do not). Lengths in world units (1 wu = 3.05 m); groove widths in texture repeats. cap_in / cap_out: the most a point goes behind / in front of the stock (collision) surface. budget_triangles bounds the displaced classes' density (their target edges scale up together to meet it). light: Cycles' sun (estimated from CE's lightmap and incident radiosity unless given) and sky, and the clamp of the light ratio put into the incident radiosity. Metal grooves (grooves: true, cut along the texture's panel lines into CE's flat surface) are off in every recipe: CE's floors and walls are flat there, and the grooves drew a grid CE does not have; bevels stay on CE's own sharp edges (bevel_angle). relief: the metal texture's own bump map made geometry (wg2_relief.py): its channels set into flat metal triangles within relief_reach wu of where one walks, nearest first, within the level's relief_budget_triangles; relief_scale times the bump map's own depth (in texels times the texel's size on the surface), at most relief_max wu. The relief budgets keep each BSP's .pwg under the engine's 256 MB file limit and its geometry within the contiguous memory the game can give it at load (prism_world_geometry.c: b30a at 168 MB failed beside b30's textures, 115 MB loads; a30_a at 139 MB has loaded). relief_first: the shaders (substrings) a class's relief goes to first, after floors before walls. Natural classes (kind rock and ground, v3): target_edge is the edge within budget.near wu of where the player can be (the bake's reach, WG_REACH, else the walkable faces), rising smoothly to budget.far_mult times it at budget.far, and budget.unseen_mult for faces no reachable point within budget.seen_radius is in front of; budget_triangles bounds the natural classes' triangles (their targets scale up together to meet it). phong rounds over CE's welded normals and taubin_iters smooths along the normal on the fine mesh. The relief is band-limited by each vertex's edge length: tex_amps the base map's painted shading at four scales (crack_gain: its dark sunk deeper), strata_amps its rows (strata along v) with ledge, runnels along v, facet_depth / facet_scale / facet_tilt fractured facets (jittered cells, each a tilted plane, blended over a few edges), swell a world-space swell; floor_keep the share floors keep. Caps: cap_in / cap_out on steep faces within reach_near of the reach, cap_in_far past reach_far, floor_cap_in / floor_cap_out on faces one stands on. Rock (v3 scans, wg2_natural.scan_relief): scan lists CC0 scans (wg2_scans.json, prepared into WG_SCANS by wg2_scans.py; the pack tools do it) as layers {name, tile_wu, offset, mirror, weight, bias}, each sampled in world space with its rows level (the scan's bedding horizontal, as CE's painted strata are), band-limited by the vertex's edge, two or more height-blended in patches scan_patch_scale wu across (a second copy of one scan, offset and mirrored, hides its tile); scan_amp the height's deviation in wu, scan_bias deviations in (the ridges near the collision surface), scan_sharpen a tanh toward the ledges, scan_crack_gain the hollows deeper, scan_floor what floors keep; tex_keep how much of the painted relief stays (0: CE's paint already holds its light). cap_out_far: the most out of the collision surface past reach_far.",
  "levels\\b30\\b30a": {
   "budget_triangles": 2200000,
   "fade_distance": 0.2,
@@ -35,40 +35,41 @@
     "cap_out": 0.05,
     "lod_spacing": 0.45,
     "taubin_iters": 16,
-    "tex_amps": [
-     0.008,
-     0.018,
-     0.035,
-     0.05
-    ],
-    "crack_gain": 1.6,
-    "strata_amps": [
-     0.015,
-     0.04,
-     0.08,
-     0.11
-    ],
-    "strata_warp_v": 0.012,
-    "warp_cells_u": 12,
-    "ledge": 0.6,
-    "ledge_soft": 0.03,
-    "runnel_cells_u": 24,
-    "runnel_cells_v": 3,
-    "runnel_width": 0.12,
-    "runnel_depth": 0.03,
-    "swell_amp": 0.07,
+    "swell_amp": 0.04,
     "swell_scale": 2.6,
     "floor_keep": 0.35,
     "floor_cos_lo": 0.55,
     "floor_cos_hi": 0.85,
-    "cap_in_far": 0.3,
+    "cap_in_far": 0.35,
     "floor_cap_in": 0.04,
     "floor_cap_out": 0.03,
     "reach_near": 2.5,
     "reach_far": 6.0,
-    "facet_depth": 0.11,
-    "facet_scale": 1.4,
-    "facet_tilt": 0.42
+    "scan_amp": 0.11,
+    "scan_bias": 0.6,
+    "scan_sharpen": 0.6,
+    "scan_crack_gain": 1.4,
+    "cap_out_far": 0.12,
+    "scan_floor": 0.4,
+    "scan_blend_soft": 0.6,
+    "scan_patch_amp": 1.2,
+    "scan_patch_scale": 9.0,
+    "tex_keep": 0.0,
+    "scan": [
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433
+     },
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433,
+      "offset": [
+       0.5,
+       0.31
+      ],
+      "mirror": true
+     }
+    ]
    },
    "ground": {
     "kind": "ground",
@@ -1026,40 +1027,41 @@
     "cap_out": 0.05,
     "lod_spacing": 0.45,
     "taubin_iters": 16,
-    "tex_amps": [
-     0.008,
-     0.018,
-     0.035,
-     0.05
-    ],
-    "crack_gain": 1.6,
-    "strata_amps": [
-     0.015,
-     0.04,
-     0.08,
-     0.11
-    ],
-    "strata_warp_v": 0.012,
-    "warp_cells_u": 12,
-    "ledge": 0.6,
-    "ledge_soft": 0.03,
-    "runnel_cells_u": 24,
-    "runnel_cells_v": 3,
-    "runnel_width": 0.12,
-    "runnel_depth": 0.03,
-    "swell_amp": 0.07,
+    "swell_amp": 0.04,
     "swell_scale": 2.6,
     "floor_keep": 0.35,
     "floor_cos_lo": 0.55,
     "floor_cos_hi": 0.85,
-    "cap_in_far": 0.3,
+    "cap_in_far": 0.35,
     "floor_cap_in": 0.04,
     "floor_cap_out": 0.03,
     "reach_near": 2.5,
     "reach_far": 6.0,
-    "facet_depth": 0.11,
-    "facet_scale": 1.4,
-    "facet_tilt": 0.42
+    "scan_amp": 0.11,
+    "scan_bias": 0.6,
+    "scan_sharpen": 0.6,
+    "scan_crack_gain": 1.4,
+    "cap_out_far": 0.12,
+    "scan_floor": 0.4,
+    "scan_blend_soft": 0.6,
+    "scan_patch_amp": 1.2,
+    "scan_patch_scale": 9.0,
+    "tex_keep": 0.0,
+    "scan": [
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433
+     },
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433,
+      "offset": [
+       0.5,
+       0.31
+      ],
+      "mirror": true
+     }
+    ]
    },
    "ground": {
     "kind": "ground",
@@ -1221,40 +1223,41 @@
     "cap_out": 0.05,
     "lod_spacing": 0.45,
     "taubin_iters": 16,
-    "tex_amps": [
-     0.008,
-     0.018,
-     0.035,
-     0.05
-    ],
-    "crack_gain": 1.6,
-    "strata_amps": [
-     0.015,
-     0.04,
-     0.08,
-     0.11
-    ],
-    "strata_warp_v": 0.012,
-    "warp_cells_u": 12,
-    "ledge": 0.6,
-    "ledge_soft": 0.03,
-    "runnel_cells_u": 24,
-    "runnel_cells_v": 3,
-    "runnel_width": 0.12,
-    "runnel_depth": 0.03,
-    "swell_amp": 0.07,
+    "swell_amp": 0.04,
     "swell_scale": 2.6,
     "floor_keep": 0.35,
     "floor_cos_lo": 0.55,
     "floor_cos_hi": 0.85,
-    "cap_in_far": 0.3,
+    "cap_in_far": 0.35,
     "floor_cap_in": 0.04,
     "floor_cap_out": 0.03,
     "reach_near": 2.5,
     "reach_far": 6.0,
-    "facet_depth": 0.11,
-    "facet_scale": 1.4,
-    "facet_tilt": 0.42
+    "scan_amp": 0.11,
+    "scan_bias": 0.6,
+    "scan_sharpen": 0.6,
+    "scan_crack_gain": 1.4,
+    "cap_out_far": 0.12,
+    "scan_floor": 0.4,
+    "scan_blend_soft": 0.6,
+    "scan_patch_amp": 1.2,
+    "scan_patch_scale": 9.0,
+    "tex_keep": 0.0,
+    "scan": [
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433
+     },
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433,
+      "offset": [
+       0.5,
+       0.31
+      ],
+      "mirror": true
+     }
+    ]
    },
    "ground": {
     "kind": "ground",
@@ -1980,40 +1983,41 @@
     "cap_out": 0.05,
     "lod_spacing": 0.45,
     "taubin_iters": 16,
-    "tex_amps": [
-     0.008,
-     0.018,
-     0.035,
-     0.05
-    ],
-    "crack_gain": 1.6,
-    "strata_amps": [
-     0.015,
-     0.04,
-     0.08,
-     0.11
-    ],
-    "strata_warp_v": 0.012,
-    "warp_cells_u": 12,
-    "ledge": 0.6,
-    "ledge_soft": 0.03,
-    "runnel_cells_u": 24,
-    "runnel_cells_v": 3,
-    "runnel_width": 0.12,
-    "runnel_depth": 0.03,
-    "swell_amp": 0.07,
+    "swell_amp": 0.04,
     "swell_scale": 2.6,
     "floor_keep": 0.35,
     "floor_cos_lo": 0.55,
     "floor_cos_hi": 0.85,
-    "cap_in_far": 0.3,
+    "cap_in_far": 0.35,
     "floor_cap_in": 0.04,
     "floor_cap_out": 0.03,
     "reach_near": 2.5,
     "reach_far": 6.0,
-    "facet_depth": 0.11,
-    "facet_scale": 1.4,
-    "facet_tilt": 0.42
+    "scan_amp": 0.11,
+    "scan_bias": 0.6,
+    "scan_sharpen": 0.6,
+    "scan_crack_gain": 1.4,
+    "cap_out_far": 0.12,
+    "scan_floor": 0.4,
+    "scan_blend_soft": 0.6,
+    "scan_patch_amp": 1.2,
+    "scan_patch_scale": 9.0,
+    "tex_keep": 0.0,
+    "scan": [
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433
+     },
+     {
+      "name": "ph_marble_cliff_03",
+      "tile_wu": 1.8858267716535433,
+      "offset": [
+       0.5,
+       0.31
+      ],
+      "mirror": true
+     }
+    ]
    },
    "ground": {
     "kind": "ground",

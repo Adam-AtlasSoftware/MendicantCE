@@ -820,7 +820,9 @@ def main():
         far_t = nat.smoothstep(r.get("reach_near", 2.0), r.get("reach_far", 6.0), vreach[sel])
         ci = r.get("cap_in", 0.18) * (1 - far_t) + r.get("cap_in_far", r.get("cap_in", 0.18)) * far_t
         ci = ci * (1 - fl) + r.get("floor_cap_in", 0.04) * fl
-        co = r.get("cap_out", 0.05) * (1 - fl) + r.get("floor_cap_out", 0.03) * fl
+        # (out of reach a ledge may stand further out of the collision surface: no one stands against it there)
+        co = r.get("cap_out", 0.05) * (1 - far_t) + r.get("cap_out_far", r.get("cap_out", 0.05)) * far_t
+        co = co * (1 - fl) + r.get("floor_cap_out", 0.03) * fl
         cap_in[sel] = ci
         cap_out[sel] = co
     # (a band-limited field still has its last octave's grain at a vertex: two passes over the edges)

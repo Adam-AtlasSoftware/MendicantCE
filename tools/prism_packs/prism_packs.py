@@ -175,7 +175,7 @@ class Context:
                     "PRISM_PACKS_INVADER": self.invader or "", "PRISM_PACKS_UPSCALERS": str(self.upscalers),
                     "PRISM_PACKS_TOOLS": str(self.tools), "PRISM_PACKS_GPU": self.a.gpu or "",
                     "PRISM_PACKS_VULKAN_GPU": self.a.vulkan_gpu or "", "PRISM_PACKS_TORCH": self.a.torch or "",
-                    "PYTHONDONTWRITEBYTECODE": "1"})
+                    "PYTHONDONTWRITEBYTECODE": "1", "WG_SCANS": str(self.work / "scans")})
         tmp = self.work / "tmp"
         tmp.mkdir(parents=True, exist_ok=True)
         for name in ("TMPDIR", "TEMP", "TMP"):
@@ -1123,6 +1123,7 @@ ROCK_MAPS = {"boulder_granite_": ("a50", "scenery/rocks/boulder_granite_large/bi
 
 
 def step_rocks(ctx):
+    ensure_scans(ctx)
     mod = ctx.mod("prism_v3_rocks")
     shutil.rmtree(mod, ignore_errors=True)
     (mod / "reports").mkdir(parents=True)
@@ -1165,7 +1166,22 @@ def bsp_gltf(ctx, level, name):
     return ctx.w("extract", level, "bsps", "levels", level, f"{name}.gltf")
 
 
+def ensure_scans(ctx):
+    """the CC0 scans whose height maps give the rock its relief (world_geo/wg2_scans.json): fetched once into the work
+    folder (with --yes; each checked against its SHA-256) and prepared as the builder reads them (WG_SCANS)"""
+    def prepare():
+        src = ctx.work / "scans_src"
+        if ctx.run([PYTHON, "-B", "-I", ART / "world_geo" / "wg2_scans.py", "fetch", "--work", src] +
+                   (["--yes"] if ctx.a.yes else []), what="the rock scans (CC0): fetched", check=False):
+            raise Failure("the rock scans are not fetched: run again with --yes to fetch them "
+                          "(CC0 scans, world_geo/wg2_scans.json)")
+        ctx.python("world_geo/wg2_scans.py", "prepare", "--work", src, "--out", ctx.work / "scans",
+                   what="the rock scans: prepared")
+    ctx.once("scans", prepare)
+
+
 def step_world(ctx):
+    ensure_scans(ctx)
     recipes = json.load(open(ART / "world_geo" / "wg2_recipes.json"))
     for level in ctx.levels:
         for index, name in level_bsps(ctx, level):
@@ -1432,7 +1448,8 @@ def main(argv=None):
     parser.add_argument("--torch", default="")
     parser.add_argument("--lightmap-samples", type=int, default=1024)
     parser.add_argument("--again", action="append", default=[], help="build this pack anew (repeat)")
-    parser.add_argument("--yes", action="store_true", help="models: accept every licence shown")
+    parser.add_argument("--yes", action="store_true", help="models: accept every licence shown; world, rocks: fetch "
+                        "the CC0 rock scans")
     a = parser.parse_args(argv)
     if a.command == "list":
         return list_packs()

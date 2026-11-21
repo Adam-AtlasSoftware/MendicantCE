@@ -191,3 +191,52 @@ def test_limit_slope_caps_each_edge():
     out = nat.limit_slope(d, X, E, mov, 0.8, 50)
     assert out[0] == 0.0
     assert np.all(np.abs(np.diff(out)) <= 0.8 * 0.1 + 1e-9)
+
+
+def _made_up_scan(res=128, seed=3):
+    """a made-up periodic height field: level strata (rows) plus blocky cells, mean 0, deviation 1"""
+    rng = np.random.default_rng(seed)
+    y = np.arange(res)[:, None] / res
+    strata = np.sin(2 * np.pi * 4 * y) + 0.5 * np.sin(2 * np.pi * 9 * y + 1.0)
+    cells = np.kron(rng.standard_normal((8, 8)), np.ones((res // 8, res // 8)))
+    h = strata + 0.6 * cells + 0.3 * rng.standard_normal((res, res))
+    return (h - h.mean()) / h.std()
+
+
+def test_scan_field_band_limited_and_periodic():
+    f = nat.ScanField(_made_up_scan(), levels=5)
+    uv = np.random.default_rng(1).random((4000, 2))
+    fine = f.sample(uv, np.full(len(uv), 0.002))
+    coarse = f.sample(uv, np.full(len(uv), 0.05))
+    none = f.sample(uv, np.full(len(uv), 5.0))
+    # (a coarser mesh carries less of the scan; a mesh coarser than its tile none of it)
+    assert fine.std() > coarse.std() > 0
+    assert np.abs(none).max() < 1e-9
+    # (the field repeats with its tile)
+    assert np.allclose(f.sample(uv + 1.0, np.full(len(uv), 0.01)), f.sample(uv, np.full(len(uv), 0.01)))
+
+
+def test_scan_relief_keeps_strata_level_on_a_wall():
+    nat._SCANS["made_up"] = nat.ScanField(_made_up_scan(), levels=5)
+    y, z = np.meshgrid(np.linspace(0, 4, 80), np.linspace(0, 4, 80))
+    p = np.stack([np.zeros(y.size), y.ravel(), z.ravel()], 1)
+    n = np.tile([1.0, 0.0, 0.0], (len(p), 1))
+    h = np.full(len(p), 0.02)
+    r = {"scan": [{"name": "made_up", "tile_wu": 2.0}], "scan_amp": 0.05, "scan_bias": 0.0}
+    d, parts = nat.rock_relief(p, n, None, None, h, np.ones(len(p)), r, None)
+    g = d.reshape(80, 80)
+    # (the strata run level: the relief varies more up the wall than along it)
+    assert np.abs(np.diff(g, axis=0)).mean() > 1.3 * np.abs(np.diff(g, axis=1)).mean()
+    assert "scan" in parts and "strata" not in parts
+    # (deterministic)
+    d2, _ = nat.rock_relief(p, n, None, None, h, np.ones(len(p)), r, None)
+    assert np.array_equal(d, d2)
+    del nat._SCANS["made_up"]
+
+
+def test_scans_manifest_is_cc0_with_hashes():
+    m = json.loads((WORLD / "wg2_scans.json").read_text())
+    for name, s in m["scans"].items():
+        assert s["licence"] == "CC0-1.0"
+        assert len(s["height"]["sha256"]) == 64 and s["height"]["url"].startswith("https://")
+        assert s["size_m"] > 0

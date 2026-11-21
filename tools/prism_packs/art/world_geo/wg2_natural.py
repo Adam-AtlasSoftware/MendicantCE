@@ -532,15 +532,152 @@ def band_weight(lambda_wu, h, lo=3.0, hi=6.0):
     return smoothstep(lo, hi, lambda_wu / np.maximum(h, 1e-6))
 
 
+# ---------- scanned relief (CC0 scans' height maps: wg2_scans.json)
+
+def gauss_wrap(a, sigma):
+    """a Gaussian blur of a periodic field (three box passes of the matching width)"""
+    if sigma < 0.5:
+        return a.copy()
+    r = max(1, int(round(math.sqrt(12.0 * sigma * sigma / 3.0 + 1.0) / 2.0 - 0.5)))
+    out = a
+    for _ in range(3):
+        out = box_blur_wrap(out, r)
+    return out
+
+
+class ScanField:
+    """A scan's height field (wg2_scans.py's prepared 512 by 512, mean 0, deviation 1) split into octave bands
+    (differences of Gaussians, sigma 1, 2, 4 ... 64 texels) and the residue above them, each with its wavelength as a
+    fraction of the tile: the relief adds only the bands the mesh carries (band_weight), so a ledge is as crisp as the
+    vertices there allow and never finer (no sparkle)."""
+
+    def __init__(self, height, levels=7):
+        a = np.asarray(height, np.float64)
+        self.res = a.shape[0]
+        g = [a] + [gauss_wrap(a, 2.0 ** j) for j in range(levels)]
+        self.bands = [g[j] - g[j + 1] for j in range(levels)]
+        self.residue = g[levels]
+        # (a difference of Gaussians sigma and 2 sigma peaks at a wavelength of about 6.5 sigma)
+        self.lam = [min(1.0, 6.5 * (2.0 ** max(j - 1, -0.5)) / self.res) for j in range(levels)]
+        # the deviation of what a mesh carrying a quarter of the tile and up keeps: the amplitude's unit
+        keep = self.residue + sum(b for b, l in zip(self.bands, self.lam) if l >= 0.25)
+        self.unit = max(float(keep.std()), 1e-6)
+
+    def sample(self, uv, h_tiles):
+        """height at uv (tiles; rows down = v up the rock negated), band-limited by h_tiles (each point's edge length
+        in tiles)"""
+        out = band_weight(1.0, h_tiles) * _bilinear_wrap(self.residue, uv)
+        for b, lam in zip(self.bands, self.lam):
+            w = band_weight(lam, h_tiles)
+            if w.any():
+                out = out + w * _bilinear_wrap(b, uv)
+        return out / self.unit
+
+
+_SCANS = {}
+
+
+def scan_field(name):
+    if name not in _SCANS:
+        import os
+        import sys
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import wg2_scans
+        height, meta = wg2_scans.load(name)
+        _SCANS[name] = ScanField(height)
+        print("scan relief: %s (%s, %s, %s)" % (name, meta["asset"], meta["source"], meta["licence"]), flush=True)
+    return _SCANS[name]
+
+
+def triplanar_scan(field, p, n, h, tile, offset=(0.0, 0.0), mirror=False, sharp=4.0):
+    """a scan's height on the rock in world space, its rows kept level (v is height, so its bedding stays horizontal
+    as CE's painted strata are) on the two side projections, from above on the third; the three blended by the smooth
+    normal and renormalised so a blend keeps the scan's contrast. tile in wu; h the edge length (wu)."""
+    w = np.maximum(np.abs(n) - 0.15, 0.0) ** sharp
+    w = w / np.maximum(w.sum(1, keepdims=True), 1e-12)
+    ht = h / tile
+    sx = -1.0 if mirror else 1.0
+    out = np.zeros(len(p))
+    acc = np.zeros(len(p))
+    planes = ((0, (1, 2)), (1, (0, 2)), (2, (0, 1)))
+    for axis, (a, b) in planes:
+        sel = w[:, axis] > 1e-4
+        if not sel.any():
+            continue
+        q = p[sel]
+        # (the side views face their axis: u along the face, mirrored by the facing so a rock's two sides do not read
+        # as one picture turned over)
+        face = np.sign(n[sel, axis])
+        u = sx * face * q[:, a] / tile + offset[0] + 0.37 * axis
+        if axis == 2:
+            v = q[:, b] / tile + offset[1]
+        else:
+            v = -q[:, 2] / tile + offset[1] + 0.21 * axis
+        hv = field.sample(np.stack([u, v], 1), ht[sel])
+        out[sel] += w[sel, axis] * hv
+        acc[sel] += w[sel, axis] ** 2
+    return out / np.maximum(np.sqrt(acc), 1e-6)
+
+
+def scan_relief(p, n, h, steep, r):
+    """The rock's relief from CC0 scans (r["scan"]: layers {name, tile_wu, offset, mirror, weight}): each layer's
+    band-limited height in world space; two or more layers height-blended (the higher wins over a soft band, swayed by
+    a slow world-space noise so each shows in patches tens of wu across, so a single scan's tile does not repeat
+    visibly); sharpened toward its ledges (r["scan_sharpen"]: a tanh curve, the slope limit after holds it); dark
+    (into the rock) deeper than light (r["scan_crack_gain"]). Returns the height in deviations."""
+    layers = r["scan"]
+    hs = []
+    for k, L in enumerate(layers):
+        f = scan_field(L["name"])
+        hh = triplanar_scan(f, p, n, h, float(L["tile_wu"]), tuple(L.get("offset", (0.0, 0.0))),
+                            bool(L.get("mirror", False)))
+        hs.append(hh * float(L.get("weight", 1.0)))
+    hv = hs[0]
+    soft = float(r.get("scan_blend_soft", 0.6))
+    for k in range(1, len(hs)):
+        bias = float(layers[k].get("bias", 0.0)) + float(r.get("scan_patch_amp", 1.2)) * \
+            value_noise3(p, float(r.get("scan_patch_scale", 9.0)), salt=101 + k)
+        t = smoothstep(-soft, soft, hs[k] + bias - hv)
+        hv = hv * (1.0 - t) + hs[k] * t
+    s = float(r.get("scan_sharpen", 0.0))
+    if s > 0:
+        hv = np.tanh(hv * (1.0 + 2.0 * s)) / math.tanh(1.0 + 2.0 * s) * (1.0 + 0.5 * s)
+    hv = np.where(hv < 0, hv * float(r.get("scan_crack_gain", 1.3)), hv)
+    return hv
+
+
 # ---------- the relief
 
 def rock_relief(p, n, uv, texel_wu, h, steep, r, tex):
     """Rock and cliffs (distance along the normal, wu; negative into the rock). p, n positions and smooth normals; uv
     the base map's coordinates; texel_wu (n, 2) a texel's size on the surface along u and v; h each vertex's edge
-    length; steep 1 on faces too steep to stand on, 0 on floors; tex: TextureBands (or None)."""
+    length; steep 1 on faces too steep to stand on, 0 on floors; tex: TextureBands (or None).
+    With r["scan"] the relief is the scans' (scan_relief) and CE's painted shading gives none of it (its paint already
+    holds its light: relief from it would light the rock twice); only r["tex_keep"] of the painted relief stays."""
     m = len(p)
     d = np.zeros(m)
     parts = {}
+    if r.get("scan"):
+        # (r["scan_bias"] deviations in: the scan's ridges near the stock surface one collides with, its hollows in)
+        ds = float(r.get("scan_amp", 0.06)) * (scan_relief(p, n, h, steep, r) - float(r.get("scan_bias", 0.5)))
+        ds *= float(r.get("scan_floor", 0.5)) + (1.0 - float(r.get("scan_floor", 0.5))) * steep
+        d += ds
+        parts["scan"] = ds
+        keep = float(r.get("tex_keep", 0.0))
+        if keep > 0 and tex is not None:
+            r2 = {k: v for k, v in r.items() if k != "scan"}
+            r2.update(facet_depth=0.0, runnel_depth=0.0, swell_amp=0.0, floor_keep=1.0)
+            dt, _ = rock_relief(p, n, uv, texel_wu, h, np.ones(m), r2, tex)
+            d += keep * dt
+            parts["tex"] = keep * dt
+        sw = r.get("swell_scale", 2.6)
+        dsw = r.get("swell_amp", 0.0) * (value_noise3(p, sw, salt=23) + 0.5 * value_noise3(p, sw * 0.5, salt=29)) / 1.5
+        dsw *= band_weight(sw * 0.5, h, 2.0, 4.0)
+        d += dsw * (0.35 + 0.65 * steep)
+        parts["swell"] = dsw
+        return d, parts
     tw = np.sqrt(np.maximum(texel_wu[:, 0] * texel_wu[:, 1], 1e-12))
     if tex is not None:
         # the painted shading, at four scales; its dark (cracks, crevices) sunk deeper than its light stands out

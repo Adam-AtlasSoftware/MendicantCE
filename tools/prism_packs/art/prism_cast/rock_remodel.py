@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """PRISM: a scenery rock or boulder remodelled for the mesh store (display.prism_models "max"), numpy only.
 
-    python3 rock_remodel.py <model dump.json> <base map.png> <out.pmesh> [--seed N] [--levels 4,2,1]
-        [--cutoffs 200,70,0] [--relief 1.0] [--report out.json]
+    python3 rock_remodel.py <model dump.json> <base map.png> <out.pmesh> [--seed N] [--levels 4,3,2]
+        [--cutoffs 140,45,0] [--planes 3] [--scan acg_Rock042L] [--relief 1.0] [--report out.json]
 
 From the model as the game draws it (debug.prism_mesh_dump), each permutation's pieces:
   1. split into four at the edges' midpoints, the level's number of times, each midpoint set on the PN curve of its
@@ -14,7 +14,9 @@ From the model as the game draws it (debug.prism_mesh_dump), each permutation's 
      space; each band only where the level's edges can carry it (none finer than about four edges), so every level
      is the same rock at its own detail and a level switch changes only the finest grain;
   4. never more than 0.6 % of its size outside CE's surface, nor 3 % inside it (collision is CE's); normals per
-     corner, smooth up to 60 degrees; tangents from the uvs.
+     corner, smooth up to 60 degrees; tangents from the uvs;
+  5. a few broad fracture planes (fracture_planes: the same on every level, their edges rounded as the level carries)
+     and, where WG_SCANS holds it, a CC0 scan's grain (wg2_scans.json; acg_Rock042L) band-limited as the relief is.
 Every displacement is a function of the position and the base map's coordinates (a seam's two sides move together:
 welded). The last level is the smooth mass once subdivided (not CE's own geometry, whose flat facets would show as a
 different shell when it switches in). Collision, physics and markers are the stock model's (the game's): nothing here
@@ -138,12 +140,50 @@ def displace(P, N, UV, T, bands, size, opts):
         move += welded_mean(rel, w)[first]
     sw = opts.swell_scale * size
     move += opts.swell * size * nat.value_noise3(X, sw, salt=23) * nat.band_weight(sw * 0.5, h, 2.0, 4.0)
+    if opts.scan and opts.scan_amp > 0:
+        # a CC0 scan's height (wg2_scans.json) in the rock's own space, band-limited by the level's edges: its grain
+        # where the level carries it, so every level is the same rock
+        field = nat.scan_field(opts.scan)
+        hs = nat.triplanar_scan(field, X, NW, h, opts.scan_tile * size, (0.13, 0.41))
+        move += opts.scan_amp * size * (np.where(hs < 0, hs * 1.3, hs) - 0.3)
     move = nat.smooth_scalar(move, E, movable, 1)
     X = X + NW * move[:, None]
     off = ((X - PW) * NW).sum(1)
     off_c = nat.soft_clamp(off, -opts.cap_in * size, opts.cap_out * size)
     X = X + NW * (off_c - off)[:, None]
+    if opts.planes > 0:
+        X = fracture_planes(X, NW, h, size, opts)
     return X[w]
+
+
+def fracture_planes(X, NW, h, size, opts):
+    """a few broad fracture planes, the way a weathered boulder breaks: each plane (its normal mostly sideways or up,
+    from the rock's own seed) takes the cap of the mass beyond it down onto it, the edge rounded over a band at least
+    1.5 edges wide (a smooth maximum), so a plane reads as a facet and its edge is as crisp as the level carries, and
+    every level cuts the same planes. Its depth is a share of the rock's size (opts.plane_depth): at its deepest
+    point a plane sits that far inside CE's surface (collision), nowhere else."""
+    rng = np.random.default_rng(opts.seed_val)
+    c = 0.5 * (X.max(0) + X.min(0))
+    c[2] = X[:, 2].min() + 0.35 * (X[:, 2].max() - X[:, 2].min())
+    out = X.copy()
+    az0 = rng.uniform(0, 2 * np.pi)
+    for k in range(opts.planes):
+        az = az0 + 2 * np.pi * (k + rng.uniform(-0.25, 0.25)) / opts.planes
+        el = rng.uniform(0.15, 0.75)
+        if k == 0:
+            el = rng.uniform(0.9, 1.2)  # (one upper face, tilted)
+        npl = np.array([np.cos(az) * np.cos(el), np.sin(az) * np.cos(el), np.sin(el)])
+        s0 = (out - c) @ npl
+        depth = opts.plane_depth * size * rng.uniform(0.6, 1.0)
+        off = s0.max() - depth
+        s = s0 - off
+        b = np.maximum(opts.plane_bevel * size, 1.5 * h)
+        # (smooth max(s, 0): about s past the bevel, nothing a bevel inside it)
+        cut = b * np.logaddexp(0.0, s / b)
+        # (only where the surface faces the plane's way: the far side of the rock is never pulled through)
+        facing = nat.smoothstep(0.0, 0.35, NW @ npl)
+        out = out - npl[None, :] * (cut * facing)[:, None]
+    return out
 
 
 def corner_normals(P, T, split_deg):
@@ -191,6 +231,7 @@ def build_level(dump, blob, part_groups, subdivisions, size, rng_seed, relief, o
         for _ in range(subdivisions):
             P, N, UV, T = subdivide(P, N, UV, T, opts.phong)
         if subdivisions:
+            opts.seed_val = int(hashlib.sha1(("%s %s" % (opts.tag, key)).encode()).hexdigest()[:8], 16)
             P = displace(P, N, UV, T, relief, size, opts)
             CN = corner_normals(P, T, opts.split)
         else:
@@ -218,8 +259,17 @@ def main():
     ap.add_argument("base_map")
     ap.add_argument("out")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--levels", default="4,2,1")
-    ap.add_argument("--cutoffs", default="200,70,0")
+    # (levels 4, 3 and 2: the coarsest is still the rounded, fractured rock of the finest, so no level switch shows
+    # the low, blobby look of a once-subdivided mass)
+    ap.add_argument("--levels", default="4,3,2")
+    ap.add_argument("--cutoffs", default="140,45,0")
+    ap.add_argument("--planes", type=int, default=4, help="fracture planes a piece (0: none)")
+    ap.add_argument("--plane-depth", type=float, default=0.045, help="a plane's depth into the mass, a share of size")
+    ap.add_argument("--plane-bevel", type=float, default=0.008, help="its edge's rounding, a share of size")
+    ap.add_argument("--scan", default="acg_Rock042L",
+                    help="a wg2_scans.json scan for the grain (used when WG_SCANS holds it prepared; '' none)")
+    ap.add_argument("--scan-amp", type=float, default=0.005, help="its height's deviation, a share of size")
+    ap.add_argument("--scan-tile", type=float, default=0.7, help="its tile, a share of size")
     ap.add_argument("--phong", type=float, default=0.75)
     ap.add_argument("--taubin", type=int, default=6)
     ap.add_argument("--relief", type=float, default=1.0, help="the relief's scale (1: the amplitudes below)")
@@ -235,7 +285,12 @@ def main():
     o = ap.parse_args()
     o.tex_amps = [float(x) * o.relief for x in o.tex_amps.split(",")]
     o.swell *= o.relief
+    if o.scan and not (os.environ.get("WG_SCANS") and
+                       (Path(os.environ["WG_SCANS"]) / f"{o.scan}.npy").is_file()):
+        print(f"scan {o.scan}: not prepared (WG_SCANS): no scanned grain")
+        o.scan = ""
     dump = json.loads(Path(o.dump).read_text())
+    o.tag = dump["tag"]
     blob = Path(o.dump).with_suffix(".bin").read_bytes()
     relief = load_bands(o.base_map) if o.base_map != "-" else None
     seed = o.seed or int(hashlib.sha1(dump["tag"].encode()).hexdigest()[:8], 16)

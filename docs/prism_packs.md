@@ -193,3 +193,15 @@ hand-placed feature positions on the game's texture layout. They hold no pixels,
 game. The extractor's source is `tools/prism_packs/extract/`; a source checkout builds it with
 `python tools/x86_game_abi.py --map-extract`. `tools/fork_gate.py` refuses a package with the game's data in it,
 and a tools folder with anything but code, recipes and text in it.
+
+### The rock's relief from CC0 scans
+
+The `world` and `rocks` packs read the height maps of public CC0 scans (Poly Haven's Marble Cliff 03 and Cliff
+Side, ambientCG's Rock022 and Rock042L: `art/world_geo/wg2_scans.json`, their sources and SHA-256 in
+`art/world_geo/LICENSES.md`). With `--yes` the tools fetch them into the work folder (`scans_src`), check each
+against its SHA-256 and prepare them (`scans`, `WG_SCANS`); without it they stop and say so. In the level remodel a
+rock class's `scan` layers give its relief in place of the shapes guessed from CE's painted shading: each scan
+sampled in world space with its bedding level, only as fine as the mesh there carries (no sparkle), two layers
+height-blended in patches; CE's colour is untouched. The boulders take a few broad fracture planes and the grain of
+Rock042L the same way, and their three levels are 4, 3 and 2 subdivisions. `tools/prism_terrain_layers` can also take
+a source published as separate files (Poly Haven's) and another manifest (`--manifest`, `--out`) for a trial layer.

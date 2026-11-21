@@ -1,0 +1,60 @@
+{
+ "format": 1,
+ "about": "PRISM world geometry: the CC0 scans whose height maps give the natural remodel's rock its relief (wg2_natural.py's scan_relief; docs/prism_packs.md). Each is fetched from its source and checked against its SHA-256 (wg2_scans.py fetch), then prepared as a mean-0, deviation-1 height field (wg2_scans.py prepare) that the builder reads from WG_SCANS. size_m: one tile's side as the source measured it (ambientCG gives none: the size here is ours, from the scan's grain). Nothing of the game's data is in them.",
+ "scans": {
+  "ph_marble_cliff_03": {
+   "asset": "Marble Cliff 03",
+   "source": "Poly Haven",
+   "authors": "Amal Kumar",
+   "page": "https://polyhaven.com/a/marble_cliff_03",
+   "licence": "CC0-1.0",
+   "size_m": 5.748,
+   "height": {
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/marble_cliff_03/marble_cliff_03_disp_2k.png",
+    "sha256": "78a86415156d2ee9c22ad7dadce322dcbfd8bf18e2973e4b237d1aae80befdc5"
+   },
+   "checked": "2026-11-21"
+  },
+  "ph_cliff_side": {
+   "asset": "Cliff Side",
+   "source": "Poly Haven",
+   "authors": "James Ray Cock, Dario Barresi (photography); Jenelle van Heerden (processing)",
+   "page": "https://polyhaven.com/a/cliff_side",
+   "licence": "CC0-1.0",
+   "size_m": 1.83,
+   "height": {
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/png/2k/cliff_side/cliff_side_disp_2k.png",
+    "sha256": "be974eb7ef5ecb17be1a574c8cadf09d47794983cacc0c27e953bbe47dedfd6f"
+   },
+   "checked": "2026-11-21"
+  },
+  "acg_Rock022": {
+   "asset": "Rock022",
+   "source": "ambientCG",
+   "authors": "Lennart Demes",
+   "page": "https://ambientcg.com/view?id=Rock022",
+   "licence": "CC0-1.0",
+   "size_m": 2.0,
+   "height": {
+    "url": "https://ambientcg.com/get?file=Rock022_2K-JPG.zip",
+    "sha256": "b14568e5ccb4f6aae646df2e3afcc35768e818a78c246e93e0374230147bf2a5",
+    "member": "_Displacement.jpg"
+   },
+   "checked": "2026-11-21"
+  },
+  "acg_Rock042L": {
+   "asset": "Rock042L",
+   "source": "ambientCG",
+   "authors": "Lennart Demes",
+   "page": "https://ambientcg.com/view?id=Rock042L",
+   "licence": "CC0-1.0",
+   "size_m": 2.0,
+   "height": {
+    "url": "https://ambientcg.com/get?file=Rock042L_2K-JPG.zip",
+    "sha256": "5212ced8445c1402d37e9d517e02dc59edd117fed62d9b700286725b308451ca",
+    "member": "_Displacement.jpg"
+   },
+   "checked": "2026-11-21"
+  }
+ }
+}

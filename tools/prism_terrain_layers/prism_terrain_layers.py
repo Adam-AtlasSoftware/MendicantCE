@@ -4,10 +4,12 @@ terrain pass draws, built from public CC0 scans into the game's data folder.
 
     prism_terrain_layers.py list                                  # the layers, their sources and licences
     prism_terrain_layers.py build --data <data folder> [--size 1024] [--work <folder>] [--yes]
+        [--manifest <file>] [--out <folder>]                      # another manifest (a trial's layers), elsewhere
     prism_terrain_layers.py check --data <data folder>            # is the pack there and whole
 
 Every source is a CC0 1.0 scan (manifest.json beside this file: the asset, its page, the archive's URL and SHA-256,
-the licence, the date it was checked, and our numbers). Nothing is fetched until the player says yes (--yes, or the
+the licence, the date it was checked, and our numbers); a source published as separate files (Poly Haven's) names
+each map's URL and SHA-256 under "files" (color, normal, height, roughness, occlusion) in place of the archive. Nothing is fetched until the player says yes (--yes, or the
 question answered); each archive is checked against its SHA-256 before it is used. The pack is:
 
     <data>/prism_terrain/layers.ptl     the layers (format below)
@@ -59,7 +61,9 @@ VERSION = 1
 MACRO_SIZE = 512
 
 
-def manifest():
+def manifest(path=None):
+    if path:
+        return json.loads(Path(path).read_text())
     return json.loads(MANIFEST.read_text())
 
 
@@ -121,6 +125,37 @@ def fetch(source, work, yes):
     return path
 
 
+def fetch_url(url, sha256, path, what, yes):
+    """one file, from the work folder or fetched (asked first), checked against its SHA-256"""
+    if not path.exists():
+        if not yes:
+            answer = input(f"fetch {what} from {url}? [y/N] ")
+            if answer.strip().lower() not in ("y", "yes"):
+                raise SystemExit("nothing fetched")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"fetching {url}")
+        request = urllib.request.Request(url, headers={"User-Agent": "prism_terrain_layers"})
+        with urllib.request.urlopen(request, timeout=300) as response:
+            data = response.read()
+        partial = path.with_suffix(".part")
+        partial.write_bytes(data)
+        partial.rename(path)
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != sha256:
+        raise SystemExit(f"{path}: SHA-256 {digest}, not the manifest's {sha256}: refused")
+    return path
+
+
+def fetch_files(source, work, yes):
+    """a source of separate files: {role: path}, each checked"""
+    out = {}
+    for role, f in source["files"].items():
+        leaf = f["url"].rsplit("/", 1)[-1]
+        out[role] = fetch_url(f["url"], f["sha256"], work / leaf, f"{source['asset']} {role} ({source['licence']})",
+                              yes)
+    return out
+
+
 def member(archive, suffix):
     names = [n for n in archive.namelist() if n.endswith(suffix)]
     if not names:
@@ -128,21 +163,34 @@ def member(archive, suffix):
     return Image.open(io.BytesIO(archive.read(names[0])))
 
 
+def open_maps(archive_path):
+    """the five maps of a source: an ambientCG archive's members, or a {role: path} of separate files"""
+    if isinstance(archive_path, dict):
+        def one(role):
+            p = archive_path.get(role)
+            if p is None:
+                return None
+            im = Image.open(p)
+            im.load()
+            if im.mode.startswith("I;16") or im.mode == "I":
+                im = Image.fromarray((np.asarray(im, np.float64) / 257.0).clip(0, 255).astype(np.uint8))
+            return im
+        return one("color"), one("normal"), one("height"), one("roughness"), one("occlusion")
+    with zipfile.ZipFile(archive_path) as archive:
+        return (member(archive, "_Color.jpg"), member(archive, "_NormalGL.jpg"), member(archive, "_Displacement.jpg"),
+                member(archive, "_Roughness.jpg"), member(archive, "_AmbientOcclusion.jpg"))
+
+
 def make_layer(layer, archive_path, size):
     """A layer's detail and surface images (RGBA8 each) and what was found of it."""
-    with zipfile.ZipFile(archive_path) as archive:
-        color = member(archive, "_Color.jpg")
-        normal = member(archive, "_NormalGL.jpg")
-        height = member(archive, "_Displacement.jpg")
-        rough = member(archive, "_Roughness.jpg")
-        occlusion = member(archive, "_AmbientOcclusion.jpg")
-        if color is None or normal is None or height is None or rough is None:
-            raise SystemExit(f"{archive_path}: a map is missing (colour, normal, displacement, roughness)")
-        c = srgb_to_linear(resize(color, size, "RGB"))
-        n = resize(normal, size, "RGB")
-        h = resize(height, size, "L")
-        r = resize(rough, size, "L")
-        o = resize(occlusion, size, "L") if occlusion is not None else np.ones((size, size), np.float32)
+    color, normal, height, rough, occlusion = open_maps(archive_path)
+    if color is None or normal is None or height is None or rough is None:
+        raise SystemExit(f"{archive_path}: a map is missing (colour, normal, displacement, roughness)")
+    c = srgb_to_linear(resize(color, size, "RGB"))
+    n = resize(normal, size, "RGB")
+    h = resize(height, size, "L")
+    r = resize(rough, size, "L")
+    o = resize(occlusion, size, "L") if occlusion is not None else np.ones((size, size), np.float32)
     luminance = c @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     lit = lit_correlation(luminance, n)
     if lit > layer["lit_limit"]:
@@ -218,7 +266,7 @@ def licences_text(m, built):
 
 
 def build(args):
-    m = manifest()
+    m = manifest(args.manifest)
     size = args.size
     if size & (size - 1) or not 256 <= size <= 4096:
         raise SystemExit("--size is a power of two from 256 to 4096")
@@ -226,16 +274,19 @@ def build(args):
     if not data.is_dir():
         raise SystemExit(f"{data}: no such data folder")
     work = Path(args.work) if args.work else data / "prism_terrain" / "work"
+    out = Path(args.out) if args.out else data / "prism_terrain"
     images, made = [], {}
     for layer in m["layers"]:
-        archive = fetch(layer["source"], work, args.yes)
+        if "files" in layer["source"]:
+            archive = fetch_files(layer["source"], work, args.yes)
+        else:
+            archive = fetch(layer["source"], work, args.yes)
         a, b, found = make_layer(layer, archive, size)
         images.append((a, b))
         made[layer["name"]] = found
         print(f"{layer['name']}: {layer['source']['asset']}, |r| {found['lit_correlation']}, detail std "
               f"{found['detail_std']}")
     macro = make_macro(MACRO_SIZE, m.get("macro_seed", 1))
-    out = data / "prism_terrain"
     out.mkdir(parents=True, exist_ok=True)
     partial = out / "layers.ptl.part"
     write_pack(partial, size, m["layers"], images, macro)
@@ -275,6 +326,8 @@ def main():
     p.add_argument("--size", type=int, default=1024)
     p.add_argument("--work")
     p.add_argument("--yes", action="store_true", help="fetch the manifest's CC0 sources without asking")
+    p.add_argument("--manifest", help="another manifest (default: manifest.json beside this tool)")
+    p.add_argument("--out", help="the pack's folder (default: <data>/prism_terrain)")
     p.set_defaults(run=build)
     p = sub.add_parser("check")
     p.add_argument("--data", required=True)
