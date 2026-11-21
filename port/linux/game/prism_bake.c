@@ -1172,7 +1172,7 @@ static boolean scenery_copy(
 					left_seen[left_count++] = left;
 					platform_log("prism bake: the scenery %s is not static (%s): the frame's moving objects carry it",
 						name ? name : "?", !definition_static(left) ? "animated or breakable" : "a named or "
-						"location-flagged placement, or outside the level");
+						"location-flagged placement, or one outside this BSP");
 				}
 			}
 
