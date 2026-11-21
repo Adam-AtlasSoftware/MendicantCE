@@ -226,6 +226,15 @@ a metre the colour is CE's, and above it the scan's high-passed lightness (its o
 `lowpass`) stands in for CE's painted streaks. The taps are fixed in the world, so the mean does not crawl as the
 camera turns. Made for b30's cliffs (`v4_rock_ref_runs`, round 4); no pack the tools build sets it.
 
+Round 5 adds, for the split's layer alone: its detail held to 30 world units and gone by the pass's far end (60),
+not faded from 15; the mean's ellipse widening with distance (1x to 4 units, 3.5x by 34), with a far octave taking
+the band it leaves (the same scan 3.5 times larger, turned and offset, mip-correct by its own footprint, blended in
+from 3 to 12 units, its lightness ratio times the near tile's); the detail and the bumped normal 60 % less on faces
+turned up (shelves, a chunk's top); and the material's own specular scale and metal (the pack's, from CE's specular
+mask, which a remodel's tilted facets smear along CE's stretched coordinates: the pale blue-grey sheets of sky seen at
+b30's D1 in both modes) replaced by plain rock's, a 4 % dielectric times the layer's occlusion, never metal, its
+roughness at least 0.6. Round 4's split had never been compiled into `xgpu_vulkan_post_shaders.c`; round 5's is.
+
 ### CE's own detail maps up close
 
 CE's ground draws fine detail maps (b30's sand speckle, 7.8 mm texels) that turn into large blocky noise within a few

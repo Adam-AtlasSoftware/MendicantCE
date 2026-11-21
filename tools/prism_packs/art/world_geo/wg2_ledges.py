@@ -85,6 +85,10 @@ PRESETS = {
 # a triangle to stretch over: the slivers), and the kit's chunks back at low frequency under the ledges
 PRESETS["a4"] = dict(PRESETS["a3"], cut=True, block_soft=0.10, chunk_amp=1.0, chunk_scale=1.6, chunk_tilt=0.14,
                      chunk_soft=0.08)
+# round 5: A5 is A4 with the chunks about the kit's chips (A4's were too weak at 10-30 wu beside them): smaller
+# cells (1.2 wu, the kit's 0.9), up to 2.5 times as deep (0.15 wu, the kit's 0.14) and tilted 0.4 (the kit's 0.45),
+# their creases soft over 0.08 wu as A4's (band-limited: no sparkle)
+PRESETS["a5"] = dict(PRESETS["a4"], chunk_amp=2.5, chunk_scale=1.2, chunk_tilt=0.16, chunk_soft=0.08)
 
 
 def params(r):

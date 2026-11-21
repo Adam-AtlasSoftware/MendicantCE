@@ -850,9 +850,12 @@ vec2 ripple_tilt(vec3 p, vec3 n, float footprint)
 
 /* (the frequency split's taps: the same material there; under local reads (TERRAIN_LAYERS_LOCAL) the words are
 read only at the pixel, so the distance alone decides) */
-bool tap_same(ivec2 tp, uint material)
+bool tap_same(ivec2 tp, uint material, vec3 n)
 {
-	return (texelFetch(gbuffer_texture, tp, 0).w & 0xfffu) == material;
+	uvec4 tw = texelFetch(gbuffer_texture, tp, 0);
+	/* (round 5: and facing the same way, within about 45 degrees: the ground where it meets the cliff is another
+	face, whose colour a tap there smeared into the wall in a green haze, M1) */
+	return (tw.w & 0xfffu) == material && dot(unfold(unpackSnorm2x16(tw.y)), n) > 0.7;
 }
 
 void main()
@@ -993,6 +996,17 @@ void main()
 		cls = hb > 0.5 ? cb : ca;
 	}
 	vec4 a = layer_a(la), b = layer_b(la);
+	float rep_index = floor(tangents.w);
+	float rep = tangents.w - rep_index;
+	/* (only on a material of rock alone: on one that blends rock with another class (b30's cliff foot into grass)
+	CE's mean smeared the blend's edge into a haze over both) */
+	bool split = rep > 0.0 && float(la) == rep_index && rock_here;
+	/* (round 5, the split's layer alone: its detail held to 30 world units and gone by the pass's far end (60), not
+	faded from 15 as the rest, so that the scan, not CE's painted streaks, carries the cliffs at 10 to 40 units; and
+	the faces turned up (shelves, a chunk's top) given less of it: they face the sky and caught its sheen) */
+	if (split)
+		fade = max(fade, 1.0 - smoothstep(30.0, bounds.z, dist));
+	float up = split ? smoothstep(0.3, 0.75, n.z) : 0.0;
 	/* (the frequency split, for the one layer whose pack asks (tangents.w: its index, plus the share): CE's colour
 	kept under about a metre, its own finer paint (b30's cliffs: streaks smeared along a stretched v) replaced by
 	the layer's detail. CE's local mean is taken from the base itself: twelve taps on an ellipse in the surface's
@@ -1000,9 +1014,7 @@ void main()
 	where the G-buffer there is the same material at the distance expected (no other surface's colour, no sky);
 	fixed in the world, so it does not crawl as the camera moves. Fewer than six kept: less of it) */
 	vec3 base_rgb = base.rgb;
-	float rep_index = floor(tangents.w);
-	float rep = tangents.w - rep_index;
-	if (rep > 0.0 && float(la) == rep_index)
+	if (split)
 	{
 		vec3 t1 = abs(plane.z) > 0.9 ? normalize(cross(plane, vec3(1.0, 0.0, 0.0))) :
 			normalize(cross(vec3(0.0, 0.0, 1.0), plane));
@@ -1011,10 +1023,13 @@ void main()
 			ad = dot(view_down.xyz, view_down.xyz);
 		vec3 sum = base.rgb;
 		float kept = 1.0;
+		/* (round 5: the ellipse widens with distance, 1x to 4 units, 2x by 20, as the far octave below takes over
+		the band it leaves: CE's streaks replaced where they carry the look; wider left a blur the scan could not fill) */
+		float widen = 1.0 + clamp((dist - 4.0) / 16.0, 0.0, 1.0);
 		for (int i = 0; i < 12; i++)
 		{
 			float ang = float(i) * 0.5235988 + (i >= 6 ? 0.2617994 : 0.0);
-			float rr = i >= 6 ? 1.0 : 0.5;
+			float rr = (i >= 6 ? 1.0 : 0.5) * widen;
 			vec3 q = p + (t1 * (cos(ang) * 0.20) + t2 * (sin(ang) * 0.11)) * rr;
 			vec3 dq = q - view_eye.xyz;
 			float tq = dot(dq, view_axis.xyz) / aa;
@@ -1026,13 +1041,15 @@ void main()
 				continue;
 			ivec2 tp = ivec2(px);
 			float d2 = uintBitsToFloat(texelFetch(extras_texture, tp, 0).w);
-			if (!tap_same(tp, material) || !(abs(d2 - tq) < 0.04 * tq + 0.03))
+			if (!tap_same(tp, material, n) || !(abs(d2 - tq) < 0.04 * tq + 0.03))
 				continue;
 			sum += texelFetch(color_texture, tp, 0).rgb;
 			kept += 1.0;
 		}
 		vec3 low = sum / kept;
-		base_rgb = mix(base.rgb, low, rep * fade * smoothstep(3.0, 7.0, kept));
+		/* (round 5: none of it within 2 units, all of it past 10: up close CE's fine paint and the scan's detail
+		together read best (round 4's S1 and D1, where the split had never run); at 10 to 40 units the streaks go) */
+		base_rgb = mix(base.rgb, low, rep * fade * smoothstep(3.0, 7.0, kept) * smoothstep(2.0, 10.0, dist));
 	}
 	vec4 macro = texture(macro_texture, p.xy * (1.0 / 24.0));
 	float k = a.y * fade * clamp(0.7 + (macro.r - 0.5) * 1.2 + (macro.g - 0.5) * 0.6, 0.35, 1.25);
@@ -1042,12 +1059,35 @@ void main()
 /*}PRINTS*/	vec3 ratio = detail.rgb * 2.0;
 	float lum = max(dot(ratio, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
 	ratio = lum * mix(vec3(1.0), ratio / lum, a.z);
+	if (split)
+	{
+		/* (round 5, the split's far octave: the same scan FAR_OCTAVE times larger (its own low pass with it, so the
+		band of about 0.8 to 3 world units the near tile's high pass leaves out), turned and offset so the two never
+		line up, mip-correct by its own footprint, blended in from 3 to 12 units: its lightness ratio times the
+		near one's, which the mips flatten there anyway) */
+		float wfar = smoothstep(3.0, 12.0, dist);
+		if (wfar > 0.01)
+		{
+			const mat3 fm = mat3(0.8, -0.6, 0.0, 0.6, 0.8, 0.0, 0.0, 0.0, 1.0);
+			const float FAR_OCTAVE = 3.5;
+			vec4 fd;
+			vec3 fnrm;
+			float frough, fao;
+			layer_at(la, fm * p / FAR_OCTAVE + vec3(5.17, 2.93, 1.31), fm * dpx / FAR_OCTAVE, fm * dpy / FAR_OCTAVE,
+				fm * n, false, 0.0, fd, fnrm, frough, fao);
+			vec3 rf = fd.rgb * 2.0;
+			float lf = max(dot(rf, vec3(0.2126, 0.7152, 0.0722)), 1.0e-3);
+			/* (its lightness's contrast raised (power 1.8): a scan's broad band is faint beside its fine one) */
+			ratio *= pow(lf, 1.8 * wfar);
+		}
+		k *= 1.0 - 0.6 * up;
+	}
 	ratio = mix(vec3(1.0), ratio, k);
 	/* (a strength past 1 carries a scan's darkest grains past black: below 0.3 the ratio rolls off toward 0 along
 	an exponential that meets it there with its slope, so a pebble stays a dark grain and never a black hole) */
 	ratio = max(ratio, 0.3 * exp(min(ratio - 0.3, vec3(0.0)) / 0.3));
 	vec3 color = clamp(base_rgb * pow(ratio, vec3(1.0 / 2.2)), 0.0, 1.0);
-	normal = normalize(mix(n, normal, fade * near));
+	normal = normalize(mix(n, normal, fade * near * (1.0 - 0.6 * up)));
 	/* (sand's ripples, over the HQ normal and beyond its reach, as far as the footprint resolves them) */
 	if (cls == 1u && tangents.z > 0.0)
 		normal = normalize(normal - vec3(ripple_tilt(p, n, max(length(dpx), length(dpy))), 0.0) * fade);
@@ -1086,6 +1126,16 @@ void main()
 	uvec4 o = classed(w, cls, r, occlusion);
 	if (TERRAIN_ROUGHNESS[cls] < 0.0)
 		o.z = (o.z & 0xffffff00u) | uint(r * 255.0 + 0.5);
+	/* (round 5, the split's layer: the material's own specular scale and metal (the pack's, from CE's specular mask,
+	smeared along CE's stretched coordinates over a remodel's tilted facets: pale blue-grey sheets of sky in Path
+	Traced and Rebaked alike, D1) replaced by plain rock's: a dielectric of 4 % (the byte 0.5 of the scale's 8 %),
+	times the layer's occlusion, never metal; the roughness kept at 0.6 at least) */
+	if (split && (o.z >> 24 & 15u) == 0u)
+	{
+		uint spec = uint(clamp(0.5 * occlusion, 0.0, 1.0) * 255.0 + 0.5);
+		uint rb = max(o.z & 255u, 153u);
+		o.z = (o.z & 0xff000000u) | (spec << 16) | rb;
+	}
 	words_out = uvec4(w.x, packSnorm2x16(fold(normal)), o.z, w.w);
 }
 """
@@ -1107,7 +1157,8 @@ def terrain_local(source: str) -> str:
         "layout(location = 1) out vec4 base_out;\nlayout(location = 0) out uvec4 words_out;\n").replace(
         "\tuvec4 w = texelFetch(gbuffer_texture, texel, 0);\n", "\tuvec4 w = subpassLoad(words_input);\n").replace(
         "result = vec4(", "base_out = vec4(").replace(
-        "\treturn (texelFetch(gbuffer_texture, tp, 0).w & 0xfffu) == material;\n", "\treturn true;\n")
+        "\tuvec4 tw = texelFetch(gbuffer_texture, tp, 0);\n", "").replace(
+        "\treturn (tw.w & 0xfffu) == material && dot(unfold(unpackSnorm2x16(tw.y)), n) > 0.7;\n", "\treturn true;\n")
     assert local.count("words_input") == 2 and "base_out" in local and "gbuffer_texture" not in local
     return local
 
