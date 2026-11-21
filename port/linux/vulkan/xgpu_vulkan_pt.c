@@ -87,8 +87,17 @@ indirect light's clamp by default (0 none) */
 #define CACHE_CELLS (1u << 19)
 #define CACHE_WORDS 12u
 #define CACHE_DEFAULT 0
-/* ReSTIR DI's initial candidates taken from the light tree (of 8) */
-#define TREE_CANDIDATES_DEFAULT 1
+/* ReSTIR DI's initial candidates taken from the light tree, the rest from
+the grid's lists (HALO_PT_TREE_CANDIDATES): all 4 since the dark interiors'
+second round. With the specular lobe in the tree's importance (tree_lobe)
+the tree finds the lamps whose glints a semi-glossy wall shows and the grid's
+lists, ranked by each lamp's light at the cell's few points, do not: at
+720p against R, c10's lab still error 0.045 to 0.015 and moving 0.084 to
+0.036, a10's door windows moving 0.112 to 0.030, b30's G4 moving 0.156 to
+0.076 and 0.116 to 0.060, the frames' energy back to within 5% of R's. 1 to
+4 measured in v4_dark_interiors_runs (U1 to U4). Its cost is a descent of
+the tree a candidate in place of a cell's lookup */
+#define TREE_CANDIDATES_DEFAULT 4
 /* whether the tree's importance takes its nodes' emitter cones (round 6:
 1.5 ms of the RTX 3070 Ti's light pass at G4, 1080p) */
 #define TREE_CONES_DEFAULT 0
@@ -116,6 +125,9 @@ this frame's 3 x 3 by default (HALO_PT_SPEC_HOLD) */
 #define RESTIR_SPATIAL_DEFAULT 1
 #define CANDIDATES_SPATIAL_DEFAULT 4
 #define RESTIR_RADIUS_DEFAULT 16
+/* whether ReSTIR DI's light-tree candidate takes the surface's specular lobe
+by default (HALO_PT_TREE_LOBE; xgpu_vulkan_pt.glsl's tree_lobe) */
+#define TREE_LOBE_DEFAULT 1
 /* the lamp ray's roughness at most by default (HALO_PT_LAMP_RAY); the job
 block's flag (xgpu_vulkan_pt.glsl's FLAG_LAMP_MIS): the lamps' specular light
 shared between ReSTIR DI and the reflection's ray by the chance ReSTIR DI
@@ -144,6 +156,7 @@ and PERMUTE is biased, a reservoir from another pixel counted without its
 support there: G4's first pose 0.0957 to 0.1583, darker) */
 #define REUSE_FEEDBACK 1u
 #define REUSE_PERMUTE 2u
+#define REUSE_TREE_LOBE 4u
 #define RESTIR_PERMUTE_DEFAULT 0
 #define RESTIR_BOIL_DEFAULT 0.0f
 /* the passes timed, the timestamps a frame (a begin and each pass's end),
@@ -1587,7 +1600,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	const struct xgpu_stream_scene_light *lights;
 	float *dynamic_lights;
 	int reference, denoiser_off, steps, step, raw, still;
-	uint32_t stabilized = 0;
+	uint32_t stabilized = 0, tree_bits = 0;
 	static int history_moving = -1, history_still = -1;
 	static float most_still = -1.0f;
 	uint64_t scene;
@@ -1698,14 +1711,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	{
 		static int lamp_tree = -1;
 
+		tree_bits = 0;
+
 		if (lamp_tree < 0)
 			lamp_tree = getenv("HALO_PT_LAMP_TREE") ? atoi(getenv("HALO_PT_LAMP_TREE")) != 0 : 1;
 		if (pt.tree_nodes && pt.tree_generation == lookup.generation && pt.tree.buffer && (lamp_tree || reference))
 		{
 			job->tree = pt.tree.address;
 			job->extra[3] = (float)pt.tree_nodes;
-			/* (ReSTIR DI's candidates from the tree, of its 8:
-			HALO_PT_TREE_CANDIDATES, the rest the grid's) */
+			/* (ReSTIR DI's candidates from the tree, of its 4 (8 without
+			the spatial reuse): HALO_PT_TREE_CANDIDATES, the rest the grid's) */
 			{
 				static int from_tree = -1, cones = -1;
 
@@ -1714,8 +1729,12 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 						atoi(getenv("HALO_PT_TREE_CANDIDATES")) : TREE_CANDIDATES_DEFAULT;
 				if (cones < 0)
 					cones = getenv("HALO_PT_TREE_CONES") ? atoi(getenv("HALO_PT_TREE_CONES")) != 0 : TREE_CONES_DEFAULT;
-				/* (16 more where the nodes' emitter cones bound the importance) */
-				job->volume[3] = (float)(from_tree < 1 ? 1 : from_tree > 8 ? 8 : from_tree) + (cones ? 16.0f : 0.0f);
+				/* (in the reuse flags, below: the count in bits 4 to 7, bit 3
+				where the nodes' emitter cones bound the importance. They were
+				job.volume's w, which the recent dynamic lights' count then
+				took for itself: the tree's candidates were 1 + that count
+				mod 16, its cones on past 16 of them) */
+				tree_bits = ((uint32_t)(from_tree < 1 ? 1 : from_tree > 8 ? 8 : from_tree) << 4) | (cones ? 8u : 0u);
 			}
 		}
 	}
@@ -1862,7 +1881,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	place, HALO_PT_RESTIR_PERMUTE; the boiling filter's strength,
 	HALO_PT_RESTIR_BOIL (0 to 1, 0 none)) */
 	{
-		static int feedback = -1, permute = -1;
+		static int feedback = -1, permute = -1, tree_lobe = -1;
 		static float boil = -1.0f;
 		int radius;
 
@@ -1880,8 +1899,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		pixels, 3 to 64; 16 by default) */
 		radius = env_int("HALO_PT_RESTIR_RADIUS", RESTIR_RADIUS_DEFAULT);
 		radius = radius < 3 ? 3 : radius > 64 ? 64 : radius;
+		if (tree_lobe < 0)
+			tree_lobe = env_int("HALO_PT_TREE_LOBE", TREE_LOBE_DEFAULT) != 0;
 		job->reuse_flags = ((uint32_t)radius << 16) | (feedback ? REUSE_FEEDBACK : 0u) | (permute ? REUSE_PERMUTE : 0u) |
-			((uint32_t)(boil * 100.0f + 0.5f) << 8);
+			((uint32_t)(boil * 100.0f + 0.5f) << 8) | (tree_lobe ? REUSE_TREE_LOBE : 0u) |
+			tree_bits;
 	}
 	/* (a diagnosis of the light pass's cost: HALO_PT_PARTS_OFF, a mask of
 	its parts left out (1 the sun's ray, 2 the domes, 4 the spatial reuse, 8

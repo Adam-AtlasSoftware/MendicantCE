@@ -1274,3 +1274,46 @@ def test_the_specular_hold_drops_a_glint_that_moved_on_and_keeps_a_highlight_sti
     # (a still eye, or a rough surface: never held)
     assert model.specular_hold(5.0, 0.02, [0.01] * 8, moving=False) == 5.0
     assert model.specular_hold(5.0, 0.02, [0.01] * 8, roughness=0.8) == 5.0
+
+
+def test_the_tree_candidate_takes_the_specular_lobe_and_stays_unbiased():
+    """ReSTIR DI's light-tree candidate by the surface's specular lobe as well as its cosine (REUSE_TREE_LOBE): the
+    descent's choices change, its probability is the product of the choices it made, so a candidate's weight
+    (target / probability) stays an unbiased estimate of the lamps' light whatever the importance; the lobe is set
+    for the live candidates alone and cleared before anything else descends the tree (the reference's
+    tree_probability); the tree's candidate count is the reuse flags' (bits 4 to 7), no longer job.volume's w, which
+    the recent dynamic lights' count overwrote"""
+    rng = np.random.default_rng(7)
+    # (a two-level tree over four lamps: each pick a descent by any positive importance, its probability the
+    # product of its choices; the estimate target / probability over many picks against the sum of the targets)
+    target = np.array([0.02, 0.5, 0.001, 3.0])
+    for importance in (np.array([1.0, 1.0, 1.0, 1.0]), np.array([0.1, 5.0, 0.01, 0.2]), np.array([9.0, 0.3, 2.0, 0.5])):
+        estimates = []
+        for _ in range(40000):
+            left = importance[0] + importance[1]
+            right = importance[2] + importance[3]
+            pl = left / (left + right)
+            if rng.uniform() < pl:
+                p0 = importance[0] / left
+                lamp, probability = (0, pl * p0) if rng.uniform() < p0 else (1, pl * (1.0 - p0))
+            else:
+                p2 = importance[2] / right
+                lamp, probability = (2, (1.0 - pl) * p2) if rng.uniform() < p2 else (3, (1.0 - pl) * (1.0 - p2))
+            estimates.append(target[lamp] / probability)
+        assert abs(np.mean(estimates) - target.sum()) < 0.05 * target.sum()
+    text = GLSL.read_text()
+    assert "const uint REUSE_TREE_LOBE = 4u;" in text
+    importance = text[text.index("float tree_importance(uint node, vec3 p, vec3 n)"):]
+    importance = importance[:importance.index("\n}\n")]
+    assert "tree_lobe.w > 0.0 && bound > 0.0" in importance
+    assert "return t.v[b + 6u] * weight / max(dist2, max(r2, 1.0e-8));" in importance
+    initial = text[text.index("void lights_initial("):]
+    initial = initial[:initial.index("\n}\n")]
+    assert initial.index("tree_lobe = vec4(reflect(-g.eye, g.normal), a * a);") < initial.index("lamp_pick_live(")
+    assert "    tree_lobe = vec4(0.0);\n    uint fixtures = uint(s.lamp.z);" in initial
+    assert "c < count - int(max((job.reuse_flags >> 4) & 15u, 1u))" in text
+    assert "mod(job.volume.w, 16.0)" not in text
+    host = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
+    assert "#define TREE_LOBE_DEFAULT 1" in host
+    assert "tree_bits = ((uint32_t)(from_tree < 1 ? 1 : from_tree > 8 ? 8 : from_tree) << 4) | (cones ? 8u : 0u);" in host
+    assert "job->volume[3] = (float)(from_tree" not in host

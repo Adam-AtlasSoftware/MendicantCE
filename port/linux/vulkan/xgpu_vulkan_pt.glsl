@@ -100,6 +100,10 @@ ReSTIR DI giving it the lamps' diffuse light alone; the fixtures and the
 dynamic lights, which no probe holds, keep theirs. It lost the lamps' pools
 on c20's walls that R has; by default the probe is scaled instead, below) */
 bool lamps_probe = false;
+/* (ReSTIR DI's light-tree candidate by the specular lobe: the mirror
+direction and alpha squared (w 0: none), F0's luminance, n.v; tree_importance) */
+vec4 tree_lobe = vec4(0.0);
+float tree_lobe_f0 = 0.0, tree_lobe_nv = 1.0;
 /* (hit_light_n's last triangle met on the level, else 0xffffffff) */
 uint hit_light_triangle = 0xffffffffu;
 
@@ -117,9 +121,13 @@ layout(buffer_reference, std430, buffer_reference_align = 16) buffer Counters
 4's, which spread a sample from pixel to pixel over the frames: the blobs in
 motion); the temporal reuse by a permutation of the 4 x 4 about the place; the spatial disc's radius in
 pixels in bits 16 to 23 (0: 16);
-the boiling filter's strength in hundredths (bits 8 to 15, 0 none) */
+the boiling filter's strength in hundredths (bits 8 to 15, 0 none); the
+light tree's candidates in bits 4 to 7, its emitters' cones in bit 3 */
 const uint REUSE_FEEDBACK = 1u;
 const uint REUSE_PERMUTE = 2u;
+/* (the light tree's candidate by the surface's specular lobe as well as its
+cosine: tree_lobe, HALO_PT_TREE_LOBE) */
+const uint REUSE_TREE_LOBE = 4u;
 /* job.parts_off (a diagnosis of the light pass's cost, HALO_PT_PARTS_OFF):
 the sun's ray, the domes, ReSTIR DI's spatial reuse, the bounce, the
 reflection's ray, ReSTIR GI's reuse, the spatial neighbours' traced Z left
@@ -1030,6 +1038,15 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
     if (lamps_on)
     {
         Floats f = Floats(s.lamps);
+        /* (the tree's candidate by the specular lobe too, under a roughness
+        of 0.9: tree_importance) */
+        if ((job.reuse_flags & REUSE_TREE_LOBE) != 0u && g.roughness < 0.9)
+        {
+            float a = max(g.roughness * g.roughness, 1.0e-3);
+            tree_lobe = vec4(reflect(-g.eye, g.normal), a * a);
+            tree_lobe_f0 = luma(f0_of(g));
+            tree_lobe_nv = clamp(dot(g.normal, g.eye), 0.1, 1.0);
+        }
         for (int c = 0; c < lamp_count; c++)
         {
             float probability;
@@ -1068,6 +1085,7 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
             }
         }
     }
+    tree_lobe = vec4(0.0);
     uint fixtures = uint(s.lamp.z);
     if (fixtures > 0u && !term_off(16u) && fixture_count > 0)
     {
@@ -1493,6 +1511,20 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Tr
     float v[];
 };
 bool tree_on() { return job.tree != uvec2(0u) && job.extra.w >= 1.0; }
+/* (ReSTIR DI's tree candidate on a glossy or semi-rough surface,
+REUSE_TREE_LOBE: each node's importance takes the surface's specular lobe
+as well as its diffuse cosine bound (Conty Estevez and Kulla 2018's
+importance with a BRDF term, as their paper's glossy extension describes):
+the GGX distribution at the half-angle nearest the node's bounding cone
+about the mirror direction, by the surface's F0, over 4 n.v. A small lamp
+whose diffuse light at the pixel is little but whose highlight on a
+semi-glossy wall is bright (c10's lab: the blue lamps' glints on the door's
+wall; b30's G4 walls) was drawn by its diffuse share alone, a candidate in
+hundreds of frames, each find a sparkle; the lobe term draws it most frames
+the lobe holds it. Only the descent's own choices change, its probability
+is the product of the choices it made, so the candidate's weight stays
+exact. tree_lobe.w 0: the cosine alone (the reference's, and every other
+use's; tree_lobe is declared with the light pass's other state, above) */
 float tree_importance(uint node, vec3 p, vec3 n)
 {
     Tree t = Tree(job.tree);
@@ -1508,13 +1540,13 @@ float tree_importance(uint node, vec3 p, vec3 n)
         float cos_u = sqrt(max(1.0 - r2 / dist2, 0.0)), sin_u = sqrt(min(r2 / dist2, 1.0));
         float cos_i = dot(n, d) * inversesqrt(dist2), sin_i = sqrt(max(1.0 - cos_i * cos_i, 0.0));
         bound = cos_i >= cos_u ? 1.0 : max(cos_i * cos_u + sin_i * sin_u, 0.0);
-        /* (the emitters' side, HALO_PT_TREE_CONES=1 (job.volume.w past 16): the best
+        /* (the emitters' side, HALO_PT_TREE_CONES=1 (reuse_flags' bit 3): the best
         cosine of a lamp of the node toward p, its normals' cone (axis,
         half angle) widened by the sphere's angle from p; one-sided
         Lambertian lamps, nought past a right angle: Conty Estevez and Kulla
         2018's theta prime) */
         float cos_o = t.v[b + 15u];
-        if (SPEC_CONES && cos_o > -0.99 && job.volume.w >= 16.0)
+        if (SPEC_CONES && cos_o > -0.99 && (job.reuse_flags & 8u) != 0u)
         {
             /* (cos(theta - theta_o - theta_u) by the angles' sums, no
             inverse trigonometry: theta past the two, else 1) */
@@ -1535,7 +1567,24 @@ float tree_importance(uint node, vec3 p, vec3 n)
             }
         }
     }
-    return t.v[b + 6u] * bound / max(dist2, max(r2, 1.0e-8));
+    float weight = bound;
+    if (tree_lobe.w > 0.0 && bound > 0.0)
+    {
+        /* (the best angle between the mirror direction and the cone from p
+        to the node's sphere, half of it the half vector's to the normal) */
+        float cos_rb = 1.0;
+        if (dist2 > r2)
+        {
+            float cos_u = sqrt(max(1.0 - r2 / dist2, 0.0)), sin_u = sqrt(min(r2 / dist2, 1.0));
+            float cos_r = clamp(dot(tree_lobe.xyz, d) * inversesqrt(dist2), -1.0, 1.0);
+            float sin_r = sqrt(max(1.0 - cos_r * cos_r, 0.0));
+            cos_rb = cos_r >= cos_u ? 1.0 : cos_r * cos_u + sin_r * sin_u;
+        }
+        float ch2 = max(0.5 * (1.0 + cos_rb), 0.0), a2 = tree_lobe.w;
+        float dd = ch2 * (a2 - 1.0) + 1.0;
+        weight += PI * tree_lobe_f0 * (a2 / (PI * dd * dd)) / (4.0 * tree_lobe_nv);
+    }
+    return t.v[b + 6u] * weight / max(dist2, max(r2, 1.0e-8));
 }
 /* a node's chance of its left child (by their importances; by their powers
 where both are nought: none of their lamps reaches p, any choice is right) */
@@ -1615,10 +1664,16 @@ lamps' light over count); the tree's one candidate finds the lamps the
 grid's lists miss near a cell's surfaces (round 1's a10 fireflies) at one
 tree descent a pixel. The mixture for every candidate (lamp_pick_mixed, the
 reference's) cost two descents a candidate: 12 ms of the RTX 3070 Ti's
-light pass at 1080p, G2 and G5 alike. */
+light pass at 1080p, G2 and G5 alike. Since the dark interiors' second
+round every candidate is the tree's by default (reuse_flags' bits 4 to 7,
+HALO_PT_TREE_CANDIDATES 4), its importance by the surface's specular lobe as
+well (tree_lobe): the grid's lists, ranked by the lamps' light at a cell's
+few points, missed the lamps whose glints a semi-glossy wall shows (c10's
+lab, b30's G4 walls, a10's corridor floor through the door windows), each
+find a sparkle. */
 uint lamp_pick_live(vec3 p, vec3 n, int c, int count, out float probability)
 {
-    if (!tree_on() || c < count - int(max(mod(job.volume.w, 16.0), 1.0)))
+    if (!tree_on() || c < count - int(max((job.reuse_flags >> 4) & 15u, 1u)))
         return lamp_pick(p, probability);
     return tree_pick(p, n, probability);
 }
