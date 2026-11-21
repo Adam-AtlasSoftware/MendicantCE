@@ -1101,6 +1101,18 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
         per_surface[key] = per_surface.get(key, 0.0) + est
         chosen.append(item)
     rep["estimate_by_class"] = {k: int(v) for k, v in per_class.items()}
+    # (per material: candidates, chosen, the estimate of each)
+    bym = {}
+    for item in cand:
+        k_ = mats[item[2]].shader.rsplit("\\", 1)[-1]
+        e_ = bym.setdefault(k_, [0, 0, 0, 0])
+        e_[0] += 1
+        e_[2] += int(item[6])
+    for item in chosen:
+        e_ = bym[mats[item[2]].shader.rsplit("\\", 1)[-1]]
+        e_[1] += 1
+        e_[3] += int(item[6])
+    rep["candidates_by_material"] = bym
     # every chosen triangle's clipped points: a triangle's own corners are its vertices; the other points are welded
     # by position (a point on an edge two cut triangles share is made by both, the same where the texture runs on)
     allP, allD, allCorner, triIdx, triMeta, cut = [], [], [], [], [], []
