@@ -1116,6 +1116,7 @@ static boolean scenery_copy(
 {
 	struct tag_block const *placements[4], *palettes[4];
 	long sizes[4] = { 0x48, 0x40, 0x40, 0x58 }, index;
+	long left_seen[16], left_count = 0;
 	int kind;
 
 	placements[0] = &scenario->scenery;
@@ -1150,6 +1151,30 @@ static boolean scenery_copy(
 			real_matrix4x3 matrix;
 			short region_index, part_index;
 			long model_index, first = input->scenery_count;
+
+			/* (each scenery model left to the frame's moving objects, said
+			once a bake: its tag and why, an animation graph's animations, a
+			body to break, or a name or location flag on its placement) */
+			if (definition_index == NONE && kind == 0 && palettes[0]->address &&
+				placement->palette_entry_index >= 0 && placement->palette_entry_index < palettes[0]->count)
+			{
+				long left = TAG_BLOCK_GET_ELEMENT(palettes[0], placement->palette_entry_index,
+					struct scenario_object_palette_entry)->reference.index;
+				long seen_index;
+
+				for (seen_index = 0; seen_index < left_count && left_seen[seen_index] != left; seen_index++)
+				{
+				}
+				if (left != NONE && seen_index == left_count && left_count < 16)
+				{
+					char const *name = tag_get_name(left);
+
+					left_seen[left_count++] = left;
+					platform_log("prism bake: the scenery %s is not static (%s): the frame's moving objects carry it",
+						name ? name : "?", !definition_static(left) ? "animated or breakable" : "a named or "
+						"location-flagged placement, or outside the level");
+				}
+			}
 
 			model_index = definition_index != NONE ? object_definition_get(definition_index)->object.model.index : NONE;
 			if (definition_index == NONE || !(model = model_definition_get(model_index)) || !model->regions.address ||
