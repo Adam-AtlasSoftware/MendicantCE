@@ -1366,6 +1366,17 @@ static int atrous_steps(void)
 	return steps;
 }
 
+/* whether ReSTIR DI's spatial reuse runs while DLSS Ray Reconstruction takes
+the light raw (HALO_PT_RR_SPATIAL; off by default) */
+static int rr_spatial(void)
+{
+	static int on = -1;
+
+	if (on < 0)
+		on = env_int("HALO_PT_RR_SPATIAL", 0) != 0;
+	return on;
+}
+
 /* the temporal pass's hold of the specular history (HALO_PT_SPEC_HOLD) */
 static uint32_t spec_hold(void)
 {
@@ -1854,6 +1865,13 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		traced from each, HALO_PT_RESTIR_Z=1; else by their own sample's
 		light here) */
 		job->settings[2] = (float)spatial + (traced_z && spatial ? 16.0f : 0.0f);
+		/* (DLSS Ray Reconstruction given the light raw: no spatial reuse
+		(HALO_PT_RR_SPATIAL=1 keeps it). Its network takes each pixel's noise
+		as its own; neighbours sharing a lamp's sample are patches it keeps as
+		detail (the baseline's salt-like grain and blobs on dark walls), and
+		the reuse costs 2.5 ms of the RTX 3070 Ti's light pass at G4) */
+		if (raw && !rr_spatial())
+			job->settings[2] = 0.0f;
 	}
 	/* (ReSTIR DI's reuse flags: the spatial reservoirs kept for the next
 	frame, HALO_PT_RESTIR_FEEDBACK=1 (round 4's; by default the temporal
@@ -1938,6 +1956,19 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 				env_int("HALO_PT_RESTIR_SPATIAL", RESTIR_SPATIAL_DEFAULT) > 0 ? CANDIDATES_SPATIAL_DEFAULT : 8);
 		candidates = candidates < 1 ? 1 : candidates > 8 ? 8 : candidates;
 		job->extra[0] = reference ? 8.0f : (float)candidates;
+		/* (under Ray Reconstruction without the spatial reuse, the candidates
+		it would have brought: HALO_PT_RR_CANDIDATES, 8 by default) */
+		if (raw && !rr_spatial() && !reference)
+		{
+			static int rr_candidates = -1;
+
+			if (rr_candidates < 0)
+			{
+				rr_candidates = env_int("HALO_PT_RR_CANDIDATES", 8);
+				rr_candidates = rr_candidates < 1 ? 1 : rr_candidates > 8 ? 8 : rr_candidates;
+			}
+			job->extra[0] = (float)rr_candidates;
+		}
 	}
 	job->extra[1] = (float)(pt.ref_paths ? pt.ref_paths : 1u);
 	{
