@@ -1022,6 +1022,7 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
         return np.unique(e, axis=0)
 
     names = [n for n, r in recipes.items() if r.get("relief") and r["kind"] == "metal"]
+    r_cap = rec.get("relief_surface_vertices", 40000)
     if not names:
         return V, T, tsrc, tmat, edges_of(T), pinned, zero, np.zeros(nV0, bool), None
     budget = rec.get("relief_budget_triangles", 1.5e6)
@@ -1080,7 +1081,9 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
             # (facing up by CE's own vertex normals: the triangles' winding is not the side they face)
             up = mm.normal[st[i]].astype(np.float64).sum(0)
             floor_first = 0 if up[2] > 0.7 * np.linalg.norm(up) else 1
-            cand.append((floor_first, max(dist, 0.0), t, m, name, uv3, texel, est))
+            # (and the recipe's own first materials: relief_first, substrings of their shaders)
+            first = 0 if any(x.lower() in mm.shader.lower() for x in r.get("relief_first", [])) else 1
+            cand.append(((floor_first, first), max(dist, 0.0), t, m, name, uv3, texel, est))
     # floors first, then nearest first, each class within its own share of the budget (relief_budget, else the
     # level's) and the level within relief_budget_triangles
     cand.sort(key=lambda x: (x[0], x[1], x[2]))
@@ -1090,7 +1093,7 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
     for item in cand:
         dist, t, m, name, uv3, texel, est = item
         key = (m, int(tsrc[t]))
-        if used + est > budget or per_surface.get(key, 0.0) + est > 60000 or \
+        if used + est > budget or per_surface.get(key, 0.0) + est > 100000 or \
                 per_class.get(name, 0.0) + est > recipes[name].get("relief_budget", budget):
             continue
         used += est
@@ -1105,7 +1108,7 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
     for dist, t, m, name, uv3, texel, est in chosen:
         r = recipes[name]
         tile = tiles[mats[m].maps["bump_map"]["png"]]
-        res = relief.clip_tile(tile, uv3, r.get("relief_max_tiles", 64))
+        res = relief.clip_tile(tile, uv3, r.get("relief_max_tiles", 400))
         if res is None or not len(res[1]):
             continue
         pts3, tris = res
@@ -1136,11 +1139,24 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
         newP = list(P_[~isc][first])
         newD = list(D_[~isc][first])
         TT = ids[np.concatenate(triIdx)]
+        # a stock surface is drawn from one part of at most 65535 vertices (16-bit indices): one whose relief would
+        # take it near that keeps its flat triangles (corner rows split further by their normals: a margin)
+        surf = {}
+        off = 0
+        for t, m, n_ in triMeta:
+            surf.setdefault((m, int(tsrc[t])), []).append(TT[off:off + n_].ravel())
+            off += n_
+        over = {k for k, v in surf.items() if len(np.unique(np.concatenate(v))) > r_cap}
+        rep["surfaces_over_vertex_cap"] = len(over)
         newT, new_src, new_mat = [], [], []
         off = 0
+        kept_cut = []
         for t, m, n_ in triMeta:
             tt = TT[off:off + n_]
             off += n_
+            if (m, int(tsrc[t])) in over:
+                continue
+            kept_cut.append(t)
             tt = tt[(tt[:, 0] != tt[:, 1]) & (tt[:, 1] != tt[:, 2]) & (tt[:, 0] != tt[:, 2])]
             newT.append(tt)
             new_src.append(np.full(len(tt), tsrc[t]))
@@ -1148,6 +1164,7 @@ def relief_stage(V, T, tsrc, tmat, pinned, mats, offsets, cls, recipes, rec, ext
             mrep = rep["materials"].setdefault(mats[m].shader.rsplit("\\", 1)[-1], {"cut": 0, "made": 0})
             mrep["cut"] += 1
             mrep["made"] += int(len(tt))
+        cut = kept_cut
     if not cut:
         return V, T, tsrc, tmat, edges_of(T), pinned, zero, np.zeros(nV0, bool), rep
     keep = np.ones(len(T), bool)

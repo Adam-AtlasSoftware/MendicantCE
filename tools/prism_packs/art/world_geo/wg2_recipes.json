@@ -1,5 +1,5 @@
 {
- "_doc": "PRISM world geometry v2 recipes (wg2_remodel.py, wg2_shape.py). A class matches a material by a substring of its shader's name (first class wins; exclude: substrings that do not). Lengths in world units (1 wu = 3.05 m); groove widths in texture repeats. cap_in / cap_out: the most a point goes behind / in front of the stock (collision) surface. budget_triangles bounds the displaced classes' density (their target edges scale up together to meet it). light: Cycles' sun (estimated from CE's lightmap and incident radiosity unless given) and sky, and the clamp of the light ratio put into the incident radiosity. Metal grooves (grooves: true, cut along the texture's panel lines into CE's flat surface) are off in every recipe: CE's floors and walls are flat there, and the grooves drew a grid CE does not have; bevels stay on CE's own sharp edges (bevel_angle). relief: the metal texture's own bump map made geometry (wg2_relief.py): its channels set into flat metal triangles within relief_reach wu of where one walks, nearest first, within the level's relief_budget_triangles; relief_scale times the bump map's own depth (in texels times the texel's size on the surface), at most relief_max wu. The relief budgets keep each BSP's .pwg under the engine's 256 MB file limit and its geometry within the contiguous memory the game can give it at load (prism_world_geometry.c: b30a at 168 MB failed beside b30's textures, 115 MB loads; a30_a at 139 MB has loaded).",
+ "_doc": "PRISM world geometry v2 recipes (wg2_remodel.py, wg2_shape.py). A class matches a material by a substring of its shader's name (first class wins; exclude: substrings that do not). Lengths in world units (1 wu = 3.05 m); groove widths in texture repeats. cap_in / cap_out: the most a point goes behind / in front of the stock (collision) surface. budget_triangles bounds the displaced classes' density (their target edges scale up together to meet it). light: Cycles' sun (estimated from CE's lightmap and incident radiosity unless given) and sky, and the clamp of the light ratio put into the incident radiosity. Metal grooves (grooves: true, cut along the texture's panel lines into CE's flat surface) are off in every recipe: CE's floors and walls are flat there, and the grooves drew a grid CE does not have; bevels stay on CE's own sharp edges (bevel_angle). relief: the metal texture's own bump map made geometry (wg2_relief.py): its channels set into flat metal triangles within relief_reach wu of where one walks, nearest first, within the level's relief_budget_triangles; relief_scale times the bump map's own depth (in texels times the texel's size on the surface), at most relief_max wu. The relief budgets keep each BSP's .pwg under the engine's 256 MB file limit and its geometry within the contiguous memory the game can give it at load (prism_world_geometry.c: b30a at 168 MB failed beside b30's textures, 115 MB loads; a30_a at 139 MB has loaded). relief_first: the shaders (substrings) a class's relief goes to first, after floors before walls.",
  "levels\\b30\\b30a": {
   "budget_triangles": 1500000,
   "fade_distance": 0.2,
@@ -103,7 +103,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 260000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    },
    "forerunner_int": {
     "kind": "metal",
@@ -133,7 +136,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 40000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -199,7 +205,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 1200000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1070,7 +1079,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 200000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    },
    "forerunner_int": {
     "kind": "metal",
@@ -1100,7 +1112,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 50000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1230,7 +1245,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 240000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    },
    "forerunner_int": {
     "kind": "metal",
@@ -1260,7 +1278,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 60000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1326,7 +1347,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1391,7 +1415,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1456,7 +1483,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1521,7 +1551,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1649,7 +1682,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
@@ -1778,7 +1814,10 @@
     "relief_max": 0.012,
     "relief_reach": 8.0,
     "relief_budget": 400000,
-    "relief_tile_triangles": 1000
+    "relief_tile_triangles": 1000,
+    "relief_first": [
+     "metal plate floor"
+    ]
    }
   },
   "near": {
