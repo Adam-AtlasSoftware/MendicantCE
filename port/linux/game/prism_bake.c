@@ -132,6 +132,11 @@ levels (super low to super high) and its parts' most; the albedo's bounds
 /* the models a mod's mesh draws among the static scenery's, at most (b30's
 three boulders; past it the rest stay in the frame's traced scene) */
 #define SCENERY_REPLACED_MODELS 256
+/* the static scenery's cutouts' alpha maps: the most (each its base map's),
+and their largest side (a leaf card's alpha at most this many texels a side:
+display.prism_rt's level maps' PRISM_RT_ALPHA_SIDE) */
+#define SCENERY_ALPHA_MAPS 256
+#define SCENERY_ALPHA_SIDE 256
 #define STATUS_WORDS XGPU_BAKE_STATUS_WORDS
 
 /* what the reach's thread works from: copies of the tags' arrays */
@@ -167,6 +172,16 @@ struct reach_input
 	draws (first triangle and count each), and their count */
 	int32_t *replaced;
 	long replaced_count, replaced_room;
+	/* per static scenery triangle its corners' base map coordinates (6
+	floats, as drawn: the model's and its shader's map scales applied) and
+	its cutout's alpha map (-1 none, opaque); the alpha maps (each its
+	width, height and texels, a byte each, padded to a word) and their base
+	maps' tags */
+	float *scenery_uv;
+	int32_t *scenery_map;
+	unsigned char *maps;
+	long maps_bytes, maps_room, map_count;
+	long map_tags[SCENERY_ALPHA_MAPS];
 	/* the scenario's light fixtures in this BSP (FIXTURE_FLOATS each: the
 	place, the forward axis, the colour, the intensity, the falloff and
 	cutoff angles) */
@@ -419,6 +434,9 @@ static void input_free(
 	free(input->fighters);
 	free(input->scenery);
 	free(input->replaced);
+	free(input->scenery_uv);
+	free(input->scenery_map);
+	free(input->maps);
 	free(input->fixtures);
 	memset(input, 0, sizeof(*input));
 }
@@ -635,7 +653,9 @@ cannot be read) and coverage (0 transparent: left out) */
 static void scenery_shader(
 	long shader_tag,
 	float albedo[3],
-	float *coverage)
+	float *coverage,
+	long *alpha_map,
+	float map_scale[2])
 {
 	struct shader *shader = shader_tag != NONE ? shader_definition_get(shader_tag) : NULL;
 	long base_map = NONE;
@@ -643,6 +663,8 @@ static void scenery_shader(
 
 	albedo[0] = albedo[1] = albedo[2] = 0.35f;
 	*coverage = 1.0f;
+	*alpha_map = NONE;
+	map_scale[0] = map_scale[1] = 1.0f;
 	if (!shader || !shader_type_is_valid_for_model(shader->base.type) || shader_type_is_transparent(shader->base.type))
 	{
 		*coverage = 0.0f;
@@ -653,6 +675,16 @@ static void scenery_shader(
 		struct scenery_shader_model const *model = (struct scenery_shader_model const *)shader;
 
 		base_map = model->base_map.index;
+		/* (its map scales, 0 none: rasterizer_xbox_models.c's map_u_scale
+		and map_v_scale, at 0x9C and 0xA0) */
+		{
+			float u_scale, v_scale;
+
+			memcpy(&u_scale, (byte const *)model + 0x9C, sizeof(u_scale));
+			memcpy(&v_scale, (byte const *)model + 0xA0, sizeof(v_scale));
+			map_scale[0] = u_scale != 0.0f && u_scale == u_scale && fabsf(u_scale) < 1.0e4f ? u_scale : 1.0f;
+			map_scale[1] = v_scale != 0.0f && v_scale == v_scale && fabsf(v_scale) < 1.0e4f ? v_scale : 1.0f;
+		}
 		if (base_map != NONE && !TEST_FLAG(model->flags, _scenery_shader_model_not_alpha_tested_bit))
 		{
 			struct bitmap_group *group = bitmap_group_get(base_map);
@@ -664,6 +696,10 @@ static void scenery_shader(
 			{
 				*coverage = xgpu_texture_alpha_coverage((unsigned int)header[3], (unsigned int)header[4],
 					(unsigned char const *)bitmap->base_address, 0x7F, 512);
+				if (*coverage < 0.999f)
+				{
+					*alpha_map = base_map;
+				}
 			}
 		}
 	}
@@ -757,6 +793,79 @@ static long scenery_static(
 
 /* a part's drawn triangles into the input, in the world (by matrix);
 FALSE if no memory */
+/* a cutout's alpha map among the reach's inputs' (its index, added where
+new; -1 where it cannot be read or there is no room: the card then blocks
+by its coverage, as before) */
+static int32_t scenery_alpha_map(
+	struct reach_input *input,
+	long bitmap_tag)
+{
+	struct bitmap_group *group;
+	struct bitmap_data const *bitmap;
+	unsigned long const *header;
+	unsigned long width = 0, height = 0;
+	long index, start, need;
+
+	if (bitmap_tag == NONE)
+	{
+		return -1;
+	}
+	for (index = 0; index < input->map_count; index++)
+	{
+		if (input->map_tags[index] == bitmap_tag)
+		{
+			return input->map_tags[index] == NONE ? -1 : (int32_t)index;
+		}
+	}
+	if (input->map_count >= SCENERY_ALPHA_MAPS || !(group = bitmap_group_get(bitmap_tag)) ||
+		!group->bitmaps.address || group->bitmaps.count <= 0)
+	{
+		return -1;
+	}
+	header = (unsigned long const *)texture_cache_port_load((unsigned long)bitmap_tag, 0);
+	bitmap = TAG_BLOCK_GET_ELEMENT(&group->bitmaps, 0, struct bitmap_data);
+	if (!header || !bitmap->base_address)
+	{
+		return -1;
+	}
+	start = input->maps_bytes;
+	need = start + 8 + SCENERY_ALPHA_SIDE * SCENERY_ALPHA_SIDE + 4;
+	if (need > input->maps_room)
+	{
+		long room = MAX(input->maps_room * 2, need + SCENERY_ALPHA_SIDE * SCENERY_ALPHA_SIDE * 4);
+		unsigned char *grown = (unsigned char *)realloc(input->maps, (size_t)room);
+
+		if (!grown)
+		{
+			return -1;
+		}
+		input->maps = grown;
+		input->maps_room = room;
+	}
+	if (!xgpu_texture_alpha_map((unsigned int)header[3], (unsigned int)header[4],
+		(unsigned char const *)bitmap->base_address, SCENERY_ALPHA_SIDE, input->maps + start + 8, &width, &height) ||
+		!width || !height)
+	{
+		return -1;
+	}
+	{
+		int32_t size[2];
+
+		size[0] = (int32_t)width;
+		size[1] = (int32_t)height;
+		memcpy(input->maps + start, size, 8);
+	}
+	/* (a whole number of words) */
+	need = (long)(width * height);
+	while (need & 3)
+	{
+		input->maps[start + 8 + need++] = 0;
+	}
+	input->maps_bytes = start + 8 + need;
+	input->map_tags[input->map_count] = bitmap_tag;
+	return (int32_t)input->map_count++;
+}
+
 static boolean scenery_part_copy(
 	struct reach_input *input,
 	struct model const *model,
@@ -767,8 +876,9 @@ static boolean scenery_part_copy(
 	struct triangle_buffer const *triangle_buffer = &part->triangle_buffer;
 	byte *vertices = NULL;
 	BYTE *indices = NULL;
-	long stride, index_count, index;
-	float albedo[3], coverage;
+	long stride, index_count, index, alpha_tag;
+	float albedo[3], coverage, map_scale[2], uv_scale[2];
+	int32_t alpha_map;
 	boolean good = TRUE;
 
 	if (TEST_FLAG(part->flags, _scenery_part_stripped_bit) || part->shader_index < 0 ||
@@ -777,7 +887,12 @@ static boolean scenery_part_copy(
 		return TRUE;
 	}
 	scenery_shader(TAG_BLOCK_GET_ELEMENT(&model->shaders, part->shader_index, struct scenery_model_shader)->shader.index,
-		albedo, &coverage);
+		albedo, &coverage, &alpha_tag, map_scale);
+	/* (the coordinates as drawn: the model's base map scale (0 none) by the
+	shader's) */
+	uv_scale[0] = (model->base_map_scale.i != 0.0f ? model->base_map_scale.i : 1.0f) * map_scale[0];
+	uv_scale[1] = (model->base_map_scale.j != 0.0f ? model->base_map_scale.j : 1.0f) * map_scale[1];
+	alpha_map = coverage > 0.0f && coverage < 0.999f ? scenery_alpha_map(input, alpha_tag) : -1;
 	if (coverage <= 0.0f || !vertex_buffer->hardware_format || vertex_buffer->count <= 0 ||
 		!triangle_buffer->hardware_format || triangle_buffer->count <= 0)
 	{
@@ -819,7 +934,7 @@ static boolean scenery_part_copy(
 		for (index = 0; index + 2 < index_count && input->scenery_count < SCENERY_MOST; index += step)
 		{
 			unsigned short corners[3];
-			float *out, normal[3] = { 0.0f, 0.0f, 0.0f }, e1[3], e2[3], c[3];
+			float *out, *uv, normal[3] = { 0.0f, 0.0f, 0.0f }, e1[3], e2[3], c[3];
 			int corner, axis, finite = TRUE;
 
 			corners[0] = list[index];
@@ -836,16 +951,31 @@ static boolean scenery_part_copy(
 			{
 				long room = input->scenery_room ? input->scenery_room * 2 : 65536;
 				float *grown = (float *)realloc(input->scenery, (size_t)room * SCENERY_FLOATS * sizeof(float));
+				float *grown_uv = (float *)realloc(input->scenery_uv, (size_t)room * 6 * sizeof(float));
+				int32_t *grown_map;
 
-				if (!grown)
+				if (grown)
+				{
+					input->scenery = grown;
+				}
+				if (grown_uv)
+				{
+					input->scenery_uv = grown_uv;
+				}
+				grown_map = (int32_t *)realloc(input->scenery_map, (size_t)room * sizeof(int32_t));
+				if (grown_map)
+				{
+					input->scenery_map = grown_map;
+				}
+				if (!grown || !grown_uv || !grown_map)
 				{
 					good = FALSE;
 					break;
 				}
-				input->scenery = grown;
 				input->scenery_room = room;
 			}
 			out = input->scenery + input->scenery_count * SCENERY_FLOATS;
+			uv = input->scenery_uv + input->scenery_count * 6;
 			for (corner = 0; corner < 3; corner++)
 			{
 				byte const *vertex = vertices + corners[corner] * stride;
@@ -853,6 +983,21 @@ static boolean scenery_part_copy(
 				real_vector3d n, world_n;
 
 				matrix4x3_transform_point(matrix, (real_point3d const *)vertex, &point);
+				if (stride == sizeof(struct model_vertex_compressed))
+				{
+					short const *t = (short const *)(vertex + 24);
+
+					uv[corner * 2] = ((float)t[0] * 2.0f + 1.0f) * (1.0f / 65535.0f) * uv_scale[0];
+					uv[corner * 2 + 1] = ((float)t[1] * 2.0f + 1.0f) * (1.0f / 65535.0f) * uv_scale[1];
+				}
+				else
+				{
+					float t[2];
+
+					memcpy(t, vertex + 48, sizeof(t));
+					uv[corner * 2] = t[0] * uv_scale[0];
+					uv[corner * 2 + 1] = t[1] * uv_scale[1];
+				}
 				out[corner * 3] = point.x;
 				out[corner * 3 + 1] = point.y;
 				out[corner * 3 + 2] = point.z;
@@ -899,9 +1044,13 @@ static boolean scenery_part_copy(
 				memcpy(swap, out + 3, sizeof(swap));
 				memcpy(out + 3, out + 6, sizeof(swap));
 				memcpy(out + 6, swap, sizeof(swap));
+				memcpy(swap, uv + 2, 2 * sizeof(float));
+				memcpy(uv + 2, uv + 4, 2 * sizeof(float));
+				memcpy(uv + 4, swap, 2 * sizeof(float));
 			}
 			memcpy(out + 9, albedo, sizeof(albedo));
 			out[12] = coverage;
+			input->scenery_map[input->scenery_count] = alpha_map;
 			input->scenery_count++;
 		}
 	}
@@ -1228,7 +1377,14 @@ host's reach_read in xgpu_vulkan_bake.c reads them):
 	the static scenery's runs drawn by a mod's mesh: count, then (first
 		triangle, triangle count); after the inputs the reach's file and
 		the bake's key are made of (the host's hash ends before it), and
-		absent from an older game's, which the host reads as none */
+		absent from an older game's, which the host reads as none
+	the static scenery's base map coordinates and cutouts' alpha maps: the
+		count (the scenery's, 0 none), then per triangle its corners'
+		coordinates (6 floats, as drawn), then per triangle its alpha map
+		(int32, -1 none); the maps' count and their words, then each map
+		(width, height int32, its alpha a byte a texel, padded to a word).
+		After the runs (absent from an older game's: the cards then block by
+		their coverage); in the bake's geometry hash, not the reach's */
 
 struct blob
 {
@@ -1331,6 +1487,15 @@ static unsigned char *reach_serialise(
 	blob_put(&blob, input->fixtures, (unsigned long)input->fixture_count * FIXTURE_FLOATS * 4);
 	blob_word(&blob, input->replaced_count);
 	blob_put(&blob, input->replaced, (unsigned long)input->replaced_count * 8);
+	blob_word(&blob, input->scenery_uv && input->scenery_map ? input->scenery_count : 0);
+	if (input->scenery_uv && input->scenery_map)
+	{
+		blob_put(&blob, input->scenery_uv, (unsigned long)input->scenery_count * 24);
+		blob_put(&blob, input->scenery_map, (unsigned long)input->scenery_count * 4);
+	}
+	blob_word(&blob, input->map_count);
+	blob_word(&blob, input->maps_bytes / 4);
+	blob_put(&blob, input->maps, (unsigned long)input->maps_bytes);
 	/* (a whole number of words) */
 	while (blob.size & 3)
 	{

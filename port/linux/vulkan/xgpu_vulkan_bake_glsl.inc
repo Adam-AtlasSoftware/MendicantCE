@@ -114,12 +114,13 @@ over 2 pi, a0 = 1 - k . n0. */
 	"\n" \
 	"bool alpha_kept(uint custom, uint primitive, vec2 b)\n" \
 	"{\n" \
-	"    /* (the static scenery's cutouts: a hit kept by its share of texels\n" \
-	"    drawn, as the reference's objects' are) */\n" \
-	"    if (custom == 3u)\n" \
-	"        return rnd() < 0.75 * material_value(material_of(scene_triangle(3u, primitive)), 7u);\n" \
-	"    uint t = primitive + s.counts.x;\n" \
+	"    /* (the static scenery's cutouts: tested by their alpha maps where\n" \
+	"    the reach sent them (the leaves' cards' own shapes), else a hit kept\n" \
+	"    by its share of texels drawn, as the reference's objects' are) */\n" \
+	"    uint t = custom == 3u ? scene_triangle(3u, primitive) : primitive + s.counts.x;\n" \
 	"    uint m = material_of(t);\n" \
+	"    if (custom == 3u && (m >= s.counts.w || (uint(material_value(m, 3u)) & 2u) == 0u))\n" \
+	"        return rnd() < 0.75 * material_value(m, 7u);\n" \
 	"    if (m >= s.counts.w || (uint(material_value(m, 3u)) & 2u) == 0u)\n" \
 	"        return true;\n" \
 	"    Uints a = Uints(s.info);\n" \
@@ -136,7 +137,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    uvec2 texel = min(uvec2(fract(uv) * vec2(w, h)), size - 1u);\n" \
 	"    uint at = uint(material_value(m, 8u)) + texel.y * size.x + texel.x;\n" \
 	"    uint alpha = (Uints(s.alpha).v[at >> 2u] >> ((at & 3u) * 8u)) & 0xffu;\n" \
-	"    return float(alpha) * (1.0 / 255.0) > material_value(m, 7u);\n" \
+	"    return float(alpha) * (1.0 / 255.0) > (custom == 3u ? 0.5 : material_value(m, 7u));\n" \
 	"}\n" \
 	"\n" \
 	"#define ALPHA_PROCEED(q) { uint candidates = 0u; while (rayQueryProceedEXT(q)) { \\\n" \

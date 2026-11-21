@@ -420,6 +420,13 @@ struct bake_state
 	uint32_t scenery_count, scenery_opaque, scenery_cutout, scenery_opaque_kept, scenery_cutout_kept;
 	int32_t *scenery_replaced;
 	uint32_t scenery_replaced_count;
+	/* per scenery triangle its base map coordinates (6 floats) and alpha
+	map (-1 none), and the maps (each width, height, then its texels a byte
+	each padded to a word), the reach's copied (NULL where it sent none) */
+	float *scenery_uv;
+	int32_t *scenery_map;
+	uint32_t *scenery_maps;
+	uint32_t scenery_map_count, scenery_map_words;
 	/* the fixtures (16 floats each: xgpu_vulkan_bake_glsl.inc's
 	fixture_light) and their buffer */
 	float *fixtures;
@@ -563,6 +570,12 @@ static struct
 	/* of them the runs a mod's mesh draws (first triangle and count each) */
 	int32_t *scenery_replaced;
 	uint32_t scenery_replaced_count;
+	/* their base map coordinates, cutouts' alpha maps and the maps (the
+	bake state's scenery_uv, scenery_map, scenery_maps) */
+	float *scenery_uv;
+	int32_t *scenery_map;
+	uint32_t *scenery_maps;
+	uint32_t scenery_map_count, scenery_map_words;
 	/* the scenario's light fixtures in the BSP (FIXTURE_FLOATS each), the
 	reach's inputs' */
 	float *fixtures_input;
@@ -1842,6 +1855,9 @@ static void bake_free(struct bake_state *b)
 		garbage_add(NULL, b->runtime_tlas);
 	free(b->scenery);
 	free(b->scenery_replaced);
+	free(b->scenery_uv);
+	free(b->scenery_map);
+	free(b->scenery_maps);
 	free(b->fixtures);
 	if (b->tlas)
 		garbage_add(NULL, b->tlas);
@@ -2108,6 +2124,31 @@ static struct bake_state *bake_begin(void)
 		{
 			memcpy(b->scenery_replaced, bake.scenery_replaced, (size_t)bake.scenery_replaced_count * 8);
 			b->scenery_replaced_count = bake.scenery_replaced_count;
+		}
+		/* (the cutouts' coordinates and alpha maps: in the geometry's hash,
+		so that a bake whose cards blocked by their coverage alone is made
+		again) */
+		if (bake.scenery_uv && bake.scenery_map && bake.scenery_maps && bake.scenery_map_words &&
+			(b->scenery_uv = (float *)malloc((size_t)b->scenery_count * 24)) != NULL &&
+			(b->scenery_map = (int32_t *)malloc((size_t)b->scenery_count * 4)) != NULL &&
+			(b->scenery_maps = (uint32_t *)malloc((size_t)bake.scenery_map_words * 4)) != NULL)
+		{
+			memcpy(b->scenery_uv, bake.scenery_uv, (size_t)b->scenery_count * 24);
+			memcpy(b->scenery_map, bake.scenery_map, (size_t)b->scenery_count * 4);
+			memcpy(b->scenery_maps, bake.scenery_maps, (size_t)bake.scenery_map_words * 4);
+			b->scenery_map_count = bake.scenery_map_count;
+			b->scenery_map_words = bake.scenery_map_words;
+			b->key.geometry_hash = prism_bake_hash64(b->key.geometry_hash, b->scenery_uv, (size_t)b->scenery_count * 24);
+			b->key.geometry_hash = prism_bake_hash64(b->key.geometry_hash, b->scenery_map, (size_t)b->scenery_count * 4);
+			b->key.geometry_hash = prism_bake_hash64(b->key.geometry_hash, b->scenery_maps,
+				(size_t)b->scenery_map_words * 4);
+		}
+		else
+		{
+			free(b->scenery_uv);
+			free(b->scenery_map);
+			b->scenery_uv = NULL;
+			b->scenery_map = NULL;
 		}
 	}
 	hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, materials, (size_t)material_count *
@@ -2404,7 +2445,7 @@ static int bake_upload(struct bake_state *b)
 	uint8_t *replaced = NULL;
 	VkDeviceAddress opaque_address = 0, tested_address = 0, addresses[4] = { 0, 0, 0, 0 };
 	void *host_materials = b->materials.mapped, *host_alpha = b->alpha.mapped;
-	VkDeviceSize alpha_bytes = b->alpha.size;
+	VkDeviceSize alpha_bytes = b->alpha.size, level_alpha_bytes = b->alpha.size;
 	int ok = 0, k_ok;
 
 	b->materials.mapped = b->alpha.mapped = NULL;
@@ -2463,11 +2504,60 @@ static int bake_upload(struct bake_state *b)
 	{
 		float *grown = (float *)realloc(host_materials, ((size_t)b->material_count + SCENERY_MATERIALS + 1) *
 			XGPU_STREAM_RT_MATERIAL_FLOATS * 4);
+		/* (the cutouts' alpha maps after the level's: each map's offset in
+		bytes, width and height; -1 where its words do not add up) */
+		float map_place[256 * 3];
+		uint32_t map, map_total = b->scenery_uv && b->scenery_map && b->scenery_maps ? b->scenery_map_count : 0;
+		uint32_t mapped = 0;
 
 		if (!grown)
 			goto done;
 		host_materials = grown;
 		materials = grown;
+		if (map_total > 256)
+			map_total = 256;
+		if (map_total)
+		{
+			uint32_t word = 0, texel_words = 0;
+			unsigned char *alpha_grown;
+
+			for (map = 0; map < map_total; map++)
+			{
+				uint32_t w, h, n;
+
+				map_place[map * 3] = -1.0f;
+				if (word + 2 > b->scenery_map_words)
+					break;
+				w = b->scenery_maps[word];
+				h = b->scenery_maps[word + 1];
+				n = w && h && w <= 4096 && h <= 4096 ? (w * h + 3) / 4 : 0;
+				if (!n || word + 2 + n > b->scenery_map_words)
+					break;
+				map_place[map * 3] = (float)(alpha_bytes + (VkDeviceSize)texel_words * 4);
+				map_place[map * 3 + 1] = (float)w;
+				map_place[map * 3 + 2] = (float)h;
+				texel_words += n;
+				word += 2 + n;
+			}
+			for (; map < map_total; map++)
+				map_place[map * 3] = -1.0f;
+			alpha_grown = texel_words ? (unsigned char *)realloc(host_alpha, (size_t)alpha_bytes +
+				(size_t)texel_words * 4 + 16) : NULL;
+			if (alpha_grown)
+			{
+				host_alpha = alpha_grown;
+				for (word = 0, map = 0; map < map_total && map_place[map * 3] >= 0.0f; map++)
+				{
+					uint32_t n = (b->scenery_maps[word] * b->scenery_maps[word + 1] + 3) / 4;
+
+					memcpy(alpha_grown + (size_t)map_place[map * 3], b->scenery_maps + word + 2, (size_t)n * 4);
+					word += 2 + n;
+				}
+				alpha_bytes += (VkDeviceSize)texel_words * 4;
+			}
+			else
+				map_total = 0;
+		}
 		at[2] = opaque + tested;
 		at[3] = opaque + tested + b->scenery_opaque;
 		gone[0] = at[2] + b->scenery_opaque_kept;
@@ -2478,13 +2568,20 @@ static int bake_upload(struct bake_state *b)
 			int cutout = t[12] < 0.999f;
 			uint32_t slot = replaced && replaced[index] ? gone[cutout]++ : at[cutout ? 3 : 2]++, m;
 			uint32_t *to = info + (size_t)slot * 8;
+			/* (a cutout's alpha map, where the reach sent one: its card
+			tested texel by texel as the level's alpha-tested faces are, not
+			kept by its coverage) */
+			int32_t own = cutout && map_total ? b->scenery_map[index] : -1;
+			float place = own >= 0 && (uint32_t)own < map_total ? map_place[own * 3] : -1.0f;
 
 			/* (its material: one alike already made, else a new one) */
 			for (m = 0; m < scenery_materials; m++)
 			{
 				const float *had = grown + ((size_t)b->material_count + m) * XGPU_STREAM_RT_MATERIAL_FLOATS;
 
-				if (had[0] == t[9] && had[1] == t[10] && had[2] == t[11] && had[7] == t[12])
+				if (had[0] == t[9] && had[1] == t[10] && had[2] == t[11] && had[7] == t[12] &&
+					(place >= 0.0f ? had[3] == (float)XGPU_RT_MATERIAL_FLAG_ALPHA_TESTED && had[8] == place :
+					had[3] == 0.0f))
 					break;
 			}
 			if (m == scenery_materials && scenery_materials < SCENERY_MATERIALS)
@@ -2496,6 +2593,13 @@ static int bake_upload(struct bake_state *b)
 				made[1] = t[10];
 				made[2] = t[11];
 				made[7] = t[12];
+				if (place >= 0.0f)
+				{
+					made[3] = (float)XGPU_RT_MATERIAL_FLAG_ALPHA_TESTED;
+					made[8] = place;
+					made[9] = map_place[own * 3 + 1];
+					made[10] = map_place[own * 3 + 2];
+				}
 				scenery_materials++;
 			}
 			if (m >= scenery_materials)
@@ -2503,8 +2607,16 @@ static int bake_upload(struct bake_state *b)
 			memcpy(vertices + (size_t)slot * 9, t, 36);
 			memset(to, 0, 32);
 			to[0] = (b->material_count + m) | (cutout ? 0x10000u : 0u);
+			if (place >= 0.0f)
+			{
+				memcpy(to + 1, b->scenery_uv + (size_t)index * 6, 24);
+				mapped++;
+			}
 			to[7] = 0xffffffffu;
 		}
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the static scenery's cutouts: %u of %u triangles tested by "
+			"their alpha maps (%u maps), the rest kept by their coverage", b->map, (int)b->bsp, mapped,
+			b->scenery_cutout, map_total);
 	}
 	at[0] = 0;
 	at[1] = opaque;
@@ -2516,7 +2628,9 @@ static int bake_upload(struct bake_state *b)
 		if (emitter_passes(materials, traced, b->material_count))
 			continue;
 		uint32_t level = (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] >> XGPU_SCENE_LEVEL_SHIFT) & 3u;
-		int tests = (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] & 0xffu) == XGPU_RT_TRIANGLE_ALPHA_TESTED && alpha_bytes &&
+		/* (the level's alpha maps alone decide, as when the triangles were
+		counted: the scenery's are added after them) */
+		int tests = (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] & 0xffu) == XGPU_RT_TRIANGLE_ALPHA_TESTED && level_alpha_bytes &&
 			traced < b->material_count && ((int)materials[(size_t)traced * XGPU_STREAM_RT_MATERIAL_FLOATS +
 			XGPU_RT_MATERIAL_FLAGS] & XGPU_RT_MATERIAL_FLAG_ALPHA_TESTED);
 		uint32_t slot = at[tests ? 1 : 0]++;
@@ -5807,6 +5921,43 @@ static void *reach_thread(void *unused)
 					bake.scenery_replaced_count++;
 				}
 			}
+		}
+		/* (the scenery's base map coordinates and cutouts' alpha maps: after
+		the runs, none from an older game's; a map index past the maps, or
+		maps that do not add up, left as none) */
+		free(bake.scenery_uv);
+		free(bake.scenery_map);
+		free(bake.scenery_maps);
+		bake.scenery_uv = NULL;
+		bake.scenery_map = NULL;
+		bake.scenery_maps = NULL;
+		bake.scenery_map_count = bake.scenery_map_words = 0;
+		if (!r.failed && r.at < r.count)
+		{
+			int32_t uv_count = reach_count(&r, 7), map_count, map_words;
+			const float *uv = (const float *)reach_take(&r, (size_t)uv_count * 6);
+			const int32_t *maps = (const int32_t *)reach_take(&r, (size_t)uv_count);
+			const uint32_t *texels;
+
+			map_count = reach_count(&r, 0);
+			map_words = reach_count(&r, 1);
+			texels = (const uint32_t *)reach_take(&r, (size_t)map_words);
+			if (!r.failed && uv && maps && texels && uv_count > 0 && (uint32_t)uv_count == bake.scenery_count &&
+				map_count > 0 && map_words > 0 &&
+				(bake.scenery_uv = (float *)malloc((size_t)uv_count * 24)) != NULL &&
+				(bake.scenery_map = (int32_t *)malloc((size_t)uv_count * 4)) != NULL &&
+				(bake.scenery_maps = (uint32_t *)malloc((size_t)map_words * 4)) != NULL)
+			{
+				int32_t index;
+
+				memcpy(bake.scenery_uv, uv, (size_t)uv_count * 24);
+				memcpy(bake.scenery_maps, texels, (size_t)map_words * 4);
+				bake.scenery_map_count = (uint32_t)map_count;
+				bake.scenery_map_words = (uint32_t)map_words;
+				for (index = 0; index < uv_count; index++)
+					bake.scenery_map[index] = maps[index] >= 0 && maps[index] < map_count ? maps[index] : -1;
+			}
+			r.failed = 0;
 		}
 	}
 	if (r.failed || !leaf_clusters || !leaf_counts || !leaf_first || !seeds || !positions || !surfaces)
