@@ -86,17 +86,19 @@ RECIPE_MAX_RUN = 64
 NUMBER_RUN = re.compile(r"(?:-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\s*,\s*){%d,}" % RECIPE_MAX_RUN)
 
 
-def _numbers(value) -> List[int]:
-    """(the count of numbers in a JSON value, the longest list of numbers in it)"""
-    if isinstance(value, bool) or value is None or isinstance(value, str):
-        return [0, 0]
+def _shape(value):
+    """(the count of numbers, the count of strings, and the longest list of numbers in a JSON value)"""
+    if isinstance(value, bool) or value is None:
+        return [0, 0, 0]
+    if isinstance(value, str):
+        return [0, 1, 0]
     if isinstance(value, (int, float)):
-        return [1, 0]
+        return [1, 0, 0]
     items = list(value.values()) if isinstance(value, dict) else list(value)
-    counts = [_numbers(item) for item in items]
+    counts = [_shape(item) for item in items]
     run = sum(1 for item in items if isinstance(item, (int, float)) and not isinstance(item, bool)) \
         if isinstance(value, list) else 0
-    return [sum(c[0] for c in counts), max([run] + [c[1] for c in counts])]
+    return [sum(c[0] for c in counts), sum(c[1] for c in counts), max([run] + [c[2] for c in counts])]
 
 
 def check_game_data(paths: Iterable[Path]) -> List[str]:
@@ -127,11 +129,12 @@ def check_game_data(paths: Iterable[Path]) -> List[str]:
                 continue
             if path.suffix.lower() == ".json":
                 try:
-                    count, run = _numbers(json.loads(text))
+                    count, strings, run = _shape(json.loads(text))
                 except ValueError:
                     problems.append(f"{path}: not JSON")
                     continue
-                if count > RECIPE_MAX_NUMBERS or run > RECIPE_MAX_RUN:
+                # (a recipe's numbers sit under names; a table of numbers carries none)
+                if run > RECIPE_MAX_RUN or (strings == 0 and count > RECIPE_MAX_NUMBERS):
                     problems.append(f"{path}: {count} numbers, {run} in one list: a table, not a recipe")
             elif NUMBER_RUN.search(text):
                 problems.append(f"{path}: a list of more than {RECIPE_MAX_RUN} numbers: a table, not code")
