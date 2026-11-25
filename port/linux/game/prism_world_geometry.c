@@ -93,15 +93,17 @@ segments (MIRROR_SEGMENT_BYTES), so that the GPU draws them from its copy
 and nothing is streamed per draw. They are freed when the BSP changes and
 with the map.
 
-What it costs. The passes before the surfaces do not draw the remodel as
-the surfaces are drawn: the sun's shadow maps (render_prism_shadow_pass,
-three cascades, both faces) draw every surface's far level
-(display.prism_world_geometry_shadows "far"; "remodel" or "stock" the
-map's triangles), and the world occlusion's pre-pass
-(render_world_ao_prepass), whose level gives only where objects darken it
-and what hides them, the surfaces as drawn
-(display.prism_world_geometry_occlusion "remodel", by default: a
-pixel reads its own surface's occlusion; "far", "stock" cheaper). Each
+What it costs. The passes before the surfaces draw the remodel as the
+surfaces are drawn, each surface's near or far level as the view chose it
+(port: one geometry for every pass, so that no surface is shadowed or
+occluded by another shape than its own): the sun's shadow maps
+(render_prism_shadow_pass, three cascades, both faces) and the world
+occlusion's pre-pass (render_world_ao_prepass, whose level gives only where
+objects darken it and what hides them). display.prism_world_geometry_shadows
+and _occlusion "far" or "stock" are debug overrides now, drawn only with
+debug.geometry_overrides (logged once): before, the shadows' default "far"
+cast the far level's relief over the near level drawn (blotches, acne and
+peter-panning on the rock), and "stock" CE's triangles over the remodel. Each
 surface's near and far levels have a cone of facings (the bounds' sphere,
 the mean of the triangles' facings and the least cosine to it, made as the
 file loads): a level that faces away from the camera whole is skipped in
@@ -391,14 +393,32 @@ static unsigned long segment_place(
 	return offset;
 }
 
+/* a pass's shape: as drawn ("drawn", "remodel", the default), or "far" or
+"stock" with debug.geometry_overrides only (else said once and drawn) */
 static short proxy_setting(
 	char const *name,
-	short fallback)
+	boolean overrides,
+	boolean *told)
 {
 	char const *value = config_string(name);
+	short proxy = !value ? _world_proxy_remodel : !strcmp(value, "stock") ? _world_proxy_stock :
+		!strcmp(value, "far") ? _world_proxy_far : _world_proxy_remodel;
 
-	return !value ? fallback : !strcmp(value, "stock") ? _world_proxy_stock : !strcmp(value, "far") ? _world_proxy_far :
-		!strcmp(value, "remodel") ? _world_proxy_remodel : fallback;
+	if (proxy != _world_proxy_remodel && !overrides)
+	{
+		if (!*told)
+		{
+			platform_log("prism world geometry: %s \"%s\" is a debug override (debug.geometry_overrides): the pass "
+				"draws the geometry drawn", name, value);
+			*told = TRUE;
+		}
+		return _world_proxy_remodel;
+	}
+	if (proxy == _world_proxy_remodel)
+	{
+		*told = FALSE;
+	}
+	return proxy;
 }
 
 static void settings_read(
@@ -422,8 +442,14 @@ static void settings_read(
 		world_geometry.tried_bsp = NULL;
 	}
 	world_geometry.enabled = enabled;
-	world_geometry.shadow_proxy = proxy_setting("display.prism_world_geometry_shadows", _world_proxy_far);
-	world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", _world_proxy_remodel);
+	{
+		static boolean told_shadows, told_occlusion;
+		boolean overrides = config_boolean("debug.geometry_overrides") != 0;
+
+		world_geometry.shadow_proxy = proxy_setting("display.prism_world_geometry_shadows", overrides, &told_shadows);
+		world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", overrides,
+			&told_occlusion);
+	}
 	/* (port: display.prism_rt traces the remodel's level, prism_rt.c's
 	world_level: the pre-pass its rays start from draws the same, so that
 	they leave the surface they trace, not one inside or above it) */
@@ -2312,17 +2338,21 @@ static byte surface_choice(
 
 /* ---------- public code */
 
-void prism_world_geometry_frame(
+/* port: the BSP's remodel taken up (or let go of) for the frame: by the
+first of the frame's readers, SCENE_STATIC's (world_ao_frame_begin, before
+the structure is drawn), so that its first set, the bake's key and the
+frame's draws are all of the remodel from the BSP's first frame, not stock
+for a frame and then begun again; TRUE where the setting asks for it */
+boolean prism_world_geometry_prepare(
 	void)
 {
 	struct structure_bsp *bsp;
 	long tag_index;
 
 	settings_read();
-	world_geometry.current = NULL;
 	if (!world_geometry.enabled)
 	{
-		return;
+		return FALSE;
 	}
 	bsp = global_structure_bsp_get();
 	tag_index = global_structure_bsp_tag_index_get();
@@ -2334,6 +2364,18 @@ void prism_world_geometry_frame(
 		(world_geometry.tried_bsp != bsp || world_geometry.tried_tag_index != tag_index))
 	{
 		world_geometry_load(bsp, tag_index);
+	}
+
+	return TRUE;
+}
+
+void prism_world_geometry_frame(
+	void)
+{
+	world_geometry.current = NULL;
+	if (!prism_world_geometry_prepare())
+	{
+		return;
 	}
 	/* (the frame's camera, which every pass of the structure's draws this
 	frame shares; a narrower view, a zoom, draws near surfaces from further) */
