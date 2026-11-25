@@ -20,10 +20,17 @@ are of. A draw of a part of an instance whose mesh is in:
 The rest of a part drawn in several draws (no state between them: the
 engine's 10000 triangles a draw) is not drawn again. Instances whose bones
 are the same (the same mesh, level and matrices: a shadow's and the view's)
-share one skinning in a submission. An object's shadow is drawn at the
-level its view was drawn at this frame (or the last, if the shadow comes
-first), not at the shadow's own smaller size, so the two share the one
-skinning rather than skinning a second level.
+share one skinning in a submission. An object's level is the resolver's
+(xgpu_geometry.h): one decision a frame per object, by its datum and mesh,
+with the hysteresis against the level it had however long ago, which its
+view, its shadows and its traced shape all draw (its shadow and view share
+the one skinning); its traced level the resolver's within the traced
+triangles' budget; a remodel drawn once never drawn stock again on the map
+(the store keeps it: xgpu_mesh_store_pin). HALO_GEOMETRY_RESOLVER=legacy
+puts back the choices before it (each draw's own level from a 256-slot table
+of last frame's, the shadows' at the view's size where its slot remembered
+it, the traced shape per draw within the share), for comparisons;
+HALO_GEOMETRY_LOG=1 or 2 logs what each pass drew (xgpu_geometry.h).
 A draw with a material (display.prism_materials) whose stream has its wide
 pipeline (xgpu_vulkan_stream.c) reads the skinning's wide copy instead
 (xgpu_vulkan_mesh_skin): the same 32-byte vertices with the mesh's uv0 as
@@ -34,9 +41,11 @@ without a material and its shadow share that skinning.
 */
 
 #include "host.h"
+#include "xgpu_geometry.h"
 #include "xgpu_mesh_store.h"
 #include "xgpu_rig.h"
 #include "xgpu_vulkan_meshes.h"
+#include "xgpu_vulkan_rt.h"
 
 #include <stddef.h>
 #include <stdio.h>
@@ -75,6 +84,8 @@ struct instance
 	in, and the parts' keys captured in it */
 	uint32_t rt_window, rt_key_count;
 	uint32_t rt_keys[16];
+	/* the resolver's traced level (the view's where legacy) */
+	uint32_t traced_lod;
 };
 
 static struct
@@ -134,7 +145,54 @@ static struct
 	float largest_pixels;
 	/* an object's level switched from one frame to the next */
 	uint64_t level_switches;
+	/* the resolver (xgpu_geometry.h); legacy: the choices before it */
+	struct xgpu_geometry *geometry;
+	int legacy, settings_known;
+	uint32_t hysteresis_percent;
 } meshes;
+
+static void geometry_log(void *context, const char *line)
+{
+	(void)context;
+	host_logf(HOST_LOG_INFO, "%s", line);
+}
+
+/* the resolver, made once (NULL: none could be; legacy then) */
+static struct xgpu_geometry *geometry_get(void)
+{
+	if (!meshes.geometry && !meshes.settings_known)
+	{
+		const char *mode = getenv("HALO_GEOMETRY_RESOLVER"), *log = getenv("HALO_GEOMETRY_LOG");
+
+		meshes.settings_known = 1;
+		meshes.legacy = mode && !strcmp(mode, "legacy");
+		meshes.geometry = xgpu_geometry_create();
+		if (meshes.geometry && log && *log >= '1' && *log <= '9')
+			xgpu_geometry_log(meshes.geometry, *log - '0', geometry_log, NULL);
+		if (meshes.legacy)
+			host_logf(HOST_LOG_INFO, "meshstore: HALO_GEOMETRY_RESOLVER=legacy: each pass's level chosen as before the "
+				"resolver (for comparisons)");
+	}
+	if (!meshes.geometry)
+		meshes.legacy = 1;
+	return meshes.geometry;
+}
+
+int xgpu_vulkan_meshes_drawn(void)
+{
+	struct xgpu_mesh_store_statistics statistics;
+
+	if (!meshes.store)
+		return 0;
+	xgpu_mesh_store_statistics(meshes.store, &statistics);
+	return statistics.entries > 0;
+}
+
+int xgpu_vulkan_meshes_resolved(void)
+{
+	geometry_get();
+	return !meshes.legacy;
+}
 
 /* ---------- the store's backend */
 
@@ -262,6 +320,11 @@ void xgpu_vulkan_meshes_map(void *context, const struct xgpu_stream_mesh_store_m
 	xgpu_mesh_store_map(meshes.store, record->generation, record->budget_megabytes, count, asked, answered);
 	xgpu_mesh_store_options(meshes.store, (record->flags & XGPU_STREAM_MESH_STORE_PREFETCH) != 0,
 		(record->flags >> XGPU_STREAM_MESH_STORE_HYSTERESIS_SHIFT) & XGPU_STREAM_MESH_STORE_HYSTERESIS_MASK);
+	meshes.hysteresis_percent = (record->flags >> XGPU_STREAM_MESH_STORE_HYSTERESIS_SHIFT) &
+		XGPU_STREAM_MESH_STORE_HYSTERESIS_MASK;
+	/* (the new set's ids: every object's choice made again) */
+	if (geometry_get())
+		xgpu_geometry_map(meshes.geometry);
 	memset(meshes.views, 0, sizeof(meshes.views));
 	for (index = 0; index < count; index++)
 	{
@@ -285,16 +348,16 @@ static uint32_t bytes_hash(const void *data, size_t size, uint32_t hash)
 	return hash;
 }
 
-void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_instance *record,
-	const float (*matrices)[3][4])
+/* the choices before the resolver (HALO_GEOMETRY_RESOLVER=legacy): each
+draw's level from the 256-slot table of last frame's levels, a shadow's at
+its view's size where the slot remembered it; 1 and the view where drawn */
+static int instance_legacy(const struct xgpu_stream_mesh_instance *record, struct instance *instance)
 {
-	struct instance *instance = &meshes.instances[record->instance % INSTANCES];
 	float lod_pixels = record->lod_pixels;
 	int previous_lod = -1;
 	uint32_t slot = 0;
 	int viewed = 0;
 
-	(void)context;
 	/* (an object's view's size kept; its shadow drawn at it, where the
 	view was drawn this frame or the last) */
 	if (record->object != 0xffffffffu)
@@ -322,6 +385,73 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 			meshes.shadows_at_view++;
 		}
 	}
+	if (!meshes.store || !xgpu_mesh_store_use_from(meshes.store, record->mesh, lod_pixels, previous_lod,
+		&instance->view))
+		return 0;
+	/* (the view's level kept for the next frame's hysteresis; a change
+	from the frame before counted) */
+	if (viewed)
+	{
+		if (previous_lod >= 0 && (uint32_t)previous_lod != instance->view.lod &&
+			meshes.views[slot].lod_frame != meshes.frame)
+			meshes.level_switches++;
+		meshes.views[slot].lod = instance->view.lod;
+		meshes.views[slot].lod_known = 1;
+		meshes.views[slot].lod_frame = meshes.frame;
+	}
+	instance->traced_lod = instance->view.lod;
+	if (lod_pixels > meshes.largest_pixels)
+		meshes.largest_pixels = lod_pixels;
+	return 1;
+}
+
+/* the resolver's choice (xgpu_geometry.h); 1 and the view where drawn as
+the remodel */
+static int instance_resolved(const struct xgpu_stream_mesh_instance *record, struct instance *instance,
+	const float (*matrices)[3][4])
+{
+	struct xgpu_geometry_ladder ladder;
+	struct xgpu_geometry_choice choice;
+	struct xgpu_mesh_store_view probe;
+	float origin[3];
+	int resident = 0;
+
+	/* (the store asked first: the mesh's reading begun, its use counted) */
+	if (meshes.store && xgpu_mesh_store_use_from(meshes.store, record->mesh, record->lod_pixels, -1, &probe))
+	{
+		memset(&ladder, 0, sizeof(ladder));
+		resident = xgpu_mesh_store_ladder(meshes.store, record->mesh, &ladder.lod_count, ladder.triangles,
+			ladder.cutoff);
+		if (ladder.lod_count > XGPU_GEOMETRY_LODS)
+			ladder.lod_count = XGPU_GEOMETRY_LODS;
+	}
+	if (record->node_count)
+	{
+		origin[0] = matrices[0][0][3];
+		origin[1] = matrices[0][1][3];
+		origin[2] = matrices[0][2][3];
+	}
+	xgpu_geometry_resolve(meshes.geometry, record->object, record->mesh,
+		(record->flags & XGPU_STREAM_MESH_INSTANCE_SHADOW) != 0, resident ? &ladder : NULL, record->lod_pixels,
+		record->node_count ? origin : NULL, &choice);
+	if (choice.variant != XGPU_GEOMETRY_REMODEL ||
+		!xgpu_mesh_store_use_lod(meshes.store, record->mesh, choice.lod, &instance->view))
+		return 0;
+	xgpu_mesh_store_pin(meshes.store, record->mesh);
+	instance->traced_lod = choice.traced_lod;
+	if (record->lod_pixels > meshes.largest_pixels)
+		meshes.largest_pixels = record->lod_pixels;
+	return 1;
+}
+
+void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_instance *record,
+	const float (*matrices)[3][4])
+{
+	struct instance *instance = &meshes.instances[record->instance % INSTANCES];
+	int drawn, shadow = (record->flags & XGPU_STREAM_MESH_INSTANCE_SHADOW) != 0;
+
+	(void)context;
+	geometry_get();
 	memset(instance, 0, offsetof(struct instance, matrices));
 	instance->hash = 0;
 	memset(&instance->skinned, 0, sizeof(instance->skinned));
@@ -340,28 +470,19 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	instance->node_count = record->node_count;
 	memcpy(instance->matrices, matrices, record->node_count * sizeof(matrices[0]));
 	meshes.instances_seen++;
-	if (!meshes.store || !xgpu_mesh_store_use_from(meshes.store, record->mesh, lod_pixels, previous_lod,
-		&instance->view))
-		return;
-	/* (the view's level kept for the next frame's hysteresis; a change
-	from the frame before counted) */
-	if (viewed)
-	{
-		if (previous_lod >= 0 && (uint32_t)previous_lod != instance->view.lod &&
-			meshes.views[slot].lod_frame != meshes.frame)
-			meshes.level_switches++;
-		meshes.views[slot].lod = instance->view.lod;
-		meshes.views[slot].lod_known = 1;
-		meshes.views[slot].lod_frame = meshes.frame;
-	}
-	if (instance->view.node_count > instance->node_count)
+	drawn = meshes.legacy ? instance_legacy(record, instance) : instance_resolved(record, instance, matrices);
+	if (drawn && instance->view.node_count > instance->node_count)
+		drawn = 0;
+	if (meshes.geometry)
+		xgpu_geometry_note(meshes.geometry, record->object, record->mesh,
+			shadow ? XGPU_GEOMETRY_SHADOW : XGPU_GEOMETRY_VIEW, drawn ? XGPU_GEOMETRY_REMODEL : XGPU_GEOMETRY_STOCK,
+			drawn ? instance->view.lod : 0u);
+	if (!drawn)
 		return;
 	instance->hash = bytes_hash(matrices, record->node_count * sizeof(matrices[0]), 2166136261u ^ instance->view.lod);
 	instance->drawable = 1;
 	meshes.instances_drawable++;
 	meshes.level_instances[instance->view.lod]++;
-	if (lod_pixels > meshes.largest_pixels)
-		meshes.largest_pixels = lod_pixels;
 }
 
 void xgpu_vulkan_meshes_draw_part(void *context, const struct xgpu_stream_mesh_draw *record)
@@ -642,6 +763,9 @@ static int rt_pieces_fill(const struct instance *instance, uint32_t region, uint
 	return count ? count : -1;
 }
 
+static int rt_pieces_level(struct instance *instance, uint32_t lod, struct xgpu_vulkan_meshes_rt_piece *pieces,
+	int most);
+
 int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_piece *pieces, int most)
 {
 	struct instance *instance = meshes.part;
@@ -666,6 +790,18 @@ int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_p
 			return 0;
 	if (instance->rt_key_count < sizeof(instance->rt_keys) / sizeof(instance->rt_keys[0]))
 		instance->rt_keys[instance->rt_key_count++] = key;
+	/* (the resolver's traced level where it is coarser than the drawn one:
+the traced triangles' budget, the farthest first) */
+	if (!meshes.legacy && instance->traced_lod != instance->view.lod)
+	{
+		int count = rt_pieces_level(instance, instance->traced_lod, pieces, most);
+
+		if (count > 0)
+		{
+			xgpu_vulkan_meshes_note_traced(XGPU_GEOMETRY_REMODEL, instance->traced_lod);
+			return count;
+		}
+	}
 	if (!instance_skin(instance, 0))
 		return -1;
 	view = &instance->view;
@@ -673,27 +809,32 @@ int xgpu_vulkan_meshes_rt_pieces(uint32_t window, struct xgpu_vulkan_meshes_rt_p
 	whatever the matrices) */
 	pose = ((uint64_t)instance->hash << 32) ^ (view->rig ? (uint64_t)(instance->game_seconds * 1000.0) : 0) ^
 		(uint64_t)view->lod;
-	return rt_pieces_fill(instance, region, permutation, pose, pieces, most);
+	{
+		int count = rt_pieces_fill(instance, region, permutation, pose, pieces, most);
+
+		if (count > 0 && !meshes.legacy)
+			xgpu_vulkan_meshes_note_traced(XGPU_GEOMETRY_REMODEL, view->lod);
+		return count;
+	}
 }
 
-/* port: a level of the part found by xgpu_mesh_store_use at a size below
-every cutoff (its least detailed), skinned in the instance's place and the
+/* a level of the part (lod) skinned in the instance's place, and the
 instance's own level and skinning put back after, so that the frame's draws
-of it after this one keep the level drawn */
-#define RT_COARSE_PIXELS 1.0f
-int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *pieces, int most)
+of it after this one keep the level drawn: the pieces' count, -1 none */
+static int rt_pieces_level(struct instance *instance, uint32_t lod, struct xgpu_vulkan_meshes_rt_piece *pieces,
+	int most)
 {
-	struct instance *instance = meshes.part, kept;
-	struct xgpu_mesh_store_view coarse;
+	struct instance kept;
+	struct xgpu_mesh_store_view level;
 	uint32_t region = meshes.key.region, permutation = meshes.key.permutation;
 	uint64_t pose;
 	int count;
 
 	if (!instance || !instance->drawable || !meshes.store || region >= 32 || permutation >= 32 ||
 		!(meshes.key.flags & XGPU_STREAM_MESH_DRAW_CARRIER) ||
-		!xgpu_mesh_store_use(meshes.store, instance->mesh, RT_COARSE_PIXELS, &coarse) ||
-		coarse.lod == instance->view.lod || coarse.node_count > instance->node_count ||
-		!(coarse.present[(region * 32 + permutation) / 8] & (1u << ((region * 32 + permutation) % 8))))
+		!xgpu_mesh_store_use_lod(meshes.store, instance->mesh, lod, &level) ||
+		level.lod == instance->view.lod || level.node_count > instance->node_count ||
+		!(level.present[(region * 32 + permutation) / 8] & (1u << ((region * 32 + permutation) % 8))))
 		return -1;
 	memcpy(&kept, instance, offsetof(struct instance, matrices));
 	kept.hash = instance->hash;
@@ -701,15 +842,15 @@ int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *piec
 	kept.wide = instance->wide;
 	kept.skinned_wide = instance->skinned_wide;
 	kept.skinned_serial = instance->skinned_serial;
-	instance->view = coarse;
+	instance->view = level;
 	instance->hash = bytes_hash(instance->matrices, instance->node_count * sizeof(instance->matrices[0]),
-		2166136261u ^ coarse.lod);
+		2166136261u ^ level.lod);
 	instance->skinned_serial = 0;
 	count = -1;
 	if (instance_skin(instance, 0))
 	{
-		pose = ((uint64_t)instance->hash << 32) ^ (coarse.rig ? (uint64_t)(instance->game_seconds * 1000.0) : 0) ^
-			(uint64_t)coarse.lod;
+		pose = ((uint64_t)instance->hash << 32) ^ (level.rig ? (uint64_t)(instance->game_seconds * 1000.0) : 0) ^
+			(uint64_t)level.lod;
 		count = rt_pieces_fill(instance, region, permutation, pose, pieces, most);
 	}
 	memcpy(instance, &kept, offsetof(struct instance, matrices));
@@ -721,9 +862,52 @@ int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *piec
 	return count;
 }
 
+/* port: (legacy) the part's least detailed level, traced past
+display.prism_rt_objects "auto"'s reach or share */
+int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *pieces, int most)
+{
+	struct instance *instance = meshes.part;
+	struct xgpu_mesh_store_view coarse;
+
+	if (!instance || !instance->drawable || !meshes.store ||
+		!xgpu_mesh_store_use(meshes.store, instance->mesh, 1.0f, &coarse))
+		return -1;
+	return rt_pieces_level(instance, coarse.lod, pieces, most);
+}
+
+int xgpu_vulkan_meshes_part_remodelled(void)
+{
+	const struct instance *instance = meshes.part;
+	uint32_t region = meshes.key.region, permutation = meshes.key.permutation;
+
+	return instance && instance->drawable && region < 32 && permutation < 32 &&
+		(instance->view.present[(region * 32 + permutation) / 8] & (1u << ((region * 32 + permutation) % 8))) != 0;
+}
+
+void xgpu_vulkan_meshes_note_traced(int variant, uint32_t lod)
+{
+	const struct instance *instance = meshes.part;
+
+	if (meshes.geometry && instance && instance->id)
+		xgpu_geometry_note(meshes.geometry, instance->object, instance->mesh, XGPU_GEOMETRY_TRACED, variant, lod);
+}
+
 void xgpu_vulkan_meshes_frame(void)
 {
 	meshes.frame++;
+	/* (the resolver's frame: the eye the traced scene was last built from,
+	the traced triangles' budget, the hysteresis the map's record gave) */
+	if (geometry_get())
+	{
+		struct xgpu_geometry_settings settings;
+		float eye[3];
+
+		memset(&settings, 0, sizeof(settings));
+		settings.hysteresis = (float)(meshes.hysteresis_percent > 50u ? 50u : meshes.hysteresis_percent) / 100.0f;
+		settings.traced_budget = xgpu_vulkan_rt_replacement_budget(&settings.coarse_reach);
+		xgpu_geometry_settings_set(meshes.geometry, &settings);
+		xgpu_geometry_frame(meshes.geometry, xgpu_vulkan_rt_eye(eye) ? eye : NULL);
+	}
 	if (meshes.store)
 		xgpu_mesh_store_frame(meshes.store);
 	if (meshes.rig_states)

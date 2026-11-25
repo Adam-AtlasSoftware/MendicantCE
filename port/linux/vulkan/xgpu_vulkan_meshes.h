@@ -97,5 +97,19 @@ share), as the mesh store draws no stock part in a carrier's place to trace
 instead. Returns the pieces, or -1 where there is none coarser (or none
 resident yet) */
 int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *pieces, int most);
+/* port: whether the resolver (xgpu_geometry.h) chooses the objects' levels
+(0: HALO_GEOMETRY_RESOLVER=legacy, the choices before it) */
+int xgpu_vulkan_meshes_resolved(void);
+/* port: whether remodels are drawn now (the store holds a set with a mesh
+it accepted): the frame's traced scene then leaves out the bake's static
+scenery a mesh may draw (xgpu_vulkan_bake.c), as the game's
+prism_bake_object_static does on the same frame */
+int xgpu_vulkan_meshes_drawn(void);
+/* the part drawn now traced as (XGPU_GEOMETRY_* variant, level): noted for
+the resolver's statistics and log */
+void xgpu_vulkan_meshes_note_traced(int variant, uint32_t lod);
+/* the part drawn now is one the remodel draws (its instance's mesh in, the
+part's region and permutation in the mesh) */
+int xgpu_vulkan_meshes_part_remodelled(void);
 
 #endif

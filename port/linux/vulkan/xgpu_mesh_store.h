@@ -226,6 +226,17 @@ detailed ones down to their cutoffs less the hysteresis (a size near a
 cutoff keeps its level; never a level less detailed than the size's) */
 int xgpu_mesh_store_use_from(struct xgpu_mesh_store *store, uint32_t id, float lod_pixels, int previous_lod,
 	struct xgpu_mesh_store_view *view);
+/* port: the resolver's (xgpu_geometry.h) reads. A resident id's levels:
+their count, triangles and cutoffs in pixels (the last's 0); 0 where the
+mesh is not in (nothing written) */
+int xgpu_mesh_store_ladder(struct xgpu_mesh_store *store, uint32_t id, uint32_t *lod_count, uint32_t *triangles,
+	float *cutoffs);
+/* a resident id's view at a level the caller chose (the reading not begun:
+xgpu_mesh_store_use_from first); 0 where it is not in or has no such level */
+int xgpu_mesh_store_use_lod(struct xgpu_mesh_store *store, uint32_t id, uint32_t lod, struct xgpu_mesh_store_view *view);
+/* a resident id drawn as its remodel: never let go of for the budget while
+this generation lasts (a remodel drawn is never drawn stock again) */
+void xgpu_mesh_store_pin(struct xgpu_mesh_store *store, uint32_t id);
 /* (after a map's record) prefetch: every mesh of the map read now, within
 the budget, not when first drawn (display.prism_prefetch);
 hysteresis_percent: display.prism_lod_hysteresis */

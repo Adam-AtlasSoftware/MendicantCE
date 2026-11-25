@@ -48,6 +48,13 @@ origin) traced: display.prism_rt_objects "auto" within a reach of the eye
 and a share of the window's triangles, "view_lod" always; else the game's
 own model in their place */
 int xgpu_vulkan_rt_replacement_traced(const float origin[3], uint32_t triangles);
+/* port: the resolver's (xgpu_geometry.h) budget for the replacement meshes'
+traced triangles a frame (0: as drawn, display.prism_rt_objects
+"view_lod"; 1: as coarse as each may be, "low_lod"), and the reach beyond
+which a level past a ladder's drawable floor may be traced */
+uint32_t xgpu_vulkan_rt_replacement_budget(float *coarse_reach);
+/* port: the eye the traced scene was last built from: 1 and eye, else 0 */
+int xgpu_vulkan_rt_eye(float eye[3]);
 
 /* a pre-pass draw of an object, as it is drawn, by where its vertices,
 indices and constants are on the GPU (nothing of them is read here: a
