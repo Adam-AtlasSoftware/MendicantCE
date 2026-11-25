@@ -6,8 +6,9 @@ the game lit from that bake, with no ray tracing while playing. This document de
 bake file, the settings, how Raster reads the bake, and what was measured. The gates' figures are in
 `docs/prism_gates.md` ("M2: the bake and PRISM Raster").
 
-Nothing a bake makes is shared: the bake files are made from the player's maps and stay on the machine they were made
-on (`<data>/prism_bake`, or `display.bake_folder`).
+A release ships every campaign level's light baked at MAX for both worlds, lighting only ("The shipped bake", below):
+the player's machine uses it wherever its key is that machine's own BSP's, and bakes only what it does not cover (a
+mod, a custom map). A bake made on the player's machine stays there (`<data>/prism_bake`, or `display.bake_folder`).
 
 ## What runs where
 
@@ -353,6 +354,64 @@ grid's lamp indices; never a triangle, an albedo map or the remodel. `LYRB` says
 world: a pack for a release is the files of a stock bake, keyed by the per-BSP hashes of its key, which the player's
 machine checks against its own maps before it uses the light (the plan is rebuilt from the player's map).
 
+## The shipped bake
+
+Players never bake for hours and never bake again when they change a setting (Adam, 2026-11-25). As games do (Unreal's
+Lightmass and volumetric lightmaps, Unity's lighting scenarios, Frostbite, Call of Duty's UberBake: the light baked
+once, offline, at final quality, shipped, and recombined at runtime by its layers), each release ships every campaign
+level's light baked at MAX for both worlds (the stock and the remodel), and the settings a player has change only the
+runtime light. The plan and its sources: `work/openh1_eval/v4_ship_bake_runs/PLAN.md`.
+
+**What ships** (`display.bake_shipped_folder`, the data folder's `prism_bake_shipped` by default):
+`<stock|remodel>/<map>/bsp<n>.pbk`, each a finished bake file as the baker writes it, and `manifest.txt` (the game's:
+`bsp <world> <map> <index> <of> <key>`, the key as the main menu's note keeps it, its geometry by kind,
+`geo:stock` or `geo:pwg`, with the BSP's tag where the export knew it) beside `manifest.json` (each file's size and
+sha256, each BSP's per-BSP input hashes). Lighting only: the plan's job ids, the texels' light, direction, indirect
+light, sun visibility and layers' shares, the sun mask, the volume's probes and their shares, the reflection probes,
+the probes' placement (the reach's bricks), the lamp grid's lamp indices, the footprints and the layers' base. No
+triangle, albedo, texture or remodel geometry: the player's machine rebuilds the plan from its own maps (and builds
+its own remodel) and checks the key before it uses the light.
+
+**The tool** (`tools/prism_bake_ship.py`): `export <bake folder> <stock|remodel> <shipped folder>` copies each finished
+BSP bake after checking it is whole (DONE), of the quality asked (`--quality`, max for a release) or better, of this
+file version and lighting only (a record of a kind not known to be light refuses the file), and writes both manifests;
+`--archives` writes a release asset a level and world (`prism_bake_<map>_<world>_v<baker>.ppk`, an uncompressed tar:
+the records are packed already), each under GitHub's 2 GiB asset limit (a level past it splits by BSP). `install`
+unpacks a release's archives into a shipped folder (nothing outside it) and `verify` checks one (sizes, sha256, every
+file a whole lighting-only bake of its manifest's key).
+
+**The baker** (`xgpu_vulkan_bake.c`'s `file_open`): the world drawn's shipped file first (the game sends the folder and
+the world: `XGPU_BAKE_FLAG_REMODEL`), read only. Where its key is this BSP's it is loaded and drawn and nothing is
+baked ("the shipped bake (...) is this BSP's: loaded, nothing baked"); the status block's `XGPU_BAKE_STATUS_SOURCE` says
+so. Where it is not (a mod, a custom map, a remodel built otherwise), the log names the key's fields that differ and
+this BSP alone is baked here, as before. Either way the baker notes it beside the local bake (`<folder>/<map>/
+shipped.txt`: `bsp<n> <world> used <quality>`, or `mismatch` and the fields), for the main menu. **A better bake is good
+for a lesser quality**: a whole bake of the same inputs whose quality is better than the one asked is taken (the key's
+settings made again at the file's quality, the `max` tier's noise floor among them: `key_settings_hash`), so a shipped
+MAX bake serves every quality, and `display.bake_quality` (config.toml's) only sets what a bake made here aims at.
+
+**What no longer bakes again:**
+
+| Setting | Before | Now |
+| --- | --- | --- |
+| Bake Quality | every level baked again | no menu row; a release ships MAX, which every quality takes |
+| Sky Light | (the layered bake) | recombined from the layers at once |
+| Cutout Shadows | every level baked again | the level's cutouts are always in the bake under both PRISM lightings (`prism_rt.c`'s `level_alpha_traced`); the setting chooses the moving objects' cutouts |
+| World Geometry | the BSPs it changes baked again | both worlds ship: an instant switch; asks REBAKE only where the shipped bake lacks that world |
+| The rig's class (`display.prism_rig`) | baked again | config.toml's alone (the units rig is every player's) |
+| Exposure, tone curve, Path Traced's quality, dynamic lights, shadows, denoiser, upscaler | never read by the baker | runtime alone: the performance settings |
+
+**The main menu** reads `manifest.txt` for the world drawn: a level whose every BSP it has (and that the baker has not
+found to differ) is SHIPPED, ready, with no PLAY NOW question. Once every level that needs a bake has one, the worker
+checks each shipped level not yet seen used against this machine's maps (CHECKING; "Checking PRISM light" under the
+menu, playable meanwhile): it loads the level, the baker takes each BSP's shipped bake at once and bakes any BSP that
+does not match, that BSP alone. A check is made once a start at most; Rebake Local (the old Rebake All) deletes the
+bakes made here and the notes, keeps the shipped light and checks it again.
+
+Not yet (the plan's other steps): the farm's MAX bake of every level and both worlds, the remodel's bit-identical
+build (its geometry hash checked in the manifest), the BC6H/BC4/BC7 release encoding (about 4.5 bytes a texel against
+about 18), the baked sun masks and rebaked pages of Classic's PRISM shipped alongside, and the installer's download.
+
 ## What is baked
 
 Each a list of jobs (`prism_bake_cache.h`'s ids), in this order:
@@ -409,9 +468,10 @@ the first traced window) and the beach stayed CE's light 16 s coming out.
 | --- | --- | --- |
 | `display.lighting` | `"ce"`, `"ce_deferred"`, `"raster"` | Raster is the third |
 | `display.bake` | `"auto"`, `"off"` | Bake on the main menu and while playing (default), never (a whole bake is still drawn); the older `"ask"` is read as `"auto"` |
-| `display.bake_quality` | `"max"`, `"ultra"`, `"high"`, `"draft"` | `ultra` the default since prism-9 (minutes a level on the main menu); D4's `max` (hours a level) where asked for. A config.toml that names a quality keeps it |
-| `display.bake_rebake` | an integer | Each change bakes the BSP drawn again from nothing (the console's; Settings' Rebake All deletes every level's bake) |
+| `display.bake_quality` | `"max"`, `"ultra"`, `"high"`, `"draft"` | The quality of a bake made on this machine (config.toml's and the console's; no menu row): `ultra` the default (minutes a level on the main menu); D4's `max` (hours a level) where asked for. A bake of a better quality is good for a lesser one (a release's shipped MAX bake for every quality) |
+| `display.bake_rebake` | an integer | Each change bakes the BSP drawn again from nothing (the console's; Settings' Rebake Local deletes every level's bake made here, the shipped light kept) |
 | `display.bake_folder` | a path | Empty: the data folder's `prism_bake` |
+| `display.bake_shipped_folder` | a path | A release's shipped bake, read only ("The shipped bake"); empty: the data folder's `prism_bake_shipped` |
 | `display.bake_budget` | 0.25 to 200 ms | The GPU time a frame may give a background bake (30 in the menus, 60 with `debug.bake_exit`, 40 in the main menu's worker) |
 | `display.bake_indicator` | `true`, `false` | The progress at the screen's top left |
 | `debug.bake_exit` | `true`, `false` | Bake in the foreground and quit once done: the measurements' runs |
@@ -436,7 +496,7 @@ frame.
 Settings > Video > PRISM > Lighting chooses Classic, PRISM Rebaked (`"raster"`) or PRISM Path Traced. PRISM's page
 then opens, under PRISM Rebaked, Rebaked Lighting › (Composition, Object Light, Object Shadows, and Shadow Quality while
 the object shadows are Classic's, Dynamic Lights); under both PRISM modes, Image › (Exposure, Exposure Bias and Tone
-Curve), Upscaling › and Light Bake ›: Bake Quality, Sky Light, each campaign level's bake and Rebake All (Path Traced
+Curve), Upscaling › and Light Bake ›: Sky Light, each campaign level's bake and Rebake Local (Path Traced
 reads the bake too; "The bake on the main menu", below). Ray Tracing has the traced scene's rows
 (docs/prism_settings.md). The bake
 needs ray queries; a GPU without them draws Raster with CE's
@@ -463,7 +523,8 @@ a bake of the settings chosen, before they are played, as other games compile th
   game's, the one after the last finished (player 1's profile), then the campaign's.
 - **What is baked** is noted beside each map's bake, `<folder>/<map>/baked.txt`: the map's BSPs, and each BSP baked
   with its key (`prism_bake_key`: the baker's version, `XGPU_BAKE_VERSION`, `display.bake_quality`, the rig's class
-  (`units`, which `"auto"` is, or `fitted`), `prism_rt_alpha`) and its own geometry (`geo:stock:<tag>`, or
+  (`units`, which `"auto"` is, or `fitted`), `cutouts` (always: the level's cutouts are in every bake); a noted quality
+  better than the one asked is good) and its own geometry (`geo:stock:<tag>`, or
   `geo:pwg:<tag>:<size>:<time>` where the world is the remodel and the BSP has a `.pwg`), written by whichever process
   saw that BSP's bake `DONE` (the worker, or a game played). A level is baked when all its BSPs carry the settings'
   key and their geometry is still what was noted: switching the world's geometry, or one BSP's remodel changing,
@@ -480,12 +541,12 @@ a bake of the settings chosen, before they are played, as other games compile th
   `menu_functions.c`'s `campaign_start`) asks first (`screens/bake_play.xml`): PLAY NOW plays it with Classic's light
   where its bake has nothing yet, the game's own baker going on with it in the background as it is played (the worker
   is ended as the level starts); WAIT (and B) goes back, the main menu baking that level next.
-- **A setting the bake holds changed** (Bake Quality, World Geometry, Cutout Shadows, the rig's class; not Sky
-  Light, which the layers recombine) under a PRISM
-  lighting asks once it is written (`screens/bake_rebake.xml`): REBAKE (and B) keeps it, and the main menu bakes every
-  level again; UNDO writes the settings back.
-- **Light Bake** has Bake Quality, Sky Light, each campaign level's bake (BAKED, BAKING 37%, LOADING, PART BAKED,
-  NOT BAKED, NO MAP, FAILED) and REBAKE ALL, which asks (`screens/bake_rebake_all.xml`), then deletes every level's
+- **A setting the bake holds changed** (World Geometry where the shipped bake lacks the world chosen, the rig's class:
+  config.toml's) under a PRISM lighting asks once it is written (`screens/bake_rebake.xml`): REBAKE (and B) keeps it,
+  and the main menu bakes the levels again; UNDO writes the settings back. Bake Quality, Cutout Shadows and Sky Light
+  never ask ("The shipped bake").
+- **Light Bake** has Sky Light, each campaign level's bake (SHIPPED, CHECKING, BAKED, BAKING 37%, LOADING, PART BAKED,
+  NOT BAKED, NO MAP, FAILED) and REBAKE LOCAL, which asks (`screens/bake_rebake_all.xml`), then deletes every level's
   bake and note for the main menu to bake them again from nothing. Its old Bake (While Playing, When Asked, Never),
   Rebake Lightmaps and Progress on Screen rows are gone: `display.bake` `"ask"` is read as `"auto"` and written so;
   `"off"`, `display.bake_rebake` and `display.bake_indicator` stay config.toml's (and the console's).
