@@ -902,7 +902,7 @@ LIGHTING_MODE_ROWS = {
     # the bake both read (Light Bake))
     "prism_exposure": "RP", "prism_exposure_bias": "RP", "prism_tone_curve": "RP",
     "upscaling": "RP", "upscaler_scale": "CRP",
-    "light_bake": "RP", "bake_quality": "RP", "prism_sky_light": "RP",
+    "light_bake": "RP", "prism_sky_light": "RP",
     **{f"bake_{level}": "RP" for level in ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40")},
     "bake_rebake_all": "RP",
     # (Ray Tracing: Classic's ray tracer, display.prism_rt, off under both
@@ -2489,12 +2489,10 @@ PAGES = {
             (SECTION, "LIGHT BAKE"),
             # (display.bake "auto": the main menu bakes the campaign's levels
             # that need it, prism_bake_menu.c; no choice of when: "off" is
-            # config.toml's alone, and the older "ask" is read as "auto")
-            ("BAKE QUALITY", "display.bake_quality",
-             [("MAX", "max"), ("ULTRA", "ultra"), ("HIGH", "high"), ("DRAFT", "draft")],
-             "Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and "
-             "large on disk. The others are quicker and smaller. A change bakes every level again on the main "
-             "menu.", "desktop"),
+            # config.toml's alone, and the older "ask" is read as "auto".
+            # No quality: a release ships every level's light baked at MAX
+            # (display.bake_shipped_folder), and the quality of a bake made
+            # here (a mod, a custom map) is config.toml's display.bake_quality)
             ("SKY LIGHT", "display.prism_sky_light", [("SKY", "sky"), ("FLAT", "flat")],
              "Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground "
              "fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the "
@@ -2503,15 +2501,16 @@ PAGES = {
             # writes its state each frame)
             (SECTION, "LEVELS"),
             *[(name, None, None,
-               "The main menu bakes each level's light before you play it, the level you play next first, and "
-               "picks up where it stopped. A level played before its bake is done shows Classic's light until "
-               "it is.", "desktop", f"bake_{level}")
+               "Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the "
+               "shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.",
+               "desktop", f"bake_{level}")
               for level, name in (("a10", "THE PILLAR OF AUTUMN"), ("a30", "HALO"), ("a50", "TRUTH & RECON."),
                                   ("b30", "SILENT CARTOGRAPHER"), ("b40", "CONTROL ROOM"), ("c10", "343 GUILTY SPARK"),
                                   ("c20", "THE LIBRARY"), ("c40", "TWO BETRAYALS"), ("d20", "KEYES"),
                                   ("d40", "THE MAW"))],
-            ("REBAKE ALL", None, None,
-             "Deletes every level's bake: the main menu bakes them all again from nothing. Asks first.", "desktop",
+            ("REBAKE LOCAL", None, None,
+             "Deletes the light baked on this computer: the main menu checks the shipped light again and bakes "
+             "only what it does not cover. The shipped light is kept. Asks first.", "desktop",
              "bake_rebake_all", "port settings bake rebake all"),
         ],
     },

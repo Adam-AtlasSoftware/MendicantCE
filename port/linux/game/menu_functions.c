@@ -2863,7 +2863,6 @@ static struct
 	{ "op_upscaling", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
 	{ "op_light_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_quality", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_prism_sky_light", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_a10", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_a30", LIGHTING_R | LIGHTING_P, NULL, NULL },
