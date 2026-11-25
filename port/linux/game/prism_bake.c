@@ -15,7 +15,9 @@ is sent from here, in the v4 modes that read a bake (display.lighting
   played, prism_bake_menu.c), display.bake_quality, the rebakes asked for
   (display.bake_rebake: each change starts the BSP's bake again from
   nothing), the bake folder (display.bake_folder; <data>/prism_bake), the
-  GPU time a frame may give the bake, and where the host writes how the
+  shipped bake's folder (display.bake_shipped_folder; <data>/
+  prism_bake_shipped: a release's MAX bake, read only) and which world's
+  set of it (the stock or the remodel), the GPU time a frame may give the bake, and where the host writes how the
   bake goes (the status block);
 - once a BSP, what the reachable space is found from (the BSP's collision
   BSP, its clusters, leaves and PVS, its water, its render triangles, and
@@ -199,6 +201,10 @@ static struct
 	long request;
 	float budget, threshold, noise_floor;
 	char folder[XGPU_BAKE_PATH];
+	/* the shipped bake's folder (display.bake_shipped_folder; <data>/
+	prism_bake_shipped), and whether the world drawn is the remodel */
+	char shipped[XGPU_BAKE_PATH];
+	boolean remodel;
 	/* the host's answers */
 	uint32_t status[STATUS_WORDS];
 	/* the reach's inputs: of which BSP (its address) and scene generation,
@@ -270,6 +276,17 @@ static void settings_read(
 	{
 		snprintf(prism_bake.folder, sizeof(prism_bake.folder), "%s/prism_bake", platform_data_root());
 	}
+	value = config_string("display.bake_shipped_folder");
+	if (value && *value)
+	{
+		snprintf(prism_bake.shipped, sizeof(prism_bake.shipped), "%s", value);
+	}
+	else
+	{
+		snprintf(prism_bake.shipped, sizeof(prism_bake.shipped), "%s/prism_bake_shipped", platform_data_root());
+	}
+	value = config_string("display.prism_world_geometry");
+	prism_bake.remodel = value && !strcmp(value, "remodel");
 
 	return;
 }
@@ -1561,10 +1578,12 @@ static void control_fill(
 	bake->request = (uint32_t)prism_bake.request;
 	bake->flags = (prism_bake.foreground ? XGPU_BAKE_FLAG_FOREGROUND : 0) |
 		(prism_bake_menus_up() ? XGPU_BAKE_FLAG_MENU : 0) |
-		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0);
+		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0) |
+		(prism_bake.remodel ? XGPU_BAKE_FLAG_REMODEL : 0);
 	bake->map_checksum = (uint32_t)cache_files_get_checksum();
 	bake->bsp_index = global_structure_bsp_index_get();
 	bake->folder = (uint32_t)(unsigned long)prism_bake.folder;
+	bake->shipped = prism_bake.shipped[0] ? (uint32_t)(unsigned long)prism_bake.shipped : 0;
 	bake->status = (uint32_t)(unsigned long)prism_bake.status;
 	bake->budget_milliseconds = prism_bake_worker_map() ? prism_bake_worker_budget() : prism_bake.foreground ? 60.0f :
 		prism_bake_menus_up() ? 30.0f : prism_bake.budget;

@@ -531,6 +531,13 @@ struct bake_state
 	ratio a channel, the reflection probes' */
 	struct prism_bake_layer_light base;
 	int base_known, saw_remodel;
+	/* (the filter's passes a diagnostic asked for, -1 none: the key's
+	settings at another quality, key_settings_hash) */
+	int filter_asked;
+	/* the bake drawn is the shipped one (a release's, read only: <shipped>/
+	<stock|remodel>/<map>/bsp<n>.pbk): its quality, at least the one asked */
+	int shipped;
+	uint32_t loaded_quality;
 	struct prism_bake_layer_weights weights;
 	int relighting, relight_open, relight_logged;
 	struct prism_bake_cache relight_reader;
@@ -2036,6 +2043,30 @@ static uint64_t light_transport_hash(const float block_rig[16][4], const struct 
 	return hash;
 }
 
+/* the key's settings (the reach's bricks, the `max` tier's noise floor,
+HALO_BAKE_SEED, the noise's steps where a diagnostic changed them) as a
+bake of this quality has them: the bake's own, or a better one's, which is
+good for this bake too (a release's shipped MAX bake for an ultra one) */
+static uint64_t key_settings_hash(const struct bake_state *b, uint32_t quality)
+{
+	struct prism_bake_filter_parameters standard;
+	float noise_floor = quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
+		bake.control.noise_floor <= 10.0f ? bake.control.noise_floor * 0.18f : 0.0f;
+	uint64_t hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
+	int passes;
+
+	hash = prism_bake_hash64(hash, &noise_floor, sizeof(noise_floor));
+	if (b->seed)
+		hash = prism_bake_hash64(hash, &b->seed, sizeof(b->seed));
+	prism_bake_filter_defaults(&standard, (int)quality);
+	passes = b->filter_asked >= 0 ? b->filter_asked : standard.passes;
+	if (!b->robust_on)
+		hash = prism_bake_hash64(hash, "no robust", 9);
+	if (passes != standard.passes)
+		hash = prism_bake_hash64(hash, &passes, sizeof(passes));
+	return hash;
+}
+
 /* the bake's inputs taken (the render thread's: the scene, the materials,
 the rig, the reach), its key made and its plan begun on its thread: NULL
 where they are not all here yet */
@@ -2322,20 +2353,8 @@ static struct bake_state *bake_begin(void)
 	if (b->fixture_count)
 		hash = prism_bake_hash64(hash, b->fixtures, (size_t)b->fixture_count * 16 * sizeof(float));
 	b->key.light_hash = hash;
-	b->key.settings_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
-	b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->noise_floor, sizeof(b->noise_floor));
-	if (b->seed)
-		b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->seed, sizeof(b->seed));
-	{
-		/* (the noise's steps where a diagnostic changed them) */
-		struct prism_bake_filter_parameters standard;
-
-		prism_bake_filter_defaults(&standard, (int)b->quality);
-		if (!b->robust_on)
-			b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, "no robust", 9);
-		if (b->filter.passes != standard.passes)
-			b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->filter.passes, sizeof(b->filter.passes));
-	}
+	b->filter_asked = getenv("HALO_BAKE_FILTER_PASSES") || getenv("HALO_BAKE_NO_FILTER") ? b->filter.passes : -1;
+	b->key.settings_hash = key_settings_hash(b, b->quality);
 	b->key.baker_version = BAKE_VERSION;
 	b->key.quality = b->quality;
 	b->key.convergence_threshold = bake.control.threshold > 0.0f ? bake.control.threshold : 0.01f;
@@ -5199,20 +5218,156 @@ static void base_write(struct bake_state *b)
 /* the file: a whole bake of this key loaded (DONE), the log of an unfinished
 one resumed, or a new one made; where no bake is wanted (wanted 0), nothing
 made or resumed */
+/* a whole bake at path that is good for this one: of its key, or of the
+same inputs at a better quality (a release's shipped MAX bake for an
+ultra one; the key's settings as that quality has them). 1 where it is,
+loaded into b->cache, b->key then the file's; else 0, b->cache closed, the
+fields that differed in *differences (0 no file or not a bake) */
+static int file_whole(struct bake_state *b, const char *path, uint32_t *differences)
+{
+	enum prism_bake_cache_status status = prism_bake_cache_open(&b->cache, path, &b->key, 0);
+	struct prism_bake_cache_key better;
+
+	*differences = status == PRISM_BAKE_CACHE_STALE ? b->cache.differences : 0;
+	if (status == PRISM_BAKE_CACHE_CURRENT && b->cache.done)
+	{
+		b->loaded_quality = b->key.quality;
+		return 1;
+	}
+	if (status == PRISM_BAKE_CACHE_STALE && b->cache.done && b->cache.key.quality > b->key.quality &&
+		b->cache.key.quality <= PRISM_BAKE_QUALITY_MAX &&
+		!(b->cache.differences & ~(uint32_t)(PRISM_BAKE_KEY_QUALITY | PRISM_BAKE_KEY_SETTINGS)))
+	{
+		better = b->key;
+		better.quality = b->cache.key.quality;
+		better.settings_hash = key_settings_hash(b, better.quality);
+		if (prism_bake_key_compare(&better, &b->cache.key) == 0)
+		{
+			prism_bake_cache_close(&b->cache);
+			if (prism_bake_cache_open(&b->cache, path, &better, 0) == PRISM_BAKE_CACHE_CURRENT && b->cache.done)
+			{
+				b->key = better;
+				b->loaded_quality = better.quality;
+				return 1;
+			}
+			*differences = b->cache.differences;
+		}
+	}
+	prism_bake_cache_close(&b->cache);
+	memset(&b->cache, 0, sizeof(b->cache));
+	return 0;
+}
+
+static const char *const quality_names[] = { "draft", "high", "ultra", "max" };
+
+/* the shipped bake's note beside the BSP's local bake (<folder>/<map>/
+shipped.txt, a line a BSP and world: "bsp<n> <stock|remodel> used <quality>"
+or "bsp<n> <stock|remodel> mismatch <the key's fields that differ, hex>"),
+which the main menu reads (prism_bake_menu.c): a BSP whose shipped bake
+does not match this machine's maps (a mod, a custom map, a remodel built
+otherwise) is baked here, that BSP alone */
+static void shipped_note(struct bake_state *b, const char *world, const char *state, uint32_t value)
+{
+	char path[XGPU_BAKE_PATH + 200], temporary[XGPU_BAKE_PATH + 208], name[96], line[256], prefix[64];
+	char text[8192];
+	size_t length = 0;
+	FILE *file;
+
+	name_clean(b->map, name, sizeof(name));
+	snprintf(path, sizeof(path), "%s/%s/shipped.txt", b->folder, name);
+	snprintf(prefix, sizeof(prefix), "bsp%d %s ", (int)b->bsp, world);
+	text[0] = 0;
+	if ((file = fopen(path, "rb")) != NULL)
+	{
+		while (fgets(line, sizeof(line), file))
+		{
+			size_t size = strlen(line);
+
+			if (!strncmp(line, prefix, strlen(prefix)) || size == 0 || line[size - 1] != '\n' ||
+				length + size + 1 >= sizeof(text))
+				continue;
+			memcpy(text + length, line, size + 1);
+			length += size;
+		}
+		fclose(file);
+	}
+	if (!strcmp(state, "used"))
+		snprintf(line, sizeof(line), "%s%s %s\n", prefix, state, value < 4 ? quality_names[value] : "?");
+	else
+		snprintf(line, sizeof(line), "%s%s 0x%x\n", prefix, state, value);
+	if (length + strlen(line) + 1 < sizeof(text))
+	{
+		memcpy(text + length, line, strlen(line) + 1);
+		length += strlen(line);
+	}
+	snprintf(temporary, sizeof(temporary), "%s.tmp", path);
+	if ((file = fopen(temporary, "wb")) == NULL)
+		return;
+	if (fwrite(text, 1, length, file) != length)
+	{
+		fclose(file);
+		remove(temporary);
+		return;
+	}
+	fclose(file);
+	if (rename(temporary, path) != 0)
+	{
+		remove(path);
+		if (rename(temporary, path) != 0)
+			remove(temporary);
+	}
+}
+
 static void file_open(struct bake_state *b, int wanted)
 {
 	enum prism_bake_cache_status status;
 	uint32_t differences;
+	const char *shipped = bake.control.shipped ? (const char *)host_pointer(bake.control.shipped) : NULL;
 
-	status = prism_bake_cache_open(&b->cache, b->path, &b->key, 0);
-	if (status == PRISM_BAKE_CACHE_CURRENT && b->cache.done)
+	/* (a release's shipped bake first, its world's set (the stock or the
+	remodel), read only: wherever its key is this BSP's (the player's maps,
+	their geometry, materials and lights: the per-BSP input hashes) it is
+	drawn, nothing baked; else this BSP alone is baked here, as before) */
+	if (shipped && *shipped)
 	{
-		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake is whole (%s): loaded (at %.3f s)%s", b->map, (int)b->bsp,
-			b->path, now_seconds(), base_read(b, &b->cache) ? "" : ", no layers' base: drawn as baked");
+		char path[XGPU_BAKE_PATH + 200], name[96];
+		const char *world = (bake.control.flags & XGPU_BAKE_FLAG_REMODEL) ? "remodel" : "stock";
+		struct stat info;
+
+		name_clean(b->map, name, sizeof(name));
+		snprintf(path, sizeof(path), "%s/%s/%s/bsp%d.pbk", shipped, world, name, (int)b->bsp);
+		if (stat(path, &info) == 0)
+		{
+			if (file_whole(b, path, &differences))
+			{
+				host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the shipped bake (%s, %s) is this BSP's: loaded, nothing "
+					"baked (at %.3f s)%s", b->map, (int)b->bsp, path, quality_names[b->loaded_quality & 3u], now_seconds(),
+					base_read(b, &b->cache) ? "" : ", no layers' base: drawn as baked");
+				snprintf(b->path, sizeof(b->path), "%s", path);
+				b->shipped = 1;
+				b->writing = 0;
+				b->complete = 1;
+				shipped_note(b, world, "used", b->loaded_quality);
+				return;
+			}
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the shipped bake (%s) is not this machine's BSP (the key's "
+				"fields 0x%x differ: 1 the map, 2 the BSP, 4 the geometry, 8 the materials, 16 the lights, 32 the "
+				"settings, 64 the baker, 128 the quality): this BSP's own bake used or made", b->map, (int)b->bsp, path,
+				differences);
+			shipped_note(b, world, "mismatch", differences);
+		}
+	}
+	if (file_whole(b, b->path, &differences))
+	{
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake is whole (%s%s%s): loaded (at %.3f s)%s", b->map,
+			(int)b->bsp, b->path, b->loaded_quality != b->quality ? ", " : "",
+			b->loaded_quality != b->quality ? quality_names[b->loaded_quality & 3u] : "", now_seconds(),
+			base_read(b, &b->cache) ? "" : ", no layers' base: drawn as baked");
 		b->writing = 0;
 		b->complete = 1;
 		return;
 	}
+	status = prism_bake_cache_open(&b->cache, b->path, &b->key, 0);
 	/* (the differences read before the cache is let go: closing clears it) */
 	differences = b->cache.differences;
 	prism_bake_cache_close(&b->cache);
@@ -5884,7 +6039,8 @@ static void status_write(struct bake_state *b)
 	status_set(XGPU_BAKE_STATUS_STATE, (uint32_t)state);
 	status_set(XGPU_BAKE_STATUS_BSP, (uint32_t)b->bsp);
 	status_set(XGPU_BAKE_STATUS_GENERATION, b->generation);
-	status_set(XGPU_BAKE_STATUS_QUALITY, b->quality);
+	status_set(XGPU_BAKE_STATUS_QUALITY, b->complete ? b->loaded_quality : b->quality);
+	status_set(XGPU_BAKE_STATUS_SOURCE, b->shipped ? XGPU_BAKE_SOURCE_SHIPPED : XGPU_BAKE_SOURCE_HERE);
 	status_real(XGPU_BAKE_STATUS_PROGRESS, progress);
 	status_set(XGPU_BAKE_STATUS_STEP, step == STEP_IMPORTANCE ? XGPU_BAKE_STEP_IMPORTANCE : step == STEP_LIGHTMAP ?
 		XGPU_BAKE_STEP_LIGHTMAP : step == STEP_MASK ? XGPU_BAKE_STEP_SUN_MASK : step == STEP_VOLUME ? XGPU_BAKE_STEP_VOLUME :

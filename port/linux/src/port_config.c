@@ -1092,6 +1092,12 @@ static const struct config_setting config_settings[] =
 		"Where the bakes are kept (a folder of each map's, a file of each\n"
 		"BSP's; made on this machine, never shared); empty: the data folder's\n"
 		"prism_bake." },
+	{ "display.bake_shipped_folder", _config_string, "\"\"", "HALO_BAKE_SHIPPED_FOLDER", _environment_value,
+		_platform_desktop,
+		"Where a release's shipped light is (its MAX bake, lighting only, of\n"
+		"the stock and the remodelled world: <stock|remodel>/<map>/bsp<n>.pbk\n"
+		"and manifest.txt; read only, used wherever it matches this machine's\n"
+		"maps); empty: the data folder's prism_bake_shipped." },
 	{ "display.bake_budget", _config_real, "2.0", "HALO_BAKE_BUDGET", _environment_value, _platform_desktop,
 		"The milliseconds of each frame's graphics time a background bake may\n"
 		"take while you play (0.25 to 200; in the menus it takes 30, and the\n"
@@ -4591,8 +4597,8 @@ static const char *const config_display_order[] =
 	"display.prism_exposure_speed", "display.prism_tone_curve",
 	"=The light bake (PRISM Rebaked and PRISM Path Traced: both read it)",
 	"display.bake", "display.bake_quality", "display.prism_sky_light", "display.bake_rebake",
-	"display.bake_indicator", "display.bake_folder", "display.bake_budget", "display.material_packs",
-	"display.prism_rig",
+	"display.bake_indicator", "display.bake_folder", "display.bake_shipped_folder", "display.bake_budget",
+	"display.material_packs", "display.prism_rig",
 	"=PRISM Rebaked (\"raster\") alone",
 	"display.prism_raster_composition", "display.prism_raster_objects",
 	"=PRISM Path Traced (\"pathtraced\") alone",
@@ -4665,6 +4671,7 @@ static const struct
 	{ "display.bake_rebake", LIGHTING_PRISM },
 	{ "display.bake_indicator", LIGHTING_PRISM },
 	{ "display.bake_folder", LIGHTING_PRISM },
+	{ "display.bake_shipped_folder", LIGHTING_PRISM },
 	{ "display.bake_budget", LIGHTING_PRISM },
 	{ "display.material_packs", LIGHTING_PRISM },
 	{ "display.prism_rig", "PRISM Rebaked and PRISM Path Traced (units), Classic's ray tracing (fitted)" },

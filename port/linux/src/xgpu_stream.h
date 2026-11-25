@@ -2924,6 +2924,9 @@ enum
 	XGPU_BAKE_FLAG_FOREGROUND = 2,
 	/* the reach's inputs were all sent */
 	XGPU_BAKE_FLAG_REACH = 4,
+	/* display.prism_world_geometry "remodel": the shipped bake looked for
+	is the remodel's set (shipped's "remodel" folder), else the stock one's */
+	XGPU_BAKE_FLAG_REMODEL = 8,
 };
 /* the bake file's maker (xgpu_vulkan_bake.c's BAKE_VERSION: a change makes
 every bake stale), which the game's note of the BSPs baked holds too
@@ -2939,7 +2942,9 @@ bake), the step (XGPU_BAKE_STEP_*) and its progress (a float), texels done
 and planned (millions, floats), rays a second (millions, a float), seconds
 taken and seconds left (floats, the latter -1 unknown), the bake file's
 bytes (MB, a float), whether the light drawn is the bake's
-(XGPU_BAKE_SHOWN_*), a number that moves with each write */
+(XGPU_BAKE_SHOWN_*), a number that moves with each write, and where the
+bake drawn is from (XGPU_BAKE_SOURCE_*: this machine's, or the release's
+shipped one; the quality then the file's, at least the one asked) */
 enum
 {
 	XGPU_BAKE_STATUS_STATE,
@@ -2957,7 +2962,13 @@ enum
 	XGPU_BAKE_STATUS_MEGABYTES,
 	XGPU_BAKE_STATUS_SHOWN,
 	XGPU_BAKE_STATUS_SERIAL,
+	XGPU_BAKE_STATUS_SOURCE,
 	XGPU_BAKE_STATUS_WORDS = 16,
+};
+enum
+{
+	XGPU_BAKE_SOURCE_HERE, /* baked (or being baked) on this machine */
+	XGPU_BAKE_SOURCE_SHIPPED, /* the release's shipped bake (display.bake_shipped_folder) */
 };
 enum
 {
@@ -3003,7 +3014,12 @@ struct xgpu_stream_prism_bake
 	which a texel's error is measured against it, not its own light; 0 the
 	literal rule) */
 	float noise_floor;
-	uint32_t pad;
+	/* (the shipped bake's folder, a release's light: a guest address of a
+	NUL-terminated UTF-8 string of at most XGPU_BAKE_PATH bytes, as folder;
+	0 none. Read only: <shipped>/<stock|remodel>/<map>/bsp<n>.pbk, used
+	before the bake folder's wherever its key is the BSP's (docs/
+	prism_bake.md, "The shipped bake")) */
+	uint32_t shipped;
 	char map_name[XGPU_BAKE_NAME];
 };
 
