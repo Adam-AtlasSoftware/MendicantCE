@@ -234,6 +234,8 @@ python -m pytest -q tools/test_prism_gate.py tools/test_prism_plugin.py tools/te
                                                             # PRISM's gates' metrics and captures' paths, the plugin ABI, the scene records, the RT GLSL generated
 python3 tools/vulkan_bake_shaders.py --check               # PRISM v4's baker's and Raster's SPIR-V still its GLSL's (glslangValidator)
 python3 tools/vulkan_pt_shaders.py --check                 # PRISM Path Traced's SPIR-V still its GLSL's (and the baker's BAKE_COMMON)
+python -m pytest -q tools/test_geometry_resolver.py      # PRISM's resolved geometry of the objects (xgpu_geometry.c): hysteresis, shadows, the
+                                                            # drawable floor, the traced budget, the variant, a new map
 python -m pytest -q tools/test_prism_pt.py                 # PRISM Path Traced's arithmetic on the CPU: the lights' resampling, the reference's sums,
                                                             # noise and stopping rule, the denoiser's history and a-trous weights
 python3 tools/vulkan_upscale_shaders.py --check            # PRISM v4's FSR 3.1 passes and upscaler's input pass, their SPIR-V still their GLSL's
@@ -561,4 +563,5 @@ The decompilation's upstream, punpckhdq/halo, is AGPL 3.0 from 17 October
 | [docs/prism_bake.md](docs/prism_bake.md) | PRISM v4's in-game baker (the reach, the light-importance grid, the lightmap, the sun mask, the irradiance volume, the bake file) and PRISM Raster (`display.lighting` `"raster"`) |
 | [docs/prism_pathtraced.md](docs/prism_pathtraced.md) | PRISM Path Traced (`display.lighting` `"pathtraced"`): what it traces and reads from the bake, which light each term carries, ReSTIR DI, the denoiser, its reference |
 | [docs/prism_settings.md](docs/prism_settings.md) | The lighting's settings: Classic, PRISM Rebaked and PRISM Path Traced, and which settings Settings and config.toml show for each |
+| [docs/prism_geometry.md](docs/prism_geometry.md) | PRISM's resolved geometry: one shape per surface and object (`xgpu_geometry.c`) that the view, the shadows, the traced scene and the bake's frame scene draw; the levels' hysteresis, the drawable floor, the traced budget; `HALO_GEOMETRY_LOG` |
 | [docs/prism_materials.md](docs/prism_materials.md) | PRISM v4's materials of the pack and mod tiers: the format (2), how the G-buffer's uber-shaders draw them, the material pack the pack tools build (`v4_materials`) |
