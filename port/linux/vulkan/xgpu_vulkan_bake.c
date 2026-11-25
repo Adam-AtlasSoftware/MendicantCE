@@ -538,6 +538,9 @@ struct bake_state
 	<stock|remodel>/<map>/bsp<n>.pbk): its quality, at least the one asked */
 	int shipped;
 	uint32_t loaded_quality;
+	/* a whole bake found before the plan (file_choose: 1 the shipped one,
+	2 this machine's), loaded into cache: the plan is made at its quality */
+	int chosen;
 	struct prism_bake_layer_weights weights;
 	int relighting, relight_open, relight_logged;
 	struct prism_bake_cache relight_reader;
@@ -2067,6 +2070,8 @@ static uint64_t key_settings_hash(const struct bake_state *b, uint32_t quality)
 	return hash;
 }
 
+static void file_choose(struct bake_state *b);
+
 /* the bake's inputs taken (the render thread's: the scene, the materials,
 the rig, the reach), its key made and its plan begun on its thread: NULL
 where they are not all here yet */
@@ -2367,6 +2372,9 @@ static struct bake_state *bake_begin(void)
 		snprintf(folder, sizeof(folder), "%s/%s", b->folder, name);
 		folder_make(folder);
 	}
+	/* (a whole bake of this BSP: the shipped one, or this machine's; the
+	plan at its quality) */
+	file_choose(b);
 	/* the materials and alpha maps copied for the GPU (the set's may go) */
 	b->started = now_seconds();
 	b->step = STEP_PLAN;
@@ -5318,16 +5326,19 @@ static void shipped_note(struct bake_state *b, const char *world, const char *st
 	}
 }
 
-static void file_open(struct bake_state *b, int wanted)
+/* before the plan: a whole bake that is good for this one, the world
+drawn's shipped one first (a release's, read only: wherever its key is
+this BSP's (the player's maps, their geometry, materials and lights: the
+per-BSP input hashes) it is drawn, nothing baked), else this machine's;
+loaded into b->cache, b->chosen 1 or 2, the plan then made at its quality
+(a better quality's plan is finer: a lesser plan's tiles are not the
+file's). Else 0, and this BSP alone is baked here as before */
+static void file_choose(struct bake_state *b)
 {
-	enum prism_bake_cache_status status;
 	uint32_t differences;
 	const char *shipped = bake.control.shipped ? (const char *)host_pointer(bake.control.shipped) : NULL;
 
-	/* (a release's shipped bake first, its world's set (the stock or the
-	remodel), read only: wherever its key is this BSP's (the player's maps,
-	their geometry, materials and lights: the per-BSP input hashes) it is
-	drawn, nothing baked; else this BSP alone is baked here, as before) */
+	b->chosen = 0;
 	if (shipped && *shipped)
 	{
 		char path[XGPU_BAKE_PATH + 200], name[96];
@@ -5340,24 +5351,42 @@ static void file_open(struct bake_state *b, int wanted)
 		{
 			if (file_whole(b, path, &differences))
 			{
-				host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the shipped bake (%s, %s) is this BSP's: loaded, nothing "
-					"baked (at %.3f s)%s", b->map, (int)b->bsp, path, quality_names[b->loaded_quality & 3u], now_seconds(),
-					base_read(b, &b->cache) ? "" : ", no layers' base: drawn as baked");
 				snprintf(b->path, sizeof(b->path), "%s", path);
 				b->shipped = 1;
-				b->writing = 0;
-				b->complete = 1;
+				b->chosen = 1;
 				shipped_note(b, world, "used", b->loaded_quality);
-				return;
 			}
-			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the shipped bake (%s) is not this machine's BSP (the key's "
-				"fields 0x%x differ: 1 the map, 2 the BSP, 4 the geometry, 8 the materials, 16 the lights, 32 the "
-				"settings, 64 the baker, 128 the quality): this BSP's own bake used or made", b->map, (int)b->bsp, path,
-				differences);
-			shipped_note(b, world, "mismatch", differences);
+			else
+			{
+				host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the shipped bake (%s) is not this machine's BSP (the "
+					"key's fields 0x%x differ: 1 the map, 2 the BSP, 4 the geometry, 8 the materials, 16 the lights, 32 "
+					"the settings, 64 the baker, 128 the quality): this BSP's own bake used or made", b->map, (int)b->bsp,
+					path, differences);
+				shipped_note(b, world, "mismatch", differences);
+			}
 		}
 	}
-	if (file_whole(b, b->path, &differences))
+	if (!b->chosen && file_whole(b, b->path, &differences))
+		b->chosen = 2;
+	if (b->chosen)
+		b->plan.quality = (int)b->loaded_quality;
+}
+
+static void file_open(struct bake_state *b, int wanted)
+{
+	enum prism_bake_cache_status status;
+	uint32_t differences;
+
+	if (b->chosen == 1)
+	{
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the shipped bake (%s, %s) is this BSP's: loaded, nothing "
+			"baked (at %.3f s)%s", b->map, (int)b->bsp, b->path, quality_names[b->loaded_quality & 3u], now_seconds(),
+			base_read(b, &b->cache) ? "" : ", no layers' base: drawn as baked");
+		b->writing = 0;
+		b->complete = 1;
+		return;
+	}
+	if (b->chosen == 2)
 	{
 		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the bake is whole (%s%s%s): loaded (at %.3f s)%s", b->map,
 			(int)b->bsp, b->path, b->loaded_quality != b->quality ? ", " : "",
