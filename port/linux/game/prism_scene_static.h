@@ -21,5 +21,8 @@ void prism_scene_static_map_unloaded(void);
 whole (its _END sent) */
 unsigned long prism_scene_static_generation(void);
 int prism_scene_static_ended(void);
+/* the set of the BSP drawn begun with nothing in it: the BSP has no
+lightmapped surface (a cinematic's), so there is nothing to bake */
+int prism_scene_static_empty(void);
 
 #endif

@@ -94,6 +94,7 @@ boolean prism_bake_wanted(void);
 unsigned long prism_bake_status(int word);
 float prism_bake_status_real(int word);
 unsigned long prism_scene_static_generation(void);
+int prism_scene_static_empty(void);
 void draw_quad(rectangle2d *rectangle, pixel32 color);
 /* menu_functions.c's: the saved game's level and the one after the last
 finished, player 1's profile's (NONE for none) */
@@ -732,6 +733,15 @@ static void worker_frame(void)
 		return;
 	}
 	bake_worker.switch_asked = 0;
+	if (prism_scene_static_empty())
+	{
+		/* (nothing to bake: noted by prism_bake_note, this frame) */
+		platform_log("prism bake: the main menu's worker: %s's BSP %d has no lightmapped surface: nothing to bake",
+			bake_worker.map, (int)bsp);
+		bake_worker.target++;
+		worker_progress_write("baking");
+		return;
+	}
 	state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 	if ((long)prism_bake_status(XGPU_BAKE_STATUS_BSP) == (long)bsp &&
 		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) == prism_scene_static_generation())
@@ -827,9 +837,11 @@ static void prism_bake_note(void)
 		return;
 	}
 	generation = prism_scene_static_generation();
-	if (prism_bake_status(XGPU_BAKE_STATUS_STATE) != XGPU_BAKE_STATE_DONE ||
+	/* (a BSP with no lightmapped surface, a cinematic's, has nothing to
+	bake: noted as baked, so that its level counts whole) */
+	if (!prism_scene_static_empty() && (prism_bake_status(XGPU_BAKE_STATUS_STATE) != XGPU_BAKE_STATE_DONE ||
 		(long)prism_bake_status(XGPU_BAKE_STATUS_BSP) != (long)bsp ||
-		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) != generation)
+		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) != generation))
 	{
 		return;
 	}
