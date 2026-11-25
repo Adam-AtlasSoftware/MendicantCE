@@ -363,6 +363,19 @@ static int word_index(char const *value, char const *const *words, int otherwise
 	return otherwise;
 }
 
+/* port: whether the level's alpha-tested surfaces (grates, fences, leaf
+cards) are traced through their alpha maps: always under the lightings
+that read the bake (display.lighting "raster" and "pathtraced"), whose bake
+holds their shadows whatever Cutout Shadows says, so that the setting never
+bakes again (a release's shipped bake is of them); there
+display.prism_rt_alpha chooses the moving objects' cutouts alone (foliage
+traced by the share of its texels drawn, RT_FRAME's alpha word). Classic's
+ray tracer: the setting, as before */
+static int level_alpha_traced(void)
+{
+	return prism_rt.alpha_traced || prism_deferred_raster();
+}
+
 static void settings_read(void)
 {
 	static char const *const modes[] = { "off", "shadows", "gi", "pathtraced", NULL };
@@ -1158,7 +1171,7 @@ static int static_copy(struct structure_bsp *bsp, int world)
 					continue;
 				}
 				traced = material_of(material->shader.index, &kind);
-				if (traced == NONE || (kind == PRISM_RT_TRIANGLE_ALPHA_TESTED && !prism_rt.alpha_traced))
+				if (traced == NONE || (kind == PRISM_RT_TRIANGLE_ALPHA_TESTED && !level_alpha_traced()))
 					continue;
 				/* (the remodel's level where it is drawn and display.prism_rt_world
 				traces it: prism_world_geometry.c's triangles of the material) */
@@ -1335,12 +1348,12 @@ static void static_frame(void)
 	if (static_scene_frame())
 		return;
 	rig_read();
-	if (bsp_index != prism_rt.bsp_index || world != prism_rt.copied_world || prism_rt.alpha_traced != copied_alpha)
+	if (bsp_index != prism_rt.bsp_index || world != prism_rt.copied_world || level_alpha_traced() != copied_alpha)
 	{
 		static_release();
 		prism_rt.bsp_index = bsp_index;
 		prism_rt.copied_world = world;
-		copied_alpha = prism_rt.alpha_traced;
+		copied_alpha = level_alpha_traced();
 		prism_rt.generation++;
 		bsp = bsp_index != NONE ? global_structure_bsp_get() : NULL;
 		if (!bsp || !static_copy(bsp, world))
@@ -1672,7 +1685,7 @@ long prism_rt_traced_material(long shader_tag, int *kind)
 	if ((prism_rt_mode() == PRISM_RT_OFF && !raster_scene()) || prism_rt.world != PRISM_RT_WORLD_DRAWN)
 		return NONE;
 	index = material_of(shader_tag, kind);
-	if (index != NONE && *kind == PRISM_RT_TRIANGLE_ALPHA_TESTED && !prism_rt.alpha_traced)
+	if (index != NONE && *kind == PRISM_RT_TRIANGLE_ALPHA_TESTED && !level_alpha_traced())
 		return NONE;
 	return index;
 }
@@ -1684,7 +1697,7 @@ int prism_rt_scene_traced(void)
 {
 	if ((prism_rt_mode() == PRISM_RT_OFF && !raster_scene()) || prism_rt.world != PRISM_RT_WORLD_DRAWN)
 		return 0;
-	return prism_rt.alpha_traced ? 2 : 1;
+	return level_alpha_traced() ? 2 : 1;
 }
 
 
