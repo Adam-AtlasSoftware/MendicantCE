@@ -344,6 +344,8 @@ static struct
 	/* port: display.prism_rt's mode turned off under display.lighting
 	"raster", logged (once while it lasts) */
 	int raster_off_logged;
+	/* port: display.prism_rt_world's override said (debug.geometry_overrides) */
+	int world_override_told;
 } prism_rt;
 
 int prism_rt_mode(void);
@@ -430,6 +432,20 @@ static void settings_read(void)
 	prism_rt.world = word_index(config_string("display.prism_rt_world"), worlds, 4);
 	if (prism_rt.world == 4)
 		prism_rt.world = PRISM_RT_WORLD_DRAWN;
+	/* (port: the level traced is the level drawn, one geometry for every
+	pass; another is a debug override, debug.geometry_overrides: before,
+	"remodel" traced the near level whole under a far level drawn, the
+	sand's black patches, and "stock" CE's triangles under the remodel) */
+	if (prism_rt.world != PRISM_RT_WORLD_DRAWN && !config_boolean("debug.geometry_overrides"))
+	{
+		if (!prism_rt.world_override_told)
+			platform_log("prism rt: display.prism_rt_world \"%s\" is a debug override (debug.geometry_overrides): the "
+				"level traced is the level drawn", worlds[prism_rt.world]);
+		prism_rt.world_override_told = TRUE;
+		prism_rt.world = PRISM_RT_WORLD_DRAWN;
+	}
+	else if (prism_rt.world == PRISM_RT_WORLD_DRAWN)
+		prism_rt.world_override_told = FALSE;
 	/* (display.lighting "raster" with ray tracing off: the level as drawn
 	is the scene the baker traces, whatever the setting) */
 	if (prism_rt.mode == PRISM_RT_OFF && prism_deferred_raster())
