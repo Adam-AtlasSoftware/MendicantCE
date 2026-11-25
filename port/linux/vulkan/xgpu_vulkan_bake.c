@@ -66,6 +66,7 @@ top level.
 
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_bake.h"
+#include "xgpu_vulkan_meshes.h"
 #include "xgpu_vulkan_bake_shaders.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_scene.h"
@@ -2410,10 +2411,12 @@ static int scene_block_upload(VkCommandBuffer commands, struct bake_state *b)
 }
 
 /* the scene block the frame traces: the bake's, or its own where the static
-scenery a mod's mesh draws is left out */
+scenery a mod's mesh may draw is left out (port: while remodels are drawn,
+xgpu_vulkan_meshes_drawn, as the game's prism_bake_object_static has it on
+the same frame: display.prism_models "stock" traces the bake's whole) */
 static VkDeviceAddress scene_runtime_address(const struct bake_state *b)
 {
-	return b->scene_runtime.buffer ? b->scene_runtime.address : b->scene.address;
+	return b->scene_runtime.buffer && xgpu_vulkan_meshes_drawn() ? b->scene_runtime.address : b->scene.address;
 }
 
 /* the scene put on the GPU (the plan done): the triangles traced (the

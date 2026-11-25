@@ -218,6 +218,19 @@ for this map: drawn from the store once it is in, the stock part until
 then): the bake's static scenery leaves such a placement out of the scene
 the frame traces, which traces it as drawn (prism_bake.c) */
 boolean mod_meshes_model_replaced(long model_index);
+/* port: whether a mod played on the map has a mesh for a model tag in any
+tier (max or enhanced), whatever display.prism_models says: the bake's
+static scenery names such a placement's triangles (a run the frame's scene
+leaves out while remodels are drawn), so that the runs, and the scene the
+frame traces, do not wait for the next BSP when the setting changes */
+boolean mod_meshes_model_candidate(long model_index);
+/* port: whether remodels are drawn now (the host accepted at least one
+mesh of the set sent last): the frame traces the static scenery a mesh may
+draw as drawn, not as the bake's stock placement; and the number of the
+set, which changes with every set sent (a tier change, the mods found
+again) */
+boolean mod_meshes_remodels_drawn(void);
+unsigned long mod_meshes_generation(void);
 /* (models.c's render_model_parts, around an opaque, decal or shadow part's
 draws) the part the draws that follow are of; and none */
 void mod_meshes_part(short region_index, short permutation_index, short geometry_index, short part_index,

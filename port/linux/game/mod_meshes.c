@@ -228,6 +228,10 @@ static struct
 	boolean part_named;
 	/* the part named: its MESH_DRAW's values (mod_meshes_part_key) */
 	unsigned long part_key[MOD_MESHES_PART_KEY];
+	/* port: mod_meshes_model_candidate's answers by model tag (absolute
+	index: 0 not looked for, 1 none, 2 a mesh), for this map and mods */
+	unsigned char *candidates;
+	long candidate_count;
 } mod_meshes_globals;
 
 /* ---------- private code */
@@ -1061,11 +1065,21 @@ static void node_matrix_constants(
 
 /* ---------- public code */
 
+static void candidates_forget(
+	void)
+{
+	memory_release(mod_meshes_globals.candidates);
+	mod_meshes_globals.candidates = NULL;
+	mod_meshes_globals.candidate_count = 0;
+}
+
 long mod_meshes_update(
 	boolean remove_all,
 	boolean at_load)
 {
 	settings_read();
+	/* (the mods found again, or a new map: each model looked for again) */
+	candidates_forget();
 	mod_meshes_globals.map_loaded = TRUE;
 	if (remove_all)
 	{
@@ -1085,6 +1099,7 @@ long mod_meshes_update(
 void mod_meshes_tags_unloaded(
 	void)
 {
+	candidates_forget();
 	models_clear();
 	store_close();
 	mod_meshes_globals.map_loaded = FALSE;
@@ -1277,6 +1292,66 @@ boolean mod_meshes_model_replaced(
 	}
 
 	return mod_meshes_globals.models[absolute].id != 0 && mod_meshes_globals.models[absolute].tag_index == model_index;
+}
+
+boolean mod_meshes_model_candidate(
+	long model_index)
+{
+	long absolute;
+	char const *tag_name;
+
+	if (model_index == NONE || !mod_meshes_globals.map_loaded)
+	{
+		return FALSE;
+	}
+	absolute = (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(model_index);
+	if (absolute < 0)
+	{
+		return FALSE;
+	}
+	if (absolute >= mod_meshes_globals.candidate_count)
+	{
+		struct tag_iterator iterator;
+		long tag_index, count = absolute + 1;
+		unsigned char *grown;
+
+		tag_iterator_new(&iterator, MODELS_GROUP_TAG);
+		while ((tag_index = tag_iterator_next(&iterator)) != NONE)
+		{
+			count = MAX(count, (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(tag_index) + 1);
+		}
+		grown = memory_zeroed((size_t)count);
+		if (!grown)
+		{
+			return FALSE;
+		}
+		if (mod_meshes_globals.candidates)
+		{
+			memcpy(grown, mod_meshes_globals.candidates, (size_t)mod_meshes_globals.candidate_count);
+			memory_release(mod_meshes_globals.candidates);
+		}
+		mod_meshes_globals.candidates = grown;
+		mod_meshes_globals.candidate_count = count;
+	}
+	if (!mod_meshes_globals.candidates[absolute])
+	{
+		tag_name = tag_get_name(model_index);
+		mod_meshes_globals.candidates[absolute] = tag_name && file_find(tag_name, _tier_max) >= 0 ? 2 : 1;
+	}
+
+	return mod_meshes_globals.candidates[absolute] == 2;
+}
+
+boolean mod_meshes_remodels_drawn(
+	void)
+{
+	return mod_meshes_globals.accepted > 0;
+}
+
+unsigned long mod_meshes_generation(
+	void)
+{
+	return mod_meshes_globals.generation;
 }
 
 /* (render_model, after its parts) */
