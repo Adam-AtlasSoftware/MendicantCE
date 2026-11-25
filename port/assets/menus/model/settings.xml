@@ -2095,7 +2095,7 @@
 			<choice shown="DRAFT" value="draft"/>
 		</row>
 		<row key="prism_sky_light" kind="choice" setting="display.prism_sky_light" label="SKY LIGHT" crumb="VIDEO › PRISM › LIGHT BAKE" search_choices="sky flat" when="desktop">
-			<help>Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes every level again.</help>
+			<help>Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. Applied at once, with no rebake.</help>
 			<choice shown="SKY" value="sky"/>
 			<choice shown="FLAT" value="flat"/>
 		</row>

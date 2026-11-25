@@ -9,8 +9,9 @@ PRISM's light bake on the main menu (prism_bake_menu.c, docs/prism_bake.md).
 
 /* the settings the bake holds, as the note of the BSPs baked keeps them */
 void prism_bake_key(char *key, unsigned long size);
-/* whether a change of the setting bakes every level again */
-boolean prism_bake_key_setting(char const *name);
+/* whether a change of the setting from before to after bakes the levels
+again (a setting the layered bake recombines does not) */
+boolean prism_bake_key_setting(char const *name, char const *before, char const *after);
 /* the main menu's bake runs (a PRISM lighting, a card that traces rays,
 display.bake "auto") */
 boolean prism_bake_menu_wanted(void);

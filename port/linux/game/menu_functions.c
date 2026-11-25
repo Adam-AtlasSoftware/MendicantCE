@@ -3214,8 +3214,8 @@ static void settings_pending_write(boolean finish)
 		struct settings_pending const *entry = &settings_pending.entries[index];
 		char before[80];
 
-		if (prism_bake_key_setting(entry->name) && setting_text(entry->name, before, sizeof(before), FALSE) &&
-			strcmp(before, entry->value))
+		if (setting_text(entry->name, before, sizeof(before), FALSE) && strcmp(before, entry->value) &&
+			prism_bake_key_setting(entry->name, before, entry->value))
 		{
 			snprintf(bake_question.undo_name[undo_count], sizeof(bake_question.undo_name[0]), "%s", entry->name);
 			snprintf(bake_question.undo_value[undo_count], sizeof(bake_question.undo_value[0]), "%s", before);

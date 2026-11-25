@@ -2498,7 +2498,7 @@ PAGES = {
             ("SKY LIGHT", "display.prism_sky_light", [("SKY", "sky"), ("FLAT", "flat")],
              "Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground "
              "fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the "
-             "same everywhere. A change bakes every level again.", "desktop"),
+             "same everywhere. Applied at once, with no rebake.", "desktop"),
             # (each campaign level's bake: menu_functions.c's bake_rows_show
             # writes its state each frame)
             (SECTION, "LEVELS"),

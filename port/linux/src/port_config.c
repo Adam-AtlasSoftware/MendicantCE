@@ -997,7 +997,8 @@ static const struct config_setting config_settings[] =
 		"open sky gets Tool's ambient and one under cover less, and a room with\n"
 		"no sky only what comes in. \"flat\" Tool's fill: the same light at\n"
 		"every point (the sky's outdoor value where the cluster has a sky, its\n"
-		"indoor value where it has none). A change bakes again." },
+		"indoor value where it has none). Applied as the bake loads, with no\n"
+		"rebake: the layered bake recombines its sky layer (docs/prism_bake.md)." },
 	{ "display.material_packs", _config_boolean, "true", "HALO_MATERIAL_PACKS", _environment_value,
 		_platform_desktop,
 		"PRISM v4's materials from packs and mods (docs/prism_materials.md), with\n"

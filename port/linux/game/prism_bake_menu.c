@@ -24,8 +24,11 @@ chosen, before they are played, as other games compile their shaders.
   map's BSPs, and each BSP baked with its key), by whichever process
   finished it, the worker or a game played (prism_bake_note, each frame): a
   BSP whose note's key is not the settings' (prism_bake_key: the baker's
-  version, display.bake_quality, prism_sky_light, prism_rig,
-  prism_world_geometry, prism_rt_alpha) is baked again. The baker itself
+  version, display.bake_quality, the rig's class, prism_rt_alpha; and the
+  BSP's own geometry, geometry_token: stock, or its remodel's file) is
+  baked again; a setting that only scales or tints a light (the sky's
+  light, the rig's scales) is recombined from the layered bake as it
+  loads, with no rebake. The baker itself
   checks the whole key as it loads a bake (the map, its geometry, its
   lights): a bake this note calls good that is not is baked again as the
   level is played.
@@ -51,6 +54,7 @@ still; it writes only its bake, its note and its progress.
 
 #include "cseries.h"
 #include "cache/cache_files.h"
+#include "tag_files/tag_files.h"
 #include "game/game.h"
 #include "hs/hs.h"
 #include "interface/interface.h"
@@ -105,7 +109,7 @@ void pc_menu_bake_questions_open(void);
 #define BAKE_LEVELS 10
 #define BAKE_BSPS 16
 #define BAKE_PATH 600
-#define BAKE_KEY 160
+#define BAKE_KEY 256
 /* the levels' notes read again this often, the worker's progress this often */
 #define NOTES_MILLISECONDS 2000ul
 #define PROGRESS_MILLISECONDS 500ul
@@ -247,6 +251,76 @@ static boolean file_exists(char const *path)
 	return posix_stat(path, &information) == 0;
 }
 
+/* a BSP's geometry as the note keeps it (per BSP, so that a change of the
+world's geometry bakes again only the BSPs it changes): "geo:pwg:<tag>:
+<size>:<time>" where display.prism_world_geometry is "remodel" and the BSP
+has a remodel (<data>/prism_world/<its tag>.pwg, prism_world_geometry.c),
+else "geo:stock:<tag>"; its tag's path with / for \ (the note keeps the
+rest of a line as the key, so a space in it is kept) */
+static void geometry_token(char const *tag, char *token, unsigned long size)
+{
+	char name[160], path[BAKE_PATH + 200];
+	struct posix_file_information information;
+	char const *geometry = config_string("display.prism_world_geometry");
+	unsigned long k;
+
+	snprintf(name, sizeof(name), "%s", tag ? tag : "");
+	/* (the path as prism_world_geometry.c opens it: / for \, nothing else
+	changed, so that a tag with a space finds its remodel) */
+	for (k = 0; name[k]; k++)
+	{
+		if (name[k] == '\\')
+			name[k] = '/';
+	}
+	snprintf(path, sizeof(path), "%s/prism_world/%s.pwg", platform_data_root(), name);
+	if (geometry && !strcmp(geometry, "remodel") && name[0] && posix_stat(path, &information) == 0)
+		snprintf(token, size, "geo:pwg:%s:%lu:%lu", name, (unsigned long)information.size_low,
+			(unsigned long)information.modification_seconds);
+	else
+		snprintf(token, size, "geo:stock:%s", name);
+}
+
+/* a BSP's whole key: the settings' and its geometry's */
+static void bsp_key(char const *base, char const *tag, char *key, unsigned long size)
+{
+	char token[BAKE_KEY];
+
+	geometry_token(tag, token, sizeof(token));
+	snprintf(key, size, "%s %s", base, token);
+}
+
+/* whether a BSP's noted key is good for the settings now: its settings' key
+the same, and its geometry the same (its token made again from the tag it
+names). An older note's key, with no geometry, is not */
+static boolean bsp_key_good(char const *noted, char const *base)
+{
+	char const *token = strstr(noted, " geo:");
+	char tag[160], now[BAKE_KEY + 8];
+	unsigned long length = (unsigned long)strlen(base);
+	char const *at;
+
+	if (!token || (unsigned long)(token - noted) != length || strncmp(noted, base, length))
+		return FALSE;
+	token++;
+	/* (the tag: after "geo:stock:", or after "geo:pwg:" to the next ':') */
+	if (!strncmp(token, "geo:stock:", 10))
+		at = token + 10;
+	else if (!strncmp(token, "geo:pwg:", 8))
+		at = token + 8;
+	else
+		return FALSE;
+	snprintf(tag, sizeof(tag), "%s", at);
+	if (token[4] == 'p')
+	{
+		char *colon = strchr(tag, ':');
+
+		if (colon)
+			*colon = 0;
+	}
+	bsp_key(base, tag, now, sizeof(now));
+	return !strcmp(now, noted);
+}
+
 /* a file written whole or not at all (written beside it, then renamed over
 it: Windows renames over no file, so it goes first) */
 static boolean file_write(char const *path, char const *text)
@@ -372,7 +446,7 @@ static void levels_read(void)
 		bsps = note_read(bake_levels[level].map, keys);
 		for (index = 0; index < bsps; index++)
 		{
-			if (!strcmp(keys[index], bake_menu.key))
+			if (bsp_key_good(keys[index], bake_menu.key))
 				baked++;
 		}
 		bake_menu.bsps[level] = bsps;
@@ -732,23 +806,37 @@ static void worker_frame(void)
 
 /* ---------- public code */
 
-/* the settings the bake holds, as the note keeps them: a BSP whose note's
-key is another is baked again (the baker's version, the quality, the sky's
-light, the rig, the remodelled level, the cutouts traced) */
-void prism_bake_key(char *key, unsigned long size)
+/* the rig's class the bake holds: the fitted rig's sky lights test their
+rays the whole level's length, the units rig's as far as their tags say
+(transport); "auto" is the units rig under both PRISM lightings */
+static char const *rig_class(char const *rig)
 {
-	snprintf(key, size, "v%u %s %s %s %s %s", (unsigned)XGPU_BAKE_VERSION, config_string("display.bake_quality"),
-		config_string("display.prism_sky_light"), config_string("display.prism_rig"),
-		config_string("display.prism_world_geometry"), config_boolean("display.prism_rt_alpha") ? "cutouts" :
-		"solid");
+	return rig && !strcmp(rig, "fitted") ? "fitted" : "units";
 }
 
-/* whether a setting is one the key holds (a change bakes every level again) */
-boolean prism_bake_key_setting(char const *name)
+/* the settings every BSP's bake holds, as the note keeps them: the baker's
+version, the quality, the rig's class, the cutouts traced. Not the sky's
+light, the rig's scales or the lamps' brightness: the layered bake
+recombines its layers by those as it loads (docs/prism_bake.md, "The
+layers"), with no rebake. The level's geometry is each BSP's own
+(geometry_token) */
+void prism_bake_key(char *key, unsigned long size)
 {
-	return name && (!strcmp(name, "display.bake_quality") || !strcmp(name, "display.prism_sky_light") ||
-		!strcmp(name, "display.prism_rig") || !strcmp(name, "display.prism_world_geometry") ||
-		!strcmp(name, "display.prism_rt_alpha"));
+	snprintf(key, size, "v%u %s %s %s", (unsigned)XGPU_BAKE_VERSION, config_string("display.bake_quality"),
+		rig_class(config_string("display.prism_rig")), config_boolean("display.prism_rt_alpha") ? "cutouts" : "solid");
+}
+
+/* whether a change of a setting from before to after changes what the bake
+holds (a REBAKE asked): the quality, the world's geometry, the cutouts, the
+rig's class; not the sky's light, which is recombined */
+boolean prism_bake_key_setting(char const *name, char const *before, char const *after)
+{
+	if (!name)
+		return FALSE;
+	if (!strcmp(name, "display.prism_rig"))
+		return strcmp(rig_class(before), rig_class(after)) != 0;
+	return !strcmp(name, "display.bake_quality") || !strcmp(name, "display.prism_world_geometry") ||
+		!strcmp(name, "display.prism_rt_alpha");
 }
 
 /* the main menu's bake runs (the lighting reads a bake, the card traces
@@ -814,11 +902,20 @@ static void prism_bake_note(void)
 	bake_menu.noted_generation = generation;
 	settings_read();
 	bsps = note_read(map, keys);
-	if (strcmp(keys[bsp], bake_menu.key) || bsps != scenario->structure_bsp_references.count)
 	{
-		snprintf(keys[bsp], BAKE_KEY, "%s", bake_menu.key);
-		note_write(map, scenario->structure_bsp_references.count, keys);
-		platform_log("prism bake: %s's BSP %d noted baked (%s)", map, (int)bsp, bake_menu.key);
+		struct scenario_structure_bsp_reference const *reference = TAG_BLOCK_GET_ELEMENT(
+			&scenario->structure_bsp_references, bsp, struct scenario_structure_bsp_reference);
+		char const *tag = reference && reference->structure_bsp.index != NONE ?
+			tag_get_name(reference->structure_bsp.index) : NULL;
+		char key[BAKE_KEY];
+
+		bsp_key(bake_menu.key, tag, key, sizeof(key));
+		if (strcmp(keys[bsp], key) || bsps != scenario->structure_bsp_references.count)
+		{
+			snprintf(keys[bsp], BAKE_KEY, "%s", key);
+			note_write(map, scenario->structure_bsp_references.count, keys);
+			platform_log("prism bake: %s's BSP %d noted baked (%s)", map, (int)bsp, key);
+		}
 	}
 }
 
