@@ -181,6 +181,14 @@ grid's light work; Windows's limit is 2 s, then the device is lost) */
 #define BOUNCES 32
 /* the black floor: 1/1000 of middle grey (D4, docs/prism_gates.md) */
 #define BLACK_FLOOR (0.18f * 1.0e-3f)
+/* `max`'s hard cap on a texel's or probe's samples: the 1% rule under the
+noise floor finishes almost every texel far below it (c10's most about
+50,000), but a handful of near-black texels lit by rare paths never meet it
+(a50's first BSP: 5 texels still running after 13 half-hour slices, one at
+242,944 samples). A texel stopped by the cap closes at its running mean; the
+robust mean and the filter take its residual noise. Counted in the log
+("capped"). Samples, not seconds, so the bake stays the same on every card */
+#define MAX_SAMPLES_CAP 65536.0f
 
 #define BAKE_FUNCTIONS(F) \
 	F(vkCreateBuffer) F(vkDestroyBuffer) F(vkGetBufferMemoryRequirements) F(vkAllocateMemory) F(vkFreeMemory) \
@@ -465,7 +473,7 @@ struct bake_state
 	/* the `max` tier's noise floor (radiance; 0 none) and the texels it
 	stopped (converged with their light below it) */
 	float noise_floor;
-	double texels_floor, texels_converged;
+	double texels_floor, texels_converged, texels_capped;
 	/* the GPU time this run gave the bake (its timestamps') */
 	double gpu_seconds;
 	/* the importance step: the cells weighed so far */
@@ -2174,6 +2182,13 @@ static struct bake_state *bake_begin(void)
 	b->key.light_hash = hash;
 	b->key.settings_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
 	b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->noise_floor, sizeof(b->noise_floor));
+	if (b->quality == PRISM_BAKE_QUALITY_MAX)
+	{
+		/* (`max`'s cap: a bake begun with no cap is not resumed under one) */
+		float cap = MAX_SAMPLES_CAP;
+
+		b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &cap, sizeof(cap));
+	}
 	if (b->seed)
 		b->key.settings_hash = prism_bake_hash64(b->key.settings_hash, &b->seed, sizeof(b->seed));
 	{
@@ -3241,6 +3256,8 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 			if (b->noise_floor > 0.0f && a[13] < b->noise_floor)
 				b->texels_floor += 1.0;
 		}
+		if (flags && b->quality == PRISM_BAKE_QUALITY_MAX && (float)count >= MAX_SAMPLES_CAP)
+			b->texels_capped += 1.0;
 		if (!flags || (states[index] != 1 && states[index] != 2))
 			continue;
 		/* (the robust mean: the level the filter compares, the groups'
@@ -3839,7 +3856,7 @@ static VkDeviceAddress gather_cache(struct bake_state *b)
 tiers': section 3.6's counts; `max` none, D4) */
 static float cap_of(struct bake_state *b)
 {
-	static const float caps[NUMBER_OF_PRISM_BAKE_QUALITIES] = { 64.0f, 512.0f, 2048.0f, 0.0f };
+	static const float caps[NUMBER_OF_PRISM_BAKE_QUALITIES] = { 64.0f, 512.0f, 2048.0f, MAX_SAMPLES_CAP };
 
 	return b->quality < NUMBER_OF_PRISM_BAKE_QUALITIES ? caps[b->quality] : 0.0f;
 }
@@ -5382,12 +5399,12 @@ static void bake_log_progress(struct bake_state *b)
 	bake.last_status = t;
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: step %d, tiles %u of %u, masks %u of %u, probes %u of %u, "
 		"%.0f s, %u samples a dispatch (%.1f ms of GPU), %u texels running, %.0f MB written; %.0f samples a texel (the "
-		"most %u; %.0f%% by the firefly rule; %.0f%% of those converged by the noise floor), %.1f M samples a second, "
-		"%.1f s of GPU", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
+		"most %u; %.0f%% by the firefly rule; %.0f%% of those converged by the noise floor; %.0f capped), %.1f M samples "
+		"a second, %.1f s of GPU", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
 		b->mask_tile_count, b->volume.done, b->plan.probe_count, t - b->started, bake.samples, bake.gpu_milliseconds,
 		b->running_texels, (double)b->file_bytes / 1048576.0, b->texels_baked > 0.0 ? (double)b->rays / b->texels_baked : 0.0,
 		b->samples_most, b->texels_baked > 0.0 ? 100.0 * b->texels_firefly_bound / b->texels_baked : 0.0,
-		b->texels_converged > 0.0 ? 100.0 * b->texels_floor / b->texels_converged : 0.0,
+		b->texels_converged > 0.0 ? 100.0 * b->texels_floor / b->texels_converged : 0.0, b->texels_capped,
 		(double)b->rays / (t - b->started + 1.0e-3) / 1.0e6, b->gpu_seconds);
 }
 
