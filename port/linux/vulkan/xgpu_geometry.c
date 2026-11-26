@@ -40,6 +40,8 @@ struct entry
 	uint32_t budget_lod;
 	/* the frames the budgets last made its drawn and traced levels coarser */
 	uint64_t budget_frame, traced_frame;
+	/* the frame its drawn level last changed (by its size or a budget) */
+	uint64_t level_frame;
 	/* skinned each frame (a rig, or moving: its skinning not kept), and the
 	frames its skinning has been kept in a row */
 	int per_frame;
@@ -452,7 +454,13 @@ static void skinned_share(struct xgpu_geometry *geometry)
 	band = (uint64_t)((float)budget * BUDGET_BAND);
 	if (total > budget)
 	{
+		int settled;
+
 		order_sort(geometry, geometry->order, count, 1);
+		/* (the objects whose level has not changed lately first, so that a
+		level just made finer by its size is not undone at once: a flip;
+		then any) */
+		for (settled = 1; settled >= 0 && total > budget; settled--)
 		for (pass = 0, changed = 1; changed && total > budget && pass < XGPU_GEOMETRY_LODS; pass++)
 		{
 			changed = 0;
@@ -460,8 +468,10 @@ static void skinned_share(struct xgpu_geometry *geometry)
 			{
 				struct entry *entry = &geometry->entries[geometry->order[index]];
 
-				if (entry->lod >= entry->drawable_last)
+				if (entry->lod >= entry->drawable_last ||
+					(settled && entry->level_frame + XGPU_GEOMETRY_FLIP_FRAMES >= geometry->frame))
 					continue;
+				entry->level_frame = geometry->frame;
 				total -= entry->vertices[entry->lod];
 				entry->lod++;
 				entry->budget_lod = entry->lod;
@@ -481,7 +491,8 @@ static void skinned_share(struct xgpu_geometry *geometry)
 			struct entry *entry = &geometry->entries[geometry->order[index]];
 			uint64_t finer;
 
-			if (!entry->budget_lod || geometry->frame - entry->budget_frame < BUDGET_HOLD_FRAMES)
+			if (!entry->budget_lod || geometry->frame - entry->budget_frame < BUDGET_HOLD_FRAMES ||
+				entry->level_frame + 2u * XGPU_GEOMETRY_FLIP_FRAMES >= geometry->frame)
 				continue;
 			/* (held at its budget's level: one level finer where the total
 			stays in the band; held coarser by its own size: let go) */
@@ -495,6 +506,7 @@ static void skinned_share(struct xgpu_geometry *geometry)
 				continue;
 			total = finer;
 			entry->budget_lod--;
+			entry->level_frame = geometry->frame;
 		}
 	}
 	for (index = 0; index < count; index++)
@@ -688,6 +700,8 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 			say(geometry, 2, "geometry: frame %llu object %08x mesh %x level %u -> %u (%.1f px%s, %.1f wu)",
 				(unsigned long long)geometry->frame, object, mesh, entry->lod, lod, (double)pixels,
 				shadow ? " estimated" : "", (double)distance);
+		if (entry->lod_known && lod != entry->lod)
+			entry->level_frame = geometry->frame;
 		entry->lod = lod;
 		entry->lod_known = 1;
 		entry->decided_frame = geometry->frame;
