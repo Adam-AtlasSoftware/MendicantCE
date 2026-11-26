@@ -61,6 +61,7 @@ NO_BUILD_TESTS = [
     "tools/test_checkpoint_epoch.py", "tools/test_coop_checkpoint.py", "tools/test_coop_checkpoint_recovery.py",
     "tools/test_mcc_checkpoint.py", "tools/test_mcc_keyboard_glyphs.py", "tools/test_controller_buttons.py",
     "tools/test_hud_button_style.py", "tools/test_hud_corrections.py", "tools/test_ci_plan.py",
+    "tools/test_geopatch.py", "tools/test_prism_world_ids.py",
 ]
 
 # The tests that read linux-x86_64's debug build, that job's (its Start the build's tests step)

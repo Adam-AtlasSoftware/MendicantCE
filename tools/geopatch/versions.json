@@ -1,0 +1,221 @@
+{
+ "comment": "Retail Xbox map versions the farm builds from (PLAN_FINAL.md section 2.1): per input file its name, build, header checksum, size, SHA-256 of the file and base_id (SHA-256 of the inflated body, port/linux/game/prism_identity.h). Hashes only: no retail bytes. classic_world_id is the farm's, added when the farm computes it.",
+ "versions": [
+  {
+   "map": "a10",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "e6ac8e18",
+   "size": 173903872,
+   "sha256": "f7461e5b6eaf0314c4f03a1c6e43752b06ae3e4782b70b240a8c15e5f634b3ce",
+   "base_id": "0f4c7255801ba85b8acb8bc642441e4e23711ea067a50b8fd6ce4e137224737c"
+  },
+  {
+   "map": "a30",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "5b4c2953",
+   "size": 152610816,
+   "sha256": "4875fa105e6c517589a796cfdcc7fcaa07e98df13d14e601bfc9eb1eab7e30b5",
+   "base_id": "b3e2322fbb726a7381c998fba1da7c4393629a829059cb63842e70d4bd97cce6"
+  },
+  {
+   "map": "a50",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "2ae9c2ed",
+   "size": 176224256,
+   "sha256": "f8ec33c0130191cf944ef7b4a3f210bb680cfd1341cdf3a6ef3447391049abe7",
+   "base_id": "cf3ea4f7699f96b8a87af54231941e9e3b1b3871ce9b6185083948a442a23679"
+  },
+  {
+   "map": "b30",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "cb35bb26",
+   "size": 162877440,
+   "sha256": "a6e2ae628f96b666922d6429541068c3e117e8aa5031d00d187b3c853630be0f",
+   "base_id": "2c9b81fc1f7e9dd9826f4746a97e98a9d2c9a160f5d07d198ead2c43b1295b21"
+  },
+  {
+   "map": "b40",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "580cd8d3",
+   "size": 186873856,
+   "sha256": "0a7b26d6d828e7b773d36d9d5c798b9bf4b143332301a0c0e7a3d685782eab48",
+   "base_id": "566cbd758b0cfbda5b26e7e20ba750d0cbd28d941237f89735020bbfc27cd807"
+  },
+  {
+   "map": "beavercreek",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "a831a7bf",
+   "size": 22122496,
+   "sha256": "c65ac17d830552cdebfc173c1e8aa17f1f009149138c2c8e72afda1f79f88a60",
+   "base_id": "e10fabbbdbd39b27d7a3c6af8dcfe7df14051efe9187b7a424b3e4c48f4990e2"
+  },
+  {
+   "map": "bloodgulch",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "035e2da3",
+   "size": 22571008,
+   "sha256": "50fe52406f075d975e24100a65b26ff696458023dd3509878953052ab0ef858f",
+   "base_id": "4acf56498a053b031af78b48fbe8a4ebd495340ec9455837e616bca730e55d13"
+  },
+  {
+   "map": "boardingaction",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "a0d614f5",
+   "size": 22075392,
+   "sha256": "e14cebccd63f7780e1f5da7a1687a37bdaa3f0821701095075336ef548889efb",
+   "base_id": "1f6fd2ae877d698e33de2d990e8a27f29e55c1596522e041005f2352140b07b9"
+  },
+  {
+   "map": "c10",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "4a170f76",
+   "size": 166926336,
+   "sha256": "d65683f92e2f78cf8ba4d31c26b212869652b5d5ec037add480865a49e18434e",
+   "base_id": "1c40ec37ac4537be25337c2cda94900e0b2bd8d6d47cc6c4b4bec5f32cb8a65c"
+  },
+  {
+   "map": "c20",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "d22193c1",
+   "size": 76980224,
+   "sha256": "6560cd88af4c5b4e2f02f14017085a7b47e9a9622198c30f36b03d3d3943d6b8",
+   "base_id": "1071b3f8d5b93afbe61aa96d036754ba20391fbf5ff9903a2a588295247d27ad"
+  },
+  {
+   "map": "c40",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "61a4799d",
+   "size": 166295552,
+   "sha256": "b5fb3db5b111280e8494c5ec7612604d7facd1e0a511987afa38a228a115a896",
+   "base_id": "382b1c625c5bce1b5d3c7e8dd8b7a5e1157cb000559a5792c6a3b5778687d216"
+  },
+  {
+   "map": "carousel",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "b38b62c7",
+   "size": 20215808,
+   "sha256": "1c6353df6e4530437841b09775e62fa067caa46bb0e40f4579bbf2276991a38e",
+   "base_id": "76edc30a0c76569b720f95b24efc8ad33a36835c3454856c36f6e7c4843db78f"
+  },
+  {
+   "map": "chillout",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "086c74ad",
+   "size": 20336640,
+   "sha256": "81819e9d7037a6b6c4e9a7472a431ebb53ed25ea00d8af634ac8384f1fe13d8b",
+   "base_id": "a2da819d6a7258de75b2140d1c2fa8440e3a2438acc479f36928632f49de22be"
+  },
+  {
+   "map": "d20",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "3c590eec",
+   "size": 131012608,
+   "sha256": "6b38b4776f4be1e9e12063db202e5809245aae0ded3d9cef56602d7fd69c96be",
+   "base_id": "bef02f11a154e3495a163173521a6a434c02d2c2376faa5f6bc4b9f937e1e5c7"
+  },
+  {
+   "map": "d40",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "eb84833e",
+   "size": 170405888,
+   "sha256": "7c6dccc9f928f4a44db992c4d6f5fa6191e9cfd331bb0d0b631540f0fc9bc796",
+   "base_id": "72e38c653add03a9d98e1809f259642a345e3008aec509264850a27c3d4016ae"
+  },
+  {
+   "map": "damnation",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "911cd6ee",
+   "size": 23756800,
+   "sha256": "8b97ca7d73a4b720ba1b88deeb5a250b02a3f6886ffd2ddaa789cc9ad05e47b8",
+   "base_id": "aa79df890af7925c127ca8ae580cedff2206662bff71eec9fcb6547453e3e833"
+  },
+  {
+   "map": "hangemhigh",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "8313bd85",
+   "size": 21338112,
+   "sha256": "932a3a13a69fff5dd6e69c9b2c896c1bf3942c54a2a207975c4d0da4df07ed30",
+   "base_id": "3f814464791c527177c773a812118344a9a533730376e2e4993b0ea0e40b84d2"
+  },
+  {
+   "map": "longest",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "df1deaa6",
+   "size": 20512768,
+   "sha256": "12977a4042ecb960cbe48ef936046a35c6754c18829ad2d17206b66ddd03864e",
+   "base_id": "733ef78b0f646709e680f6d23782cf5ca3f700f02aaa08566a5727c9ce24017c"
+  },
+  {
+   "map": "prisoner",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "b68da242",
+   "size": 21323776,
+   "sha256": "50740d89600b7fa53613ced764fa6e688434a8132948224658bf1ed07662aa3d",
+   "base_id": "443a7d707a3cf782e03c1fc763fcb8428381da75dd7f65da4ed331b1c599fccd"
+  },
+  {
+   "map": "putput",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "b3f87f50",
+   "size": 19777536,
+   "sha256": "7f5d13335d44982b0fbf7aad6b767d035aa64b32bf5c38d6d29bf20916fce5d4",
+   "base_id": "8455128b4a330b308c08c956d27e638cb83e5b93ba061dcf727928d93c48d13f"
+  },
+  {
+   "map": "ratrace",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "af5f3831",
+   "size": 23840768,
+   "sha256": "ad83896842b2303d145b944f644e4ddfe8d0dd80feda7efcb058a0f567a6bdec",
+   "base_id": "b1b6d74fe629dcbce217062b96a593711f1a787ffbee1285a8b8690de50b82a8"
+  },
+  {
+   "map": "sidewinder",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "4f8e749d",
+   "size": 24823808,
+   "sha256": "210f7a01bac7b4c242483b1a640e0bc32fb0a2b4f97f56e69668720563b34912",
+   "base_id": "abb1a9da55c72e7a2640009007bfd14920563f9993f16d8b9edb646b7090e3cf"
+  },
+  {
+   "map": "ui",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "cdc1a39a",
+   "size": 14145536,
+   "sha256": "35e3e560478d85178749be310ad13d6d6ecde618d32675261a3554592333a833",
+   "base_id": "a3617f34bb29ffd46ffc373fec98ff4012cafd0e79cc0d7292ab2da3aa86116e"
+  },
+  {
+   "map": "wizard",
+   "build": "01.10.12.2276",
+   "region": "NTSC",
+   "header_checksum": "2d5a08fc",
+   "size": 19687424,
+   "sha256": "e782ad19071efa1c73f30be44feb6b7e073e15f00337e23d877a8e9776f2f3ad",
+   "base_id": "c26c6d1ba5ff55086b06daa17b79ccf803e812d0b31edc1d27dfe26f5d1c64a2"
+  }
+ ]
+}
