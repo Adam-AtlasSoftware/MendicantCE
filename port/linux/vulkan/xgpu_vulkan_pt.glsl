@@ -93,6 +93,17 @@ Job job;
 sampling between ReSTIR DI and the reflection's GGX ray (lamp_mis_nee): a
 pixel whose reflection is traced) */
 bool lamps_mis = false;
+/* (FLAG_PROBE_ONLY, a diagnosis: a pixel whose reflection is read from the
+bake's probes takes the lamps' specular light from the probes alone (their
+faces are in the probes' light: the bake's path() takes each hit's glow),
+ReSTIR DI giving it the lamps' diffuse light alone; the fixtures and the
+dynamic lights, which no probe holds, keep theirs. It lost the lamps' pools
+on c20's walls that R has; by default the probe is scaled instead, below) */
+bool lamps_probe = false;
+/* (ReSTIR DI's light-tree candidate by the specular lobe: the mirror
+direction and alpha squared (w 0: none), F0's luminance, n.v; tree_importance) */
+vec4 tree_lobe = vec4(0.0);
+float tree_lobe_f0 = 0.0, tree_lobe_nv = 1.0;
 /* (hit_light_n's last triangle met on the level, else 0xffffffff) */
 uint hit_light_triangle = 0xffffffffu;
 
@@ -110,9 +121,13 @@ layout(buffer_reference, std430, buffer_reference_align = 16) buffer Counters
 4's, which spread a sample from pixel to pixel over the frames: the blobs in
 motion); the temporal reuse by a permutation of the 4 x 4 about the place; the spatial disc's radius in
 pixels in bits 16 to 23 (0: 16);
-the boiling filter's strength in hundredths (bits 8 to 15, 0 none) */
+the boiling filter's strength in hundredths (bits 8 to 15, 0 none); the
+light tree's candidates in bits 4 to 7, its emitters' cones in bit 3 */
 const uint REUSE_FEEDBACK = 1u;
 const uint REUSE_PERMUTE = 2u;
+/* (the light tree's candidate by the surface's specular lobe as well as its
+cosine: tree_lobe, HALO_PT_TREE_LOBE) */
+const uint REUSE_TREE_LOBE = 4u;
 /* job.parts_off (a diagnosis of the light pass's cost, HALO_PT_PARTS_OFF):
 the sun's ray, the domes, ReSTIR DI's spatial reuse, the bounce, the
 reflection's ray, ReSTIR GI's reuse, the spatial neighbours' traced Z left
@@ -131,6 +146,8 @@ const uint FLAG_PERFORMANCE = 2u;
 const uint FLAG_DENOISER_OFF = 4u;
 const uint FLAG_REFERENCE = 8u;
 const uint FLAG_TILES = 16u;
+const uint FLAG_PROBE_NEE = 32u;
+const uint FLAG_PROBE_ONLY = 128u;
 /* the reference's sums: floats a pixel (the diffuse light's mean, the
 specular's, the luminance's mean and squared deviations, the distance, then
 the means and squared deviations of its parts' luminances: the direct, the
@@ -185,6 +202,13 @@ layout(set = 0, binding = 36, rgba32f) uniform image2D gi_data_now;
 the view (xgpu_vulkan_upscale.c: it takes the frame as linear light before
 the tone mapping and its output is tone mapped again by these) */
 layout(set = 0, binding = 37, rgba16f) uniform image2D exposure_out;
+/* the temporal stabilisation's histories (the pass "stabilize"): the
+filtered diffuse and specular light as shown, the last frame's and this
+frame's, their frames in alpha */
+layout(set = 0, binding = 38, rgba16f) uniform image2D stab_diff_last;
+layout(set = 0, binding = 39, rgba16f) uniform image2D stab_diff_now;
+layout(set = 0, binding = 40, rgba16f) uniform image2D stab_spec_last;
+layout(set = 0, binding = 41, rgba16f) uniform image2D stab_spec_now;
 
 ivec2 size_of() { return ivec2(job.counts.y, job.counts.z); }
 bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(job.counts.y) && p.y < int(job.counts.z); }
@@ -386,11 +410,37 @@ that sum to 1 at every direction keeps the light unbiased, and this one
 gives a lamp wider than the lobe to the ray (a mirror's highlight, which a
 point on the lamp rarely finds) and a lamp narrower than the lobe to the
 lamp's point (a rough floor's, which the ray rarely meets) */
-float lamp_mis_nee(Surface g, vec3 l, float solid)
+/* (FLAG_LAMP_MIS: the lamp's own density taken as the chance next-event
+estimation finds it, not 1: the lamp's unshadowed diffuse light here over
+the bake's direct light at the pixel (the lamps' light the texel holds: its
+whole less its indirect layer), by the candidates a pixel draws, at most 1.
+A small lamp that adds little light but a bright highlight on a glossy
+surface (a semi-glossy wall's glints of a lamp beside it, c10's lab and
+b30's G4 walls) is drawn by few candidates; with the weight of 1 / its solid
+angle its highlight was left to next-event estimation, which met it once in
+hundreds of frames as a white sparkle. Now the reflection's ray, which meets
+it every frame its lobe holds it, takes it. Any weights that sum to 1 over
+the two strategies keep the estimate unbiased; both sides compute these the
+same way at a pixel: lamp_direct_total, the bake's direct light here, set by
+the light pass; 0 (no texel, the flag off) the old weight) */
+const uint FLAG_LAMP_MIS = 256u;
+/* the lamp ray's roughness at most (job.frame.w, in hundredths:
+HALO_PT_LAMP_RAY; 0 none) and its reach */
+float lamp_ray_roughness() { return float(job.frame.w) / 100.0; }
+const float LAMP_RAY_REACH = 60.0;
+float lamp_direct_total = 0.0;
+float lamp_mis_nee(Surface g, vec3 l, float solid, float radiance)
 {
+    if (lamps_probe)
+        return 0.0;
     if (!lamps_mis)
         return 1.0;
     float pb = ggx_pdf(g, l), q = 1.0 / max(solid, 1.0e-8);
+    if (lamp_direct_total > 0.0)
+    {
+        float own = radiance * solid * max(dot(g.normal, l), 0.0) / PI;
+        q *= clamp(max(job.extra.x, 1.0) * 2.0 * own / lamp_direct_total, 1.0e-3, 1.0);
+    }
     return q * q / (q * q + pb * pb);
 }
 
@@ -914,11 +964,8 @@ bool structure_flag_hit(vec3 o, vec3 d, float t_max, out bool inside)
     }
     return false;
 }
-vec3 floor_light(Surface g)
+bool surface_inside(Surface g)
 {
-    vec3 outdoor = ambient(), inside_light = ambient_indoor();
-    if (!units_rig() || all(equal(outdoor, inside_light)))
-        return outdoor;
     bool inside = false;
     if (g.instance == 0u)
     {
@@ -927,7 +974,14 @@ vec3 floor_light(Surface g)
     }
     else
         structure_flag_hit(g.point + vec3(0.0, 0.0, 0.01), vec3(0.0, 0.0, -1.0), 64.0, inside);
-    return inside ? inside_light : outdoor;
+    return inside;
+}
+vec3 floor_light(Surface g)
+{
+    vec3 outdoor = ambient(), inside_light = ambient_indoor();
+    if (!units_rig() || all(equal(outdoor, inside_light)))
+        return outdoor;
+    return surface_inside(g) ? inside_light : outdoor;
 }
 /* the floor the bake added at a ray's hit: its texel's triangle's (flag 8 in
 the bake's setup), or the volume's probes' (where they stand: the bake's
@@ -996,7 +1050,7 @@ bool sample_light(Surface g, int kind, uint index, vec3 y, out vec3 dif, out vec
         if (ce <= 0.0)
             return false;
         parts(g, l, radiance * c, false, dif, spe);
-        spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * ce / d2);
+        spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * ce / d2, luma(radiance));
         float geometry = ce / d2;
         dif *= geometry;
         spe *= geometry;
@@ -1047,6 +1101,15 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
     if (lamps_on)
     {
         Floats f = Floats(s.lamps);
+        /* (the tree's candidate by the specular lobe too, under a roughness
+        of 0.9: tree_importance) */
+        if ((job.reuse_flags & REUSE_TREE_LOBE) != 0u && g.roughness < 0.9)
+        {
+            float a = max(g.roughness * g.roughness, 1.0e-3);
+            tree_lobe = vec4(reflect(-g.eye, g.normal), a * a);
+            tree_lobe_f0 = luma(f0_of(g));
+            tree_lobe_nv = clamp(dot(g.normal, g.eye), 0.1, 1.0);
+        }
         for (int c = 0; c < lamp_count; c++)
         {
             float probability;
@@ -1068,7 +1131,8 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
                 continue;
             vec3 dif, spe;
             parts(g, l, radiance * c_, false, dif, spe);
-            spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * max(dot(ne, -l), 0.0) / max(d * d, 1.0e-8));
+            spe *= lamp_mis_nee(g, l, 0.5 * length(cross(a1 - a0, a2 - a0)) * max(dot(ne, -l), 0.0) / max(d * d, 1.0e-8),
+                luma(radiance));
             float target = luma(dif) + luma(spe);
             float w = target * inverse_pdf / probability / float(lamp_count);
             if (!(w > 0.0) || isinf(w))
@@ -1084,6 +1148,7 @@ void lights_initial(Surface g, int lamp_count, int fixture_count, int dynamic_co
             }
         }
     }
+    tree_lobe = vec4(0.0);
     uint fixtures = uint(s.lamp.z);
     if (fixtures > 0u && !term_off(16u) && fixture_count > 0)
     {
@@ -1509,6 +1574,20 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Tr
     float v[];
 };
 bool tree_on() { return job.tree != uvec2(0u) && job.extra.w >= 1.0; }
+/* (ReSTIR DI's tree candidate on a glossy or semi-rough surface,
+REUSE_TREE_LOBE: each node's importance takes the surface's specular lobe
+as well as its diffuse cosine bound (Conty Estevez and Kulla 2018's
+importance with a BRDF term, as their paper's glossy extension describes):
+the GGX distribution at the half-angle nearest the node's bounding cone
+about the mirror direction, by the surface's F0, over 4 n.v. A small lamp
+whose diffuse light at the pixel is little but whose highlight on a
+semi-glossy wall is bright (c10's lab: the blue lamps' glints on the door's
+wall; b30's G4 walls) was drawn by its diffuse share alone, a candidate in
+hundreds of frames, each find a sparkle; the lobe term draws it most frames
+the lobe holds it. Only the descent's own choices change, its probability
+is the product of the choices it made, so the candidate's weight stays
+exact. tree_lobe.w 0: the cosine alone (the reference's, and every other
+use's; tree_lobe is declared with the light pass's other state, above) */
 float tree_importance(uint node, vec3 p, vec3 n)
 {
     Tree t = Tree(job.tree);
@@ -1524,13 +1603,13 @@ float tree_importance(uint node, vec3 p, vec3 n)
         float cos_u = sqrt(max(1.0 - r2 / dist2, 0.0)), sin_u = sqrt(min(r2 / dist2, 1.0));
         float cos_i = dot(n, d) * inversesqrt(dist2), sin_i = sqrt(max(1.0 - cos_i * cos_i, 0.0));
         bound = cos_i >= cos_u ? 1.0 : max(cos_i * cos_u + sin_i * sin_u, 0.0);
-        /* (the emitters' side, HALO_PT_TREE_CONES=1 (job.volume.w past 16): the best
+        /* (the emitters' side, HALO_PT_TREE_CONES=1 (reuse_flags' bit 3): the best
         cosine of a lamp of the node toward p, its normals' cone (axis,
         half angle) widened by the sphere's angle from p; one-sided
         Lambertian lamps, nought past a right angle: Conty Estevez and Kulla
         2018's theta prime) */
         float cos_o = t.v[b + 15u];
-        if (SPEC_CONES && cos_o > -0.99 && job.volume.w >= 16.0)
+        if (SPEC_CONES && cos_o > -0.99 && (job.reuse_flags & 8u) != 0u)
         {
             /* (cos(theta - theta_o - theta_u) by the angles' sums, no
             inverse trigonometry: theta past the two, else 1) */
@@ -1551,7 +1630,24 @@ float tree_importance(uint node, vec3 p, vec3 n)
             }
         }
     }
-    return t.v[b + 6u] * bound / max(dist2, max(r2, 1.0e-8));
+    float weight = bound;
+    if (tree_lobe.w > 0.0 && bound > 0.0)
+    {
+        /* (the best angle between the mirror direction and the cone from p
+        to the node's sphere, half of it the half vector's to the normal) */
+        float cos_rb = 1.0;
+        if (dist2 > r2)
+        {
+            float cos_u = sqrt(max(1.0 - r2 / dist2, 0.0)), sin_u = sqrt(min(r2 / dist2, 1.0));
+            float cos_r = clamp(dot(tree_lobe.xyz, d) * inversesqrt(dist2), -1.0, 1.0);
+            float sin_r = sqrt(max(1.0 - cos_r * cos_r, 0.0));
+            cos_rb = cos_r >= cos_u ? 1.0 : cos_r * cos_u + sin_r * sin_u;
+        }
+        float ch2 = max(0.5 * (1.0 + cos_rb), 0.0), a2 = tree_lobe.w;
+        float dd = ch2 * (a2 - 1.0) + 1.0;
+        weight += PI * tree_lobe_f0 * (a2 / (PI * dd * dd)) / (4.0 * tree_lobe_nv);
+    }
+    return t.v[b + 6u] * weight / max(dist2, max(r2, 1.0e-8));
 }
 /* a node's chance of its left child (by their importances; by their powers
 where both are nought: none of their lamps reaches p, any choice is right) */
@@ -1631,10 +1727,16 @@ lamps' light over count); the tree's one candidate finds the lamps the
 grid's lists miss near a cell's surfaces (round 1's a10 fireflies) at one
 tree descent a pixel. The mixture for every candidate (lamp_pick_mixed, the
 reference's) cost two descents a candidate: 12 ms of the RTX 3070 Ti's
-light pass at 1080p, G2 and G5 alike. */
+light pass at 1080p, G2 and G5 alike. Since the dark interiors' second
+round every candidate is the tree's by default (reuse_flags' bits 4 to 7,
+HALO_PT_TREE_CANDIDATES 4), its importance by the surface's specular lobe as
+well (tree_lobe): the grid's lists, ranked by the lamps' light at a cell's
+few points, missed the lamps whose glints a semi-glossy wall shows (c10's
+lab, b30's G4 walls, a10's corridor floor through the door windows), each
+find a sparkle. */
 uint lamp_pick_live(vec3 p, vec3 n, int c, int count, out float probability)
 {
-    if (!tree_on() || c < count - int(max(mod(job.volume.w, 16.0), 1.0)))
+    if (!tree_on() || c < count - int(max((job.reuse_flags >> 4) & 15u, 1u)))
         return lamp_pick(p, probability);
     return tree_pick(p, n, probability);
 }
@@ -2530,6 +2632,18 @@ void main()
     reflections (G5's second pose); by the ray alone a semi-glossy wall's
     pool of a small lamp's light is met by few rays (G4's second pose)) */
     bool glossy = g.roughness <= job.settings.y && indirect_on;
+    /* (a rough pixel whose reflection the probes give, up to job.frame.w's
+    roughness (HALO_PT_LAMP_RAY): one GGX ray meets the lamps' faces as the
+    traced reflection does, its lamps' light shared with ReSTIR DI by the same
+    multiple importance sampling (lamp_mis_nee), the rest of the reflection
+    the probe's. A small lamp's highlight on a semi-rough, normal-mapped wall
+    (roughness about 0.4 to 0.5: b30's G4 walls, c10's lab) was ReSTIR's
+    alone: its candidates, drawn by the lamps' light at the cell, met the
+    lamp the lobe holds once in hundreds of frames, each time a white
+    sparkle the denoiser spread into a dot. The GGX ray's weight is bounded
+    (Fresnel by G2 / G1), so a lamp it meets is its radiance at most) */
+    bool lamp_ray = indirect_on && !glossy && g.roughness <= lamp_ray_roughness() &&
+        (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u && !part_off(PARTS_REFLECTION);
     /* (the reflection ray's length, for the specular history's virtual
     motion: 0 where none is traced, far where it leaves the level) */
     float spec_hit = 0.0;
@@ -2545,10 +2659,15 @@ void main()
         if (!part_off(PARTS_DOMES))
             noisy_d += domes_objects_at(o, g.normal, m) * ambient_share;
         vec3 ld, ls;
+        lamps_probe = indirect_on && !(g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION)) &&
+            (job.frame.y & FLAG_PROBE_ONLY) != 0u;
         seed_for(pixel, frame, 3u);
-        lamps_mis = glossy;
+        lamps_mis = (glossy || lamp_ray) && !part_off(PARTS_REFLECTION);
+        lamp_direct_total = texel && (job.frame.y & FLAG_LAMP_MIS) != 0u ?
+            max(luma(bake_total - bake_indirect), 0.0) : 0.0;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
         lamps_mis = false;
+        lamps_probe = false;
         noisy_d += ld;
         noisy_s += ls;
         seed_for(pixel, frame, 9u);
@@ -2633,7 +2752,7 @@ void main()
                         lamp's sample measures it) */
                         vec3 to = o + r * hd - g.point;
                         lamps_mis = true;
-                        met += lamp * (1.0 - lamp_mis_nee(g, r, area * ce / max(dot(to, to), 1.0e-8)));
+                        met += lamp * (1.0 - lamp_mis_nee(g, r, area * ce / max(dot(to, to), 1.0e-8), luma(lamp)));
                         lamps_mis = false;
                     }
                 }
@@ -2643,12 +2762,58 @@ void main()
         else
         {
             float found;
+            if (lamp_ray && direct_on && !part_off(PARTS_REFLECTION))
+            {
+                vec3 weight;
+                seed_for(pixel, frame, 10u);
+                vec3 rl = ggx_sample(g, weight);
+                vec3 nh, object_albedo;
+                uint t;
+                vec2 b;
+                float hd = dot(weight, weight) > 0.0 ? scene_hit(o, rl, LAMP_RAY_REACH, nh, t, b, object_albedo) : -1.0;
+                if (hd > 0.0 && t != OBJECT_HIT)
+                {
+                    vec3 lamp = lamp_met(t, rl);
+                    if (dot(lamp, lamp) > 0.0)
+                    {
+                        vec3 e = cross(corner(t, 1u) - corner(t, 0u), corner(t, 2u) - corner(t, 0u));
+                        float ce = abs(dot(normalize(e), rl));
+                        vec3 to = o + rl * hd - g.point;
+                        lamps_mis = true;
+                        noisy_s += weight * lamp * (1.0 - lamp_mis_nee(g, rl, 0.5 * length(e) * ce /
+                            max(dot(to, to), 1.0e-8), luma(lamp)));
+                        lamps_mis = false;
+                    }
+                }
+            }
             vec3 r = reflect(-g.eye, g.normal);
             vec3 probe = reflection_at(o, r, g.roughness, found);
             if (found <= 0.0)
             {
                 vec4 v;
                 probe = volume_at(o, r, v) ? v.rgb : texel ? bake_total : vec3(0.0);
+            }
+            /* (the probes hold the lamps' faces (the bake's path() takes
+            each hit's glow), which ReSTIR DI's specular light already
+            gives this pixel, shadowed and sharp: the probe's light kept by
+            the share of the bake's light here that is not the lamps' own
+            (its indirect layer over its whole), so that the lamps are not
+            counted twice (c20's Library walls: 47% too much specular light
+            against R) and their pools on the walls stay ReSTIR's) */
+            /* (Only in an indoor cluster (XGPU_SCENE_INDOOR), and the
+            units rig's floor kept with the indirect layer: the bake's
+            direct light holds the domes' sky and the floor as well as the
+            lamps, and outdoors that share is the sky's, which no lamp
+            sample gives: the whole share taken there dimmed a rough
+            surface's reflected sky. Indoors the clusters have no sky, so
+            the direct share less the floor is the lamps' and the
+            fixtures'. Only the lamps' faces are in the probe: where a
+            fixture lights the wall the probe is dimmed by its share too,
+            an approximation a lamp mask in the probes' bake would end) */
+            if (texel && (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u && surface_inside(g))
+            {
+                vec3 kept = bake_indirect + ambient_indoor();
+                probe *= clamp(luma(kept) / max(luma(bake_total), 1.0e-6), 0.0, 1.0);
             }
             clean_s += probe * share;
         }
@@ -3823,6 +3988,13 @@ void main()
             imageLoad(diff_a, pixel);
         vec4 ds = raw ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
             imageLoad(spec_a, pixel);
+        /* (parameters.y 1: the diffuse and specular light as the
+        stabilisation left them, the sun's visibility from the source) */
+        if (!raw && push.parameters.y == 1u)
+        {
+            dd = imageLoad(stab_diff_now, pixel);
+            ds = imageLoad(stab_spec_now, pixel);
+        }
         vec4 dv = raw ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
             imageLoad(sun_a, pixel);
         float v = clamp(dv.x, 0.0, 1.0);
@@ -4414,4 +4586,119 @@ void main()
     imageStore(noisy_diffuse, h, vec4(up_shown * met, met));
     imageStore(noisy_specular, h, vec4(down_shown * share, share));
     imageStore(sun_raw, h, vec4(sun_seen, up_miss, down_length, 1.0) * share);
+}
+
+//@pass stabilize
+layout(local_size_x = 8, local_size_y = 8) in;
+/* the temporal stabilisation (ReBLUR's, from Zhdan's published talks on
+NVIDIA's denoisers, written from their descriptions; a TAA on the denoised
+light): the filtered light as shown keeps a history of its own, taken from
+the last frame where the guide finds this surface (the temporal pass's
+test, bilinear over the kept taps), held to the filtered frame's 3 x 3 on
+the same surface (its mean and STAB_SIGMA standard deviations, by channel),
+and blended with it by 1 / its frames, at most parameters.y and never more
+than the light's own history holds (the temporal pass's length, which every
+reset, the dynamic lights' cut and the fast history's hold shorten: the
+flashlight and a disocclusion begin again at once). The spatial filter's
+patterns, made each frame from that frame's samples, then move less from
+frame to frame (the crawl). The light's histories are not touched.
+parameters.x the filter's source (0 a, 1 b), y its frames at most
+(HALO_PT_STABILIZE); writes stab_*_now, which the
+composite reads (its parameters.y 1) */
+const float STAB_SIGMA = 1.5;
+bool stab_tap(ivec2 q, Surface g, float tolerance)
+{
+    if (!inside(q))
+        return false;
+    uvec4 gl = imageLoad(guide_last, q);
+    if (gl.x != (g.instance | 0x10000u))
+        return false;
+    vec3 nl = unfold(unpackSnorm2x16(gl.y));
+    if (dot(nl, g.normal) < 0.9)
+        return false;
+    float dl = uintBitsToFloat(gl.z);
+    if (g.instance == 0u)
+        return abs(dot(last_point(q, dl) - g.point, g.normal)) <= tolerance;
+    return abs(dl - g.distance) <= 0.05 * g.distance + 0.05;
+}
+void main()
+{
+    s = Scene(push.scene);
+    job = Job(push.job);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (!inside(pixel))
+        return;
+    bool from_b = push.parameters.x == 1u;
+    Surface g = surface_at(pixel);
+    vec4 dc = from_b ? imageLoad(diff_b, pixel) : imageLoad(diff_a, pixel);
+    vec4 sc = from_b ? imageLoad(spec_b, pixel) : imageLoad(spec_a, pixel);
+    if (!g.present)
+    {
+        imageStore(stab_diff_now, pixel, vec4(dc.rgb, 0.0));
+        imageStore(stab_spec_now, pixel, vec4(sc.rgb, 0.0));
+        return;
+    }
+    /* (the filtered frame's 3 x 3 on this surface: its moments by channel) */
+    uint here = imageLoad(guide_now, pixel).x;
+    vec3 m1d = vec3(0.0), m2d = vec3(0.0), m1s = vec3(0.0), m2s = vec3(0.0);
+    float count = 0.0;
+    for (int k = 0; k < 9; k++)
+    {
+        ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
+        if (!inside(q) || imageLoad(guide_now, q).x != here)
+            continue;
+        vec3 d = max((from_b ? imageLoad(diff_b, q) : imageLoad(diff_a, q)).rgb, vec3(0.0));
+        vec3 sp = max((from_b ? imageLoad(spec_b, q) : imageLoad(spec_a, q)).rgb, vec3(0.0));
+        m1d += d;
+        m2d += d * d;
+        m1s += sp;
+        m2s += sp * sp;
+        count += 1.0;
+    }
+    m1d /= max(count, 1.0);
+    m2d /= max(count, 1.0);
+    m1s /= max(count, 1.0);
+    m2s /= max(count, 1.0);
+    vec3 sd = sqrt(max(m2d - m1d * m1d, vec3(0.0))), ss = sqrt(max(m2s - m1s * m1s, vec3(0.0)));
+    /* (the last frame's stabilised light at this surface's place there) */
+    vec4 hd = vec4(0.0), hs = vec4(0.0);
+    float weights = 0.0;
+    if ((job.frame.y & FLAG_HISTORY) != 0u && g.has_history)
+    {
+        vec2 at = last_pixel(g.point, vec2(pixel), g.motion, g.instance == 0u);
+        ivec2 a = ivec2(floor(at));
+        vec2 f = at - vec2(a);
+        float tolerance = 0.02 + 0.004 * g.distance;
+        for (int k = 0; k < 4; k++)
+        {
+            ivec2 o = ivec2(k & 1, k >> 1);
+            float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+            if (w <= 1.0e-4 || !stab_tap(a + o, g, tolerance))
+                continue;
+            hd += w * imageLoad(stab_diff_last, a + o);
+            hs += w * imageLoad(stab_spec_last, a + o);
+            weights += w;
+        }
+    }
+    float n_light_d = imageLoad(diff_now, pixel).a, n_light_s = imageLoad(spec_now, pixel).a;
+    vec3 out_d = dc.rgb, out_s = sc.rgb;
+    float n_d = 1.0, n_s = 1.0;
+    if (weights >= 0.05)
+    {
+        hd /= weights;
+        hs /= weights;
+        vec3 held_d = clamp(hd.rgb, m1d - STAB_SIGMA * sd, m1d + STAB_SIGMA * sd);
+        vec3 held_s = clamp(hs.rgb, m1s - STAB_SIGMA * ss, m1s + STAB_SIGMA * ss);
+        float most = float(push.parameters.y);
+        n_d = min(min(hd.a + 1.0, most), max(n_light_d, 1.0));
+        n_s = min(min(hs.a + 1.0, most), max(n_light_s, 1.0));
+        out_d = mix(held_d, dc.rgb, 1.0 / n_d);
+        out_s = mix(held_s, sc.rgb, 1.0 / n_s);
+    }
+    if (any(isnan(out_d)) || any(isinf(out_d)))
+        out_d = dc.rgb;
+    if (any(isnan(out_s)) || any(isinf(out_s)))
+        out_s = sc.rgb;
+    imageStore(stab_diff_now, pixel, vec4(out_d, n_d));
+    imageStore(stab_spec_now, pixel, vec4(out_s, n_s));
 }
