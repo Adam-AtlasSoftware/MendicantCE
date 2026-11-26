@@ -678,6 +678,20 @@ from the guest before the window opens: their names (empty: none) and the
 folder they are opened from; HALO_PRISM_PLUGINS names another folder */
 static char plugin_upscaler[72], plugin_denoiser[72], plugin_folder[1024];
 
+/* display.lighting as the game started (host_vulkan_plugins_lighting):
+what the plugins are made for */
+static char plugin_lighting[32];
+
+/* (a host import: the guest's sdl_platform.c, before the window opens; a
+guest address of a string) */
+int host_vulkan_plugins_lighting(uint32_t lighting)
+{
+	const char *name = host_pointer(lighting);
+
+	snprintf(plugin_lighting, sizeof(plugin_lighting), "%s", name ? name : "");
+	return 1;
+}
+
 /* (a host import: the guest's sdl_platform.c, on its main thread; guest
 addresses of strings) */
 int host_vulkan_plugins_choose(uint32_t upscaler, uint32_t denoiser, uint32_t folder)
@@ -888,7 +902,22 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 #endif
 	/* (the plugins' state, on the device made) */
 	if (plugin_upscaler[0] || plugin_denoiser[0])
+	{
+		/* (DLSS SR's model under Path Traced: preset K at every quality,
+		unless the player named one (the dlss plugin reads
+		PRISM_DLSS_SR_PRESET as it is created). The driver's own choice at
+		Performance (0.5) and Ultra Performance (0.33) cost 1.1 and 0.7 ms
+		more a frame at 1080p on the RTX 3070 Ti, flickered about three
+		times as much still and ghosted more; at Balanced (0.58) it already
+		is K (work/openh1_eval/v4_pt_clarity_runs/r2). Raster keeps the
+		plugin's own choice: the lighting the game started with decides) */
+		if (!strcmp(plugin_lighting, "pathtraced") && !getenv("PRISM_DLSS_SR_PRESET"))
+		{
+			setenv("PRISM_DLSS_SR_PRESET", "K", 0);
+			host_logf(HOST_LOG_INFO, "prism plugins: DLSS SR's preset K under Path Traced");
+		}
 		xgpu_vulkan_upscale_plugins_create();
+	}
 	SDL_GetWindowSizeInPixels(object, &width, &height);
 	xgpu_vulkan_window_resized((uint32_t)width, (uint32_t)height);
 	window_hdr_read();

@@ -1724,6 +1724,8 @@ plugin display.upscaler and display.denoiser name ("plugin:<name>"'s name;
 empty: none) and the folder they are opened from, before the window opens
 (the plugins say what the instance and device need) */
 int host_vulkan_plugins_choose(const char *upscaler, const char *denoiser, const char *folder);
+/* (host_vulkan.c's) display.lighting as the game starts, before the plugins are made */
+int host_vulkan_plugins_lighting(const char *lighting);
 /* (host_vulkan.c's) whether a plugin of that name is ready for Settings to
 offer: its PRISM_CAP_* (prism_plugin.h), else 0 */
 unsigned int host_vulkan_plugin_ready(const char *name);
@@ -2014,6 +2016,7 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 		char folder[1024];
 
 		snprintf(folder, sizeof(folder), "%s/plugins", platform_data_root());
+		host_vulkan_plugins_lighting(config_string("display.lighting"));
 		/* (display.denoiser "dlss_rr": the plugin "dlss", Ray Reconstruction) */
 		host_vulkan_plugins_choose(!strncmp(upscaler, "plugin:", 7) ? upscaler + 7 : "",
 			!strncmp(denoiser, "plugin:", 7) ? denoiser + 7 : !strcmp(denoiser, "dlss_rr") ? "dlss" : "", folder);
