@@ -29,5 +29,9 @@ int prism_upscale_setting_on(void);
 /* display.denoiser is "off", in a build that upscales (prism_rt.c: the path
 tracer's own filter off; elsewhere the setting is "prism"'s) */
 int prism_upscale_denoiser_off(void);
+/* display.pt_clarity's share of the G-buffer's pixels each way the path
+tracer's light is traced at (prism_deferred.c, where display.pt_light_scale
+is not set); 0 none */
+float prism_upscale_pt_light_share(void);
 
 #endif

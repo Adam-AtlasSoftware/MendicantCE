@@ -56,6 +56,7 @@ nothing changes.
 
 #include "cseries.h"
 #include "prism_deferred.h"
+#include "prism_upscale.h"
 #include "cache/cache_files.h"
 #include "render/render.h"
 #include "scenario/scenario.h"
@@ -247,6 +248,11 @@ static void settings_read(
 		/* (the traced light's upscaling: 0 off, else 0.25 to 1) */
 		double scale = config_real("display.pt_light_scale");
 
+		/* (unset: display.pt_clarity's, prism_upscale.c) */
+		if (!(scale > 0.0))
+		{
+			scale = prism_upscale_pt_light_share();
+		}
 		prism_deferred.pt_light_scale = scale > 0.0 && scale < 0.995 ?
 			(unsigned long)((scale < 0.25 ? 0.25 : scale) * 100.0 + 0.5) : 0;
 	}

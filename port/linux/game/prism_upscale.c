@@ -71,6 +71,11 @@ enum
 each way) and its range */
 #define UPSCALER_SCALE_DEFAULT 0.67f
 #define UPSCALER_SCALE_LEAST 0.33f
+/* display.pt_clarity "auto": the least share each way the path tracer's
+G-buffer is drawn at, the light traced at display.upscaler_scale's share of
+the screen below it; "max": the light's share of a G-buffer at every pixel */
+#define PT_CLARITY_GBUFFER_LEAST 0.5f
+#define PT_CLARITY_MAX_LIGHT 0.5f
 
 /* only the desktop's Vulkan builds upscale (not Android's, not the VR
 build's; the Metal backend ignores the record) */
@@ -86,6 +91,9 @@ static struct
 	unsigned long read_at;
 	int upscaler, denoiser;
 	real scale, sharpness;
+	/* display.pt_clarity's share of the G-buffer the light is traced at (0
+	none: display.pt_light_scale's, or every pixel) */
+	real pt_light_share;
 	/* the window's view is drawn smaller now (begun) */
 	boolean drawing;
 	/* the game's time of the last frame upscaled, for the upscaler's time */
@@ -147,6 +155,31 @@ static void settings_read(
 		scale = UPSCALER_SCALE_DEFAULT;
 	}
 	prism_upscale.scale = scale < UPSCALER_SCALE_LEAST ? UPSCALER_SCALE_LEAST : scale > 1.0f ? 1.0f : scale;
+	/* (display.pt_clarity, Path Traced with its own denoiser under an
+	upscaler: the blur of a low display.upscaler_scale comes from the
+	G-buffer's size (its edges and textures, which the upscaler then
+	stretches), not from the light's, which is smooth once denoised. "auto"
+	draws the G-buffer at PT_CLARITY_GBUFFER_LEAST at least and traces the
+	light at the scale asked of the screen; "max" the G-buffer at every
+	pixel and the light at PT_CLARITY_MAX_LIGHT of it. b30's beach, 1080p:
+	work/openh1_eval/v4_pt_clarity_runs/r3) */
+	prism_upscale.pt_light_share = 0.0f;
+	if (prism_upscale.upscaler != _upscaler_none && prism_upscale.denoiser == _denoiser_prism &&
+		!strcmp(config_string("display.lighting"), "pathtraced"))
+	{
+		char const *clarity = config_string("display.pt_clarity");
+
+		if (clarity && !strcmp(clarity, "max"))
+		{
+			prism_upscale.scale = 1.0f;
+			prism_upscale.pt_light_share = PT_CLARITY_MAX_LIGHT;
+		}
+		else if (clarity && !strcmp(clarity, "auto") && prism_upscale.scale < PT_CLARITY_GBUFFER_LEAST)
+		{
+			prism_upscale.pt_light_share = prism_upscale.scale / PT_CLARITY_GBUFFER_LEAST;
+			prism_upscale.scale = PT_CLARITY_GBUFFER_LEAST;
+		}
+	}
 	prism_upscale.sharpness = (real)config_real("display.upscaler_sharpness");
 	if (!(prism_upscale.sharpness > 0.0f))
 	{
@@ -166,8 +199,9 @@ static void settings_read(
 		}
 		else
 		{
-			platform_log("upscaler: %s, the view at %.0f%% each way; denoiser: %s", upscaler,
-				(double)(prism_upscale.upscaler == _upscaler_none ? 100.0f : prism_upscale.scale * 100.0f), denoiser);
+			platform_log("upscaler: %s, the view at %.0f%% each way; denoiser: %s%s", upscaler,
+				(double)(prism_upscale.upscaler == _upscaler_none ? 100.0f : prism_upscale.scale * 100.0f), denoiser,
+				prism_upscale.pt_light_share > 0.0f ? " (display.pt_clarity: the traced light at a share of it)" : "");
 			/* (FSR 3.1 over Path Traced's denoised light: the least steady of
 			the upscalers at every pose measured, about 6 times native's flicker
 			still and 7 times its ghosting, the least detail turning;
@@ -295,4 +329,12 @@ void prism_upscale_player_end(
 		prism_upscale.drawing = FALSE;
 		halo_upscale_view_end(0, 0, 0, 0, NULL, prism_upscale.sharpness, 1000.0f / 60.0f);
 	}
+}
+
+float prism_upscale_pt_light_share(
+	void)
+{
+	settings_read();
+
+	return (float)prism_upscale.pt_light_share;
 }
