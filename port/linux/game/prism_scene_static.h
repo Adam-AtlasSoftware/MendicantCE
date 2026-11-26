@@ -21,5 +21,10 @@ void prism_scene_static_map_unloaded(void);
 whole (its _END sent) */
 unsigned long prism_scene_static_generation(void);
 int prism_scene_static_ended(void);
+/* port: the set is of the BSP the last one was of, begun again in play (the
+world geometry, the lighting or the traced kinds changed): no bake is made
+for it, the bake of its geometry loaded if there is one, else the last one
+kept until the next load (xgpu_vulkan_bake.c) */
+boolean prism_scene_static_in_play(void);
 
 #endif

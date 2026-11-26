@@ -2941,6 +2941,11 @@ enum
 	XGPU_BAKE_FLAG_FOREGROUND = 2,
 	/* the reach's inputs were all sent */
 	XGPU_BAKE_FLAG_REACH = 4,
+	/* port: the set was begun again in play (a setting changed: the world
+	geometry, the lighting): nothing is baked for it; the bake of its key is
+	loaded where there is a whole one, else the bake drawn is kept until the
+	next load (prism_scene_static_in_play, xgpu_vulkan_bake.c) */
+	XGPU_BAKE_FLAG_IN_PLAY = 8,
 };
 /* the bake file's maker (xgpu_vulkan_bake.c's BAKE_VERSION: a change makes
 every bake stale), which the game's note of the BSPs baked holds too

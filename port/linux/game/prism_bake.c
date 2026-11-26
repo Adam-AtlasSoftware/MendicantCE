@@ -87,6 +87,7 @@ units) rather than made linear */
 int prism_rt_albedo_stored(void);
 void xgpu_backend_prism_bake(const struct xgpu_stream_prism_bake *bake, const void *data, unsigned long size);
 unsigned long prism_scene_static_generation(void);
+boolean prism_scene_static_in_play(void);
 int prism_scene_static_ended(void);
 /* render_enumerate.c's (the window drawn is a map's first frame's, unseen) */
 extern unsigned char render_enumerating;
@@ -1570,7 +1571,8 @@ static void control_fill(
 	bake->request = (uint32_t)prism_bake.request;
 	bake->flags = (prism_bake.foreground ? XGPU_BAKE_FLAG_FOREGROUND : 0) |
 		(prism_bake_menus_up() ? XGPU_BAKE_FLAG_MENU : 0) |
-		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0);
+		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0) |
+		(prism_scene_static_in_play() ? XGPU_BAKE_FLAG_IN_PLAY : 0);
 	bake->map_checksum = (uint32_t)cache_files_get_checksum();
 	bake->bsp_index = global_structure_bsp_index_get();
 	bake->folder = (uint32_t)(unsigned long)prism_bake.folder;

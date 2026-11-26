@@ -132,6 +132,11 @@ static struct
 	unsigned long generation;
 	short bsp_index;
 	struct structure_bsp *bsp;
+	/* port: the BSP the last set was of, kept across a release (a lighting
+	change), until the map goes; and whether the set is of it again (a
+	setting changed in play: prism_scene_static_in_play) */
+	struct structure_bsp *played_bsp;
+	boolean in_play;
 	boolean remodel;
 	int traced;
 	long total, surfaces;
@@ -757,6 +762,10 @@ void prism_scene_static_frame(
 	{
 		set_free();
 		scene_static.generation++;
+		/* (port: a set of the BSP the last one was of: begun again in play,
+		by a setting; the bake then is never made, prism_bake.c) */
+		scene_static.in_play = bsp == scene_static.played_bsp;
+		scene_static.played_bsp = bsp;
 		scene_static.bsp_index = bsp_index;
 		scene_static.bsp = bsp;
 		scene_static.remodel = remodel;
@@ -867,6 +876,14 @@ void prism_scene_static_map_unloaded(
 	void)
 {
 	release();
+	scene_static.played_bsp = NULL;
+	scene_static.in_play = FALSE;
+}
+
+boolean prism_scene_static_in_play(
+	void)
+{
+	return scene_static.begun && scene_static.in_play;
 }
 
 unsigned long prism_scene_static_generation(
