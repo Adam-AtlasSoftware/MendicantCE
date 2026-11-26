@@ -2167,19 +2167,24 @@ static uint64_t light_transport_hash(const float block_rig[16][4], const struct 
 	return hash;
 }
 
-/* the key's settings (the reach's bricks, the `max` tier's noise floor and
-sample cap, HALO_BAKE_SEED, the noise's steps where a diagnostic changed
-them) as a bake of this quality has them: the bake's own, or a better one's,
-which is good for this bake too (a release's shipped MAX bake for an ultra
-one) */
+/* the key's settings (the reach's bricks, the volume's fine budget, the
+`max` tier's noise floor and sample cap, HALO_BAKE_SEED, the noise's steps
+where a diagnostic changed them) as a bake of this quality has them: the
+bake's own, or a better one's, which is good for this bake too (a release's
+shipped MAX bake for an ultra one) */
 static uint64_t key_settings_hash(const struct bake_state *b, uint32_t quality)
 {
 	struct prism_bake_filter_parameters standard;
 	float noise_floor = quality == PRISM_BAKE_QUALITY_MAX && bake.control.noise_floor > 0.0f &&
 		bake.control.noise_floor <= 10.0f ? bake.control.noise_floor * 0.18f : 0.0f;
 	uint64_t hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, bake.bricks, (size_t)bake.brick_count * 8);
+	/* (the volume's fine budget, at every quality: it chooses the bricks the
+	plan keeps, so a bake planned under another budget is not resumed or
+	served under this one) */
+	uint32_t fine_most = VOLUME_FINE_BRICKS_MOST;
 	int passes;
 
+	hash = prism_bake_hash64(hash, &fine_most, sizeof(fine_most));
 	hash = prism_bake_hash64(hash, &noise_floor, sizeof(noise_floor));
 	if (quality == PRISM_BAKE_QUALITY_MAX)
 	{
