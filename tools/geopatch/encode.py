@@ -310,9 +310,12 @@ def main(argv=None):
         report["bsps"][index] = entry
     blob = prsx.write(cwid, sections)
     Path(args.out).write_bytes(blob)
-    sidecar = prsx.Sidecar(blob)
-    for e in sidecar.entries:
-        report["bsps"][e.bsp][e.kind.lower() + "_compressed"] = e.csize
+    # (the directory as written: a zstd file is for measuring only, and the readers refuse it)
+    for index in range(len(sections)):
+        kind, bsp, _, _, _, csize = struct.unpack_from("<IHHIQQ", blob, prsx.HEADER_SIZE + prsx.ENTRY_SIZE * index)
+        report["bsps"][bsp][prsx.fourcc_text(kind).lower() + "_compressed"] = csize
+    if codec != prsx.ZSTD:
+        prsx.Sidecar(blob)
     report["file_bytes"] = len(blob)
     report["codec"] = args.codec
     report["level"] = level

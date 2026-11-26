@@ -170,6 +170,19 @@ const char *prsx_result_string(enum prsx_result result)
 	return "?";
 }
 
+/* the directory's order: type (as its little-endian u32), BSP, collision
+version */
+static int prsx_key_compare(const struct prsx_entry *x, const struct prsx_entry *y)
+{
+	if (x->type != y->type)
+		return x->type < y->type ? -1 : 1;
+	if (x->bsp != y->bsp)
+		return x->bsp < y->bsp ? -1 : 1;
+	if (x->collv != y->collv)
+		return x->collv < y->collv ? -1 : 1;
+	return 0;
+}
+
 static int prsx_entry_compare(const void *a, const void *b)
 {
 	const struct prsx_entry *x = *(const struct prsx_entry *const *)a;
@@ -251,6 +264,14 @@ enum prsx_result prsx_open(struct prsx *prsx, const struct prsx_source *source)
 				result = PRSX_ERROR_REQUIRED;
 				goto done;
 			}
+			if (entry->flags & PRSX_BAKE_RELEVANT)
+			{
+				/* (a section this build skips can never enter its world_id:
+				packs baked with it in place would light geometry this build
+				does not draw, so the file falls to the classic world) */
+				result = PRSX_ERROR_CLASS;
+				goto done;
+			}
 		}
 		else if ((type_class == PRSX_TYPE_BAKE) != ((entry->flags & PRSX_BAKE_RELEVANT) != 0) ||
 			(type_class == PRSX_TYPE_SIM) != (entry->collv != 0))
@@ -265,6 +286,21 @@ enum prsx_result prsx_open(struct prsx *prsx, const struct prsx_source *source)
 			result = PRSX_ERROR_DIRECTORY;
 			goto done;
 		}
+		if (codec == PRSX_CODEC_ZSTD && type_class != PRSX_TYPE_UNKNOWN)
+		{
+			/* (a section this build would read in a codec it cannot: refused
+			here, at map open, not half way through the load) */
+			result = PRSX_ERROR_CODEC;
+			goto done;
+		}
+		/* (the directory is sorted by type, BSP and collision version, each
+		key once: one file for one content, so the world_id, hashed in
+		directory order, is canonical) */
+		if (index > 0 && prsx_key_compare(&prsx->entries[index - 1], entry) >= 0)
+		{
+			result = PRSX_ERROR_DIRECTORY;
+			goto done;
+		}
 		order[index] = entry;
 	}
 	/* (no two sections share bytes) */
@@ -272,17 +308,6 @@ enum prsx_result prsx_open(struct prsx *prsx, const struct prsx_source *source)
 	for (index = 1; index < prsx->section_count; index++)
 	{
 		if (order[index - 1]->offset + order[index - 1]->csize > order[index]->offset)
-		{
-			result = PRSX_ERROR_DIRECTORY;
-			goto done;
-		}
-	}
-	/* (one entry per type, BSP and collision version) */
-	for (index = 0; index < prsx->section_count; index++)
-	{
-		const struct prsx_entry *entry = &prsx->entries[index];
-
-		if (prsx_find(prsx, entry->type, entry->bsp, entry->collv) != (long)index)
 		{
 			result = PRSX_ERROR_DIRECTORY;
 			goto done;

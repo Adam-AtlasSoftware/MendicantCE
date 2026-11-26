@@ -12,7 +12,8 @@ The file, little endian:
   header, PRSX_HEADER_SIZE bytes:
     "PRSX", u32 format, u8 classic_world_id[32], u32 section_count,
     u32 flags (0)
-  directory, section_count entries of PRSX_ENTRY_SIZE bytes:
+  directory, section_count entries of PRSX_ENTRY_SIZE bytes, sorted by
+  (type as a little-endian u32, bsp, collv), each key once:
     fourcc type, u16 bsp (PRSX_BSP_ALL: every BSP), u16 flags,
     u32 collv (0: not collision), u64 offset, u64 csize, u64 usize,
     u8 sha256_decoded[32]
@@ -20,7 +21,8 @@ The file, little endian:
 
 An entry's flags: PRSX_REQUIRED (a reader that does not know the type must
 refuse the file), PRSX_BAKE_RELEVANT (the section enters the BSP's enhanced
-world_id), the optional static set it belongs to (bits 4-7; 0 none) and its
+world_id; a reader refuses a file with a type it does not know marked so,
+REQUIRED or not, since it would skip the section yet count it), the optional static set it belongs to (bits 4-7; 0 none) and its
 codec (bits 12-15: stored, zlib). sha256_decoded is the SHA-256 of the
 section's bytes as its codec gives them back; a section is used only once
 that matches (per-section verification at load).
@@ -81,7 +83,8 @@ enum prsx_codec
 {
 	PRSX_CODEC_STORED = 0,
 	PRSX_CODEC_ZLIB = 1,
-	/* zstd: reserved; refused until the decoder is vendored */
+	/* zstd: reserved; a known section in it is refused at open until the
+	decoder is vendored */
 	PRSX_CODEC_ZSTD = 2,
 };
 
@@ -172,9 +175,11 @@ enum prsx_result
 const char *prsx_result_string(enum prsx_result result);
 
 /* the header and directory read and checked: every entry inside the source,
-sizes in range, codec known, no two entries overlapping, every REQUIRED
-type known, and every known type's BAKE_RELEVANT flag what this build's
-table says. On PRSX_OK, prsx_close frees it */
+sizes in range, codec known (and one this build reads for every type it
+knows), the directory sorted with each key once, no two entries
+overlapping, every REQUIRED or BAKE_RELEVANT type known, and every known
+type's BAKE_RELEVANT flag what this build's table says. On PRSX_OK,
+prsx_close frees it */
 enum prsx_result prsx_open(struct prsx *prsx, const struct prsx_source *source);
 void prsx_close(struct prsx *prsx);
 

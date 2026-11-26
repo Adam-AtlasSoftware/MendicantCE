@@ -6,6 +6,7 @@ REF is required, the tuple scanner's negative controls all fail while a clean re
 manifest follows its schema and rules."""
 import hashlib
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -22,12 +23,27 @@ from geopatch.geom import LIT, REF, REFC, REFM, REFP  # noqa: E402
 CWID = bytes.fromhex("aa" * 32)
 
 
+def _skip_or_fail(reason):
+    """skip on a developer's machine without the tool; fail in CI, where a green step must have run every test"""
+    if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
+def _numpy():
+    try:
+        import numpy
+    except ImportError:
+        _skip_or_fail("numpy is not installed")
+    return numpy
+
+
 @pytest.fixture(scope="module")
 def tool(tmp_path_factory):
     try:
         return native.Native(tmp_path_factory.mktemp("native"))
     except native.NativeError as error:
-        pytest.skip("no C compiler builds the game's sidecar code: %s" % error)
+        _skip_or_fail("no C compiler builds the game's sidecar code: %s" % error)
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +62,7 @@ def test_ref_decode_is_the_games_float_decode(tmp_path):
     expressions (source/rasterizer/rasterizer_geometry.c) in the compiler's IEEE single arithmetic"""
     clang = shutil.which("clang") or shutil.which("cc")
     if not clang:
-        pytest.skip("no C compiler")
+        _skip_or_fail("no C compiler")
     exe = tmp_path / ("check.exe" if sys.platform == "win32" else "check")
     flags = ["--target=i686-pc-windows-msvc", "-fuse-ld=lld", "-D_CRT_SECURE_NO_WARNINGS"] \
         if sys.platform == "win32" else []
@@ -88,6 +104,8 @@ def test_container_round_trip(tool, tmp_path):
                 prsx.Section("SCEN", prsx.BSP_ALL, big[:999], codec=prsx.STORED),
                 prsx.Section("PATH", 0, b"p" * 77, collv=3), prsx.Section("FUTR", 0, b"later", flags=0)]
     blob = prsx.write(CWID, sections)
+    # (the directory in its canonical order)
+    sections.sort(key=lambda s: prsx.directory_key(s.kind, s.bsp, s.collv))
     verdict = write_and_open(tool, tmp_path, blob)
     assert verdict["result"] == "ok" and verdict["format"] == prsx.FORMAT and verdict["classic"] == CWID.hex()
     assert [e["read"] for e in verdict["entries"]] == ["ok"] * 5
@@ -153,10 +171,17 @@ def test_section_corruption_refused(tool, tmp_path):
     verdict = write_and_open(tool, tmp_path, bytes(blob))
     assert verdict["result"] == "ok" and [e["read"] for e in verdict["entries"]] == \
         ["ok", "a section whose SHA-256 differs"]
-    zstd = prsx.write(CWID, [prsx.Section("GEOM", 0, b"z" * 100, codec=prsx.ZSTD)]) if shutil.which("zstd") else None
-    if zstd:
-        verdict = write_and_open(tool, tmp_path, zstd, "z.prsx")
-        assert verdict["entries"][0]["read"] == "a section in a codec this build does not read"
+    # a known section in zstd (not vendored yet) is refused at open, so the map falls to the classic world before
+    # its load starts; an unknown optional one is skipped unread
+    zstd = prsx.write(CWID, [prsx.Section("GEOM", 0, b"z" * 100, codec=prsx.STORED)])
+    zstd = _patch(zstd, 48 + 6, "<H", (struct.unpack_from("<H", zstd, 54)[0] & 0x0FFF) | prsx.ZSTD << 12)
+    assert write_and_open(tool, tmp_path, zstd, "z.prsx")["result"] == "a section in a codec this build does not read"
+    with pytest.raises(prsx.PrsxError):
+        prsx.Sidecar(zstd)
+    later = prsx.write(CWID, [prsx.Section("FUTR", 0, b"later", flags=0, codec=prsx.STORED)])
+    later = _patch(later, 48 + 6, "<H", prsx.ZSTD << 12)
+    assert write_and_open(tool, tmp_path, later, "f.prsx")["result"] == "ok"
+    prsx.Sidecar(later)
     trailing = bytearray(prsx.write(CWID, [prsx.Section("GEOM", 0, b"q" * 3000)]))
     struct.pack_into("<Q", trailing, 48 + 28, 2999)  # usize one short of what the stream inflates to
     assert write_and_open(tool, tmp_path, bytes(trailing), "t.prsx")["entries"][0]["read"] == \
@@ -176,7 +201,7 @@ def _sample_part(material_index=0):
 
 
 def test_geom_round_trip_and_numpy_twin():
-    np = pytest.importorskip("numpy")
+    np = _numpy()
     from geopatch import encode
     parts = [_sample_part(0), _sample_part(1)]
     data = geom.encode_geom(parts)
@@ -259,7 +284,7 @@ def _write_pwg(path, parts_np):
 
 
 def test_encode_lint_scan(tool, synth, tmp_path, monkeypatch):
-    pytest.importorskip("numpy")
+    _numpy()
     from geopatch import encode, scan_original
     monkeypatch.setenv("GEOPATCH_NATIVE_DIR", str(tool.exe.parent))
     _, _, bsps = retail.read_map(synth)
@@ -289,7 +314,7 @@ def test_encode_lint_scan(tool, synth, tmp_path, monkeypatch):
 
 def test_negative_controls(tool, synth):
     """section 2.4: each control must fail and a clean remodel pass"""
-    pytest.importorskip("numpy")
+    _numpy()
     from geopatch import scan_original
     results = scan_original.controls(synth, tool)
     names = [name for name, _, _ in results]
@@ -343,7 +368,7 @@ def test_lint_refusals(tool, synth):
 def test_window_keys():
     """the scanner's window keys: position independent, the same as a direct sum, and a retail run found at any
     offset of our bytes, in pieces"""
-    np = pytest.importorskip("numpy")
+    np = _numpy()
     import random
     rng = random.Random(5)
     data = bytes(rng.randrange(256) for _ in range(500))

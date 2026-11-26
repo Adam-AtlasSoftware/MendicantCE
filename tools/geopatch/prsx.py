@@ -4,7 +4,8 @@ and refuse the same malformed files.
 
     header (48 bytes): "PRSX", u32 format, classic_world_id[32], u32 section_count, u32 flags
     directory (68 bytes each): fourcc, u16 bsp, u16 flags, u32 collv, u64 offset, u64 csize, u64 usize,
-                               sha256_decoded[32]
+                               sha256_decoded[32]; sorted by (fourcc as a little-endian u32, bsp, collv), each
+                               key once, so one content has one file and one world_id
     sections
 """
 import hashlib
@@ -106,8 +107,14 @@ def zstd_cli(data, level=19):
     return result.stdout
 
 
+def directory_key(kind, bsp, collv):
+    """an entry's place in the directory (prism_prsx.c's prsx_key_compare)"""
+    return (fourcc(kind), bsp, collv)
+
+
 def write(classic_world_id, sections):
-    """a sidecar's bytes: the header, the directory in the order given, then the sections in that order"""
+    """a sidecar's bytes: the header, the directory sorted by directory_key whatever order the sections are given
+    in, then the sections in that order"""
     if len(classic_world_id) != 32:
         raise PrsxError("classic_world_id is 32 bytes")
     if len(sections) > MAXIMUM_SECTIONS:
@@ -123,6 +130,8 @@ def write(classic_world_id, sections):
             raise PrsxError("a sim section needs a collision version")
         if TYPES.get(section.kind) in (BAKE, RUNTIME) and section.collv:
             raise PrsxError("only sim sections carry a collision version")
+    sections = sorted(sections, key=lambda section: directory_key(section.kind, section.bsp, section.collv))
+    for section in sections:
         packed.append(compress(section.data, section.codec, section.level))
     offset = HEADER_SIZE + ENTRY_SIZE * len(sections)
     out = bytearray(MAGIC + struct.pack("<I", FORMAT) + classic_world_id + struct.pack("<II", len(sections), 0))
@@ -174,6 +183,7 @@ class Sidecar:
         if end > len(self.data):
             raise PrsxError("malformed directory")
         self.entries = []
+        last_key = None
         for index in range(count):
             at = HEADER_SIZE + index * ENTRY_SIZE
             kind, bsp, flags, collv, offset, csize, usize = struct.unpack_from("<IHHIQQQ", self.data, at)
@@ -186,14 +196,20 @@ class Sidecar:
             if klass is None:
                 if flags & REQUIRED:
                     raise PrsxError("required section %s unknown" % entry.kind)
+                if entry.bake_relevant:
+                    # (a section this reader skips never enters its world_id)
+                    raise PrsxError("section %s's class disagrees: unknown and bake relevant" % entry.kind)
             elif (klass == BAKE) != entry.bake_relevant or (klass == SIM) != (collv != 0):
                 raise PrsxError("section %s's class disagrees" % entry.kind)
+            if klass is not None and entry.codec == ZSTD:
+                raise PrsxError("a section in a codec this reader does not read")
+            if last_key is not None and last_key >= (kind, bsp, collv):
+                raise PrsxError("malformed directory: not sorted, or an entry twice")
+            last_key = (kind, bsp, collv)
             self.entries.append(entry)
         spans = sorted((e.offset, e.offset + e.csize) for e in self.entries)
         if any(a[1] > b[0] for a, b in zip(spans, spans[1:])):
             raise PrsxError("malformed directory: sections overlap")
-        if len({(e.kind, e.bsp, e.collv) for e in self.entries}) != len(self.entries):
-            raise PrsxError("malformed directory: an entry twice")
 
     def find(self, kind, bsp, collv=0):
         for index, entry in enumerate(self.entries):

@@ -17,7 +17,8 @@ section 2.5), none circular:
     classic:  H("PRSX-WORLD-C" || classic_world_id || bsp || SCENE_VERSION)
     enhanced: H("PRSX-WORLD-E" || classic_world_id || bsp || SCENE_VERSION ||
                 RENDER_FORMAT || each BAKE_RELEVANT section's sha256_decoded
-                for that BSP (its own and the all-BSP ones), in directory order)
+                for that BSP (its own and the all-BSP ones), in directory order,
+                which prsx_open has made canonical: sorted, each key once)
   bsp as u16, versions as u32, little endian; H = SHA-256. The engine
   computes the enhanced one from the directory of the sidecar it opened,
   never from a setting or the manifest. Collision (sim), runtime sections,

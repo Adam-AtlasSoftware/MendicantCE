@@ -4,6 +4,7 @@ compression; world_id depends on what a bake depends on and on nothing else, so 
 section, a recompressed sidecar or a format number never moves it; the game's C and the farm's Python agree, and
 pinned values hold on every platform (the same derivation on Linux and Windows)."""
 import hashlib
+import os
 import re
 import sys
 from pathlib import Path
@@ -22,7 +23,9 @@ def tool(tmp_path_factory):
     try:
         return native.Native(tmp_path_factory.mktemp("native"))
     except native.NativeError as error:
-        pytest.skip("no C compiler builds the game's sidecar code: %s" % error)
+        # (in CI a missing compiler fails: a green step must have run the game's C)
+        (pytest.fail if os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS") else pytest.skip)(
+            "no C compiler builds the game's sidecar code: %s" % error)
 
 
 def sections(geom0=b"geometry zero", geom1=b"geometry one", extra=()):
@@ -113,8 +116,11 @@ def test_bake_flag_is_the_tables(tool, tmp_path):
     disagrees with the table"""
     for section in (prsx.Section("GEOM", 0, b"g", flags=prsx.REQUIRED),
                     prsx.Section("RHGT", 0, b"r", flags=prsx.REQUIRED | prsx.BAKE_RELEVANT),
-                    prsx.Section("COLL", 0, b"c", collv=1, flags=prsx.REQUIRED | prsx.BAKE_RELEVANT)):
-        blob = prsx.write(CWID, [section])
+                    prsx.Section("COLL", 0, b"c", collv=1, flags=prsx.REQUIRED | prsx.BAKE_RELEVANT),
+                    # a type this build does not know, bake relevant but optional: it would skip the section yet
+                    # count it, and load packs baked for geometry it does not draw
+                    prsx.Section("TREE", 0, b"trunks", flags=prsx.BAKE_RELEVANT)):
+        blob = prsx.write(CWID, [prsx.Section("GEOM", 0, b"g"), section] if section.kind == "TREE" else [section])
         with pytest.raises(prsx.PrsxError):
             prsx.Sidecar(blob)
         path = tmp_path / "bad.prsx"
@@ -144,3 +150,25 @@ def test_base_id_of_every_form(tool, tmp_path):
     assert tool.base_id(cut) is None
     with pytest.raises(Exception):
         identity.base_id(forms["disc"][:-200])
+
+
+def test_world_id_is_the_contents_not_the_order(tool, tmp_path):
+    """the writer sorts the directory whatever order it is given, and both readers refuse one that is not sorted:
+    one content, one file, one world_id"""
+    forward = prsx.write(CWID, sections())
+    backward = prsx.write(CWID, list(reversed(sections())))
+    assert forward == backward
+    keys = [(prsx.fourcc(e.kind), e.bsp, e.collv) for e in prsx.Sidecar(forward).entries]
+    assert keys == sorted(keys)
+    ids = ids_of(tool, tmp_path, forward)
+    assert ids == ids_of(tool, tmp_path, backward, "b.prsx")
+    # the first two directory entries swapped (each still pointing at its own bytes)
+    swapped = bytearray(forward)
+    first, second = prsx.HEADER_SIZE, prsx.HEADER_SIZE + prsx.ENTRY_SIZE
+    swapped[first:first + prsx.ENTRY_SIZE], swapped[second:second + prsx.ENTRY_SIZE] = \
+        forward[second:second + prsx.ENTRY_SIZE], forward[first:first + prsx.ENTRY_SIZE]
+    path = tmp_path / "swapped.prsx"
+    path.write_bytes(bytes(swapped))
+    assert tool.open(path)["result"] == "a malformed directory"
+    with pytest.raises(prsx.PrsxError):
+        prsx.Sidecar(bytes(swapped))
