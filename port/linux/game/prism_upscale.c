@@ -168,6 +168,15 @@ static void settings_read(
 		{
 			platform_log("upscaler: %s, the view at %.0f%% each way; denoiser: %s", upscaler,
 				(double)(prism_upscale.upscaler == _upscaler_none ? 100.0f : prism_upscale.scale * 100.0f), denoiser);
+			/* (FSR 3.1 over Path Traced's denoised light: the least steady of
+			the upscalers at every pose measured, about 6 times native's flicker
+			still and 7 times its ghosting, the least detail turning;
+			work/openh1_eval/v4_pt_clarity_runs) */
+			if (prism_upscale.upscaler == _upscaler_fsr3 && !strcmp(config_string("display.lighting"), "pathtraced"))
+			{
+				platform_log("upscaler: fsr3 under Path Traced flickers and ghosts the most of the upscalers; "
+					"DLSS (plugin:dlss) at 0.67 or DLAA keeps the most of the traced light");
+			}
 		}
 	}
 }
