@@ -34,7 +34,10 @@ struct entry
 	uint32_t lod, traced_lod, drawable_last, lod_count;
 	/* the level the skinned vertices' budget holds it to at least */
 	uint32_t budget_lod;
+	/* skinned each frame (a rig, or moving: its skinning not kept), and the
+	frames its skinning has been kept in a row */
 	int per_frame;
+	uint32_t kept_frames;
 	uint32_t vertices[XGPU_GEOMETRY_LODS];
 	uint32_t triangles[XGPU_GEOMETRY_LODS];
 	float cutoff[XGPU_GEOMETRY_LODS];
@@ -644,7 +647,7 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 		memcpy(entry->triangles, ladder->triangles, sizeof(entry->triangles));
 		memcpy(entry->cutoff, ladder->cutoff, sizeof(entry->cutoff));
 		memcpy(entry->vertices, ladder->vertices, sizeof(entry->vertices));
-		entry->per_frame = ladder->per_frame;
+		entry->per_frame = ladder->per_frame || entry->per_frame;
 		entry->budget_lod = 0;
 		entry->drawable_last = xgpu_geometry_drawable_last(ladder);
 		entry->lod_known = 0;
@@ -721,6 +724,21 @@ void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_
 			object, mesh, channel_names[channel], variant == XGPU_GEOMETRY_REMODEL ? "remodel" :
 			variant == XGPU_GEOMETRY_STOCK ? "stock" : "nothing", lod, flipped ? " (flip)" : "");
 	}
+}
+
+void xgpu_geometry_skinned(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int kept)
+{
+	struct entry *entry = entry_find(geometry, object, mesh, 0);
+
+	if (!entry)
+		return;
+	if (!kept)
+	{
+		entry->per_frame = 1;
+		entry->kept_frames = 0;
+	}
+	else if (entry->per_frame && ++entry->kept_frames > 30u)
+		entry->per_frame = 0;
 }
 
 void xgpu_geometry_statistics(const struct xgpu_geometry *geometry, struct xgpu_geometry_statistics *statistics)

@@ -683,8 +683,15 @@ static int instance_skin(struct instance *instance, int wide)
 		if (xgpu_vulkan_mesh_skin_kept(key, make, view->rest, view->vertex_first, view->vertex_count,
 			(const float (*)[4])meshes.bones, view->bone_count, view->inverse_scale, &instance->skinned,
 			wide ? &instance->wide : NULL))
+		{
+			if (meshes.geometry)
+				xgpu_geometry_skinned(meshes.geometry, instance->object, instance->mesh, 1);
 			goto skinned;
+		}
 	}
+	/* (into the ring: counted in the resolver's skinned vertices' budget) */
+	if (meshes.geometry && !meshes.legacy)
+		xgpu_geometry_skinned(meshes.geometry, instance->object, instance->mesh, 0);
 	if (!xgpu_vulkan_mesh_skin(view->rest, view->vertex_first, view->vertex_count,
 		(const float (*)[4])meshes.bones, view->bone_count, view->inverse_scale, &instance->skinned,
 		wide ? &instance->wide : NULL))

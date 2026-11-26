@@ -291,6 +291,18 @@ static void test_skinned_budget(void)
 	for (object = 1; object < 20; object++)
 		CHECK(choices[object].lod >= choices[object - 1].lod);
 	CHECK(rock_choice.lod == 0);
+	/* (a still object made to move: skinned into the ring, counted) */
+	xgpu_geometry_skinned(geometry, 100, 7u, 0);
+	xgpu_geometry_frame(geometry, eye);
+	for (object = 0; object < 20; object++)
+		draw(geometry, object + 1, 0, &rig, 400.0f, 2.0f + (float)object);
+	draw(geometry, 100, 0, &rock, 400.0f, 1.0f);
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.skinned_vertices_last >= 30000u);
+	/* (kept again for a while: no longer counted) */
+	for (frame = 0; frame < 32; frame++)
+		xgpu_geometry_skinned(geometry, 100, 7u, 1);
 	/* (still: no hunting) */
 	xgpu_geometry_statistics(geometry, &statistics);
 	{

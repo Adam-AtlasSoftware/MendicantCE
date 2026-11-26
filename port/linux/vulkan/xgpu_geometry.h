@@ -148,6 +148,10 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 /* what a pass drew of an object (variant, level) */
 void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int channel, int variant,
 	uint32_t lod);
+/* an object's skinning this frame: kept (read from the keep region) or
+skinned into the ring; an object skinned into the ring counts in the
+skinned vertices' budget until it has been kept for a while */
+void xgpu_geometry_skinned(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int kept);
 /* the ladder's last drawable level */
 uint32_t xgpu_geometry_drawable_last(const struct xgpu_geometry_ladder *ladder);
 void xgpu_geometry_statistics(const struct xgpu_geometry *geometry, struct xgpu_geometry_statistics *statistics);

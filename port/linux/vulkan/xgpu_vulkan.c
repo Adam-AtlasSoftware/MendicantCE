@@ -8534,7 +8534,7 @@ spans are given back as their submissions are done. One descriptor set per
 mesh's vertex buffer: its vertices, the upload ring and the skin ring, whole
 (the bones' and the skinned vertices' places are push constants). */
 
-#define SKIN_RING_SIZE (128ull << 20)
+#define SKIN_RING_SIZE (256ull << 20)
 /* port: the kept skinnings' region after the ring (xgpu_vulkan_mesh_skin_
 kept): a still object's vertices skinned once and drawn from there frame
 after frame, not skinned again into the ring each submission; its entries
