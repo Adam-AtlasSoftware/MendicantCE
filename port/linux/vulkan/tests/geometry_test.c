@@ -318,8 +318,16 @@ static void test_skinned_budget(void)
 		CHECK(statistics.switches[XGPU_GEOMETRY_VIEW] == switches);
 		CHECK(statistics.skinned_over_budget == 0);
 	}
-	/* (half of them gone: the others drawn finer again, over frames) */
+	/* (half of them gone: the others drawn finer again, once their levels
+	have been held 150 frames) */
 	for (frame = 0; frame < 30; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		for (object = 0; object < 8; object++)
+			choices[object] = draw(geometry, object + 1, 0, &rig, 400.0f, 2.0f + (float)object);
+	}
+	CHECK(choices[7].lod > 0);
+	for (frame = 0; frame < 200; frame++)
 	{
 		xgpu_geometry_frame(geometry, eye);
 		for (object = 0; object < 8; object++)

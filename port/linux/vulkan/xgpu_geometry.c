@@ -16,6 +16,10 @@ PRISM's resolved geometry of the drawn objects (xgpu_geometry.h).
 /* the traced budget's band: levels made finer again only while the total
 stays under this share of the budget */
 #define BUDGET_BAND 0.85f
+/* ...and a level a budget made coarser is held at least this many frames
+before it may be made finer again (an object panned in and out of view
+changes the totals from frame to frame) */
+#define BUDGET_HOLD_FRAMES 150u
 
 struct channel_note
 {
@@ -34,6 +38,8 @@ struct entry
 	uint32_t lod, traced_lod, drawable_last, lod_count;
 	/* the level the skinned vertices' budget holds it to at least */
 	uint32_t budget_lod;
+	/* the frames the budgets last made its drawn and traced levels coarser */
+	uint64_t budget_frame, traced_frame;
 	/* skinned each frame (a rig, or moving: its skinning not kept), and the
 	frames its skinning has been kept in a row */
 	int per_frame;
@@ -364,6 +370,7 @@ static void budget_share(struct xgpu_geometry *geometry)
 					continue;
 				total -= entry->triangles[entry->traced_lod];
 				entry->traced_lod++;
+				entry->traced_frame = geometry->frame;
 				total += entry->triangles[entry->traced_lod];
 				changed = 1;
 			}
@@ -380,7 +387,7 @@ static void budget_share(struct xgpu_geometry *geometry)
 				struct entry *entry = &geometry->entries[geometry->order[index]];
 				uint64_t finer;
 
-				if (entry->traced_lod <= entry->lod)
+				if (entry->traced_lod <= entry->lod || geometry->frame - entry->traced_frame < BUDGET_HOLD_FRAMES)
 					continue;
 				finer = total - entry->triangles[entry->traced_lod] + entry->triangles[entry->traced_lod - 1u];
 				if (finer > band)
@@ -458,6 +465,7 @@ static void skinned_share(struct xgpu_geometry *geometry)
 				total -= entry->vertices[entry->lod];
 				entry->lod++;
 				entry->budget_lod = entry->lod;
+				entry->budget_frame = geometry->frame;
 				total += entry->vertices[entry->lod];
 				changed = 1;
 			}
@@ -473,7 +481,7 @@ static void skinned_share(struct xgpu_geometry *geometry)
 			struct entry *entry = &geometry->entries[geometry->order[index]];
 			uint64_t finer;
 
-			if (!entry->budget_lod)
+			if (!entry->budget_lod || geometry->frame - entry->budget_frame < BUDGET_HOLD_FRAMES)
 				continue;
 			/* (held at its budget's level: one level finer where the total
 			stays in the band; held coarser by its own size: let go) */

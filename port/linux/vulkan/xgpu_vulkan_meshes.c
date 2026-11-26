@@ -835,7 +835,10 @@ static int rt_pieces_fill(const struct instance *instance, uint32_t region, uint
 		if (to->vertices && to->indices && to->index_count >= 3)
 			count++;
 	}
-	return count ? count : -1;
+	/* (none of the level's pieces is this part's: the view draws nothing of
+	it at this level either, so nothing traced, never the stock part; the
+	stock part where legacy) */
+	return !count && meshes.legacy ? -1 : count;
 }
 
 static int rt_pieces_level(struct instance *instance, uint32_t lod, struct xgpu_vulkan_meshes_rt_piece *pieces,
@@ -890,7 +893,7 @@ the traced triangles' budget, the farthest first) */
 	{
 		int count = rt_pieces_fill(instance, region, permutation, pose, pieces, most);
 
-		if (count < 0)
+		if (count <= 0)
 			meshes.rt_no_piece++;
 		if (count > 0 && !meshes.legacy)
 			xgpu_vulkan_meshes_note_traced(XGPU_GEOMETRY_REMODEL, view->lod);
