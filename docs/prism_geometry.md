@@ -42,9 +42,9 @@ until the next BSP.
 
 Each surface's near or far level is `prism_world_geometry.c`'s `surface_choice` (distance, band, hysteresis), which
 the view, the shadow maps, the occlusion's pre-pass and SCENE_STATIC's LEVELS all read.
-`display.prism_world_geometry_shadows` and `_occlusion` default to `"drawn"`; their `"far"` and `"stock"`, and
-`display.prism_rt_world`'s `"remodel"`, `"far"` and `"stock"`, are debug overrides drawn only with
-`debug.geometry_overrides` (their menu rows hidden without it). The BSP's remodel is taken up by the frame's first
+Under PRISM Rebaked and Path Traced every pass draws the level drawn: `display.prism_world_geometry_shadows`' and
+`_occlusion`'s `"far"` and `"stock"` are drawn there only with `debug.geometry_overrides`. Classic keeps them as they
+were (defaults `"far"` and `"remodel"`, their menu rows shown), and `display.prism_rt_world` as it was. The BSP's remodel is taken up by the frame's first
 reader (`prism_world_geometry_prepare`, from SCENE_STATIC), so a new BSP's first set and the bake key it opens are the
 remodel's, not stock begun again a frame later.
 
