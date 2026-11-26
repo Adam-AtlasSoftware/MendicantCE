@@ -2,7 +2,7 @@
 <!-- PRISM's light bake (docs/prism_bake.md): Light Bake's REBAKE ALL (menu_functions.c's "bake rebake all"). REBAKE
 deletes every level's bake: the main menu bakes them again from nothing; CANCEL (or B) goes back. -->
 <screen name="bake_rebake_all">
-	<dialog title="REBAKE ALL?" text="Every level's light is deleted and baked again from nothing on the main menu.">
+	<dialog title="REBAKE LOCAL?" text="The light baked on this computer is deleted. The shipped light is kept and checked again; the main menu bakes only what it does not cover.">
 		<list focus="cancel">
 			<item id="rebake" label="REBAKE" do="bake rebake all"/>
 			<item id="cancel" label="CANCEL" do="back"/>

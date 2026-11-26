@@ -62,6 +62,21 @@ EXE = ".exe" if os.name == "nt" else ""
 LEVELS = ["a10", "a30", "a50", "b30", "c10"]
 INVADER_PROGRAMS = ["invader-extract", "invader-bitmap", "invader-model", "invader-edit", "invader-convert"]
 NOT_YET_READ = "this build of the game does not read them yet (display.prism_baked_shadows is in a later one)"
+# The remodel (step_world) is built to the same file on every machine, so that a light bake of it made on the farm
+# holds on the player's (art/world_geo/wg_pwg_hash.py compares two builds): numpy's BLAS on one thread, and numpy's
+# kernels pinned to its baseline, since its CPU dispatch picks SSE4, AVX2 or AVX-512 kernels by the processor and
+# their last bits differ. Blender 4.5's numpy is 1.26 (baseline SSE3); every step of the build (the seal too) runs in
+# Blender's Python, so the numpy is the one pinned with Blender, not the player's.
+BLENDER_NUMPY_DISPATCH = ("SSSE3 SSE41 POPCNT SSE42 AVX F16C FMA3 AVX2 AVX512F AVX512CD AVX512_KNL AVX512_KNM "
+                          "AVX512_SKX AVX512_CLX AVX512_CNL AVX512_ICL")
+
+
+def deterministic_env(blender=True):
+    """the environment of a remodel build's programs (each run in Blender's Python)"""
+    env = {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1"}
+    if blender:
+        env["NPY_DISABLE_CPU_FEATURES"] = BLENDER_NUMPY_DISPATCH
+    return env
 
 
 # ---------------------------------------------------------------- the packs
@@ -1180,14 +1195,15 @@ def step_world(ctx):
                 # (where the player can be, from the game's bake of this BSP when there is one: the natural surfaces'
                 # triangles go where they are seen up close)
                 reach = ctx.data / "prism_bake" / level / f"bsp{index}.reach"
+                det = deterministic_env()
                 ctx.blender_run("world_geo/wg2_remodel.py", gltf, ctx.w("extract", level),
                                 ART / "world_geo" / "wg2_recipes.json", w / f"{name}.remodel.pwg",
                                 w / f"{name}.report.json", what=f"{level} {name}: remodel and its light (Cycles)",
-                                extra={"WG_REACH": str(reach)} if reach.is_file() else None)
-                ctx.python("world_geo/wg2_seal.py", gltf, w / f"{name}.remodel.pwg", w / f"{name}.sealed.pwg",
-                           w / f"{name}.seal.json", what=f"{level} {name}: sealed")
+                                extra={**det, "WG_REACH": str(reach)} if reach.is_file() else det)
+                ctx.blender_run("world_geo/wg2_seal.py", gltf, w / f"{name}.remodel.pwg", w / f"{name}.sealed.pwg",
+                                w / f"{name}.seal.json", what=f"{level} {name}: sealed", extra=det)
                 ctx.blender_run("world_geo/wg2_far2.py", w / f"{name}.sealed.pwg", pwg, w / f"{name}.far2.json",
-                                what=f"{level} {name}: far levels")
+                                what=f"{level} {name}: far levels", extra=det)
                 (w / f"{name}.remodel.pwg").unlink()
                 (w / f"{name}.sealed.pwg").unlink()
             ctx.once(f"{level}_{name}", build)

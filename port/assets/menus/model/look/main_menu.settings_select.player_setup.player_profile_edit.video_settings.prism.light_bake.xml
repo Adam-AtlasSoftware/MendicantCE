@@ -11,20 +11,19 @@
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/options_menu" type="column_list">
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_0" x="28" y="50"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_quality" x="28" y="72"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_prism_sky_light" x="28" y="97"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3" x="28" y="128"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a10" x="28" y="150"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a30" x="28" y="175"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a50" x="28" y="200"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b30" x="28" y="225"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b40" x="28" y="250"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c10" x="28" y="275"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c20" x="28" y="300"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c40" x="28" y="325"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d20" x="28" y="350"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d40" x="28" y="375"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_rebake_all" x="28" y="400"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_prism_sky_light" x="28" y="72"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_2" x="28" y="103"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a10" x="28" y="125"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a30" x="28" y="150"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a50" x="28" y="175"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b30" x="28" y="200"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_b40" x="28" y="225"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c10" x="28" y="250"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c20" x="28" y="275"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_c40" x="28" y="300"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d20" x="28" y="325"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_d40" x="28" y="350"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_rebake_all" x="28" y="375"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/button_bar" x="0" y="448"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/button_bar" role="buttons" type="column_list" box="0 0 640 28" place="foot">
@@ -47,17 +46,6 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_0_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_quality" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
-		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_label" x="0" y="0"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_spinner" x="188" y="0"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="1" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_quality_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="MAX|ULTRA|HIGH|DRAFT" scale="1 1.2"/>
-	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_prism_sky_light" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_label" x="0" y="0"/>
@@ -66,7 +54,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="2" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="1" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="SKY" scale="1 1.2"/>
@@ -77,11 +65,11 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/prism_sky_light_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="SKY|FLAT" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3_title" x="0" y="0"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_2" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_2_title" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_3_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="3" scale="1 1.2"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/section_2_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="2" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/op_bake_a10" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
@@ -89,7 +77,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a10_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a10_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="4" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="3" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a10_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -100,7 +88,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a30_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a30_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="5" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="4" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a30_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -111,7 +99,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a50_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a50_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="6" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="5" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_a50_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -122,7 +110,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b30_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b30_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="7" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="6" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b30_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -133,7 +121,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b40_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b40_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="8" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="7" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_b40_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -144,7 +132,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c10_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c10_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="9" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="8" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c10_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -155,7 +143,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c20_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c20_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="10" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="9" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c20_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -166,7 +154,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c40_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c40_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="11" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="10" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_c40_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -177,7 +165,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d20_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d20_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="12" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="11" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d20_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -188,7 +176,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d40_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d40_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="13" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="12" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_d40_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>
@@ -199,7 +187,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_all_value" x="188" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_all_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="14" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/labels" index="13" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/bake_rebake_all_value" type="text" box="0 0 140 22" wide="40 120" past="60 60">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" scale="1 1.2"/>

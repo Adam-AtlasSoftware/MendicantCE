@@ -15,6 +15,67 @@ import numpy as np
 PWG_MAGIC = b"PWG1"
 PWG_VERSION = 1
 
+# The grids a written remodel's positions and coordinates are snapped to: a shipped light bake of the remodel holds
+# only where the player's own build of it is the same file, and floating point's last bits differ between machines
+# (SIMD widths, FFT and BLAS kernels, thread counts). Snapped, a position that came out a few ulps off still writes
+# the same bytes. Positions 1/4096 wu (0.07 mm), base map coordinates 1/65536 (a 64th of a 1024 texture's texel),
+# lightmap coordinates 1/1048576; a bounding sphere's centre to the positions' grid, its radius rounded up.
+POSITION_GRID = 1.0 / 4096.0
+UV_GRID = 1.0 / 65536.0
+LIGHTMAP_UV_GRID = 1.0 / 1048576.0
+
+
+def numpy_kernels():
+    """the CPU features numpy's kernels use here (NPY_DISABLE_CPU_FEATURES pins them to its baseline: prism_packs'
+    deterministic_env), for the build's log"""
+    try:
+        core = getattr(np, "_core", None)
+        um = core._multiarray_umath if core is not None and hasattr(core, "_multiarray_umath") else \
+            np.core._multiarray_umath
+        return " ".join(k for k, v in um.__cpu_features__.items() if v and k in set(um.__cpu_baseline__) |
+                        set(um.__cpu_dispatch__))
+    except AttributeError:
+        return "?"
+
+
+def digest(*arrays):
+    """a short digest of arrays' bytes (the build's log: where two builds part)"""
+    import hashlib
+    h = hashlib.sha256()
+    for a in arrays:
+        a = np.ascontiguousarray(a)
+        h.update(str(a.dtype).encode() + str(a.shape).encode())
+        h.update(a.tobytes())
+    return h.hexdigest()[:12]
+
+
+def snap(a, grid):
+    """a (float) rounded to the grid (a power of two: exact in float32 within the level's range), as float32"""
+    return (np.round(np.asarray(a, np.float64) / grid) * grid).astype(np.float32)
+
+
+def snap_vertices(verts):
+    """a .pwg part's vertices (n, 14: position, normal, binormal, tangent, base coordinates) snapped"""
+    v = np.array(verts, np.float32, copy=True)
+    v[:, 0:3] = snap(v[:, 0:3], POSITION_GRID)
+    v[:, 12:14] = snap(v[:, 12:14], UV_GRID)
+    return v
+
+
+def snap_lightmap(lm):
+    """a .pwg part's lightmap vertices (n, 5: incident radiosity, lightmap coordinates) snapped"""
+    v = np.array(lm, np.float32, copy=True)
+    v[:, 3:5] = snap(v[:, 3:5], LIGHTMAP_UV_GRID)
+    return v
+
+
+def snap_bounds(bounds):
+    """bounding spheres (n, 4: centre, radius) on the positions' grid, each radius rounded up (still bounding)"""
+    b = np.array(bounds, np.float64, copy=True).reshape(-1, 4)
+    b[:, 0:3] = np.round(b[:, 0:3] / POSITION_GRID) * POSITION_GRID
+    b[:, 3] = np.ceil(b[:, 3] / POSITION_GRID + 1.0) * POSITION_GRID
+    return b.astype(np.float32)
+
 
 class Material:
     """One structure_material of a lightmap: its vertices in the material's order and its surfaces
@@ -114,8 +175,9 @@ class Remodel:
     def __init__(self, stock, position, normal, binormal, tangent, uv0, uv1, radiosity, triangles,
                  surface_of_triangle):
         # by surface, and inside a surface along a Morton curve of the triangles' centres: neighbours drawn together,
-        # so the GPU's vertex cache and fetches find what the last triangles used
-        pos = np.asarray(position, np.float64)
+        # so the GPU's vertex cache and fetches find what the last triangles used (the centres of the snapped
+        # positions: a raw position a few ulps off moved a triangle across a cell's edge, and the order with it)
+        pos = snap(position, POSITION_GRID).astype(np.float64)
         tri_ = np.asarray(triangles, np.int64)
         cen = pos[tri_].mean(1) if len(tri_) else np.zeros((0, 3))
         lo = cen.min(0) if len(cen) else np.zeros(3)
@@ -124,14 +186,24 @@ class Remodel:
         for bit in range(20):
             for axis in range(3):
                 code |= ((cell[:, axis] >> bit) & 1) << (3 * bit + axis)
-        order = np.lexsort((code, np.asarray(surface_of_triangle)))
+        # (ties, triangles in one cell, broken by their corners' snapped positions and base coordinates, not by the
+        # order they came in: two builds that made the same triangles in another order write the same file)
+        uvq = np.round(np.asarray(uv0, np.float64) / UV_GRID).astype(np.int64)
+        grid = np.round(pos / POSITION_GRID).astype(np.int64)
+        ties = []
+        for k in range(3):
+            if len(tri_):
+                ties += [uvq[tri_[:, k], 1], uvq[tri_[:, k], 0], grid[tri_[:, k], 2], grid[tri_[:, k], 1],
+                         grid[tri_[:, k], 0]]
+        order = np.lexsort(tuple(ties[::-1]) + (code, np.asarray(surface_of_triangle))) if len(tri_) else \
+            np.zeros(0, np.int64)
         self.stock = stock
-        self.position = np.asarray(position, np.float32)
+        self.position = snap(position, POSITION_GRID)
         self.normal = np.asarray(normal, np.float32)
         self.binormal = np.asarray(binormal, np.float32)
         self.tangent = np.asarray(tangent, np.float32)
-        self.uv0 = np.asarray(uv0, np.float32)
-        self.uv1 = np.asarray(uv1, np.float32)
+        self.uv0 = snap(uv0, UV_GRID)
+        self.uv1 = snap(uv1, LIGHTMAP_UV_GRID)
         self.radiosity = np.asarray(radiosity, np.float32)
         self.triangles = np.asarray(triangles, np.int64)[order]
         counts = np.bincount(np.asarray(surface_of_triangle)[order], minlength=stock.surface_count)
@@ -227,7 +299,7 @@ def write_pwg(path, bsp_tag, remodels, lod_distance=0.0):
             out += _pad4(tri.astype("<u2").tobytes())
             if lod:
                 out += pairs.astype("<u4").tobytes()
-                out += bounds.astype("<f4").tobytes()
+                out += snap_bounds(bounds).astype("<f4").tobytes()
             count += 1
     struct.pack_into("<I", out, 8, count)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

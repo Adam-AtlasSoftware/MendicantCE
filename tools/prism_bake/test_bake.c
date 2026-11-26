@@ -5,7 +5,8 @@ The baker's host libraries on synthetic data (tools/test_prism_bake.py
 builds and runs it): port/linux/vulkan/prism_bake_reach.c (a collision bsp
 built here from boxes), prism_bake_atlas.c, prism_bake_batch.c (the
 volume's batches, their readbacks in flight), prism_bake_cache.c,
-prism_bake_converge.c and prism_bake_filter.c.
+prism_bake_converge.c, prism_bake_filter.c, prism_bake_pack.c (the packed
+records) and prism_bake_layers.c (the layered bake's recombining).
 
 	test_bake <scratch folder>
 
@@ -18,6 +19,8 @@ non-zero if any failed.
 #include "prism_bake_cache.h"
 #include "prism_bake_converge.h"
 #include "prism_bake_filter.h"
+#include "prism_bake_layers.h"
+#include "prism_bake_pack.h"
 #include "prism_bake_reach.h"
 
 #include <math.h>
@@ -1592,6 +1595,181 @@ static void test_filter(void)
 	check(ok, "filter_normals", "a normal's 32 bits");
 }
 
+
+/* ---------- the packing (prism_bake_pack.h) and packed records */
+
+static void test_pack(char const *folder)
+{
+	enum { WORDS = 4096 };
+	uint32_t *words = (uint32_t *)malloc(WORDS * 4), *back = (uint32_t *)malloc(WORDS * 4 + 64);
+	unsigned char *packed = (unsigned char *)malloc(prism_bake_pack_bound(WORDS * 4));
+	size_t size, k, stride;
+	int ok = 1, damaged_refused = 1;
+	struct prism_bake_cache_key key;
+	struct prism_bake_cache_writer writer;
+	struct prism_bake_cache cache;
+	struct prism_bake_record const *record;
+	char path[1024];
+
+	/* (a smooth light: RGB9E5 words of a gradient, as a tile's) */
+	for (k = 0; k < WORDS; k++)
+	{
+		float rgb[3];
+
+		rgb[0] = 0.2f + 0.0001f * (float)k;
+		rgb[1] = 0.3f + 0.00005f * (float)(k % 97);
+		rgb[2] = 0.1f;
+		words[k] = prism_bake_rgb9e5(rgb);
+	}
+	for (stride = 1; stride <= 8; stride *= 2)
+	{
+		size = prism_bake_pack(words, WORDS * 4, (uint32_t)stride, packed, prism_bake_pack_bound(WORDS * 4));
+		ok &= size > 0 && prism_bake_unpacked_size(packed, size) == WORDS * 4 &&
+			prism_bake_unpack(packed, size, back, WORDS * 4 + 64) == WORDS * 4 && !memcmp(back, words, WORDS * 4);
+	}
+	check(ok, "pack_round_trip", "a payload packed by each stride unpacks to itself");
+	size = prism_bake_pack(words, WORDS * 4, 4, packed, prism_bake_pack_bound(WORDS * 4));
+	check(size > 0 && size < WORDS * 4 / 3, "pack_smooth", "a smooth tile's words pack to under a third");
+	/* (noise: does not pack, but round-trips; an odd size, a tail of bytes) */
+	for (k = 0; k < WORDS; k++)
+		words[k] = (uint32_t)(uniform() * 4294967295.0);
+	size = prism_bake_pack(words, WORDS * 4 - 3, 4, packed, prism_bake_pack_bound(WORDS * 4));
+	check(size > 0 && prism_bake_unpack(packed, size, back, WORDS * 4) == WORDS * 4 - 3 &&
+		!memcmp(back, words, WORDS * 4 - 3), "pack_noise", "noise and a tail of bytes round-trip");
+	/* (damaged: every byte changed in turn, past the header, is refused or
+	unpacks within its bounds; a short block is refused) */
+	for (k = 0; k < WORDS; k++)
+		words[k] = (uint32_t)(k / 7);
+	size = prism_bake_pack(words, WORDS * 4, 4, packed, prism_bake_pack_bound(WORDS * 4));
+	for (k = PRISM_BAKE_PACK_HEADER; k < size; k++)
+	{
+		unsigned char was = packed[k];
+		size_t got;
+
+		packed[k] = (unsigned char)(was ^ 0x5a);
+		got = prism_bake_unpack(packed, size, back, WORDS * 4);
+		damaged_refused &= got == 0 || got == WORDS * 4;
+		packed[k] = was;
+	}
+	/* (cut short: refused, or (its last token an empty one) the same payload) */
+	k = prism_bake_unpack(packed, size - 1, back, WORDS * 4);
+	damaged_refused &= k == 0 || (k == WORDS * 4 && !memcmp(back, words, WORDS * 4));
+	damaged_refused &= prism_bake_unpack(packed, size / 2, back, WORDS * 4) == 0;
+	damaged_refused &= prism_bake_unpack(packed, size, back, WORDS * 4 - 1) == 0;
+	check(damaged_refused, "pack_damaged", "a damaged or short block refused, never past its buffers");
+	/* (a packed record: read back whole, its size the payload's, its
+	stored bytes fewer; a plain record beside it) */
+	key_make(&key);
+	snprintf(path, sizeof(path), "%s/packed.pbk", folder);
+	ok = prism_bake_cache_create(&writer, path, &key, 0) == 0 &&
+		prism_bake_cache_append_packed(&writer, PRISM_BAKE_RECORD_ATLAS_TILE, 77, words, WORDS * 4, 4) == 0 &&
+		prism_bake_cache_append(&writer, PRISM_BAKE_RECORD_ATLAS_LAYERS, 77, "plain", 5) == 0 &&
+		prism_bake_cache_writer_close(&writer) == 0;
+	ok &= prism_bake_cache_open(&cache, path, &key, 1) == PRISM_BAKE_CACHE_CURRENT;
+	record = prism_bake_cache_find(&cache, PRISM_BAKE_RECORD_ATLAS_TILE, 77);
+	memset(back, 0, WORDS * 4);
+	ok &= record && record->size == WORDS * 4 && record->stored < record->size &&
+		prism_bake_cache_read(&cache, record, back, WORDS * 4) == 0 && !memcmp(back, words, WORDS * 4);
+	record = prism_bake_cache_find(&cache, PRISM_BAKE_RECORD_ATLAS_LAYERS, 77);
+	ok &= record && record->size == 5 && record->stored == 5;
+	prism_bake_cache_close(&cache);
+	check(ok, "pack_record", "a packed record read back as its payload, a plain one beside it");
+	free(words);
+	free(back);
+	free(packed);
+}
+
+/* ---------- the layered bake's recombining (prism_bake_layers.h) */
+
+static void test_layers(void)
+{
+	struct prism_bake_layer_light base, live;
+	struct prism_bake_layer_weights weights;
+	uint8_t bytes[4 * PRISM_BAKE_LAYER_BYTES];
+	float layers[PRISM_BAKE_LAYER_SHARES][3], total[3], indirect[3], t[3], i[3];
+	uint32_t file[4 * 4], raster[4 * 2], pool[4], words[PRISM_BAKE_LAYER_BASE_WORDS];
+	int k, ok = 1;
+
+	memset(&base, 0, sizeof(base));
+	for (k = 0; k < 3; k++)
+	{
+		base.sun[k] = 1.5f;
+		base.sky[k] = 0.4f + 0.1f * (float)k;
+		base.domes[k] = 0.2f;
+	}
+	base.fixtures = 1.0f;
+	base.emission = 3.0f;
+	base.emissive_scale = 1.0f;
+	base.stock = 1;
+	prism_bake_layer_base_write(&base, words);
+	ok = prism_bake_layer_base_read(words, PRISM_BAKE_LAYER_BASE_WORDS, &live) == 0 && live.sky[2] == base.sky[2] &&
+		live.emission == 3.0f && live.stock == 1;
+	check(ok, "layers_base", "the base's record read back");
+	/* (a texel: the sun's bounce 0.2, the sky 0.3, the domes 0.05, the
+	fixtures 0.1, the lamps 0.35 of 1.0; its indirect the sun's and sky's and
+	half the rest) */
+	for (k = 0; k < 3; k++)
+	{
+		total[k] = 1.0f;
+		layers[0][k] = 0.2f;
+		layers[1][k] = 0.3f;
+		layers[2][k] = 0.05f;
+		layers[3][k] = 0.1f;
+		indirect[k] = 0.5f + 0.25f;
+	}
+	prism_bake_layer_shares_put(total, (const float (*)[3])layers, 1, bytes, 0, 4);
+	prism_bake_layer_weights_make(&base, &live, &weights);
+	check(prism_bake_layers_identity(&weights), "layers_identity", "the base's own light: every weight 1");
+	memcpy(t, total, sizeof(t));
+	memcpy(i, indirect, sizeof(i));
+	prism_bake_layer_texel(&weights, bytes, 0, 4, t, i);
+	check(fabsf(t[0] - 1.0f) < 1.0e-6f && fabsf(i[0] - 0.75f) < 1.0e-6f, "layers_identity_texel",
+		"at weights of 1 a texel is its light as baked");
+	/* (the sky doubled: the total gains the sky's share, the indirect too) */
+	live.sky[0] = base.sky[0] * 2.0f;
+	live.sky[1] = base.sky[1] * 2.0f;
+	live.sky[2] = base.sky[2] * 2.0f;
+	prism_bake_layer_weights_make(&base, &live, &weights);
+	memcpy(t, total, sizeof(t));
+	memcpy(i, indirect, sizeof(i));
+	prism_bake_layer_texel(&weights, bytes, 0, 4, t, i);
+	ok = fabsf(t[1] - (1.0f + 77.0f / 255.0f)) < 2.0e-3f && fabsf(i[1] - (0.75f + 77.0f / 255.0f)) < 2.0e-3f;
+	check(ok, "layers_sky", "the sky doubled adds its share to the light and the indirect");
+	/* (Tool's flat fill: the sky's share gone, the indoor floor added) */
+	live = base;
+	live.flat = 1;
+	live.floor_indoor[0] = live.floor_indoor[1] = live.floor_indoor[2] = 0.07f;
+	live.floor_outdoor[0] = live.floor_outdoor[1] = live.floor_outdoor[2] = 0.5f;
+	prism_bake_layer_weights_make(&base, &live, &weights);
+	memcpy(t, total, sizeof(t));
+	memcpy(i, indirect, sizeof(i));
+	prism_bake_layer_texel(&weights, bytes, 0, 4, t, i);
+	ok = fabsf(t[0] - (1.0f - 77.0f / 255.0f + 0.07f)) < 2.0e-3f && fabsf(i[0] - (0.75f - 77.0f / 255.0f)) < 2.0e-3f;
+	check(ok, "layers_flat", "Tool's fill: the sky's light out, the indoor floor in (not in the indirect)");
+	/* (the lamps' brightness: display.prism_rt_emissive_scale 2) */
+	live = base;
+	live.emissive_scale = 2.0f;
+	prism_bake_layer_weights_make(&base, &live, &weights);
+	memcpy(t, total, sizeof(t));
+	memcpy(i, indirect, sizeof(i));
+	prism_bake_layer_texel(&weights, bytes, 0, 4, t, i);
+	check(fabsf(t[2] - (1.0f + 88.0f / 255.0f)) < 2.0e-3f, "layers_lamps", "the lamps doubled add their share");
+	/* (a tile's words: identity copies them; a change recombines) */
+	memset(file, 0, sizeof(file));
+	file[0] = prism_bake_rgb9e5(total);
+	file[1] = 0x80808080u;
+	file[2] = prism_bake_rgb9e5(indirect);
+	file[3] = 1u << 24;
+	prism_bake_layers_tile(&weights, file, bytes, 4, raster, pool);
+	prism_bake_rgb9e5_decode(raster[0], t);
+	ok = raster[1] == 0x80808080u && fabsf(t[0] - (1.0f + 88.0f / 255.0f)) < 1.0e-2f && raster[2] == 0 && pool[1] == 0;
+	prism_bake_layer_weights_identity(&weights);
+	prism_bake_layers_tile(&weights, file, bytes, 4, raster, pool);
+	ok &= raster[0] == file[0] && pool[0] == file[2];
+	check(ok, "layers_tile", "a tile recombined; at weights of 1 its words as they are");
+	(void)live;
+}
+
 int main(int argc, char **argv)
 {
 	if (argc < 2)
@@ -1607,6 +1785,8 @@ int main(int argc, char **argv)
 	test_converge();
 	test_batches();
 	test_filter();
+	test_pack(argv[1]);
+	test_layers();
 	printf("%s: %d failed\n", failures ? "FAILED" : "PASSED", failures);
 	return failures != 0;
 }

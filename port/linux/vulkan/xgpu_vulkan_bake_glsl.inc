@@ -679,6 +679,9 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        return vec3(0.0);\n" \
 	"    return kept / kept_w * sum * (float(count) / float(candidates));\n" \
 	"}\n" \
+	"/* (the fixtures' part of the light lamps_at or lamps_all gave last: the\n" \
+	"layered bake's fixtures layer, docs/prism_bake.md, \"The layers\") */\n" \
+	"vec3 fixtures_last = vec3(0.0);\n" \
 	"vec3 lamps_at(vec3 p, vec3 n, vec3 o, inout vec3 moment)\n" \
 	"{\n" \
 	"    vec3 l;\n" \
@@ -687,6 +690,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    vec3 fl;\n" \
 	"    vec3 fe = fixtures_ris(p, n, o, fl);\n" \
 	"    moment += luma(fe) * 3.14159265 / max(dot(n, fl), 0.1) * fl;\n" \
+	"    fixtures_last = fe;\n" \
 	"    return e + fe;\n" \
 	"}\n" \
 	"/* whether lamp l is in a cell's list (a binary search of its ids) */\n" \
@@ -757,6 +761,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    vec3 fl;\n" \
 	"    vec3 fe = fixtures_ris(p, n, o, fl);\n" \
 	"    moment += luma(fe) * 3.14159265 / max(dot(n, fl), 0.1) * fl;\n" \
+	"    fixtures_last = fe;\n" \
 	"    return sum + fe;\n" \
 	"}\n" \
 	"\n" \
@@ -764,16 +769,26 @@ over 2 pi, a0 = 1 - k . n0. */
 	"where it leaves the level (the domes with it past the first ray, which\n" \
 	"the point took as lights), at each hit its glow and its albedo by the sun's\n" \
 	"and a lamp's light there and the next bounce; backface: the first ray met a\n" \
-	"one-sided face's back */\n" \
-	"vec3 path(vec3 o, vec3 d, int bounces, out bool backface)\n" \
+	"one-sided face's back. path_layers gives the light's layers too (the\n" \
+	"layered bake, docs/prism_bake.md, \"The layers\"): the sun's bounce, the\n" \
+	"sky, the domes and the fixtures (the lamps' and glows' the rest) */\n" \
+	"vec3 path_layers(vec3 o, vec3 d, int bounces, out bool backface, out vec3 lay_sun, out vec3 lay_sky,\n" \
+	"    out vec3 lay_domes, out vec3 lay_fixtures)\n" \
 	"{\n" \
 	"    vec3 nh;\n" \
 	"    uint t;\n" \
 	"    vec2 b;\n" \
 	"    backface = false;\n" \
+	"    lay_sun = vec3(0.0);\n" \
+	"    lay_sky = vec3(0.0);\n" \
+	"    lay_domes = vec3(0.0);\n" \
+	"    lay_fixtures = vec3(0.0);\n" \
 	"    float th = hit(o, d, 300.0, nh, t, b);\n" \
 	"    if (th < 0.0)\n" \
-	"        return sky_along(d, false);\n" \
+	"    {\n" \
+	"        lay_sky = sky_along(d, false);\n" \
+	"        return lay_sky;\n" \
+	"    }\n" \
 	"    if (dot(nh, nh) <= 0.0)\n" \
 	"    {\n" \
 	"        backface = true;\n" \
@@ -786,9 +801,14 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        light += throughput * glow_of(t);\n" \
 	"        vec3 oh = h + nh * 0.03;\n" \
 	"        vec3 lh;\n" \
-	"        vec3 ls = sun_at(oh, nh) + lamps_ris(h, nh, oh, 4, lh) + fixtures_ris(h, nh, oh, lh);\n" \
+	"        vec3 ls_sun = sun_at(oh, nh);\n" \
+	"        vec3 ls_lamps = lamps_ris(h, nh, oh, 4, lh);\n" \
+	"        vec3 ls_fixtures = fixtures_ris(h, nh, oh, lh);\n" \
+	"        vec3 ls = ls_sun + ls_lamps + ls_fixtures;\n" \
 	"        throughput *= albedo_of(t);\n" \
 	"        light += throughput * ls;\n" \
+	"        lay_sun += throughput * ls_sun;\n" \
+	"        lay_fixtures += throughput * ls_fixtures;\n" \
 	"        if (bounce == bounces - 1 || term_off(8u))\n" \
 	"            break;\n" \
 	"        if (bounce >= 1)\n" \
@@ -802,12 +822,20 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        float t2 = hit(oh, wi, 300.0, nh, t, b);\n" \
 	"        if (t2 < 0.0)\n" \
 	"        {\n" \
-	"            light += throughput * sky_along(wi, true);\n" \
+	"            vec3 escaped = sky_along(wi, true), sky_only = sky_along(wi, false);\n" \
+	"            light += throughput * escaped;\n" \
+	"            lay_sky += throughput * sky_only;\n" \
+	"            lay_domes += throughput * (escaped - sky_only);\n" \
 	"            break;\n" \
 	"        }\n" \
 	"        h = oh + wi * t2;\n" \
 	"    }\n" \
 	"    return light;\n" \
+	"}\n" \
+	"vec3 path(vec3 o, vec3 d, int bounces, out bool backface)\n" \
+	"{\n" \
+	"    vec3 a, b, c, e;\n" \
+	"    return path_layers(o, d, bounces, backface, a, b, c, e);\n" \
 	"}\n" \
 	"\n" \
 	"/* the final gather (docs/prism_bake.md, \"The estimator\"): the bake's own\n" \
@@ -1112,8 +1140,8 @@ static const char setup_source[] =
 	"    if (j.accumulators != uvec2(0u))\n"
 	"    {\n"
 	"        Floats ac = Floats(j.accumulators);\n"
-	"        for (uint k = 0u; k < 28u; k++)\n"
-	"            ac.v[index * 28u + k] = 0.0;\n"
+	"        for (uint k = 0u; k < 40u; k++)\n"
+	"            ac.v[index * 40u + k] = 0.0;\n"
 	"        if (flags != 0u)\n"
 	"            atomicAdd(Uints(j.running).v[slot], 1u);\n"
 	"    }\n"
@@ -1130,7 +1158,8 @@ records, [1] the accumulators (28 floats a texel: the direct light's mean
 RGB, the indirect's, the moment's mean, the sun's visibility's mean, the
 backfaces' share, then the statistics: count and hits as uints, mean, m2,
 maximum; the running batch's sum, the batches' count, mean and m2; the 8
-groups' sums of luminance), [2] the states, [3] the tiles' running counts; parameters.x the
+groups' sums of luminance; then the layers' means, RGB each: the sun's
+bounce, the sky, the domes, the fixtures: 40 floats), [2] the states, [3] the tiles' running counts; parameters.x the
 texels, y the samples, z the least samples (64), w the frame (the seeds');
 values: x the threshold, y the black floor, z the samples at which a texel
 stops whatever its error (0: none; the draft's), w the bounces */
@@ -1173,7 +1202,7 @@ static const char lightmap_source[] =
 	"    vec3 n = vec3(tx.v[index * 8u + 3u], tx.v[index * 8u + 4u], tx.v[index * 8u + 5u]);\n"
 	"    uint flags = floatBitsToUint(tx.v[index * 8u + 6u]);\n"
 	"    Floats ac = Floats(j.accumulators);\n"
-	"    uint base = index * 28u;\n"
+	"    uint base = index * 40u;\n"
 	"    uint count = floatBitsToUint(ac.v[base + 11u]);\n"
 	"    float batch_sum = ac.v[base + 16u], batch_mean = ac.v[base + 18u], batch_m2 = ac.v[base + 19u];\n"
 	"    uint batches = floatBitsToUint(ac.v[base + 17u]);\n"
@@ -1182,6 +1211,9 @@ static const char lightmap_source[] =
 	"    int bounces = int(push.values.w);\n"
 	"    vec3 o = p + n * 0.01;\n"
 	"    vec3 direct = vec3(0.0), indirect = vec3(0.0), moment = vec3(0.0);\n"
+	"    /* (the layers: the sun's bounce, the sky, the domes, the fixtures; the\n"
+	"    lamps' and glows' the rest of the light) */\n"
+	"    vec3 l_sun = vec3(0.0), l_sky = vec3(0.0), l_domes = vec3(0.0), l_fixtures = vec3(0.0);\n"
 	"    float sun = 0.0, back = 0.0;\n"
 	"    uint bc = 0u, bh = 0u;\n"
 	"    float bmean = 0.0, bm2 = 0.0, bmost = 0.0;\n"
@@ -1216,24 +1248,43 @@ static const char lightmap_source[] =
 	"        /* (past the draft: every lamp of the cell's lists; the draft: the\n"
 	"        resampled pick) */\n"
 	"        bool all_lamps = (j.all_lamps.x != 0u && !term_off(1024u)) || term_off(512u);\n"
-	"        vec3 dl = domes_at(o, n, m) + (term_off(256u) ? vec3(0.0) : all_lamps ? lamps_all(p, n, o, m) :\n"
+	"        fixtures_last = vec3(0.0);\n"
+	"        vec3 dd = domes_at(o, n, m);\n"
+	"        vec3 dl = dd + (term_off(256u) ? vec3(0.0) : all_lamps ? lamps_all(p, n, o, m) :\n"
 	"            lamps_at(p, n, o, m)) + floor_;\n"
+	"        vec3 df = fixtures_last;\n"
 	"        vec3 d = cosine_dir_at(n, stratum(first + k));\n"
 	"        bool backface;\n"
-	"        vec3 il = path_gathered(o, d, bounces, j.cache, backface);\n"
+	"        vec3 ps = vec3(0.0), pk = vec3(0.0), pd = vec3(0.0), pf = vec3(0.0);\n"
+	"        /* (the final gather, a diagnostic, is not layered: its light the\n"
+	"        lamps' layer's) */\n"
+	"        vec3 il = j.cache == uvec2(0u) ? path_layers(o, d, bounces, backface, ps, pk, pd, pf) :\n"
+	"            path_gathered(o, d, bounces, j.cache, backface);\n"
 	"        if (term_off(128u))\n"
+	"        {\n"
 	"            il = vec3(0.0);\n"
+	"            ps = pk = pd = pf = vec3(0.0);\n"
+	"        }\n"
 	"        float c = max(dot(d, n), 0.1);\n"
 	"        m += luma(il) * 3.14159265 / c * d;\n"
 	"        float v = s.sun.w > 0.0 && dot(n, s.sun.xyz) > 0.0 ? sun_visible(o) : 0.0;\n"
 	"        if (any(isnan(dl)) || any(isinf(dl)))\n"
 	"            dl = vec3(0.0);\n"
 	"        if (any(isnan(il)) || any(isinf(il)))\n"
+	"        {\n"
 	"            il = vec3(0.0);\n"
+	"            ps = pk = pd = pf = vec3(0.0);\n"
+	"        }\n"
+	"        if (any(isnan(dd + df)) || any(isinf(dd + df)) || any(isnan(dl)) || any(isinf(dl)))\n"
+	"            dd = df = vec3(0.0);\n"
 	"        if (any(isnan(m)) || any(isinf(m)))\n"
 	"            m = vec3(0.0);\n"
 	"        direct += dl;\n"
 	"        indirect += il;\n"
+	"        l_sun += ps;\n"
+	"        l_sky += pk;\n"
+	"        l_domes += dd + pd;\n"
+	"        l_fixtures += df + pf;\n"
 	"        moment += m;\n"
 	"        sun += v;\n"
 	"        back += backface ? 1.0 : 0.0;\n"
@@ -1254,6 +1305,10 @@ static const char lightmap_source[] =
 	"        {\n"
 	"            direct += subgroupShuffleXor(direct, off);\n"
 	"            indirect += subgroupShuffleXor(indirect, off);\n"
+	"            l_sun += subgroupShuffleXor(l_sun, off);\n"
+	"            l_sky += subgroupShuffleXor(l_sky, off);\n"
+	"            l_domes += subgroupShuffleXor(l_domes, off);\n"
+	"            l_fixtures += subgroupShuffleXor(l_fixtures, off);\n"
 	"            moment += subgroupShuffleXor(moment, off);\n"
 	"            sun += subgroupShuffleXor(sun, off);\n"
 	"            back += subgroupShuffleXor(back, off);\n"
@@ -1284,6 +1339,10 @@ static const char lightmap_source[] =
 	"        ac.v[base + k] = mix(ac.v[base + k], direct[k] / float(bc), wb);\n"
 	"        ac.v[base + 3u + k] = mix(ac.v[base + 3u + k], indirect[k] / float(bc), wb);\n"
 	"        ac.v[base + 6u + k] = mix(ac.v[base + 6u + k], moment[k] / float(bc), wb);\n"
+	"        ac.v[base + 28u + k] = mix(ac.v[base + 28u + k], l_sun[k] / float(bc), wb);\n"
+	"        ac.v[base + 31u + k] = mix(ac.v[base + 31u + k], l_sky[k] / float(bc), wb);\n"
+	"        ac.v[base + 34u + k] = mix(ac.v[base + 34u + k], l_domes[k] / float(bc), wb);\n"
+	"        ac.v[base + 37u + k] = mix(ac.v[base + 37u + k], l_fixtures[k] / float(bc), wb);\n"
 	"    }\n"
 	"    ac.v[base + 9u] = mix(ac.v[base + 9u], sun / float(bc), wb);\n"
 	"    ac.v[base + 10u] = mix(ac.v[base + 10u], back / float(bc), wb);\n"
@@ -1438,8 +1497,10 @@ lights apart (a lamp's point picked as the lightmap's, its shadow traced; a
 direction of each dome's cone), each over its density; the sun's
 visibility; the share of its rays that meet backs (inside the level:
 invalid); the rule asked on its L0's luminance. The job block: [0] the
-probes' points (4 floats each), [1] the accumulators (16 floats: SH red 4,
-green 4, blue 4, the sun's visibility, the backs' share, 0, 0), [2] the
+probes' points (4 floats each), [1] the accumulators (32 floats: SH red 4,
+green 4, blue 4, the sun's visibility, the backs' share, the layers' SH L0
+(RGB each: the sun's bounce, the sky, the domes, the fixtures), whether its
+cluster is outdoor (1) or indoor (0), 5 spare), [2] the
 states, [3] the statistics (count, hits, mean, m2, maximum: 5 words), [4]
 the batch's count of running probes; parameters as the lightmap's */
 static const char volume_source[] =
@@ -1470,6 +1531,9 @@ static const char volume_source[] =
 	"        s.unused.x * 0x85ebca6bu)));\n"
 	"    int bounces = int(push.values.w);\n"
 	"    vec4 shr = vec4(0.0), shg = vec4(0.0), shb = vec4(0.0);\n"
+	"    /* (the layers' SH L0, RGB each: the sun's bounce, the sky, the domes,\n"
+	"    the fixtures) */\n"
+	"    vec3 l_sun = vec3(0.0), l_sky = vec3(0.0), l_domes = vec3(0.0), l_fixtures = vec3(0.0);\n"
 	"    float sun = 0.0, back = 0.0;\n"
 	"    uint bc = 0u, bh = 0u;\n"
 	"    float bmean = 0.0, bm2 = 0.0, bmost = 0.0;\n"
@@ -1480,9 +1544,19 @@ static const char volume_source[] =
 	"    {\n"
 	"        vec3 d = sphere_dir_at(stratum(count + k));\n"
 	"        bool backface;\n"
-	"        vec3 l = (path_gathered(p, d, bounces, j.cache, backface) + floor_) * 12.566371;\n"
-	"        if (any(isnan(l)) || any(isinf(l))) l = vec3(0.0);\n"
+	"        vec3 ps = vec3(0.0), pk = vec3(0.0), pd = vec3(0.0), pf = vec3(0.0);\n"
+	"        vec3 l = ((j.cache == uvec2(0u) ? path_layers(p, d, bounces, backface, ps, pk, pd, pf) :\n"
+	"            path_gathered(p, d, bounces, j.cache, backface)) + floor_) * 12.566371;\n"
+	"        if (any(isnan(l)) || any(isinf(l)))\n"
+	"        {\n"
+	"            l = vec3(0.0);\n"
+	"            ps = pk = pd = pf = vec3(0.0);\n"
+	"        }\n"
 	"        vec4 y = sh(d);\n"
+	"        l_sun += ps * (12.566371 * y.x);\n"
+	"        l_sky += pk * (12.566371 * y.x);\n"
+	"        l_domes += pd * (12.566371 * y.x);\n"
+	"        l_fixtures += pf * (12.566371 * y.x);\n"
 	"        vec3 shc0 = l * y.x;\n"
 	"        shr += l.r * y; shg += l.g * y; shb += l.b * y;\n"
 	"        /* (the lamps: radiance from a direction, resampled as the texels') */\n"
@@ -1501,6 +1575,7 @@ static const char volume_source[] =
 	"                vec4 yl = sh(ld);\n"
 	"                shr += e.r * yl; shg += e.g * yl; shb += e.b * yl;\n"
 	"                shc0 += e * yl.x;\n"
+	"                l_fixtures += e * yl.x;\n"
 	"            }\n"
 	"        }\n"
 	"        /* (each dome: a direction of its cone, its radiance pi r / its\n"
@@ -1517,6 +1592,7 @@ static const char volume_source[] =
 	"                vec4 yd = sh(dd);\n"
 	"                shr += e.r * yd; shg += e.g * yd; shb += e.b * yd;\n"
 	"                shc0 += e * yd.x;\n"
+	"                l_domes += e * yd.x;\n"
 	"            }\n"
 	"        }\n"
 	"        sun += s.sun.w > 0.0 ? sun_visible(p) : 0.0;\n"
@@ -1531,8 +1607,19 @@ static const char volume_source[] =
 	"        bmost = max(bmost, x);\n"
 	"    }\n"
 	"    Floats ac = Floats(j.accumulators);\n"
-	"    uint base = index * 20u;\n"
+	"    uint base = index * 32u;\n"
 	"    float wb = float(bc) / max(float(count) + float(bc), 1.0);\n"
+	"    /* (the probe's cluster outdoor (1) or indoor (0), for Tool's flat\n"
+	"    fill recombined at load: once, with its first samples) */\n"
+	"    if (count == 0u)\n"
+	"        ac.v[base + 26u] = floor_at(p);\n"
+	"    for (uint k = 0u; k < 3u; k++)\n"
+	"    {\n"
+	"        ac.v[base + 14u + k] = mix(ac.v[base + 14u + k], l_sun[k] / float(bc), wb);\n"
+	"        ac.v[base + 17u + k] = mix(ac.v[base + 17u + k], l_sky[k] / float(bc), wb);\n"
+	"        ac.v[base + 20u + k] = mix(ac.v[base + 20u + k], l_domes[k] / float(bc), wb);\n"
+	"        ac.v[base + 23u + k] = mix(ac.v[base + 23u + k], l_fixtures[k] / float(bc), wb);\n"
+	"    }\n"
 	"    for (uint k = 0u; k < 4u; k++)\n"
 	"    {\n"
 	"        ac.v[base + k] = mix(ac.v[base + k], shr[k] / float(bc), wb);\n"

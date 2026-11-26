@@ -997,7 +997,8 @@ static const struct config_setting config_settings[] =
 		"open sky gets Tool's ambient and one under cover less, and a room with\n"
 		"no sky only what comes in. \"flat\" Tool's fill: the same light at\n"
 		"every point (the sky's outdoor value where the cluster has a sky, its\n"
-		"indoor value where it has none). A change bakes again." },
+		"indoor value where it has none). Applied as the bake loads, with no\n"
+		"rebake: the layered bake recombines its sky layer (docs/prism_bake.md)." },
 	{ "display.material_packs", _config_boolean, "true", "HALO_MATERIAL_PACKS", _environment_value,
 		_platform_desktop,
 		"PRISM v4's materials from packs and mods (docs/prism_materials.md), with\n"
@@ -1091,6 +1092,12 @@ static const struct config_setting config_settings[] =
 		"Where the bakes are kept (a folder of each map's, a file of each\n"
 		"BSP's; made on this machine, never shared); empty: the data folder's\n"
 		"prism_bake." },
+	{ "display.bake_shipped_folder", _config_string, "\"\"", "HALO_BAKE_SHIPPED_FOLDER", _environment_value,
+		_platform_desktop,
+		"Where a release's shipped light is (its MAX bake, lighting only, of\n"
+		"the stock and the remodelled world: <stock|remodel>/<map>/bsp<n>.pbk\n"
+		"and manifest.txt; read only, used wherever it matches this machine's\n"
+		"maps); empty: the data folder's prism_bake_shipped." },
 	{ "display.bake_budget", _config_real, "2.0", "HALO_BAKE_BUDGET", _environment_value, _platform_desktop,
 		"The milliseconds of each frame's graphics time a background bake may\n"
 		"take while you play (0.25 to 200; in the menus it takes 30, and the\n"
@@ -1118,6 +1125,10 @@ static const struct config_setting config_settings[] =
 		"named here loaded at once, each of its BSPs baked in turn in the\n"
 		"foreground, its progress written to the bake folder, then the game\n"
 		"quits. Empty: the game as usual." },
+	{ "debug.bake_bsp", _config_integer, "-1", "HALO_BAKE_BSP", _environment_value, _platform_desktop,
+		"With debug.bake_worker: bake only this BSP of its map (0 the first),\n"
+		"then quit, so that a farm runs a map's BSPs side by side, a job each.\n"
+		"-1: every BSP in turn." },
 	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
 		"PRISM: hardware ray tracing over Classic's light (docs/prism_rt.md;\n"
 		"off under display.lighting \"raster\" and \"pathtraced\", which light the\n"
@@ -4590,8 +4601,8 @@ static const char *const config_display_order[] =
 	"display.prism_exposure_speed", "display.prism_tone_curve",
 	"=The light bake (PRISM Rebaked and PRISM Path Traced: both read it)",
 	"display.bake", "display.bake_quality", "display.prism_sky_light", "display.bake_rebake",
-	"display.bake_indicator", "display.bake_folder", "display.bake_budget", "display.material_packs",
-	"display.prism_rig",
+	"display.bake_indicator", "display.bake_folder", "display.bake_shipped_folder", "display.bake_budget",
+	"display.material_packs", "display.prism_rig",
 	"=PRISM Rebaked (\"raster\") alone",
 	"display.prism_raster_composition", "display.prism_raster_objects",
 	"=PRISM Path Traced (\"pathtraced\") alone",
@@ -4664,6 +4675,7 @@ static const struct
 	{ "display.bake_rebake", LIGHTING_PRISM },
 	{ "display.bake_indicator", LIGHTING_PRISM },
 	{ "display.bake_folder", LIGHTING_PRISM },
+	{ "display.bake_shipped_folder", LIGHTING_PRISM },
 	{ "display.bake_budget", LIGHTING_PRISM },
 	{ "display.material_packs", LIGHTING_PRISM },
 	{ "display.prism_rig", "PRISM Rebaked and PRISM Path Traced (units), Classic's ray tracing (fitted)" },

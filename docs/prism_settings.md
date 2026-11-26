@@ -62,13 +62,13 @@ The pages it opens:
 | Ray Tracing | Traced Light and Shadows | Ray Tracing (`display.prism_rt`: Off, Shadows, Shadows + GI, All Lights) | C |
 | | | Quality, Ray Resolution, Denoiser, Light Freedom, Traced Sun, Traced Level, Traced Light Look › | C, with ray tracing on |
 | | Traced Scene | Traced Models, Keep Shapes | C with ray tracing on; R with Object Shadows traced; P |
-| | | Cutout Shadows (in the bake: a change bakes again) | C with ray tracing on; R; P |
+| | | Cutout Shadows (the moving objects' under R and P: the level's are always in the bake, no rebake) | C with ray tracing on; R; P |
 | Traced Light Look | Look, Lights | Style, Lightmap Hold, Exposure, Tone Curve; Lamps, Lamp Brightness, Sun Size, Bounced Colour, Bounces | C (opened from Ray Tracing) |
 | Image | Exposure | Exposure, Exposure Bias, Tone Curve | R, P |
 | | Post Effects | Bloom, Tone Grade | C, R, P |
 | Upscaling | Resolution | Upscaler (`display.upscaler`: Off, FSR 3.1, DLSS once its plugin is ready), Upscale Quality (while an upscaler is on) | R, P |
-| Light Bake | Light Bake | Bake Quality, Sky Light (a change of either asks, then bakes every level again on the main menu) | R, P |
-| | Levels | Each campaign level's bake (Baked, Baking 37%, Loading, Part Baked, Not Baked, No Map, Failed), Rebake All (asks first) | R, P |
+| Light Bake | Light Bake | Sky Light (applied at once: the layered bake recombines it, no rebake). No Bake Quality: a release ships every level at MAX (`display.bake_quality`, the quality of a bake made here, is config.toml's) | R, P |
+| | Levels | Each campaign level's bake (Shipped, Checking, Baked, Baking 37%, Loading, Part Baked, Not Baked, No Map, Failed), Rebake Local (asks first; the shipped light kept) | R, P |
 | Materials & Textures | Materials | Material Packs (`display.material_packs`) | R, P |
 | | | PBR Materials (`display.prism_materials`) | C, R, P |
 | | | Material Detail, Surface Detail (the model shaders' forward light) | C |
@@ -97,11 +97,16 @@ under both PRISM modes the game gives the bake's frame and the path tracer the l
 `docs/prism_pathtraced.md`), and Enhanced adds the plasma bolts' and needles' lights to them and draws their glows. A
 Pro 2v2 game holds all three at Classic.
 
-**The light bake needs no asking** (`docs/prism_bake.md`, "The bake on the main menu"): under both PRISM modes the main
-menu bakes the campaign's levels that lack a bake of the settings chosen, as other games compile their shaders, with
-a line and a bar under the menu; a level started before its bake is done asks (PLAY NOW with Classic's light while it
-bakes in the background, or WAIT); a change of a setting the bake holds (Bake Quality, Sky Light, World Geometry,
-Cutout Shadows) asks (REBAKE or UNDO). Light Bake's old Bake (While Playing, When Asked, Never), Rebake Lightmaps and
+**The light bake needs no asking** (`docs/prism_bake.md`, "The bake on the main menu" and "The shipped bake"): a
+release ships every campaign level's light baked at MAX for both worlds, used wherever it matches the player's maps
+(SHIPPED on Light Bake, checked once in the background: CHECKING); under both PRISM modes the main menu bakes only what
+it does not cover (a mod, a custom map), as other games compile their shaders, with a line and a bar under the menu; a
+level started before its bake is done asks (PLAY NOW with Classic's light while it bakes in the background, or WAIT).
+No setting a player has bakes again: Sky Light and the lamps' brightness are recombined from the layered bake at once,
+Cutout Shadows is always in the bake (the setting chooses the moving objects' cutouts), a better bake serves a lesser
+quality, and World Geometry switches between the shipped worlds (it asks REBAKE or UNDO only where the shipped light
+lacks that world, and rebakes only the BSPs it changes). The performance settings (Path Traced's quality, the dynamic
+lights, the shadows, the denoiser, the upscaler) scale the runtime light alone, never the bake. Light Bake's old Bake (While Playing, When Asked, Never), Rebake Lightmaps and
 Progress on Screen rows are gone: `display.bake` `"ask"` is read as `"auto"` (and written so), `"off"` and
 `display.bake_indicator` stay config.toml's.
 

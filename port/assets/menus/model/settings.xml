@@ -2087,51 +2087,44 @@
 	</screen>
 	<screen name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/light_bake_screen" kind="settings" layout="page" geometry="tall" title="LIGHT BAKE">
 		<section key="section_0" title="LIGHT BAKE" when="desktop"/>
-		<row key="bake_quality" kind="choice" setting="display.bake_quality" label="BAKE QUALITY" crumb="VIDEO › PRISM › LIGHT BAKE" search_choices="max ultra high draft" when="desktop">
-			<help>Max: the finest light and sharpest shadows, each texel baked until its noise is gone; slow, and large on disk. The others are quicker and smaller. A change bakes every level again on the main menu.</help>
-			<choice shown="MAX" value="max"/>
-			<choice shown="ULTRA" value="ultra"/>
-			<choice shown="HIGH" value="high"/>
-			<choice shown="DRAFT" value="draft"/>
-		</row>
 		<row key="prism_sky_light" kind="choice" setting="display.prism_sky_light" label="SKY LIGHT" crumb="VIDEO › PRISM › LIGHT BAKE" search_choices="sky flat" when="desktop">
-			<help>Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. A change bakes every level again.</help>
+			<help>Sky: the sky lights each place by how much of it the place sees, as in a path tracer: open ground fully, under cover less, a room with no sky only by what comes in. Flat: the game's own fill, the same everywhere. Applied at once, with no rebake.</help>
 			<choice shown="SKY" value="sky"/>
 			<choice shown="FLAT" value="flat"/>
 		</row>
-		<section key="section_3" title="LEVELS" when="desktop"/>
+		<section key="section_2" title="LEVELS" when="desktop"/>
 		<row key="bake_a10" kind="status" label="THE PILLAR OF AUTUMN" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_a30" kind="status" label="HALO" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_a50" kind="status" label="TRUTH &amp; RECON." crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_b30" kind="status" label="SILENT CARTOGRAPHER" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_b40" kind="status" label="CONTROL ROOM" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_c10" kind="status" label="343 GUILTY SPARK" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_c20" kind="status" label="THE LIBRARY" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_c40" kind="status" label="TWO BETRAYALS" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_d20" kind="status" label="KEYES" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
 		<row key="bake_d40" kind="status" label="THE MAW" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop">
-			<help>The main menu bakes each level's light before you play it, the level you play next first, and picks up where it stopped. A level played before its bake is done shows Classic's light until it is.</help>
+			<help>Shipped: the release's light, baked at max, matched to your maps; nothing to bake. A level the shipped light does not match (a mod, a custom map) is baked by the main menu before you play it.</help>
 		</row>
-		<row key="bake_rebake_all" kind="status" label="REBAKE ALL" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop" run="port settings bake rebake all">
-			<help>Deletes every level's bake: the main menu bakes them all again from nothing. Asks first.</help>
+		<row key="bake_rebake_all" kind="status" label="REBAKE LOCAL" crumb="VIDEO › PRISM › LIGHT BAKE" when="desktop" run="port settings bake rebake all">
+			<help>Deletes the light baked on this computer: the main menu checks the shipped light again and bakes only what it does not cover. The shipped light is kept. Asks first.</help>
 		</row>
 		<button key="button_defaults" kind="defaults" run="port settings defaults" help="Puts this page's settings back to their defaults."/>
 		<button key="button_ok" kind="ok" run="port settings keep" help="Saves your changes, on this page and every tab, and applies them."/>

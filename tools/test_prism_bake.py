@@ -132,3 +132,19 @@ def test_reach_serialised_layout():
     # (the static scenery's triangle: the same floats on both sides)
     assert "#define SCENERY_FLOATS 13" in writer and "#define SCENERY_FLOATS 13" in reader
     assert "#define FIXTURE_FLOATS 12" in writer and "#define FIXTURE_FLOATS 12" in reader
+
+
+def test_key_settings_hash_budgets():
+    """the bake's key holds the budgets that change what it bakes: `max`'s sample cap (at `max`) and the volume's
+    fine brick budget (at every quality), both hashed into key_settings_hash, which bake_begin's key and the better
+    bake's check both take"""
+    source = (VULKAN / "xgpu_vulkan_bake.c").read_text()
+    body = source[source.index("static uint64_t key_settings_hash("):]
+    body = body[:body.index("\n}\n")]
+    assert "float cap = MAX_SAMPLES_CAP;" in body and "hash = prism_bake_hash64(hash, &cap, sizeof(cap));" in body
+    assert "uint32_t fine_most = VOLUME_FINE_BRICKS_MOST;" in body
+    fine = body.index("hash = prism_bake_hash64(hash, &fine_most, sizeof(fine_most));")
+    # (not under the `max` branch: the budget plans every quality's volume)
+    assert fine < body.index("if (quality == PRISM_BAKE_QUALITY_MAX)")
+    assert "b->key.settings_hash = key_settings_hash(b, b->quality);" in source
+    assert "better.settings_hash = key_settings_hash(b, better.quality);" in source

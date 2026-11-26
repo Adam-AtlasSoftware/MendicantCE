@@ -3,7 +3,7 @@
 Geometry, Cutout Shadows) under PRISM Rebaked or Path Traced (menu_functions.c's settings_pending_write). REBAKE (or
 B) keeps it: the main menu bakes every level again; UNDO puts the settings back as they were. -->
 <screen name="bake_rebake" back="bake keep">
-	<dialog title="REBAKE NEEDED" text="This change bakes every level's light again on the main menu. Wait for it before you play.">
+	<dialog title="REBAKE NEEDED" text="The shipped light has no bake of this choice: the main menu bakes the levels' light again. Wait for it before you play.">
 		<list focus="rebake">
 			<item id="rebake" label="REBAKE" do="bake keep"/>
 			<item id="undo" label="UNDO" do="bake undo"/>

@@ -2,10 +2,17 @@
 PRISM_BAKE_MENU.C
 
 PRISM's light bake on the main menu (docs/prism_bake.md, "The bake on the
-main menu"): with display.lighting "raster" or "pathtraced" (both read the
-bake), a graphics card that traces rays and display.bake "auto", the main
-menu bakes the campaign's levels that have no bake of the settings now
-chosen, before they are played, as other games compile their shaders.
+main menu" and "The shipped bake"): with display.lighting "raster" or
+"pathtraced" (both read the bake), a graphics card that traces rays and
+display.bake "auto", the main menu bakes the campaign's levels that have no
+bake of the settings now chosen, before they are played, as other games
+compile their shaders. A release ships every campaign level's light baked
+at MAX for both worlds (display.bake_shipped_folder, its manifest.txt): a
+BSP it has is ready with nothing baked, and the worker only checks it once
+against this machine's maps (the baker's shipped.txt); a BSP whose shipped
+light does not match (a mod, a custom map, a remodel built otherwise) is
+baked here, that BSP alone. No setting a player has bakes again but World
+Geometry where the shipped bake lacks that world.
 
 - The bake is the in-game baker's (prism_bake.c, xgpu_vulkan_bake.c), which
   bakes the level drawn: the main menu has none, so a level is baked by a
@@ -24,8 +31,11 @@ chosen, before they are played, as other games compile their shaders.
   map's BSPs, and each BSP baked with its key), by whichever process
   finished it, the worker or a game played (prism_bake_note, each frame): a
   BSP whose note's key is not the settings' (prism_bake_key: the baker's
-  version, display.bake_quality, prism_sky_light, prism_rig,
-  prism_world_geometry, prism_rt_alpha) is baked again. The baker itself
+  version, display.bake_quality, the rig's class, prism_rt_alpha; and the
+  BSP's own geometry, geometry_token: stock, or its remodel's file) is
+  baked again; a setting that only scales or tints a light (the sky's
+  light, the rig's scales) is recombined from the layered bake as it
+  loads, with no rebake. The baker itself
   checks the whole key as it loads a bake (the map, its geometry, its
   lights): a bake this note calls good that is not is baked again as the
   level is played.
@@ -51,6 +61,7 @@ still; it writes only its bake, its note and its progress.
 
 #include "cseries.h"
 #include "cache/cache_files.h"
+#include "tag_files/tag_files.h"
 #include "game/game.h"
 #include "hs/hs.h"
 #include "interface/interface.h"
@@ -82,6 +93,7 @@ the Xbox's and put it under the data folder) */
 /* ---------- prototypes */
 
 char const *config_string(char const *name);
+long config_integer(char const *name);
 int config_boolean(char const *name);
 unsigned long config_changes(void);
 void platform_log(const char *format, ...);
@@ -93,6 +105,7 @@ boolean prism_bake_wanted(void);
 unsigned long prism_bake_status(int word);
 float prism_bake_status_real(int word);
 unsigned long prism_scene_static_generation(void);
+int prism_scene_static_empty(void);
 void draw_quad(rectangle2d *rectangle, pixel32 color);
 /* menu_functions.c's: the saved game's level and the one after the last
 finished, player 1's profile's (NONE for none) */
@@ -105,7 +118,7 @@ void pc_menu_bake_questions_open(void);
 #define BAKE_LEVELS 10
 #define BAKE_BSPS 16
 #define BAKE_PATH 600
-#define BAKE_KEY 160
+#define BAKE_KEY 256
 /* the levels' notes read again this often, the worker's progress this often */
 #define NOTES_MILLISECONDS 2000ul
 #define PROGRESS_MILLISECONDS 500ul
@@ -133,7 +146,10 @@ enum
 	LEVEL_PARTLY,
 	LEVEL_BAKED,
 	LEVEL_FAILED,
+	/* every BSP's light the release's shipped bake (or baked here) */
+	LEVEL_SHIPPED,
 };
+
 
 /* the campaign's levels, in its order (main.c's scenario_paths) */
 static struct
@@ -156,9 +172,18 @@ static struct
 	boolean wanted;
 	char folder[BAKE_PATH];
 	char key[BAKE_KEY];
-	/* the levels: their state, BSPs and those baked; when read */
+	/* the shipped bake's folder (a release's, read only) and the world
+	whose set of it is drawn ("stock", "remodel") */
+	char shipped[BAKE_PATH];
+	char world[16];
+	/* the levels: their state, BSPs and those baked; when read; whether
+	every BSP the shipped bake gives was seen to match this machine's maps
+	(shipped.txt's "used": else the worker checks it, last) */
 	int state[BAKE_LEVELS];
 	int bsps[BAKE_LEVELS], baked[BAKE_LEVELS];
+	boolean verified[BAKE_LEVELS];
+	/* (a level the worker checked this start: not checked again) */
+	boolean checked[BAKE_LEVELS];
 	unsigned long notes_read;
 	/* the level WAIT chose (first), NONE */
 	short first;
@@ -166,6 +191,7 @@ static struct
 	progress (its BSP, of how many, the share, seconds left: -1 unknown) */
 	int worker;
 	short worker_level;
+	boolean worker_checks;
 	unsigned long worker_began, worker_heard, progress_read;
 	int progress_bsp, progress_bsps;
 	float progress, seconds_left;
@@ -178,7 +204,7 @@ static struct
 	char noted_map[64];
 	short noted_bsp;
 	unsigned long noted_generation;
-} bake_menu = { (unsigned long)-1, FALSE, "", "", { 0 }, { 0 }, { 0 }, 0, NONE, 0, NONE };
+} bake_menu = { (unsigned long)-1, FALSE, "", "", "", "", { 0 }, { 0 }, { 0 }, { 0 }, { 0 }, 0, NONE, 0, NONE };
 
 /* the worker's own state (debug.bake_worker) */
 static struct
@@ -189,7 +215,11 @@ static struct
 	short target;
 	unsigned long written;
 	unsigned long switch_asked;
-} bake_worker = { (unsigned long)-1 };
+	/* debug.bake_bsp: the one BSP baked (a farm's job a BSP), -1 all; the
+	BSPs that failed, each passed over so that the next is still baked */
+	short only;
+	short failed;
+} bake_worker = { (unsigned long)-1, "", FALSE, 0, 0, 0, -1, 0 };
 
 /* ---------- private code */
 
@@ -201,6 +231,17 @@ static void folder_read(char *folder, unsigned long size)
 		snprintf(folder, size, "%s", value);
 	else
 		snprintf(folder, size, "%s/prism_bake", platform_data_root());
+}
+
+/* the shipped bake's folder (prism_bake.c's alike) */
+static void shipped_folder_read(char *folder, unsigned long size)
+{
+	char const *value = config_string("display.bake_shipped_folder");
+
+	if (value && *value)
+		snprintf(folder, size, "%s", value);
+	else
+		snprintf(folder, size, "%s/prism_bake_shipped", platform_data_root());
 }
 
 /* the map's name as the baker names its folder (xgpu_vulkan_bake.c's
@@ -245,6 +286,121 @@ static boolean file_exists(char const *path)
 	struct posix_file_information information;
 
 	return posix_stat(path, &information) == 0;
+}
+
+/* a BSP's geometry as the note keeps it (per BSP, so that a change of the
+world's geometry bakes again only the BSPs it changes): "geo:pwg:<tag>:
+<size>:<time>" where display.prism_world_geometry is "remodel" and the BSP
+has a remodel (<data>/prism_world/<its tag>.pwg, prism_world_geometry.c),
+else "geo:stock:<tag>"; its tag's path with / for \ (the note keeps the
+rest of a line as the key, so a space in it is kept) */
+static void geometry_token(char const *tag, char *token, unsigned long size)
+{
+	char name[160], path[BAKE_PATH + 200];
+	struct posix_file_information information;
+	char const *geometry = config_string("display.prism_world_geometry");
+	unsigned long k;
+
+	snprintf(name, sizeof(name), "%s", tag ? tag : "");
+	/* (the path as prism_world_geometry.c opens it: / for \, nothing else
+	changed, so that a tag with a space finds its remodel) */
+	for (k = 0; name[k]; k++)
+	{
+		if (name[k] == '\\')
+			name[k] = '/';
+	}
+	snprintf(path, sizeof(path), "%s/prism_world/%s.pwg", platform_data_root(), name);
+	if (geometry && !strcmp(geometry, "remodel") && name[0] && posix_stat(path, &information) == 0)
+		snprintf(token, size, "geo:pwg:%s:%lu:%lu", name, (unsigned long)information.size_low,
+			(unsigned long)information.modification_seconds);
+	else
+		snprintf(token, size, "geo:stock:%s", name);
+}
+
+/* a BSP's whole key: the settings' and its geometry's */
+static void bsp_key(char const *base, char const *tag, char *key, unsigned long size)
+{
+	char token[BAKE_KEY];
+
+	geometry_token(tag, token, sizeof(token));
+	snprintf(key, size, "%s %s", base, token);
+}
+
+/* whether a BSP's noted key is good for the settings now: its settings' key
+the same, and its geometry the same (its token made again from the tag it
+names). An older note's key, with no geometry, is not */
+/* a quality's rank (draft 0 to max 3; -1 none) */
+static int quality_rank(char const *word, unsigned long length)
+{
+	static char const *const words[] = { "draft", "high", "ultra", "max" };
+	int rank;
+
+	for (rank = 0; rank < 4; rank++)
+	{
+		if (strlen(words[rank]) == length && !strncmp(word, words[rank], length))
+			return rank;
+	}
+	return -1;
+}
+
+/* whether a settings' key noted ("v19 max units cutouts") is good for the
+settings' now: the same but for its quality, which may be better (a bake of
+max is good where ultra is asked: the baker takes it, xgpu_vulkan_bake.c's
+file_whole) */
+static boolean base_key_good(char const *noted, unsigned long noted_length, char const *base)
+{
+	char const *noted_quality = strchr(noted, ' '), *base_quality = strchr(base, ' ');
+	char const *noted_rest, *base_rest;
+	int noted_rank, base_rank;
+
+	if (!noted_quality || !base_quality || noted_quality - noted != base_quality - base ||
+		strncmp(noted, base, (unsigned long)(base_quality - base)) ||
+		(unsigned long)(noted_quality - noted) >= noted_length)
+	{
+		return FALSE;
+	}
+	noted_quality++;
+	base_quality++;
+	noted_rest = strchr(noted_quality, ' ');
+	base_rest = strchr(base_quality, ' ');
+	if (!noted_rest || !base_rest || (unsigned long)(noted_rest - noted) > noted_length)
+		return FALSE;
+	noted_rank = quality_rank(noted_quality, (unsigned long)(noted_rest - noted_quality));
+	base_rank = quality_rank(base_quality, (unsigned long)(base_rest - base_quality));
+	if (noted_rank < 0 || base_rank < 0 || noted_rank < base_rank)
+		return FALSE;
+	return noted_length - (unsigned long)(noted_rest - noted) == (unsigned long)strlen(base_rest) &&
+		!strncmp(noted_rest, base_rest, (unsigned long)strlen(base_rest));
+}
+
+static boolean bsp_key_good(char const *noted, char const *base)
+{
+	char const *token = strstr(noted, " geo:");
+	char tag[160], now[BAKE_KEY + 8];
+	char const *at;
+	char const *now_token;
+
+	if (!token || !base_key_good(noted, (unsigned long)(token - noted), base))
+		return FALSE;
+	token++;
+	/* (the tag: after "geo:stock:", or after "geo:pwg:" to the next ':') */
+	if (!strncmp(token, "geo:stock:", 10))
+		at = token + 10;
+	else if (!strncmp(token, "geo:pwg:", 8))
+		at = token + 8;
+	else
+		return FALSE;
+	snprintf(tag, sizeof(tag), "%s", at);
+	if (token[4] == 'p')
+	{
+		char *colon = strchr(tag, ':');
+
+		if (colon)
+			*colon = 0;
+	}
+	bsp_key(base, tag, now, sizeof(now));
+	now_token = strstr(now, " geo:");
+	return now_token && !strcmp(now_token, token - 1);
 }
 
 /* a file written whole or not at all (written beside it, then renamed over
@@ -328,6 +484,129 @@ static void note_write(char const *map, int bsps, char keys[BAKE_BSPS][BAKE_KEY]
 		platform_log("prism bake: could not write %s", path);
 }
 
+/* ---------- the shipped bake (docs/prism_bake.md, "The shipped bake") */
+
+/* whether a BSP's key in the shipped bake's manifest ("v19 max units
+cutouts geo:stock", or "geo:pwg" for a remodel's BSP, each with ":<tag>"
+where the export knew the BSP's tag) is good for the settings now and the
+BSP's geometry here (its tag's remodel, where it names one; the remodel's
+file is the player's own build, which the baker checks by its hash as it
+loads) */
+static boolean shipped_key_good(char const *shipped, char const *base)
+{
+	char const *token = strstr(shipped, " geo:");
+	char tag[160], now[BAKE_KEY];
+	boolean remodel;
+
+	if (!token || !base_key_good(shipped, (unsigned long)(token - shipped), base))
+		return FALSE;
+	token++;
+	if (!strncmp(token, "geo:stock", 9) && (token[9] == 0 || token[9] == ':'))
+		remodel = FALSE;
+	else if (!strncmp(token, "geo:pwg", 7) && (token[7] == 0 || token[7] == ':'))
+		remodel = TRUE;
+	else
+		return FALSE;
+	/* (no tag: the stock world's BSPs are stock, a remodel's either) */
+	if (!strchr(token + 4, ':'))
+		return remodel ? !strcmp(bake_menu.world, "remodel") : TRUE;
+	snprintf(tag, sizeof(tag), "%s", strchr(token + 4, ':') + 1);
+	geometry_token(tag, now, sizeof(now));
+	return !strncmp(now, remodel ? "geo:pwg:" : "geo:stock:", remodel ? 8 : 10);
+}
+
+/* the shipped bake's manifest's BSPs of the map in the world drawn: its
+BSPs (0 none) and each one's key */
+static int shipped_read(char const *map, char keys[BAKE_BSPS][BAKE_KEY])
+{
+	char path[BAKE_PATH + 32], line[BAKE_KEY + 96], prefix[96];
+	FILE *file;
+	int bsps = 0, index;
+	unsigned long prefix_length;
+
+	for (index = 0; index < BAKE_BSPS; index++)
+		keys[index][0] = 0;
+	if (!bake_menu.shipped[0])
+		return 0;
+	snprintf(path, sizeof(path), "%s/manifest.txt", bake_menu.shipped);
+	file = fopen(path, "rb");
+	if (!file)
+		return 0;
+	/* ("bsp <world> <map> <index> <of> <key>") */
+	snprintf(prefix, sizeof(prefix), "bsp %s %s ", bake_menu.world, map);
+	prefix_length = (unsigned long)strlen(prefix);
+	while (fgets(line, sizeof(line), file))
+	{
+		char *at, *key;
+		int of;
+
+		line[strcspn(line, "\r\n")] = 0;
+		if (strncmp(line, prefix, prefix_length))
+			continue;
+		at = line + prefix_length;
+		index = atoi(at);
+		at = strchr(at, ' ');
+		if (!at)
+			continue;
+		of = atoi(at + 1);
+		key = strchr(at + 1, ' ');
+		if (!key || index < 0 || index >= BAKE_BSPS || of <= 0 || of > BAKE_BSPS)
+			continue;
+		bsps = of;
+		snprintf(keys[index], BAKE_KEY, "%s", key + 1);
+	}
+	fclose(file);
+	return bsps;
+}
+
+/* what the baker found of the map's shipped bake here (<folder>/<map>/
+shipped.txt, xgpu_vulkan_bake.c's shipped_note), in the world drawn: each
+BSP's 1 used, -1 not this machine's (baked here instead), 0 not seen yet */
+static void shipped_seen(char const *map, int seen[BAKE_BSPS])
+{
+	char path[BAKE_PATH + 96], name[64], line[160], prefix[32];
+	FILE *file;
+	int index;
+
+	for (index = 0; index < BAKE_BSPS; index++)
+		seen[index] = 0;
+	map_folder_name(map, name, sizeof(name));
+	snprintf(path, sizeof(path), "%s/%s/shipped.txt", bake_menu.folder, name);
+	file = fopen(path, "rb");
+	if (!file)
+		return;
+	while (fgets(line, sizeof(line), file))
+	{
+		for (index = 0; index < BAKE_BSPS; index++)
+		{
+			snprintf(prefix, sizeof(prefix), "bsp%d %s ", index, bake_menu.world);
+			if (!strncmp(line, prefix, strlen(prefix)))
+				seen[index] = !strncmp(line + strlen(prefix), "used", 4) ? 1 : -1;
+		}
+	}
+	fclose(file);
+}
+
+/* whether the shipped bake has every campaign level here of a world
+("stock", "remodel"): a change of the world's geometry then bakes nothing */
+static boolean shipped_world_whole(char const *world)
+{
+	char keep[16], keys[BAKE_BSPS][BAKE_KEY], path[BAKE_PATH + 96];
+	short level;
+	boolean whole = TRUE;
+
+	snprintf(keep, sizeof(keep), "%s", bake_menu.world);
+	snprintf(bake_menu.world, sizeof(bake_menu.world), "%s", world);
+	for (level = 0; level < BAKE_LEVELS && whole; level++)
+	{
+		snprintf(path, sizeof(path), "%s/maps/%s.map", platform_data_root(), bake_levels[level].map);
+		if (file_exists(path) && !shipped_read(bake_levels[level].map, keys))
+			whole = FALSE;
+	}
+	snprintf(bake_menu.world, sizeof(bake_menu.world), "%s", keep);
+	return whole;
+}
+
 static void settings_read(void)
 {
 	char const *lighting;
@@ -337,6 +616,17 @@ static void settings_read(void)
 		return;
 	bake_menu.changes = config_changes();
 	folder_read(bake_menu.folder, sizeof(bake_menu.folder));
+	shipped_folder_read(bake_menu.shipped, sizeof(bake_menu.shipped));
+	{
+		char const *geometry = config_string("display.prism_world_geometry");
+		char const *world = geometry && !strcmp(geometry, "remodel") ? "remodel" : "stock";
+
+		if (strcmp(world, bake_menu.world))
+		{
+			snprintf(bake_menu.world, sizeof(bake_menu.world), "%s", world);
+			bake_menu.notes_read = 0;
+		}
+	}
 	prism_bake_key(key, sizeof(key));
 	if (strcmp(key, bake_menu.key))
 	{
@@ -349,11 +639,17 @@ static void settings_read(void)
 		strcmp(config_string("display.bake"), "off") != 0 && !prism_bake_worker_map();
 }
 
-/* each level's state from the maps folder and its note */
+/* each level's state from the maps folder, its note and the shipped bake:
+a BSP is ready where its note's key is good (baked here, or the shipped
+bake drawn and noted), or where the shipped bake's manifest has it for the
+world drawn and the baker has not found it to differ from this machine's
+maps (shipped.txt); a level of shipped BSPs is SHIPPED, else BAKED as
+before */
 static void levels_read(void)
 {
-	char keys[BAKE_BSPS][BAKE_KEY];
+	char keys[BAKE_BSPS][BAKE_KEY], shipped[BAKE_BSPS][BAKE_KEY];
 	char path[BAKE_PATH + 96];
+	int seen[BAKE_BSPS];
 	short level;
 
 	bake_menu.notes_read = system_milliseconds() | 1;
@@ -370,14 +666,37 @@ static void levels_read(void)
 			continue;
 		}
 		bsps = note_read(bake_levels[level].map, keys);
-		for (index = 0; index < bsps; index++)
 		{
-			if (!strcmp(keys[index], bake_menu.key))
-				baked++;
+			int shipped_bsps = shipped_read(bake_levels[level].map, shipped), from_shipped = 0, checked = 0;
+
+			if (shipped_bsps && (!bsps || bsps == shipped_bsps))
+			{
+				bsps = shipped_bsps;
+				shipped_seen(bake_levels[level].map, seen);
+			}
+			else
+				shipped_bsps = 0;
+			for (index = 0; index < bsps; index++)
+			{
+				boolean shipped_good = shipped_bsps && seen[index] >= 0 && shipped_key_good(shipped[index],
+					bake_menu.key);
+
+				if (shipped_good && seen[index] > 0)
+					checked++;
+				if (bsp_key_good(keys[index], bake_menu.key))
+					baked++;
+				else if (shipped_good)
+				{
+					baked++;
+					from_shipped++;
+				}
+			}
+			bake_menu.verified[level] = !shipped_bsps || checked == bsps || !from_shipped;
+			bake_menu.bsps[level] = bsps;
+			bake_menu.baked[level] = baked;
+			bake_menu.state[level] = bsps && baked == bsps ? (shipped_bsps && (from_shipped || checked) ? LEVEL_SHIPPED :
+				LEVEL_BAKED) : baked ? LEVEL_PARTLY : LEVEL_NOT_BAKED;
 		}
-		bake_menu.bsps[level] = bsps;
-		bake_menu.baked[level] = baked;
-		bake_menu.state[level] = bsps && baked == bsps ? LEVEL_BAKED : baked ? LEVEL_PARTLY : LEVEL_NOT_BAKED;
 	}
 }
 
@@ -425,6 +744,14 @@ static short level_next(void)
 	for (level = 0; level < BAKE_LEVELS; level++)
 	{
 		if (level_needs(level))
+			return level;
+	}
+	/* (last, a shipped level not yet checked against this machine's maps:
+	the worker loads it, the baker takes each BSP's shipped bake whose key
+	is this machine's at once and bakes any other BSP here, that BSP alone) */
+	for (level = 0; level < BAKE_LEVELS; level++)
+	{
+		if (bake_menu.state[level] == LEVEL_SHIPPED && !bake_menu.verified[level] && !bake_menu.checked[level])
 			return level;
 	}
 	return NONE;
@@ -579,15 +906,16 @@ static void worker_begin(short level)
 		return;
 	}
 	bake_menu.worker_level = level;
+	bake_menu.worker_checks = bake_menu.state[level] == LEVEL_SHIPPED;
 	bake_menu.worker_began = bake_menu.worker_heard = system_milliseconds();
 	bake_menu.progress = 0.0f;
 	bake_menu.seconds_left = -1.0f;
 	bake_menu.progress_bsp = 0;
 	bake_menu.progress_bsps = bake_menu.bsps[level];
 	snprintf(bake_menu.progress_state, sizeof(bake_menu.progress_state), "loading");
-	bake_menu.was_baking = TRUE;
-	platform_log("prism bake: the main menu bakes %s (%s) in a process of its own (%s)", bake_levels[level].map,
-		bake_levels[level].name, bake_menu.key);
+	bake_menu.was_baking = !bake_menu.worker_checks;
+	platform_log("prism bake: the main menu %s %s (%s) in a process of its own (%s)", bake_menu.worker_checks ?
+		"checks the shipped light of" : "bakes", bake_levels[level].map, bake_levels[level].name, bake_menu.key);
 }
 
 /* the worker's end: done, failed (its level left until the next start), or
@@ -600,6 +928,8 @@ static void worker_ended(int code, boolean stopped)
 	bake_menu.worker_level = NONE;
 	if (level == NONE)
 		return;
+	if (bake_menu.worker_checks && !stopped)
+		bake_menu.checked[level] = TRUE;
 	if (stopped)
 		platform_log("prism bake: the main menu's bake of %s paused (it resumes where it stopped)",
 			bake_levels[level].map);
@@ -610,7 +940,14 @@ static void worker_ended(int code, boolean stopped)
 		/* (its note read again: a worker done whose level the note does not
 		call baked is not started again until the next start) */
 		levels_read();
-		if (level_needs(level))
+		if (bake_menu.state[level] == LEVEL_SHIPPED && !bake_menu.verified[level])
+		{
+			/* (its shipped.txt does not say every BSP used: not checked again
+			until the next start; the baker checks each BSP as it is played) */
+			platform_log("prism bake: %s's shipped light was not seen used for every BSP; left until the next start",
+				bake_levels[level].map);
+		}
+		else if (level_needs(level))
 		{
 			platform_log("prism bake: %s's note (%s/%s/baked.txt) does not hold the bake just made; left until the "
 				"next start", bake_levels[level].map, bake_menu.folder, bake_levels[level].map);
@@ -619,9 +956,13 @@ static void worker_ended(int code, boolean stopped)
 	}
 	else
 	{
-		platform_log("prism bake: the main menu's bake of %s failed (its process ended with %d; its log is in %s/"
-			"bake_worker); left until the next start", bake_levels[level].map, code, platform_save_root());
-		bake_menu.state[level] = LEVEL_FAILED;
+		platform_log("prism bake: the main menu's %s of %s failed (its process ended with %d; its log is in %s/"
+			"bake_worker); left until the next start", bake_menu.worker_checks ? "check" : "bake", bake_levels[level].map,
+			code, platform_save_root());
+		/* (a check that failed leaves the shipped light as it is: the baker
+		checks each BSP again as it is played) */
+		if (!bake_menu.worker_checks)
+			bake_menu.state[level] = LEVEL_FAILED;
 	}
 	if (bake_menu.first == level && !stopped)
 		bake_menu.first = NONE;
@@ -680,17 +1021,37 @@ static void worker_frame(void)
 	if (!game_time_initialized() || !game_in_progress() || main_menu_is_active() || !(scenario = global_scenario_get()))
 		return;
 	/* (the game's clock stopped: nothing plays while it bakes) */
+	count = scenario->structure_bsp_references.count;
 	if (!bake_worker.paused)
 	{
 		bake_worker.paused = TRUE;
 		hs_compile_and_evaluate("game_speed 0");
-		platform_log("prism bake: the main menu's worker bakes %s's %d BSPs", bake_worker.map,
-			(int)scenario->structure_bsp_references.count);
+		if (bake_worker.only >= 0)
+		{
+			platform_log("prism bake: the main menu's worker bakes %s's BSP %d alone (debug.bake_bsp; %d BSPs)",
+				bake_worker.map, (int)bake_worker.only, (int)count);
+			bake_worker.target = bake_worker.only < count ? bake_worker.only : count;
+		}
+		else
+			platform_log("prism bake: the main menu's worker bakes %s's %d BSPs", bake_worker.map, (int)count);
 	}
-	count = scenario->structure_bsp_references.count;
 	bsp = global_structure_bsp_index_get();
-	if (bake_worker.target >= count)
+	if (bake_worker.target >= count || (bake_worker.only >= 0 && bake_worker.target != bake_worker.only))
 	{
+		if (bake_worker.only >= count)
+		{
+			worker_progress_write("failed");
+			platform_log("prism bake: the main menu's worker: %s has no BSP %d (debug.bake_bsp): quitting",
+				bake_worker.map, (int)bake_worker.only);
+			exit(2);
+		}
+		if (bake_worker.failed)
+		{
+			worker_progress_write("failed");
+			platform_log("prism bake: the main menu's worker baked %s but for %d BSPs that failed: quitting",
+				bake_worker.map, (int)bake_worker.failed);
+			exit(3);
+		}
 		worker_progress_write("done");
 		platform_log("prism bake: the main menu's worker baked %s: quitting", bake_worker.map);
 		exit(0);
@@ -707,6 +1068,15 @@ static void worker_frame(void)
 		return;
 	}
 	bake_worker.switch_asked = 0;
+	if (prism_scene_static_empty())
+	{
+		/* (nothing to bake: noted by prism_bake_note, this frame) */
+		platform_log("prism bake: the main menu's worker: %s's BSP %d has no lightmapped surface: nothing to bake",
+			bake_worker.map, (int)bsp);
+		bake_worker.target++;
+		worker_progress_write("baking");
+		return;
+	}
 	state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 	if ((long)prism_bake_status(XGPU_BAKE_STATUS_BSP) == (long)bsp &&
 		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) == prism_scene_static_generation())
@@ -720,10 +1090,14 @@ static void worker_frame(void)
 		}
 		if (state == XGPU_BAKE_STATE_FAILED)
 		{
-			worker_progress_write("failed");
-			platform_log("prism bake: the main menu's worker could not bake %s's BSP %d: quitting", bake_worker.map,
+			/* (passed over: the map's other BSPs are still baked, and the
+			worker ends failed once they are) */
+			bake_worker.failed++;
+			bake_worker.target++;
+			worker_progress_write("baking");
+			platform_log("prism bake: the main menu's worker could not bake %s's BSP %d: on to the next", bake_worker.map,
 				(int)bsp);
-			exit(3);
+			return;
 		}
 	}
 	if (system_milliseconds() - bake_worker.written > PROGRESS_MILLISECONDS)
@@ -732,23 +1106,49 @@ static void worker_frame(void)
 
 /* ---------- public code */
 
-/* the settings the bake holds, as the note keeps them: a BSP whose note's
-key is another is baked again (the baker's version, the quality, the sky's
-light, the rig, the remodelled level, the cutouts traced) */
-void prism_bake_key(char *key, unsigned long size)
+/* the rig's class the bake holds: the fitted rig's sky lights test their
+rays the whole level's length, the units rig's as far as their tags say
+(transport); "auto" is the units rig under both PRISM lightings */
+static char const *rig_class(char const *rig)
 {
-	snprintf(key, size, "v%u %s %s %s %s %s", (unsigned)XGPU_BAKE_VERSION, config_string("display.bake_quality"),
-		config_string("display.prism_sky_light"), config_string("display.prism_rig"),
-		config_string("display.prism_world_geometry"), config_boolean("display.prism_rt_alpha") ? "cutouts" :
-		"solid");
+	return rig && !strcmp(rig, "fitted") ? "fitted" : "units";
 }
 
-/* whether a setting is one the key holds (a change bakes every level again) */
-boolean prism_bake_key_setting(char const *name)
+/* the settings every BSP's bake holds, as the note keeps them: the baker's
+version, the quality (at least: a better bake is good, base_key_good), the
+rig's class, the cutouts (always traced in the bake: prism_rt.c's
+level_alpha_traced, so Cutout Shadows never rebakes). Not the sky's light,
+the rig's scales or the lamps' brightness: the layered bake recombines its
+layers by those as it loads (docs/prism_bake.md, "The layers"), with no
+rebake. The level's geometry is each BSP's own (geometry_token) */
+void prism_bake_key(char *key, unsigned long size)
 {
-	return name && (!strcmp(name, "display.bake_quality") || !strcmp(name, "display.prism_sky_light") ||
-		!strcmp(name, "display.prism_rig") || !strcmp(name, "display.prism_world_geometry") ||
-		!strcmp(name, "display.prism_rt_alpha"));
+	char const *quality = config_string("display.bake_quality");
+
+	snprintf(key, size, "v%u %s %s cutouts", (unsigned)XGPU_BAKE_VERSION,
+		quality && quality_rank(quality, (unsigned long)strlen(quality)) >= 0 ? quality : "ultra",
+		rig_class(config_string("display.prism_rig")));
+}
+
+/* whether a change of a setting from before to after changes what the bake
+holds (a REBAKE asked): the world's geometry where the shipped bake has
+not every level of the world chosen (it ships both worlds: switching is
+instant then), and the rig's class (config.toml's alone: the units rig is
+every player's). Not the quality (config.toml's and the console's alone: a
+release ships MAX, and a better bake is good for every quality), not the
+cutouts (always in the bake) and not the sky's light (recombined) */
+boolean prism_bake_key_setting(char const *name, char const *before, char const *after)
+{
+	if (!name)
+		return FALSE;
+	if (!strcmp(name, "display.prism_rig"))
+		return strcmp(rig_class(before), rig_class(after)) != 0;
+	if (!strcmp(name, "display.prism_world_geometry"))
+	{
+		settings_read();
+		return !shipped_world_whole(after && !strcmp(after, "remodel") ? "remodel" : "stock");
+	}
+	return FALSE;
 }
 
 /* the main menu's bake runs (the lighting reads a bake, the card traces
@@ -765,9 +1165,11 @@ char const *prism_bake_worker_map(void)
 	if (bake_worker.changes != config_changes())
 	{
 		char const *value = config_string("debug.bake_worker");
+		long only = config_integer("debug.bake_bsp");
 
 		bake_worker.changes = config_changes();
 		snprintf(bake_worker.map, sizeof(bake_worker.map), "%s", value ? value : "");
+		bake_worker.only = only >= 0 && only < 32767 ? (short)only : -1;
 	}
 	return bake_worker.map[0] ? bake_worker.map : NULL;
 }
@@ -796,9 +1198,11 @@ static void prism_bake_note(void)
 		return;
 	}
 	generation = prism_scene_static_generation();
-	if (prism_bake_status(XGPU_BAKE_STATUS_STATE) != XGPU_BAKE_STATE_DONE ||
+	/* (a BSP with no lightmapped surface, a cinematic's, has nothing to
+	bake: noted as baked, so that its level counts whole) */
+	if (!prism_scene_static_empty() && (prism_bake_status(XGPU_BAKE_STATUS_STATE) != XGPU_BAKE_STATE_DONE ||
 		(long)prism_bake_status(XGPU_BAKE_STATUS_BSP) != (long)bsp ||
-		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) != generation)
+		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) != generation))
 	{
 		return;
 	}
@@ -814,11 +1218,20 @@ static void prism_bake_note(void)
 	bake_menu.noted_generation = generation;
 	settings_read();
 	bsps = note_read(map, keys);
-	if (strcmp(keys[bsp], bake_menu.key) || bsps != scenario->structure_bsp_references.count)
 	{
-		snprintf(keys[bsp], BAKE_KEY, "%s", bake_menu.key);
-		note_write(map, scenario->structure_bsp_references.count, keys);
-		platform_log("prism bake: %s's BSP %d noted baked (%s)", map, (int)bsp, bake_menu.key);
+		struct scenario_structure_bsp_reference const *reference = TAG_BLOCK_GET_ELEMENT(
+			&scenario->structure_bsp_references, bsp, struct scenario_structure_bsp_reference);
+		char const *tag = reference && reference->structure_bsp.index != NONE ?
+			tag_get_name(reference->structure_bsp.index) : NULL;
+		char key[BAKE_KEY];
+
+		bsp_key(bake_menu.key, tag, key, sizeof(key));
+		if (strcmp(keys[bsp], key) || bsps != scenario->structure_bsp_references.count)
+		{
+			snprintf(keys[bsp], BAKE_KEY, "%s", key);
+			note_write(map, scenario->structure_bsp_references.count, keys);
+			platform_log("prism bake: %s's BSP %d noted baked (%s)", map, (int)bsp, key);
+		}
 	}
 }
 
@@ -855,8 +1268,11 @@ void prism_bake_menu_frame(void)
 
 				platform_log("prism bake: the main menu's bake of %s said nothing for %lu s: ended",
 					bake_levels[level].map, WORKER_SILENT_MILLISECONDS / 1000);
+				if (bake_menu.worker_checks)
+					bake_menu.checked[level] = TRUE;
 				worker_stop();
-				bake_menu.state[level] = LEVEL_FAILED;
+				if (!bake_menu.checked[level])
+					bake_menu.state[level] = LEVEL_FAILED;
 			}
 		}
 	}
@@ -902,7 +1318,7 @@ static void levels_counted(int *baked, int *present)
 		if (bake_menu.state[level] == LEVEL_NO_MAP || bake_menu.state[level] == LEVEL_UNKNOWN)
 			continue;
 		(*present)++;
-		if (bake_menu.state[level] == LEVEL_BAKED)
+		if (bake_menu.state[level] == LEVEL_BAKED || bake_menu.state[level] == LEVEL_SHIPPED)
 			(*baked)++;
 	}
 }
@@ -938,6 +1354,13 @@ static boolean menu_line(char *text, char *detail, unsigned long size, float *sh
 
 	*share = -1.0f;
 	detail[0] = 0;
+	if (bake_menu.worker && bake_menu.worker_level != NONE && bake_menu.worker_checks)
+	{
+		*share = worker_share();
+		snprintf(text, size, "Checking PRISM light: %s", bake_levels[bake_menu.worker_level].name);
+		snprintf(detail, size, "The shipped light against your maps - playable now");
+		return TRUE;
+	}
 	if (bake_menu.worker && bake_menu.worker_level != NONE)
 	{
 		levels_counted(&baked, &present);
@@ -1076,8 +1499,10 @@ void prism_bake_menu_level_started(char const *map_name)
 	file_write(path, name);
 }
 
-/* REBAKE ALL: every level's bake and note deleted (the worker ended
-first), so the main menu bakes each again from nothing */
+/* REBAKE LOCAL (the row's key bake_rebake_all): every level's bake made
+here and its notes deleted (the worker ended first; the shipped bake, read
+only, kept), so the main menu checks the shipped bake again and bakes each
+BSP it does not cover from nothing */
 void prism_bake_menu_rebake_all(void)
 {
 	char path[BAKE_PATH + 96];
@@ -1100,16 +1525,22 @@ void prism_bake_menu_rebake_all(void)
 		}
 		snprintf(path, sizeof(path), "%s/%s/baked.txt", bake_menu.folder, bake_levels[level].map);
 		remove(path);
+		/* (what the baker found of the shipped light: checked again) */
+		snprintf(path, sizeof(path), "%s/%s/shipped.txt", bake_menu.folder, bake_levels[level].map);
+		remove(path);
+		bake_menu.checked[level] = FALSE;
 		if (bake_menu.state[level] == LEVEL_FAILED)
 			bake_menu.state[level] = LEVEL_UNKNOWN;
 	}
 	bake_menu.notes_read = 0;
-	platform_log("prism bake: every level's bake deleted (Rebake All): the main menu bakes them again");
+	platform_log("prism bake: every level's bake made here deleted (Rebake Local; the shipped light kept): the main menu "
+		"checks the shipped light again and bakes what it does not cover");
 }
 
-/* Light Bake's row of a level (its map, "a10"), its words: BAKED, BAKING
-37%, LOADING, PART BAKED (some of its BSPs), NEXT, NOT BAKED, NO MAP,
-FAILED (test_port_settings.py's test_light_bake_level_names_fit: each fits
+/* Light Bake's row of a level (its map, "a10"), its words: SHIPPED (the
+release's light, every BSP matching this machine's maps), CHECKING, BAKED,
+BAKING 37%, LOADING, PART BAKED (some of its BSPs), NEXT, NOT BAKED, NO
+MAP, FAILED (test_port_settings.py's test_light_bake_level_names_fit: each fits
 the row's value); FALSE for a map not the campaign's */
 boolean prism_bake_menu_level_words(char const *map, char *text, unsigned long size)
 {
@@ -1122,7 +1553,9 @@ boolean prism_bake_menu_level_words(char const *map, char *text, unsigned long s
 		levels_read();
 	if (bake_menu.worker && bake_menu.worker_level == level)
 	{
-		if (!strcmp(bake_menu.progress_state, "baking"))
+		if (bake_menu.worker_checks)
+			snprintf(text, size, "CHECKING");
+		else if (!strcmp(bake_menu.progress_state, "baking"))
 		{
 			int percent = (int)(worker_share() * 100.0f);
 
@@ -1134,6 +1567,9 @@ boolean prism_bake_menu_level_words(char const *map, char *text, unsigned long s
 	}
 	switch (bake_menu.state[level])
 	{
+	case LEVEL_SHIPPED:
+		snprintf(text, size, "SHIPPED");
+		break;
 	case LEVEL_NO_MAP:
 		snprintf(text, size, "NO MAP");
 		break;

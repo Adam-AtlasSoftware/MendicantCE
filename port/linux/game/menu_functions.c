@@ -2863,7 +2863,6 @@ static struct
 	{ "op_upscaling", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
 	{ "op_light_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_quality", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_prism_sky_light", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_a10", LIGHTING_R | LIGHTING_P, NULL, NULL },
 	{ "op_bake_a30", LIGHTING_R | LIGHTING_P, NULL, NULL },
@@ -3214,8 +3213,8 @@ static void settings_pending_write(boolean finish)
 		struct settings_pending const *entry = &settings_pending.entries[index];
 		char before[80];
 
-		if (prism_bake_key_setting(entry->name) && setting_text(entry->name, before, sizeof(before), FALSE) &&
-			strcmp(before, entry->value))
+		if (setting_text(entry->name, before, sizeof(before), FALSE) && strcmp(before, entry->value) &&
+			prism_bake_key_setting(entry->name, before, entry->value))
 		{
 			snprintf(bake_question.undo_name[undo_count], sizeof(bake_question.undo_name[0]), "%s", entry->name);
 			snprintf(bake_question.undo_value[undo_count], sizeof(bake_question.undo_value[0]), "%s", before);
