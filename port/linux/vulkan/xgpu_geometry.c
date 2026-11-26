@@ -20,6 +20,12 @@ stays under this share of the budget */
 before it may be made finer again (an object panned in and out of view
 changes the totals from frame to frame) */
 #define BUDGET_HOLD_FRAMES 150u
+/* an object of no datum (the game's 0xffffffff: a ghost, the sky, a
+cinematic's) is keyed by its mesh and the cell of its place, so that two of
+them do not share one decision; one moved to a cell beside its last takes
+its decision along. Such entries are let go of sooner */
+#define DATUMLESS_CELL 2.0f
+#define DATUMLESS_AGE_FRAMES 120u
 
 struct channel_note
 {
@@ -32,7 +38,9 @@ struct channel_note
 struct entry
 {
 	uint64_t key;
-	uint32_t object, mesh;
+	/* the object (0xffffffff: none), its mesh, and for an object of no
+	datum the cell of its place (DATUMLESS_CELL world units; 0 unknown) */
+	uint32_t object, mesh, cell;
 	/* the decision */
 	int variant, lod_known;
 	uint32_t lod, traced_lod, drawable_last, lod_count;
@@ -56,6 +64,8 @@ struct entry
 	int measure_has_distance;
 	float distance;
 	struct channel_note notes[XGPU_GEOMETRY_CHANNELS];
+	/* the frame a channel's stock fallback was last counted */
+	uint64_t fallback_frame[XGPU_GEOMETRY_CHANNELS];
 	/* the decision's own changes (for the log's flips of the traced level) */
 	struct channel_note traced_note;
 };
@@ -96,11 +106,38 @@ static void say(struct xgpu_geometry *geometry, int level, const char *format, .
 	geometry->log(geometry->log_context, line);
 }
 
-static uint64_t key_of(uint32_t object, uint32_t mesh)
+static uint64_t key_of(uint32_t object, uint32_t mesh, uint32_t cell)
 {
 	uint64_t key = ((uint64_t)object << 32) | mesh;
 
+	/* (an object of no datum: its cell mixed in, the top bit kept clear of
+	a datum's keys by the mix) */
+	if (cell)
+	{
+		key ^= (uint64_t)cell * 0x9e3779b97f4a7c15ull;
+		key ^= key >> 29;
+		key *= 0xbf58476d1ce4e5b9ull;
+		key ^= key >> 32;
+	}
 	return key == EMPTY_KEY ? 1ull << 63 : key;
+}
+
+uint32_t xgpu_geometry_cell(uint32_t object, const float origin[3])
+{
+	int32_t c[3];
+	uint32_t hash = 2166136261u;
+	int axis;
+
+	if (object != 0xffffffffu || !origin)
+		return 0;
+	for (axis = 0; axis < 3; axis++)
+	{
+		float q = floorf(origin[axis] / DATUMLESS_CELL);
+
+		c[axis] = q > 1.0e6f ? 1000000 : q < -1.0e6f ? -1000000 : (int32_t)q;
+		hash = (hash ^ (uint32_t)c[axis]) * 16777619u;
+	}
+	return hash ? hash : 1u;
 }
 
 static uint32_t hash_of(uint64_t key)
@@ -138,9 +175,10 @@ static int table_grow(struct xgpu_geometry *geometry)
 }
 
 /* the object's entry, made where new (NULL: no memory) */
-static struct entry *entry_find(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int make)
+static struct entry *entry_find(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, uint32_t cell,
+	int make)
 {
-	uint64_t key = key_of(object, mesh);
+	uint64_t key = key_of(object, mesh, cell);
 	uint32_t at;
 
 	if (!geometry->capacity)
@@ -160,12 +198,13 @@ static struct entry *entry_find(struct xgpu_geometry *geometry, uint32_t object,
 	{
 		if (!table_grow(geometry))
 			return NULL;
-		return entry_find(geometry, object, mesh, make);
+		return entry_find(geometry, object, mesh, cell, make);
 	}
 	memset(&geometry->entries[at], 0, sizeof(geometry->entries[at]));
 	geometry->entries[at].key = key;
 	geometry->entries[at].object = object;
 	geometry->entries[at].mesh = mesh;
+	geometry->entries[at].cell = cell;
 	geometry->entries[at].distance = -1.0f;
 	geometry->count++;
 	geometry->statistics.objects++;
@@ -254,12 +293,15 @@ uint32_t xgpu_geometry_drawable_last(const struct xgpu_geometry_ladder *ladder)
 	return last;
 }
 
-/* the most coarse level an entry may be traced at */
+/* the most coarse level an entry may be traced at: beyond the coarse reach
+any level of its remodel; within it (or its distance unknown) the level
+drawn, never coarser, so that a ray leaving the drawn surface near the eye
+meets that surface (the budget then left over, counted) */
 static uint32_t traced_most(const struct xgpu_geometry *geometry, const struct entry *entry)
 {
 	if (entry->lod_count && entry->distance >= 0.0f && entry->distance > geometry->settings.coarse_reach)
 		return entry->lod_count - 1u;
-	return entry->drawable_last;
+	return entry->lod;
 }
 
 /* a change of a value noted, its flips counted */
@@ -555,7 +597,7 @@ void xgpu_geometry_frame(struct xgpu_geometry *geometry, const float eye[3])
 
 		if (entry->key == EMPTY_KEY)
 			continue;
-		if (entry->seen_frame + XGPU_GEOMETRY_AGE_FRAMES < geometry->frame)
+		if (entry->seen_frame + (entry->cell ? DATUMLESS_AGE_FRAMES : XGPU_GEOMETRY_AGE_FRAMES) < geometry->frame)
 		{
 			entry_remove(geometry, index);
 			index--;
@@ -577,7 +619,7 @@ void xgpu_geometry_frame(struct xgpu_geometry *geometry, const float eye[3])
 			"shadow %llu traced %llu; stock to remodel %llu, remodel to stock %llu; shadow not the view's %llu, traced "
 			"stock under a remodel %llu, traced another level near %llu; traced levels made coarser %llu, frames over "
 			"budget %llu, levels the floor held %llu; traced triangles %llu; drawn levels made coarser for the skinned vertices "
-			"%llu, frames over %llu, skinned vertices %llu",
+			"%llu, frames over %llu, skinned vertices %llu; stock fallbacks view %llu shadow %llu traced %llu",
 			(unsigned long long)s->frames, s->entries, (unsigned long long)s->switches[0],
 			(unsigned long long)s->switches[1], (unsigned long long)s->switches[2], (unsigned long long)s->flips[0],
 			(unsigned long long)s->flips[1], (unsigned long long)s->flips[2], (unsigned long long)s->to_remodel,
@@ -586,7 +628,8 @@ void xgpu_geometry_frame(struct xgpu_geometry *geometry, const float eye[3])
 			(unsigned long long)s->traced_degraded, (unsigned long long)s->over_budget,
 			(unsigned long long)s->floor_held, (unsigned long long)s->traced_triangles_last,
 			(unsigned long long)s->drawn_degraded, (unsigned long long)s->skinned_over_budget,
-			(unsigned long long)s->skinned_vertices_last);
+			(unsigned long long)s->skinned_vertices_last, (unsigned long long)s->fallbacks[0],
+			(unsigned long long)s->fallbacks[1], (unsigned long long)s->fallbacks[2]);
 	}
 }
 
@@ -607,15 +650,60 @@ static uint32_t level_for(const struct xgpu_geometry *geometry, const struct ent
 	return lod;
 }
 
+/* an object of no datum's entry: its cell's, else one of its mesh seen in
+a cell beside it last frame and not yet decided this frame, moved to its
+cell (it moved), else a new one */
+static struct entry *datumless_find(struct xgpu_geometry *geometry, uint32_t mesh, uint32_t cell,
+	const float origin[3])
+{
+	struct entry *entry = entry_find(geometry, 0xffffffffu, mesh, cell, 0);
+	int dx, dy, dz;
+
+	if (entry)
+		return entry;
+	for (dx = -1; dx <= 1; dx++)
+	for (dy = -1; dy <= 1; dy++)
+	for (dz = -1; dz <= 1; dz++)
+	{
+		float near[3];
+		uint32_t other;
+		struct entry *found, moved;
+
+		if (!dx && !dy && !dz)
+			continue;
+		near[0] = origin[0] + (float)dx * DATUMLESS_CELL;
+		near[1] = origin[1] + (float)dy * DATUMLESS_CELL;
+		near[2] = origin[2] + (float)dz * DATUMLESS_CELL;
+		other = xgpu_geometry_cell(0xffffffffu, near);
+		found = entry_find(geometry, 0xffffffffu, mesh, other, 0);
+		if (!found || found->seen_frame + 1u < geometry->frame || found->decided_frame == geometry->frame)
+			continue;
+		moved = *found;
+		entry_remove(geometry, (uint32_t)(found - geometry->entries));
+		entry = entry_find(geometry, 0xffffffffu, mesh, cell, 1);
+		if (!entry)
+			return NULL;
+		moved.key = entry->key;
+		moved.cell = cell;
+		*entry = moved;
+		geometry->statistics.objects--;
+		return entry;
+	}
+	return entry_find(geometry, 0xffffffffu, mesh, cell, 1);
+}
+
 void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int shadow,
 	const struct xgpu_geometry_ladder *ladder, float lod_pixels, const float origin[3],
 	struct xgpu_geometry_choice *choice)
 {
-	struct entry *entry = entry_find(geometry, object, mesh, 1);
+	uint32_t cell = xgpu_geometry_cell(object, origin);
+	struct entry *entry = cell ? datumless_find(geometry, mesh, cell, origin) :
+		entry_find(geometry, object, mesh, 0, 1);
 	float distance = -1.0f, pixels;
 	uint32_t lod;
 
 	memset(choice, 0, sizeof(*choice));
+	choice->cell = cell;
 	if (!entry)
 	{
 		/* (no memory: as the store would have it, without hysteresis) */
@@ -705,7 +793,10 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 		entry->lod = lod;
 		entry->lod_known = 1;
 		entry->decided_frame = geometry->frame;
-		if (entry->traced_lod < lod)
+		/* (within the coarse reach, or its distance unknown, traced as drawn
+		on the frame its level changes too: the budget's share was of last
+		frame's level; beyond it never finer than drawn) */
+		if (entry->traced_lod < lod || entry->distance < 0.0f || entry->distance <= geometry->settings.coarse_reach)
 			entry->traced_lod = lod;
 		geometry->statistics.decisions++;
 	}
@@ -717,8 +808,8 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 	choice->drawable_last = entry->drawable_last;
 }
 
-void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int channel, int variant,
-	uint32_t lod)
+void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, uint32_t cell, int channel,
+	int variant, uint32_t lod)
 {
 	struct entry *entry;
 	uint32_t value;
@@ -726,11 +817,22 @@ void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_
 
 	if (channel < 0 || channel >= (int)XGPU_GEOMETRY_CHANNELS)
 		return;
-	entry = entry_find(geometry, object, mesh, 1);
+	entry = entry_find(geometry, object, mesh, cell, 1);
 	if (!entry)
 		return;
 	entry->seen_frame = geometry->frame;
 	value = (((uint32_t)variant << 8) | (lod & 0xffu)) + 1u;
+	/* (a remodel drawn, shadowed or traced as CE's model after all, or left
+	out: a stock fallback, counted once a frame however many draws) */
+	if (variant != XGPU_GEOMETRY_REMODEL && entry->variant == XGPU_GEOMETRY_REMODEL &&
+		entry->fallback_frame[channel] != geometry->frame)
+	{
+		entry->fallback_frame[channel] = geometry->frame;
+		geometry->statistics.fallbacks[channel]++;
+		say(geometry, 2, "geometry: frame %llu object %08x mesh %x %s stock fallback (%s)",
+			(unsigned long long)geometry->frame, object, mesh, channel_names[channel],
+			variant == XGPU_GEOMETRY_STOCK ? "CE's model" : "nothing");
+	}
 	/* (a pass's draws of the frame after its first: the first's kept, the
 	shadow's cascades and the view's chunks drawing the one choice; but a
 	draw of the frame made stock under a remodel is the frame's) */
@@ -748,9 +850,9 @@ void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_
 	}
 }
 
-void xgpu_geometry_skinned(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int kept)
+void xgpu_geometry_skinned(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, uint32_t cell, int kept)
 {
-	struct entry *entry = entry_find(geometry, object, mesh, 0);
+	struct entry *entry = entry_find(geometry, object, mesh, cell, 0);
 
 	if (!entry)
 		return;

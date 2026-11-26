@@ -16,11 +16,14 @@ direct-mapped table) the resolver keeps:
   have (its last size in the view times its distance then, over its
   distance now), with the hysteresis (display.prism_lod_hysteresis) against
   the level it had, however many frames ago. The shadows draw that level;
-- its traced level: the drawn one, or a coarser level of the same remodel
-  where the traced triangles' budget needs it, the farthest objects first,
-  with a band so that the choice does not hunt (never stock, never left
-  out). Levels past the ladder's drawable floor are traced only beyond the
-  coarse reach.
+- its traced level: the drawn one, or, beyond the coarse reach only (40
+  world units), a coarser level of the same remodel where the traced
+  triangles' budget needs it, the farthest objects first, with a band so
+  that the choice does not hunt (never stock, never left out). Within the
+  coarse reach the traced level is the drawn one whatever the budget (a
+  frame still over it is counted).
+Objects of no datum (the game's 0xffffffff) are keyed by their mesh and the
+cell of their place, so that two of them never share one decision.
 Under the skinned vertices' budget (the objects skinned again each frame,
 the rigs': a full skin ring drew them stock), the farthest of them are drawn
 at a coarser level of their ladder, with the same band.
@@ -97,6 +100,9 @@ struct xgpu_geometry_settings
 struct xgpu_geometry_choice
 {
 	int variant;
+	/* the cell an object of no datum is keyed by (xgpu_geometry_cell; 0 an
+	object's own datum): the notes of its draws name it */
+	uint32_t cell;
 	uint32_t lod, traced_lod;
 	/* the ladder's last drawable level */
 	uint32_t drawable_last;
@@ -121,6 +127,10 @@ struct xgpu_geometry_statistics
 	(object-frames), the frames still over it, the vertices last frame */
 	uint64_t drawn_degraded, skinned_over_budget, skinned_vertices_last;
 	uint64_t traced_triangles_last;
+	/* by channel: object-frames a remodel was drawn, shadowed or traced as
+	CE's model or left out after all (its skinning could not be had, its
+	part's instance lost) */
+	uint64_t fallbacks[XGPU_GEOMETRY_CHANNELS];
 	uint32_t entries;
 };
 
@@ -138,20 +148,25 @@ void xgpu_geometry_map(struct xgpu_geometry *geometry);
 /* a new frame: the eye (NULL unknown), the objects not drawn lately let go
 of, the traced levels shared out within the budget */
 void xgpu_geometry_frame(struct xgpu_geometry *geometry, const float eye[3]);
+/* the cell an object of no datum (0xffffffff) is keyed by beside its mesh,
+from its node 0's place (2 world units a side); 0 for an object's datum or
+an unknown place */
+uint32_t xgpu_geometry_cell(uint32_t object, const float origin[3]);
 /* a draw of an object's mesh (object 0xffffffff: none, keyed by the mesh
-alone), from the view or a shadow, at its size in pixels, its node 0 at
+and the cell of its place, one moved to a cell beside taking its decision
+along), from the view or a shadow, at its size in pixels, its node 0 at
 origin (NULL unknown); ladder NULL where the store does not have the mesh
 in (drawn stock). The choice every pass of the frame draws */
 void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int shadow,
 	const struct xgpu_geometry_ladder *ladder, float lod_pixels, const float origin[3],
 	struct xgpu_geometry_choice *choice);
-/* what a pass drew of an object (variant, level) */
-void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int channel, int variant,
-	uint32_t lod);
+/* what a pass drew of an object (variant, level; cell: the choice's) */
+void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, uint32_t cell, int channel,
+	int variant, uint32_t lod);
 /* an object's skinning this frame: kept (read from the keep region) or
 skinned into the ring; an object skinned into the ring counts in the
 skinned vertices' budget until it has been kept for a while */
-void xgpu_geometry_skinned(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, int kept);
+void xgpu_geometry_skinned(struct xgpu_geometry *geometry, uint32_t object, uint32_t mesh, uint32_t cell, int kept);
 /* the ladder's last drawable level */
 uint32_t xgpu_geometry_drawable_last(const struct xgpu_geometry_ladder *ladder);
 void xgpu_geometry_statistics(const struct xgpu_geometry *geometry, struct xgpu_geometry_statistics *statistics);

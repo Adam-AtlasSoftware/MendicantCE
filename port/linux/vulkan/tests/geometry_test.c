@@ -61,7 +61,7 @@ static struct xgpu_geometry_choice draw(struct xgpu_geometry *geometry, uint32_t
 	origin[1] = 0.0f;
 	origin[2] = 0.0f;
 	xgpu_geometry_resolve(geometry, object, 7u, shadow, ladder, pixels, origin, &choice);
-	xgpu_geometry_note(geometry, object, 7u, shadow ? XGPU_GEOMETRY_SHADOW : XGPU_GEOMETRY_VIEW, choice.variant,
+	xgpu_geometry_note(geometry, object, 7u, choice.cell, shadow ? XGPU_GEOMETRY_SHADOW : XGPU_GEOMETRY_VIEW, choice.variant,
 		choice.lod);
 	return choice;
 }
@@ -205,6 +205,10 @@ static void test_budget(void)
 	CHECK(total <= 1000000u);
 	CHECK(choices[0].traced_lod == 0);
 	CHECK(choices[99].traced_lod > 0);
+	/* (within the coarse reach, 40 wu: traced as drawn whatever the budget) */
+	for (object = 0; object < 100; object++)
+		if (2.0f + (float)object <= 40.0f)
+			CHECK(choices[object].traced_lod == choices[object].lod);
 	/* (nearer never coarser than farther) */
 	for (object = 1; object < 100; object++)
 		CHECK(choices[object].traced_lod >= choices[object - 1].traced_lod);
@@ -220,7 +224,7 @@ static void test_budget(void)
 		for (object = 0; object < 100; object++)
 		{
 			now = draw(geometry, object + 1, 0, &ladder, 200.0f, 2.0f + (float)object + (frame & 1 ? 0.3f : -0.3f));
-			xgpu_geometry_note(geometry, object + 1, 7u, XGPU_GEOMETRY_TRACED, now.variant, now.traced_lod);
+			xgpu_geometry_note(geometry, object + 1, 7u, 0u, XGPU_GEOMETRY_TRACED, now.variant, now.traced_lod);
 		}
 	}
 	xgpu_geometry_statistics(geometry, &statistics);
@@ -292,7 +296,7 @@ static void test_skinned_budget(void)
 		CHECK(choices[object].lod >= choices[object - 1].lod);
 	CHECK(rock_choice.lod == 0);
 	/* (a still object made to move: skinned into the ring, counted) */
-	xgpu_geometry_skinned(geometry, 100, 7u, 0);
+	xgpu_geometry_skinned(geometry, 100, 7u, 0u, 0);
 	xgpu_geometry_frame(geometry, eye);
 	for (object = 0; object < 20; object++)
 		draw(geometry, object + 1, 0, &rig, 400.0f, 2.0f + (float)object);
@@ -302,7 +306,7 @@ static void test_skinned_budget(void)
 	CHECK(statistics.skinned_vertices_last >= 30000u);
 	/* (kept again for a while: no longer counted) */
 	for (frame = 0; frame < 32; frame++)
-		xgpu_geometry_skinned(geometry, 100, 7u, 1);
+		xgpu_geometry_skinned(geometry, 100, 7u, 0u, 1);
 	/* (still: no hunting) */
 	xgpu_geometry_statistics(geometry, &statistics);
 	{
@@ -385,26 +389,85 @@ static void test_notes(void)
 	int frame;
 
 	xgpu_geometry_frame(geometry, eye);
-	xgpu_geometry_note(geometry, 5, 9, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
 	xgpu_geometry_frame(geometry, eye);
-	xgpu_geometry_note(geometry, 5, 9, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 1);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 1);
 	xgpu_geometry_frame(geometry, eye);
-	xgpu_geometry_note(geometry, 5, 9, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
 	for (frame = 0; frame < 200; frame++)
 	{
 		xgpu_geometry_frame(geometry, eye);
-		xgpu_geometry_note(geometry, 5, 9, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
+		xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
 	}
 	xgpu_geometry_frame(geometry, eye);
-	xgpu_geometry_note(geometry, 5, 9, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 1);
-	xgpu_geometry_note(geometry, 5, 9, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 0);
-	xgpu_geometry_note(geometry, 5, 9, XGPU_GEOMETRY_TRACED, XGPU_GEOMETRY_STOCK, 0);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 1);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_TRACED, XGPU_GEOMETRY_STOCK, 0);
 	xgpu_geometry_frame(geometry, eye);
 	xgpu_geometry_statistics(geometry, &statistics);
 	CHECK(statistics.switches[XGPU_GEOMETRY_VIEW] == 3);
 	CHECK(statistics.flips[XGPU_GEOMETRY_VIEW] == 1);
 	CHECK(statistics.shadow_mismatch == 1);
 	CHECK(statistics.traced_stock == 1);
+	xgpu_geometry_destroy(geometry);
+}
+
+/* objects of no datum: one decision each by the cell of their place, a
+moved one taking its decision along, never one shared by two places */
+static void test_datumless(void)
+{
+	struct xgpu_geometry *geometry = made(0.3f, 0);
+	struct xgpu_geometry_ladder ladder = ladder_of(2000, 500, 125, 140.0f, 45.0f);
+	struct xgpu_geometry_choice a, b;
+	float x;
+	int frame;
+
+	xgpu_geometry_frame(geometry, eye);
+	/* (two at 150 and 30 px, in two places: levels 0 and 2, each its own) */
+	a = draw(geometry, 0xffffffffu, 0, &ladder, 150.0f, 5.0f);
+	b = draw(geometry, 0xffffffffu, 0, &ladder, 30.0f, 50.0f);
+	CHECK(a.lod == 0 && b.lod == 2);
+	CHECK(a.cell != 0 && b.cell != 0 && a.cell != b.cell);
+	xgpu_geometry_frame(geometry, eye);
+	CHECK(draw(geometry, 0xffffffffu, 0, &ladder, 150.0f, 5.0f).lod == 0);
+	CHECK(draw(geometry, 0xffffffffu, 0, &ladder, 30.0f, 50.0f).lod == 2);
+	/* (one moving across cells at 110 px keeps level 0 by its hysteresis) */
+	for (frame = 0, x = 5.0f; frame < 40; frame++, x += 0.5f)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		CHECK(draw(geometry, 0xffffffffu, 0, &ladder, 110.0f, x).lod == 0);
+	}
+	/* (an object's own datum: no cell) */
+	CHECK(draw(geometry, 77u, 0, &ladder, 150.0f, 5.0f).cell == 0);
+	xgpu_geometry_destroy(geometry);
+}
+
+/* a remodel drawn, shadowed or traced as CE's model or nothing after all: a
+stock fallback, once a frame by channel */
+static void test_fallbacks(void)
+{
+	struct xgpu_geometry *geometry = made(0.3f, 0);
+	struct xgpu_geometry_ladder ladder = ladder_of(2000, 500, 125, 140.0f, 45.0f);
+	struct xgpu_geometry_statistics statistics;
+
+	xgpu_geometry_frame(geometry, eye);
+	draw(geometry, 3, 0, &ladder, 150.0f, 5.0f);
+	xgpu_geometry_note(geometry, 3, 7u, 0u, XGPU_GEOMETRY_TRACED, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.fallbacks[0] == 0 && statistics.fallbacks[1] == 0 && statistics.fallbacks[2] == 0);
+	xgpu_geometry_note(geometry, 3, 7u, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_STOCK, 0);
+	xgpu_geometry_note(geometry, 3, 7u, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_STOCK, 0);
+	xgpu_geometry_note(geometry, 3, 7u, 0u, XGPU_GEOMETRY_TRACED, XGPU_GEOMETRY_NONE, 0);
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.fallbacks[XGPU_GEOMETRY_VIEW] == 1);
+	CHECK(statistics.fallbacks[XGPU_GEOMETRY_SHADOW] == 0);
+	CHECK(statistics.fallbacks[XGPU_GEOMETRY_TRACED] == 1);
+	/* (stock before the mesh is in: no fallback) */
+	xgpu_geometry_frame(geometry, eye);
+	draw(geometry, 4, 0, NULL, 150.0f, 5.0f);
+	xgpu_geometry_note(geometry, 4, 7u, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_STOCK, 0);
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.fallbacks[XGPU_GEOMETRY_VIEW] == 1);
 	xgpu_geometry_destroy(geometry);
 }
 
@@ -449,6 +512,8 @@ int main(void)
 	test_skinned_budget();
 	test_variant_and_map();
 	test_notes();
+	test_datumless();
+	test_fallbacks();
 	test_ageing();
 	if (failures)
 	{
