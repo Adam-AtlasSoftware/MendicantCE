@@ -88,7 +88,7 @@ void mcc_sha256_add(struct mcc_sha256 *context, const void *data, int size)
 	}
 }
 
-void mcc_sha256_end(struct mcc_sha256 *context, unsigned char *digest)
+void mcc_sha256_end(struct mcc_sha256 *context, unsigned char digest[32])
 {
 	unsigned long long bits = context->length * 8;
 	unsigned char length[8];
