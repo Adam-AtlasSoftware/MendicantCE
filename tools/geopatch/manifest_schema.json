@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prism_release.json",
+  "title": "PRISM release manifest (signed)",
+  "description": "What a binary release accepts and which content serves each supported retail map (v4_geopatch PLAN_FINAL.md sections 2.5 and 4.5). Signed as SHA256SUMS is: prism_release.json.sig holds the Ed25519 signature of the file's exact bytes by the release key, 128 lowercase hex digits and a newline (tools/geopatch/manifest.py). Identities are 64 lowercase hex digits: base_id (SHA-256 of a retail map's inflated body), classic_world_id (the farm's bake-inputs hash), world_id (per variant and BSP: port/linux/game/prism_identity.h), file_sha (a whole file's SHA-256: download integrity only, never in a key). The engine recomputes every world_id from the files it opens and uses a file only when they agree.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "build", "content_release", "bake_versions", "scene_version", "render_format",
+               "pack_format", "prsx_formats", "maps"],
+  "properties": {
+    "schema": {"const": "prism-release/1"},
+    "build": {"type": "string", "minLength": 1},
+    "content_release": {"type": "string", "pattern": "^content-[A-Za-z0-9._-]+$"},
+    "bake_versions": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1, "maxItems": 2,
+                      "description": "this binary's BAKE_VERSION and the previous one (section 3.7)"},
+    "scene_version": {"type": "integer", "minimum": 1},
+    "render_format": {"type": "integer", "minimum": 1},
+    "pack_format": {"type": "integer", "minimum": 1},
+    "prsx_formats": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1, "maxItems": 2},
+    "maps": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z0-9_]{1,31}$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["worlds"],
+        "properties": {
+          "worlds": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["classic_world_id", "base_ids", "bsp_count", "packs"],
+              "properties": {
+                "classic_world_id": {"$ref": "#/$defs/id"},
+                "base_ids": {
+                  "type": "array", "minItems": 1,
+                  "items": {
+                    "type": "object", "additionalProperties": false, "required": ["base_id", "build"],
+                    "properties": {"base_id": {"$ref": "#/$defs/id"}, "build": {"type": "string"},
+                                   "region": {"type": "string"}}
+                  }
+                },
+                "bsp_count": {"type": "integer", "minimum": 1, "maximum": 32},
+                "sidecar": {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["name", "file_sha", "size", "prsx_format", "world_ids", "collvs"],
+                  "properties": {
+                    "name": {"type": "string", "pattern": "^[a-z0-9_]+\\.[0-9a-f]{8}\\.prsx$"},
+                    "file_sha": {"$ref": "#/$defs/id"},
+                    "size": {"type": "integer", "minimum": 48},
+                    "prsx_format": {"type": "integer", "minimum": 1},
+                    "world_ids": {"type": "object", "propertyNames": {"pattern": "^[0-9]{1,2}$"},
+                                  "additionalProperties": {"$ref": "#/$defs/id"},
+                                  "description": "enhanced world_id per BSP, as the engine derives it from the sidecar's directory"},
+                    "collvs": {"type": "array", "items": {"type": "integer", "minimum": 1}}
+                  }
+                },
+                "packs": {
+                  "type": "object", "additionalProperties": false, "required": ["classic"],
+                  "properties": {
+                    "classic": {"$ref": "#/$defs/packs"},
+                    "enhanced": {"$ref": "#/$defs/packs"}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "packs": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["bsp", "world_id", "name", "file_sha", "size", "bake_version"],
+        "properties": {
+          "bsp": {"type": "integer", "minimum": 0, "maximum": 31},
+          "world_id": {"$ref": "#/$defs/id"},
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+\\.ppk$"},
+          "file_sha": {"$ref": "#/$defs/id"},
+          "size": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+          "bake_version": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}
