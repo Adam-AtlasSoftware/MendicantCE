@@ -6,12 +6,16 @@ literal where a REF is required is refused.
 
 Without maps it checks the container and every section's layout. With the retail maps of the versions the sidecar
 serves, it also checks every GEOM part against its stock material (counts, topology check, REF indices in range)
-and refuses any LIT position or collision vertex equal to a retail one on the grid, and any plane equal to a
-retail plane (scan_original.py's sets). --native has the game's own reader (prism_prsx.c, through native.py) open
+and refuses any LIT position or collision vertex equal to a retail one on the grid, any LIT plane equal to a
+retail plane (scan_original.py's sets), base map coordinates of a REFP/REFM vertex equal to the referenced stock
+vertex's own (they must be taken from it: REFPT/REFMT), and nudged runs: a LIT vertex one to NUDGE_STEPS grid
+steps above a retail position is how the encoder moves a vertex off another BSP's position, so a run of
+NUDGE_RUN consecutive ones in a part, or more than NUDGE_BUDGET in a section, is a copy the nudge hid. --native has the game's own reader (prism_prsx.c, through native.py) open
 the file and verify every section too. Exit 0 clean, 1 with findings.
 """
 import argparse
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -21,6 +25,11 @@ from geopatch import geom, prsx, retail  # noqa: E402
 LAYOUTS = {"GEOM": geom.decode_geom, "COLL": geom.decode_coll}
 # types whose layout is not final yet (LMUV: the measuring layout until M4's xatlas one)
 PROVISIONAL = {"LMUV": b"LMU0"}
+# the encoder's nudge (encode.encode_pwg_part) moves a vertex up one grid step at a time; b30's whole remodel
+# nudged 5 vertices, none next to another
+NUDGE_STEPS = 4
+NUDGE_RUN = 3
+NUDGE_BUDGET = 16
 
 
 def lint(data, retail_bsps=None, sets=None, native=None, path=None):
@@ -73,6 +82,11 @@ def lint(data, retail_bsps=None, sets=None, native=None, path=None):
             for v, vertex in enumerate(decoded[0]):
                 if vertex[0] == geom.REF and (stock is None or vertex[1] >= len(stock.collision_vertices)):
                     findings.append("%s: vertex %d refers past the stock collision vertices" % (where, v))
+            for k, plane in enumerate(decoded[1]):
+                if len(plane) == 2 and (stock is None or plane[1] >= len(stock.planes)):
+                    findings.append("%s: plane %d refers past the stock planes" % (where, k))
+        if entry.kind == "GEOM" and sets is not None:
+            findings += _check_nudges(where, decoded, sets)
         if sets is not None:
             for kind, value, is_ref, at in geom.section_tuples(entry.kind, section):
                 if not is_ref and kind in geom.HARD_KINDS and value in sets.of(kind):
@@ -80,28 +94,44 @@ def lint(data, retail_bsps=None, sets=None, native=None, path=None):
     return findings
 
 
+def _stock_tex(material, index):
+    return struct.unpack_from("<2I", material.vertices, 32 * index + 24)
+
+
 def _check_parts(where, parts, stock):
     findings = []
     if stock is None:
         return ["%s: the map has no such BSP" % where]
     for p, part in enumerate(parts):
-        material = stock.materials.get((part.lightmap_index, part.material_index))
-        label = "%s part %d (lightmap %d material %d)" % (where, p, part.lightmap_index, part.material_index)
-        if material is None:
-            findings.append("%s: no such stock material" % label)
-            continue
-        if part.stock_surface_count != material.surface_count or part.stock_vertex_count != material.vertex_count \
-                or part.topology_check != material.topology_check():
-            findings.append("%s: made for another revision of the material" % label)
-        if part.first_surface + part.surface_count > material.surface_count:
-            findings.append("%s: surfaces past the material's" % label)
+        if part.material_namespace == geom.NAMESPACE_PRISM:
+            # (new content with a PRISM material: no stock material to check against; decode_geom has refused
+            # stock fields and REF/REFP vertices in it)
+            material = None
+            label = "%s part %d (PRISM material %d)" % (where, p, part.prism_material)
+        else:
+            material = stock.materials.get((part.lightmap_index, part.material_index))
+            label = "%s part %d (lightmap %d material %d)" % (where, p, part.lightmap_index, part.material_index)
+            if material is None:
+                findings.append("%s: no such stock material" % label)
+                continue
+            if part.stock_surface_count != material.surface_count or \
+                    part.stock_vertex_count != material.vertex_count or \
+                    part.topology_check != material.topology_check():
+                findings.append("%s: made for another revision of the material" % label)
+            if part.first_surface + part.surface_count > material.surface_count:
+                findings.append("%s: surfaces past the material's" % label)
+        copied = 0
         for v, vertex in enumerate(part.vertices):
             op = vertex[0]
-            if op in (geom.REF, geom.REFP):
+            base = geom.base_op(op)
+            referenced = None
+            if base in (geom.REF, geom.REFP):
                 bad = vertex[1] >= material.vertex_count
-            elif op == geom.REFM:
+                referenced = (material, vertex[1])
+            elif base == geom.REFM:
                 other = stock.materials.get(vertex[1][0:2])
                 bad = other is None or vertex[1][2] >= other.vertex_count
+                referenced = (other, vertex[1][2])
             elif op == geom.REFC:
                 bad = vertex[1] >= len(stock.collision_vertices)
             else:
@@ -109,6 +139,33 @@ def _check_parts(where, parts, stock):
             if bad:
                 findings.append("%s: vertex %d refers past the stock vertices" % (label, v))
                 break
+            if op in (geom.REFP, geom.REFM) and vertex[3] == _stock_tex(*referenced):
+                copied += 1
+        if copied:
+            findings.append("%s: %d REFP/REFM vertices write out the referenced stock vertex's base map coordinates "
+                            "(they must take them from it: REFPT/REFMT)" % (label, copied))
+    return findings
+
+
+def _check_nudges(where, parts, sets):
+    """the nudge rule (module help): LIT vertices just above a retail position, in runs or in bulk"""
+    findings, total = [], 0
+    for p, part in enumerate(parts):
+        run = longest = 0
+        for vertex in part.vertices:
+            if vertex[0] == geom.LIT:
+                x, y, z = vertex[1]
+                nudged = any((x, y, z - step) in sets.position for step in range(1, NUDGE_STEPS + 1))
+            else:
+                nudged = False
+            run = run + 1 if nudged else 0
+            total += nudged
+            longest = max(longest, run)
+        if longest >= NUDGE_RUN:
+            findings.append("%s part %d: a run of %d LIT vertices just above retail positions (a nudged copy)" %
+                            (where, p, longest))
+    if total > NUDGE_BUDGET:
+        findings.append("%s: %d LIT vertices just above retail positions, more than %d" % (where, total, NUDGE_BUDGET))
     return findings
 
 

@@ -18,7 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from geopatch import geom, identity, lint_patch, manifest, native, prsx, retail, synthmap  # noqa: E402
-from geopatch.geom import LIT, REF, REFC, REFM, REFP  # noqa: E402
+from geopatch.geom import LIT, REF, REFC, REFM, REFMT, REFP, REFPT  # noqa: E402
 
 CWID = bytes.fromhex("aa" * 32)
 
@@ -193,7 +193,8 @@ def test_section_corruption_refused(tool, tmp_path):
 def _sample_part(material_index=0):
     vertices = [(REF, 0), (REF, 1), (LIT, (100, -200, 3000), (1, 2, 3), (4, 5)),
                 (REFP, 2, (6, 7, 8), (9, 10)), (LIT, (-50, 0, 2990), (11, 12, 13), (14, 15)),
-                (REFM, (1, 3, 77), (16, 17, 18), (19, 20)), (REFC, 5, (21, 22, 23), (24, 25))]
+                (REFM, (1, 3, 77), (16, 17, 18), (19, 20)), (REFC, 5, (21, 22, 23), (24, 25)),
+                (REFPT, 3, (26, 27, 28), None), (REFMT, (2, 4, 9), (29, 30, 31), None)]
     return geom.Part(0, material_index, 4, 3, 0xDEADBEEF, 0, 2, vertices,
                      [(0, 1, 2), (1, 3, 2), (2, 3, 4), (4, 5, 6)],
                      [0, 2, 4], near_triangle_count=2, far_distance=55.5, far_runs=[(2, 1), (0, 0)],
@@ -216,11 +217,12 @@ def test_geom_round_trip_and_numpy_twin():
                      "topology_check", "first_surface", "surface_count", "near_triangle_count", "far_distance"):
             setattr(e, name, getattr(p, name))
         e.ops = np.array([v[0] for v in p.vertices], np.uint8)
-        e.refs = np.array([v[1][2] if v[0] == REFM else v[1] for v in p.vertices if v[0] != LIT], np.uint32)
-        e.keys = np.array([v[1][0] << 16 | v[1][1] for v in p.vertices if v[0] == REFM], np.uint32)
+        e.refs = np.array([v[1][2] if v[0] in (REFM, REFMT) else v[1] for v in p.vertices if v[0] != LIT],
+                          np.uint32)
+        e.keys = np.array([v[1][0] << 16 | v[1][1] for v in p.vertices if v[0] in (REFM, REFMT)], np.uint32)
         e.q = np.array([v[1] for v in p.vertices if v[0] == LIT], np.int64).reshape(-1, 3)
         e.nrm = np.array([v[2] for v in p.vertices if v[0] != REF], np.uint32)
-        e.tex = np.array([v[3] for v in p.vertices if v[0] != REF], np.uint32)
+        e.tex = np.array([v[3] for v in p.vertices if v[0] != REF and v[3] is not None], np.uint32).reshape(-1, 2)
         e.triangles = np.array(p.triangles, np.int64)
         e.sft = np.array(p.surface_first_triangle, np.uint32)
         e.far_pairs = np.array(p.far_runs, np.uint32)
@@ -239,23 +241,66 @@ def test_geom_layout_refusals(damage):
             geom.encode_geom([bad])
         return
     if damage == "runs":
-        struct.pack_into("<I", data, 16 + 20, 5)  # surface count past its runs
+        struct.pack_into("<I", data, geom.GEOM_HEADER_SIZE + 20, 5)  # surface count past its runs
     elif damage == "trailing":
         data += b"\0"
     elif damage == "column":
-        at = 16 + geom.PART_SIZE + 16 * 2 + 8  # VPOS's element count
+        at = geom.GEOM_HEADER_SIZE + geom.PART_SIZE + 16 * 2 + 8  # VPOS's element count
         struct.pack_into("<I", data, at, struct.unpack_from("<I", data, at)[0] + 1)
     elif damage == "op":
-        at = 16 + geom.PART_SIZE + 16 * 9  # the first column's bytes: VOPS
+        at = geom.GEOM_HEADER_SIZE + geom.PART_SIZE + 16 * 10  # the first column's bytes: VOPS
         data[at] = 7
     with pytest.raises(geom.LayoutError):
         geom.decode_geom(bytes(data))
 
 
+def test_geom_room_for_new_content():
+    """GEOM v1 takes new content without a version: a part with a PRISM material tied to no stock material or
+    surface, a part with no stock surface, a longer part record and a column this reader does not know"""
+    prism_part = geom.Part(geom.NO_INDEX, geom.NO_INDEX, 0, 0, 0, 0, 0,
+                           [(LIT, (0, 0, 0), (1, 2, 3), (4, 5)), (LIT, (1024, 0, 0), (1, 2, 3), (6, 7)),
+                            (REFM, (0, 0, 2), (1, 2, 3), (8, 9)), (REFC, 1, (1, 2, 3), (10, 11))],
+                           [(0, 1, 2), (1, 3, 2)], [0], static_set=2, material_namespace=geom.NAMESPACE_PRISM,
+                           prism_material=0x1234)
+    addition = geom.Part(0, 0, 4, 3, 0xDEADBEEF, 0, 0, [(LIT, (5, 5, 5), (0, 0, 0), (0, 0)), (REF, 0), (REF, 1)],
+                         [(0, 1, 2)], [0])
+    data = geom.encode_geom([_sample_part(), prism_part, addition])
+    back = geom.decode_geom(data)
+    assert (back[1].material_namespace, back[1].prism_material, back[1].static_set) == (geom.NAMESPACE_PRISM,
+                                                                                        0x1234, 2)
+    assert back[1].vertices == prism_part.vertices and back[2].surface_count == 0
+    # a later version's longer part records and an extra column: this reader skips both
+    count, columns = struct.unpack_from("<II", data, 8)
+    extra = 8
+    head, parts_end = geom.GEOM_HEADER_SIZE, geom.GEOM_HEADER_SIZE + geom.PART_SIZE * count
+    records = b"".join(data[head + geom.PART_SIZE * i:head + geom.PART_SIZE * (i + 1)] + b"\xee" * extra
+                       for i in range(count))
+    table_end = parts_end + 16 * columns
+    longer = (data[:12] + struct.pack("<II", columns + 1, geom.PART_SIZE + extra) + records +
+              data[parts_end:table_end] + struct.pack("<4sIII", b"ZNEW", 4, 2, 8) + data[table_end:] + b"\1" * 8)
+    later = geom.decode_geom(longer)
+    assert [p.vertices for p in later] == [p.vertices for p in back]
+    # a PRISM part names no stock material, surface or own-material vertex
+    for bad in (dict(lightmap_index=0), dict(surface_count=1), dict(topology_check=1)):
+        part = geom.Part(**{**dict(lightmap_index=geom.NO_INDEX, material_index=geom.NO_INDEX,
+                                   stock_surface_count=0, stock_vertex_count=0, topology_check=0, first_surface=0,
+                                   surface_count=0, vertices=prism_part.vertices, triangles=[(0, 1, 2)],
+                                   surface_first_triangle=[0] * (1 + bad.get("surface_count", 0)),
+                                   material_namespace=geom.NAMESPACE_PRISM, prism_material=1), **bad})
+        with pytest.raises(geom.LayoutError):
+            geom.encode_geom([part])
+    own = geom.Part(geom.NO_INDEX, geom.NO_INDEX, 0, 0, 0, 0, 0, [(REF, 0), (REF, 1), (REF, 2)], [(0, 1, 2)], [0],
+                    material_namespace=geom.NAMESPACE_PRISM, prism_material=1)
+    with pytest.raises(geom.LayoutError):
+        geom.decode_geom(geom.encode_geom([own]))
+
+
 def test_coll_round_trip():
-    planes = [(geom.float_bits(0.0), geom.float_bits(0.0), geom.float_bits(1.0), geom.float_bits(-3.5))]
+    planes = [(geom.float_bits(0.0), geom.float_bits(0.0), geom.float_bits(1.0), geom.float_bits(-3.5)), (REF, 7)]
     vertices = [(REF, 4), (LIT, (1, 2, 3)), (LIT, (-7, 8, 9))]
     assert geom.decode_coll(geom.encode_coll(vertices, planes)) == (vertices, planes)
+    tuples = geom.section_tuples("COLL", geom.encode_coll(vertices, planes))
+    assert [t[2] for t in tuples if t[0] == "plane"] == [False, True]
     with pytest.raises(geom.LayoutError):
         geom.encode_coll([(REFP, 1, (0, 0, 0), (0, 0))], planes)
 
@@ -312,6 +357,58 @@ def test_encode_lint_scan(tool, synth, tmp_path, monkeypatch):
     assert lint_patch.main([str(raw), "--map", str(synth)]) == 1
 
 
+def test_encoder_takes_stock_coordinates_by_reference(tool, synth):
+    """a remodel that kept stock positions and coordinates but changed the normals: REFPT (and REFMT across
+    materials), so no stock coordinate is written out, and the lint passes it; written as REFP it fails"""
+    np = _numpy()
+    from geopatch import encode, scan_original
+    _, _, bsps = retail.read_map(synth)
+    by_index = {b.index: b for b in bsps}
+    material = by_index[0].materials[(0, 0)]
+    other = by_index[0].materials[(0, 1)]
+    p = scan_original.remodel_part(material, tool, extra=[other.position(k) for k in range(3)])
+    p.vertices = p.vertices.copy()
+    p.vertices[:, 3:6] = np.float32([0.0, 0.6, 0.8])  # every normal ours
+    other_decoded = np.frombuffer(tool.environment_vertices(other.vertices), "<f4").reshape(-1, 14)
+    p.vertices[-3:, 12:14] = other_decoded[0:3, 12:14]  # the other material's coordinates kept too
+    e, counts = encode.encode_pwg_part(p, material, tool, by_index[0])
+    assert counts["refpt"] == material.vertex_count and counts["refp"] == 0 and counts["ref"] == 0
+    assert counts["refmt"] == 3 and counts["refm"] == 0
+    data = prsx.write(CWID, [prsx.Section("GEOM", 0, encode.encode_geom_arrays([e]))])
+    assert lint_patch.lint(data, by_index) == []
+    assert not any(kind == "texcoord" and at[1] < material.vertex_count
+                   for kind, _, _, at in geom.section_tuples("GEOM", prsx.Sidecar(data).section(0)))
+    # the same vertices with their coordinates written out
+    e.ops = np.where(e.ops == REFPT, REFP, np.where(e.ops == REFMT, REFM, e.ops)).astype(np.uint8)
+    e.tex = p.vertices[e.ops != REF][:, 12:14].copy().view("<u4")
+    data = prsx.write(CWID, [prsx.Section("GEOM", 0, encode.encode_geom_arrays([e]))])
+    assert any("base map coordinates" in f for f in lint_patch.lint(data, by_index))
+
+
+def test_encoder_snaps_kept_stock_positions(tool, synth):
+    """a stock vertex the art pipeline left a grid step or two off (float noise) is that stock position, a REF:
+    never LIT a hair from retail; one past SNAP_STEPS stays ours"""
+    np = _numpy()
+    from geopatch import encode, scan_original
+    _, _, bsps = retail.read_map(synth)
+    material = bsps[0].materials[(0, 0)]
+    for steps, expected in ((1, "snapped"), (encode.SNAP_STEPS, "snapped"), (encode.SNAP_STEPS + 1, "lit")):
+        p = scan_original.remodel_part(material, tool)
+        p.vertices = p.vertices.copy()
+        p.vertices[:material.vertex_count, 0] += np.float32(steps / 1024.0)
+        e, counts = encode.encode_pwg_part(p, material, tool, bsps[0])
+        stock = material.vertex_count
+        if expected == "snapped":
+            assert counts["snapped"] == stock and counts["refp"] + counts["refpt"] == stock, (steps, counts)
+            assert counts["lit"] == counts["vertices"] - stock
+        else:
+            assert counts["snapped"] == 0 and counts["lit"] == counts["vertices"], (steps, counts)
+    stock_points = np.array([[0, 0, 0], [10, 10, 10], [3, 0, 0]], np.int64)
+    found = encode._nearest_within(np.array([[2, 0, 0], [6, 6, 6], [10, 14, 10], [-4, 0, 0]], np.int64),
+                                   stock_points, 4)
+    assert found.tolist() == [2, 1, 1, 0]
+
+
 def test_negative_controls(tool, synth):
     """section 2.4: each control must fail and a clean remodel pass"""
     _numpy()
@@ -319,11 +416,23 @@ def test_negative_controls(tool, synth):
     results = scan_original.controls(synth, tool)
     names = [name for name, _, _ in results]
     assert names == ["clean remodel", "quantized stock vertex run", "compressed-to-uncompressed copy",
-                     "single plane", "stolen run inserted before encoding", "raw retail bytes"]
+                     "single plane", "stolen run inserted before encoding", "raw retail bytes",
+                     "another BSP's mesh pasted through the encoder", "stock mesh moved 1/1024 world unit",
+                     "stock mesh moved 0.01 world unit", "stock mesh moved 0.1 world unit",
+                     "stock mesh scaled 1.0001"]
     for name, should_fail, report in results:
-        assert bool(report["findings"]) == should_fail, (name, report["findings"][:3])
-        if not should_fail:
-            assert not report["lint"], report["lint"]
+        assert scan_original.caught(report) == should_fail, (name, report["findings"][:3], report["lint"][:3],
+                                                             report["sections"])
+    by_name = {name: report for name, _, report in results}
+    # the pasted mesh is a hard failure (its nudged run), not only a review flag
+    assert any("nudged" in finding for finding in by_name["another BSP's mesh pasted through the encoder"]["lint"])
+    # a hair's move is in reach of the near share; a tenth of a unit, or a scale about a far point, only the
+    # transform share sees
+    for name in ("stock mesh moved 0.1 world unit", "stock mesh scaled 1.0001"):
+        section = by_name[name]["sections"][0]
+        assert section["near_share"] <= scan_original.HIGH_NEAR_SHARE < section["transform_share"], (name, section)
+    clean = by_name["clean remodel"]["sections"][0]
+    assert clean["near_share"] == 0 and clean["transform_share"] == 0
     # the clean remodel's sections are REF-heavy but ours
     clean = results[0][2]["sections"][0]
     assert 0 < clean["ref_share"] < 1
@@ -347,6 +456,15 @@ def test_lint_refusals(tool, synth):
     other = prsx.write(CWID, [prsx.Section("GEOM", 0, geom.encode_geom([part(
         [(REFM, (0, 1, 3), (0, 0, 0), (0, 0)), (REFC, 2, (0, 0, 0), (0, 0)), (REF, 1)])]))])
     assert lint_patch.lint(other, by_index) == []
+    # stock coordinates taken by reference (REFPT, REFMT) are clean; written out (REFP, REFM) they are a copy
+    own_tex = lint_patch._stock_tex(material, 2)
+    other_tex = lint_patch._stock_tex(by_index[0].materials[(0, 1)], 3)
+    taken = prsx.write(CWID, [prsx.Section("GEOM", 0, geom.encode_geom([part(
+        [(REFPT, 2, (0, 0, 0), None), (REFMT, (0, 1, 3), (0, 0, 0), None), (REF, 1)])]))])
+    assert lint_patch.lint(taken, by_index) == []
+    # COLL: a stock plane by reference is clean (enhanced floors are stock planes), past the stock planes not
+    stock_plane = prsx.write(CWID, [prsx.Section("COLL", 0, geom.encode_coll([(REF, 0)], [(REF, 0)]), collv=1)])
+    assert lint_patch.lint(stock_plane, by_index) == []
     cases = {
         "REF past the stock vertices": [prsx.Section("GEOM", 0, geom.encode_geom([part(
             [(REF, material.vertex_count)] + ours[1:])]))],
@@ -355,6 +473,12 @@ def test_lint_refusals(tool, synth):
         "REFC past the collision vertices": [prsx.Section("GEOM", 0, geom.encode_geom([part(
             [(REFC, 10 ** 6, (0, 0, 0), (0, 0))] + ours[1:])]))],
         "another revision": [prsx.Section("GEOM", 0, geom.encode_geom([part(ours, topology_check=1)]))],
+        "REFP writes out the stock coordinates": [prsx.Section("GEOM", 0, geom.encode_geom([part(
+            [(REFP, 2, (0, 0, 0), own_tex)] + ours[1:])]))],
+        "REFM writes out the stock coordinates": [prsx.Section("GEOM", 0, geom.encode_geom([part(
+            [(REFM, (0, 1, 3), (0, 0, 0), other_tex)] + ours[1:])]))],
+        "a plane past the stock planes": [prsx.Section("COLL", 0, geom.encode_coll(
+            [(REF, 0)], [(REF, len(by_index[0].planes))]), collv=1)],
         "no such material": [prsx.Section("GEOM", 0, geom.encode_geom([part(ours, material_index=40)]))],
         "unknown type": [prsx.Section("ZZZZ", 0, b"x", flags=0)],
         "no layout": [prsx.Section("DOBJ", 0, b"grass")],

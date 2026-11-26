@@ -27,9 +27,14 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from geopatch import geom, prsx, retail  # noqa: E402
-from geopatch.geom import LIT, REF, REFC, REFM, REFP  # noqa: E402
+from geopatch.geom import LIT, REF, REFC, REFM, REFMT, REFP, REFPT  # noqa: E402
 
 PWG_MAGIC = b"PWG1"
+# a remodel vertex within this many grid steps (on every axis) of a stock position of its BSP is that stock
+# position: float noise in the art pipeline leaves kept stock vertices a step or two off (b30's second BSP had
+# about 2,000), and as LIT they would be stock data a hair away; snapped, they are REFs. The lint's nudge rule looks
+# the same distance (lint_patch.NUDGE_STEPS)
+SNAP_STEPS = 4
 
 
 # ---------- the .pwg intermediate (port/linux/game/prism_world_geometry.c has the format)
@@ -130,11 +135,11 @@ def encode_geom_arrays(parts):
     ops, refs, keys, qs, nrm, tex, corners, runs, far, spheres = [], [], [], [], [], [], [], [], [], []
     for p in parts:
         has_far = p.far_pairs is not None
-        header += struct.pack("<HHIIIIIIIIIII", p.lightmap_index & 0xFFFF, p.material_index & 0xFFFF,
-                              p.stock_surface_count, p.stock_vertex_count, p.topology_check & 0xFFFFFFFF,
-                              p.first_surface, p.surface_count, len(p.ops), len(p.triangles),
-                              p.near_triangle_count, geom.float_bits(p.far_distance), 1 if has_far else 0,
-                              getattr(p, "static_set", 0))
+        header += geom.part_record(p.lightmap_index, p.material_index, p.stock_surface_count,
+                                   p.stock_vertex_count, p.topology_check, p.first_surface, p.surface_count,
+                                   len(p.ops), len(p.triangles), p.near_triangle_count, p.far_distance, has_far,
+                                   getattr(p, "static_set", 0), getattr(p, "material_namespace", 0),
+                                   getattr(p, "prism_material", 0))
         ops.append(p.ops)
         refs.append(p.refs)
         keys.append(getattr(p, "keys", np.zeros(0, np.uint32)))
@@ -158,8 +163,7 @@ def encode_geom_arrays(parts):
                ("TIDX", 4, cat(corners, np.uint32)), ("SRUN", 4, cat(runs, np.uint32)),
                ("FRUN", 4, cat(far, np.uint32)), ("FSPH", 4, cat(spheres, np.uint32))]
     table, blob = columns_bytes(columns)
-    return geom.GEOM_MAGIC + struct.pack("<III", geom.GEOM_VERSION, len(parts), len(columns)) + bytes(header) + \
-        table + blob
+    return geom.geom_header(len(parts), len(columns)) + bytes(header) + table + blob
 
 
 def _bsp_lookup(bsp):
@@ -180,12 +184,21 @@ def _bsp_lookup(bsp):
     return lookup
 
 
+def _nearest_within(points, stock, steps):
+    """retail.nearest_within's index alone"""
+    return retail.nearest_within(points, stock, steps)[0]
+
+
 def encode_pwg_part(p, material, native=None, bsp=None, avoid=None):
     """one .pwg part as an EncodedPart against its stock material: a vertex equal in all 56 bytes to the stock
     vertex's exact decode is REF, one on a stock vertex's grid position REFP; with the BSP, one on another
-    material's stock position REFM and one on a collision vertex REFC; others LIT. avoid: grid positions no LIT
+    material's stock position REFM and one on a collision vertex REFC; one within SNAP_STEPS of such a position (and
+    on none) is snapped to the nearest; others LIT. A REFP or REFM vertex whose base
+    map coordinates are the referenced stock vertex's own bit for bit takes them from it (REFPT, REFMT), so no
+    stock coordinates are written out. avoid: grid positions no LIT
     vertex may take (every retail position of the map's other BSPs, which a BSP cannot refer to: only one BSP is in
-    memory): such a vertex moves up one grid step (1/1024 world unit) until it is free. Returns (part, counts)"""
+    memory): such a vertex moves up one grid step (1/1024 world unit) until it is free; counts["nudged_run"] is the
+    longest run of consecutive nudged vertices, which the lint refuses past NUDGE_RUN. Returns (part, counts)"""
     n = len(p.vertices)
     q = grid(p.vertices[:, 0:3])
     ops = np.zeros(n, np.uint8)
@@ -193,6 +206,7 @@ def encode_pwg_part(p, material, native=None, bsp=None, avoid=None):
     keys = np.zeros(n, np.int64)
     lookup = {}
     decoded = None
+    stock_q = np.zeros((0, 3), np.int64)
     if material is not None and material.vertex_count:
         stock_q = grid(np.frombuffer(material.vertices, "<f4").reshape(-1, 8)[:, 0:3])
         for index, key in enumerate(map(tuple, stock_q.tolist())):
@@ -201,24 +215,57 @@ def encode_pwg_part(p, material, native=None, bsp=None, avoid=None):
             decoded = np.frombuffer(native.environment_vertices(material.vertices), "<u4").reshape(-1, 14)
     wide = _bsp_lookup(bsp) if bsp is not None else {}
     bits = p.vertices.view("<u4")
-    for v, key in enumerate(map(tuple, q.tolist())):
-        index = lookup.get(key)
-        if index is not None:
-            refs[v] = index
-            ops[v] = REF if decoded is not None and np.array_equal(bits[v], decoded[index]) else REFP
-            continue
-        found = wide.get(key)
-        if found is None:
-            continue
+
+    def stock_tex(stock_material, index):
+        """the stock compressed vertex's base map coordinates, as float bits"""
+        return struct.unpack_from("<2I", stock_material.vertices, 32 * int(index) + 24)
+
+    def own(v, index, exact):
+        refs[v] = index
+        if exact and decoded is not None and np.array_equal(bits[v], decoded[index]):
+            ops[v] = REF
+        else:
+            ops[v] = REFPT if tuple(bits[v, 12:14].tolist()) == stock_tex(material, index) else REFP
+
+    def other(v, found):
         if found[0] == REFM:
             lightmap, material_index, refs[v] = found[1]
             keys[v] = (lightmap & 0xFFFF) << 16 | (material_index & 0xFFFF)
-            ops[v] = REFM
+            same = tuple(bits[v, 12:14].tolist()) == stock_tex(bsp.materials[(lightmap, material_index)], refs[v])
+            ops[v] = REFMT if same else REFM
         else:
             refs[v] = found[1]
             ops[v] = REFC
+
+    for v, key in enumerate(map(tuple, q.tolist())):
+        index = lookup.get(key)
+        if index is not None:
+            own(v, index, True)
+            continue
+        found = wide.get(key)
+        if found is not None:
+            other(v, found)
+    snapped = 0
+    if material is not None:
+        # (a vertex a few steps off a stock position of its BSP: its own material's first, then the others')
+        rest = np.nonzero(ops == LIT)[0]
+        near = _nearest_within(q[rest], stock_q, SNAP_STEPS)
+        for v, index in zip(rest[near >= 0], near[near >= 0]):
+            own(v, int(index), False)
+        snapped += int((near >= 0).sum())
+        if wide:
+            rest = np.nonzero(ops == LIT)[0]
+            wide_keys = getattr(bsp, "_geopatch_lookup_keys", None)
+            if wide_keys is None:
+                wide_keys = np.array(list(wide), np.int64).reshape(-1, 3)
+                bsp._geopatch_lookup_keys = wide_keys
+            near = _nearest_within(q[rest], wide_keys, SNAP_STEPS)
+            for v, index in zip(rest[near >= 0], near[near >= 0]):
+                other(v, wide[tuple(wide_keys[index].tolist())])
+            snapped += int((near >= 0).sum())
     lit = ops == LIT
-    nudged = 0
+    nudged = run = longest = 0
+    previous = None
     if avoid:
         for v in np.nonzero(lit)[0]:
             key = tuple(q[v].tolist())
@@ -227,23 +274,28 @@ def encode_pwg_part(p, material, native=None, bsp=None, avoid=None):
                     key = (key[0], key[1], key[2] + 1)
                 q[v] = key
                 nudged += 1
+                run = run + 1 if previous == v - 1 else 1
+                previous = v
+                longest = max(longest, run)
     attributed = ops != REF
+    textured = attributed & (ops != REFPT) & (ops != REFMT)
     e = EncodedPart()
     for name in ("lightmap_index", "material_index", "stock_surface_count", "stock_vertex_count", "topology_check",
                  "first_surface", "surface_count", "near_triangle_count", "far_distance"):
         setattr(e, name, getattr(p, name))
     e.ops = ops
     e.refs = refs[ops != LIT].astype(np.uint32)
-    e.keys = keys[ops == REFM].astype(np.uint32)
+    e.keys = keys[(ops == REFM) | (ops == REFMT)].astype(np.uint32)
     e.q = q[lit]
     vec = p.vertices[attributed]
     e.nrm = np.stack([pack_vectors(vec[:, 3:6]), pack_vectors(vec[:, 6:9]), pack_vectors(vec[:, 9:12])], axis=1)
-    e.tex = vec[:, 12:14].copy().view("<u4")
+    e.tex = p.vertices[textured][:, 12:14].copy().view("<u4")
     e.triangles = p.triangles
     e.sft = p.sft
     e.far_pairs, e.spheres = p.far_pairs, p.spheres
     counts = {"vertices": n, "lit": int(lit.sum()), "ref": int((ops == REF).sum()), "refp": int((ops == REFP).sum()),
-              "refm": int((ops == REFM).sum()), "refc": int((ops == REFC).sum()), "nudged": nudged,
+              "refm": int((ops == REFM).sum()), "refc": int((ops == REFC).sum()), "refpt": int((ops == REFPT).sum()),
+              "refmt": int((ops == REFMT).sum()), "snapped": snapped, "nudged": nudged, "nudged_run": longest,
               "triangles": int(len(p.triangles))}
     return e, counts
 
@@ -299,7 +351,7 @@ def main(argv=None):
             e, counts = encode_pwg_part(p, material, native, bsps.get(index), avoid)
             encoded.append(e)
             for key, value in counts.items():
-                totals[key] = totals.get(key, 0) + value
+                totals[key] = max(totals.get(key, 0), value) if key == "nudged_run" else totals.get(key, 0) + value
         data = encode_geom_arrays(encoded)
         sections.append(prsx.Section("GEOM", index, data, codec=codec, level=level))
         entry = {"pwg_bytes": Path(path).stat().st_size, "geom_decoded": len(data), **totals}

@@ -9,40 +9,65 @@ Every value in a section is ours or a REF op. A vertex is either
   REFP (GEOM): a stock vertex's position (by index, as REF) with our own packed vectors and coordinates;
   REFM (GEOM): the same from a stock vertex of another material of the BSP (lightmap and material index, vertex);
   REFC (GEOM): the same from a vertex of the BSP's stock collision BSP.
+  REFP and REFM may carry the STOCK_TEX bit (REFPT, REFMT): the referenced stock vertex's base map coordinates
+       too, so only our packed vectors are carried. A remodel vertex that kept a stock vertex's coordinates is
+       encoded so; the lint refuses REFP/REFM coordinates equal to the referenced vertex's own (a copy).
 Border vertices at remodel/stock borders are always REF or REFP (E16); a remodel vertex whose grid position equals
 a stock vertex's of its material is encoded REFP, one equal to another material's REFM, one equal to a collision
 vertex REFC (encode.py), so no LIT position equals a retail one of its BSP.
 
 GEOM v1, one per BSP (little endian):
-    "GEO1", u32 version (1), u32 part count, u32 column count
-    each part, 48 bytes: u16 lightmap index, u16 material index, u32 stock surface count, u32 stock vertex count,
-        u32 topology check (sum over the material's surfaces s of (3a + 5b + 7c)(s + 1), mod 2^32: the .pwg's),
-        u32 first surface, u32 surface count (the part's run of the material's surfaces), u32 vertex count,
-        u32 triangle count, u32 near triangle count, u32 far distance (float bits), u32 flags (1: far level),
-        u32 static set (0: none; a set n is skipped at run time with its visibility layer, PLAN 4.4)
-    column table, 16 bytes each: fourcc, u32 element width, u32 element count, u32 byte size
+    "GEO1", u32 version (1), u32 part count, u32 column count, u32 part record size (PART_SIZE today; a reader
+        requires at least the size it knows and skips the rest of each record, so later fields need no version)
+    each part, part record size bytes: u16 lightmap index, u16 material index, u32 stock surface count, u32 stock
+        vertex count, u32 topology check (sum over the material's surfaces s of (3a + 5b + 7c)(s + 1), mod 2^32:
+        the .pwg's), u32 first surface, u32 surface count (the part's run of the material's surfaces; 0: a part
+        tied to no stock surface, new content drawn beside the stock), u32 vertex count, u32 triangle count, u32 near
+        triangle count, u32 far distance (float bits), u32 flags (1: far level), u32 static set (0: none; a set n
+        is skipped at run time with its visibility layer, PLAN 4.4), u32 material namespace, u32 PRISM material id:
+        material namespace STOCK (0): the part draws with the stock (lightmap index, material index) pair and is
+            checked against it (counts, topology check), the PRISM material id 0;
+        material namespace PRISM (1): the part draws with a PRISM material (its id in the PRISM material registry:
+            bark, new rock, drifts), tied to no stock material or surface: lightmap and material index 0xFFFF,
+            stock counts, topology check, first surface and surface count 0, and no REF/REFP vertex (no own
+            stock material to refer to; REFM and REFC still name stock positions of the BSP)
+    column table, 16 bytes each: fourcc, u32 element width, u32 element count, u32 byte size (a reader ignores a
+        column it does not know, so a later column needs no version either)
     the columns, each byte-plane shuffled by its element width (all first bytes, then all second bytes, ...):
-        VOPS u8   per vertex: 0 LIT, 1 REF, 2 REFP, 3 REFM, 4 REFC
-        VREF u32  per REF, REFP, REFM and REFC vertex: the stock vertex's index (in its material, or collision's)
-        VKEY u32  per REFM vertex: its material, lightmap index << 16 | material index
+        VOPS u8   per vertex: 0 LIT, 1 REF, 2 REFP, 3 REFM, 4 REFC, 10 REFPT, 11 REFMT (REFP/REFM | STOCK_TEX 8)
+        VREF u32  per vertex but LIT: the stock vertex's index (in its material, or collision's)
+        VKEY u32  per REFM and REFMT vertex: its material, lightmap index << 16 | material index
         VPOS u32  per LIT vertex, x y z: zigzag of the grid delta from the previous LIT vertex's same axis
         VNRM u32  per vertex but REF: normal, binormal, tangent packed 11:11:10
-        VTEX u32  per vertex but REF: u, v float bits
+        VTEX u32  per vertex but REF, REFPT and REFMT: u, v float bits
         TIDX u32  per triangle corner: zigzag of the delta from the previous corner's index (from 0 per part)
-        SRUN u32  per part: surface count + 1 values, the first triangle of each of its surfaces (and the end)
+        SRUN u32  per part: surface count + 1 values, the first triangle of each of its surfaces (and the end; a
+                  part with no surface has the one value 0)
         FRUN u32  per far part, per surface: its far triangles' first and count
         FSPH u32  per far part, per surface: bounding sphere centre and radius, float bits
 COLL v0 (the enhanced collision, laid out in full in M8; v0 carries what the scanner checks):
-    "COL0", u32 version (0), u32 0, u32 column count, column table, columns VOPS VREF VPOS (collision vertices)
-    and PLNE (u32: per plane, normal x y z and d, float bits).
+    "COL0", u32 version (0), u32 0, u32 column count, column table, columns VOPS VREF VPOS (collision vertices:
+    LIT or REF to a stock collision vertex), POPS (u8 per plane: 0 LIT, 1 REF), PREF (u32 per REF plane: the
+    stock collision BSP's plane index) and PLNE (u32 per LIT plane: normal x y z and d, float bits). Enhanced
+    collision follows the stock on walkable ground (PLAN section 10), so its floor planes are often the stock
+    planes: they are REFs, and only a LIT plane equal to a retail one is refused.
 """
 import struct
 
 LIT, REF, REFP, REFM, REFC = 0, 1, 2, 3, 4
-STOCK_POSITION = (REF, REFP, REFM, REFC)
+STOCK_TEX = 8
+REFPT, REFMT = REFP | STOCK_TEX, REFM | STOCK_TEX
+GEOM_OPS = (LIT, REF, REFP, REFM, REFC, REFPT, REFMT)
+STOCK_POSITION = (REF, REFP, REFM, REFC, REFPT, REFMT)
+# ops whose vertex carries no coordinates of its own
+NO_TEX = (REF, REFPT, REFMT)
 GRID = 1024
 GRID_LIMIT = 1 << 24
-PART_SIZE = 48
+GEOM_HEADER_SIZE = 20
+PART_SIZE = 56
+PART_FORMAT = "<HHIIIIIIIIIIIII"
+NAMESPACE_STOCK, NAMESPACE_PRISM = 0, 1
+NO_INDEX = 0xFFFF
 GEOM_MAGIC, GEOM_VERSION = b"GEO1", 1
 COLL_MAGIC, COLL_VERSION = b"COL0", 0
 
@@ -111,6 +136,11 @@ def _columns_bytes(columns):
     return bytes(table), bytes(blob)
 
 
+def base_op(op):
+    """REFP for REFPT, REFM for REFMT, the op itself otherwise"""
+    return op & ~STOCK_TEX
+
+
 def _read_columns(data, at, count):
     columns = {}
     table_end = at + 16 * count
@@ -120,10 +150,16 @@ def _read_columns(data, at, count):
     for index in range(count):
         name, width, elements, size = struct.unpack_from("<4sIII", data, at + 16 * index)
         name = name.decode("ascii", "replace")
-        if width not in (1, 4) or size != width * elements or offset + size > len(data) or name in columns:
+        if width not in (1, 2, 4, 8) or size != width * elements or offset + size > len(data) or name in columns:
             raise LayoutError("malformed column %s" % name)
         raw = unshuffle(data[offset:offset + size], width)
-        columns[name] = list(raw) if width == 1 else list(struct.unpack("<%dI" % elements, raw))
+        if width == 1:
+            columns[name] = list(raw)
+        elif width == 4:
+            columns[name] = list(struct.unpack("<%dI" % elements, raw))
+        else:
+            # (a width no column of this version has: a later column, which the decoders ignore)
+            columns[name] = raw
         offset += size
     if offset != len(data):
         raise LayoutError("bytes after the columns")
@@ -138,17 +174,17 @@ def _vertex_columns(vertices, with_attributes):
     last = [0, 0, 0]
     for vertex in vertices:
         op = vertex[0]
-        if op not in ((LIT, REF, REFP, REFM, REFC) if with_attributes else (LIT, REF)):
+        if op not in (GEOM_OPS if with_attributes else (LIT, REF)):
             raise LayoutError("vertex op %r here" % (op,))
         ops.append(op)
         if op == REF:
             refs.append(vertex[1])
             continue
-        if op == REFM:
+        if base_op(op) == REFM:
             lightmap, material, index = vertex[1]
             keys.append((lightmap & 0xFFFF) << 16 | (material & 0xFFFF))
             refs.append(index)
-        elif op in (REFP, REFC):
+        elif base_op(op) in (REFP, REFC):
             refs.append(vertex[1])
         else:
             q = vertex[1]
@@ -159,7 +195,8 @@ def _vertex_columns(vertices, with_attributes):
                 last[axis] = q[axis]
         if with_attributes:
             nrm.extend(vertex[2])
-            tex.extend(vertex[3])
+            if op not in NO_TEX:
+                tex.extend(vertex[3])
     columns = [("VOPS", 1, ops), ("VREF", 4, refs), ("VPOS", 4, pos)]
     if with_attributes:
         columns += [("VKEY", 4, keys), ("VNRM", 4, nrm), ("VTEX", 4, tex)]
@@ -172,17 +209,18 @@ def _vertices_of(columns, with_attributes, count=None):
     nrm, tex = columns.get("VNRM", []), columns.get("VTEX", [])
     lit = sum(1 for op in ops if op == LIT)
     attributed = sum(1 for op in ops if op != REF)
-    refm = sum(1 for op in ops if op == REFM)
-    if any(op not in ((LIT, REF, REFP, REFM, REFC) if with_attributes else (LIT, REF)) for op in ops) or \
+    textured = sum(1 for op in ops if op not in NO_TEX)
+    refm = sum(1 for op in ops if base_op(op) == REFM)
+    if any(op not in (GEOM_OPS if with_attributes else (LIT, REF)) for op in ops) or \
             len(pos) != 3 * lit or len(ref_list) != len(ops) - lit or len(key_list) != refm or \
-            (with_attributes and (len(nrm) != 3 * attributed or len(tex) != 2 * attributed)) or \
+            (with_attributes and (len(nrm) != 3 * attributed or len(tex) != 2 * textured)) or \
             (not with_attributes and (nrm or tex or key_list)):
         raise LayoutError("vertex columns disagree")
     if count is not None and count != len(ops):
         raise LayoutError("vertex count disagrees")
     out, last = [], [0, 0, 0]
     refs, keys = iter(ref_list), iter(key_list)
-    k = a = 0
+    k = a = t = 0
     for op in ops:
         if op == REF:
             out.append((REF, next(refs)))
@@ -194,13 +232,18 @@ def _vertices_of(columns, with_attributes, count=None):
                 q.append(last[axis])
             k += 1
             head = (LIT, tuple(q))
-        elif op == REFM:
+        elif base_op(op) == REFM:
             key = next(keys)
-            head = (REFM, (key >> 16, key & 0xFFFF, next(refs)))
+            head = (op, (key >> 16, key & 0xFFFF, next(refs)))
         else:
             head = (op, next(refs))
         if with_attributes:
-            out.append(head + (tuple(nrm[3 * a:3 * a + 3]), tuple(tex[2 * a:2 * a + 2])))
+            if op in NO_TEX:
+                coordinates = None
+            else:
+                coordinates = tuple(tex[2 * t:2 * t + 2])
+                t += 1
+            out.append(head + (tuple(nrm[3 * a:3 * a + 3]), coordinates))
             a += 1
         else:
             out.append(head)
@@ -212,7 +255,8 @@ def _vertices_of(columns, with_attributes, count=None):
 class Part:
     def __init__(self, lightmap_index, material_index, stock_surface_count, stock_vertex_count, topology_check,
                  first_surface, surface_count, vertices, triangles, surface_first_triangle,
-                 near_triangle_count=None, far_distance=0.0, far_runs=None, spheres=None, static_set=0):
+                 near_triangle_count=None, far_distance=0.0, far_runs=None, spheres=None, static_set=0,
+                 material_namespace=NAMESPACE_STOCK, prism_material=0):
         self.lightmap_index = lightmap_index
         self.material_index = material_index
         self.stock_surface_count = stock_surface_count
@@ -228,6 +272,30 @@ class Part:
         self.far_runs = far_runs            # [(first, count)] per surface, or None
         self.spheres = spheres              # [(x, y, z, r)] per surface (float bits), or None
         self.static_set = static_set
+        self.material_namespace = material_namespace
+        self.prism_material = prism_material
+
+
+def part_record(lightmap_index, material_index, stock_surface_count, stock_vertex_count, topology_check,
+                first_surface, surface_count, vertex_count, triangle_count, near_triangle_count, far_distance,
+                has_far, static_set, material_namespace, prism_material):
+    """a part's PART_SIZE bytes (encode.py writes the same through this)"""
+    if material_namespace not in (NAMESPACE_STOCK, NAMESPACE_PRISM):
+        raise LayoutError("material namespace %r" % (material_namespace,))
+    if material_namespace == NAMESPACE_PRISM and (
+            (lightmap_index & 0xFFFF, material_index & 0xFFFF) != (NO_INDEX, NO_INDEX) or stock_surface_count or
+            stock_vertex_count or topology_check & 0xFFFFFFFF or first_surface or surface_count):
+        raise LayoutError("a PRISM material's part is tied to a stock material")
+    if material_namespace == NAMESPACE_STOCK and prism_material:
+        raise LayoutError("a stock material's part names a PRISM material")
+    return struct.pack(PART_FORMAT, lightmap_index & 0xFFFF, material_index & 0xFFFF, stock_surface_count,
+                       stock_vertex_count, topology_check & 0xFFFFFFFF, first_surface, surface_count, vertex_count,
+                       triangle_count, near_triangle_count, float_bits(far_distance), 1 if has_far else 0,
+                       static_set, material_namespace, prism_material)
+
+
+def geom_header(part_count, column_count):
+    return GEOM_MAGIC + struct.pack("<IIII", GEOM_VERSION, part_count, column_count, PART_SIZE)
 
 
 def encode_geom(parts):
@@ -237,10 +305,11 @@ def encode_geom(parts):
         if len(part.surface_first_triangle) != part.surface_count + 1:
             raise LayoutError("a part's surface runs")
         has_far = part.far_runs is not None
-        header += struct.pack("<HHIIIIIIIIIII", part.lightmap_index, part.material_index, part.stock_surface_count,
+        header += part_record(part.lightmap_index, part.material_index, part.stock_surface_count,
                               part.stock_vertex_count, part.topology_check, part.first_surface, part.surface_count,
                               len(part.vertices), len(part.triangles), part.near_triangle_count,
-                              float_bits(part.far_distance), 1 if has_far else 0, part.static_set)
+                              part.far_distance, has_far, part.static_set, part.material_namespace,
+                              part.prism_material)
         vertices.extend(part.vertices)
         last = 0
         for triangle in part.triangles:
@@ -260,16 +329,17 @@ def encode_geom(parts):
     columns = _vertex_columns(vertices, True) + [("TIDX", 4, corners), ("SRUN", 4, runs), ("FRUN", 4, far),
                                                  ("FSPH", 4, spheres)]
     table, blob = _columns_bytes(columns)
-    return GEOM_MAGIC + struct.pack("<III", GEOM_VERSION, len(parts), len(columns)) + bytes(header) + table + blob
+    return geom_header(len(parts), len(columns)) + bytes(header) + table + blob
 
 
 def decode_geom(data):
-    if len(data) < 16 or data[:4] != GEOM_MAGIC:
+    if len(data) < GEOM_HEADER_SIZE or data[:4] != GEOM_MAGIC:
         raise LayoutError("not GEOM v1")
-    version, part_count, column_count = struct.unpack_from("<III", data, 4)
-    if version != GEOM_VERSION or part_count > 1 << 20 or column_count > 64:
+    version, part_count, column_count, part_size = struct.unpack_from("<IIII", data, 4)
+    if version != GEOM_VERSION or part_count > 1 << 20 or column_count > 64 or not PART_SIZE <= part_size <= 4096 \
+            or part_size % 4:
         raise LayoutError("GEOM header")
-    at = 16 + PART_SIZE * part_count
+    at = GEOM_HEADER_SIZE + part_size * part_count
     if at > len(data):
         raise LayoutError("GEOM parts outside the section")
     columns = _read_columns(data, at, column_count)
@@ -279,11 +349,17 @@ def decode_geom(data):
     parts = []
     v = c = r = f = s = 0
     for index in range(part_count):
-        fields = struct.unpack_from("<HHIIIIIIIIIII", data, 16 + PART_SIZE * index)
+        # (the fields this reader knows; a longer record's later ones are skipped)
+        fields = struct.unpack_from(PART_FORMAT, data, GEOM_HEADER_SIZE + part_size * index)
         (lightmap, material, stock_surfaces, stock_vertices, topology, first_surface, surface_count, vertex_count,
-         triangle_count, near, far_bits, flags, static_set) = fields
+         triangle_count, near, far_bits, flags, static_set, namespace, prism_material) = fields
         if flags & ~1 or near > triangle_count:
             raise LayoutError("GEOM part flags")
+        if namespace not in (NAMESPACE_STOCK, NAMESPACE_PRISM) or \
+                (namespace == NAMESPACE_STOCK and prism_material) or \
+                (namespace == NAMESPACE_PRISM and ((lightmap, material) != (NO_INDEX, NO_INDEX) or stock_surfaces or
+                                                   stock_vertices or topology or first_surface or surface_count)):
+            raise LayoutError("GEOM part material namespace")
         part_vertices = vertices[v:v + vertex_count]
         if len(part_vertices) != vertex_count:
             raise LayoutError("GEOM vertices run out")
@@ -314,9 +390,11 @@ def decode_geom(data):
             if any(len(x) != 2 or x[0] + x[1] > triangle_count for x in far_runs) or \
                     any(len(x) != 4 for x in part_spheres):
                 raise LayoutError("GEOM far runs")
+        if namespace == NAMESPACE_PRISM and any(op in (REF, REFP, REFPT) for op, *_ in part_vertices):
+            raise LayoutError("a PRISM material's part refers to its own stock material")
         parts.append(Part(lightmap, material, stock_surfaces, stock_vertices, topology, first_surface,
                           surface_count, part_vertices, triangles, surface_runs, near, bits_float(far_bits),
-                          far_runs, part_spheres, static_set))
+                          far_runs, part_spheres, static_set, namespace, prism_material))
     if v != len(vertices) or c != len(corners) or r != len(runs) or f != len(far) or s != len(spheres):
         raise LayoutError("GEOM columns longer than its parts")
     return parts
@@ -325,8 +403,19 @@ def decode_geom(data):
 # ---------- COLL v0
 
 def encode_coll(vertices, planes):
-    """vertices: [(LIT, (qx, qy, qz))] or [(REF, stock index)]; planes: [(i, j, k, d) float bits]"""
-    columns = _vertex_columns(vertices, False) + [("PLNE", 4, [b for plane in planes for b in plane])]
+    """vertices: [(LIT, (qx, qy, qz))] or [(REF, stock index)]; planes: [(i, j, k, d) float bits] (ours) or
+    [(REF, stock plane index)]"""
+    ops, refs, flat = [], [], []
+    for plane in planes:
+        if len(plane) == 2 and plane[0] == REF:
+            ops.append(REF)
+            refs.append(plane[1])
+        elif len(plane) == 4:
+            ops.append(LIT)
+            flat.extend(plane)
+        else:
+            raise LayoutError("a plane is four float bits or (REF, index)")
+    columns = _vertex_columns(vertices, False) + [("POPS", 1, ops), ("PREF", 4, refs), ("PLNE", 4, flat)]
     table, blob = _columns_bytes(columns)
     return COLL_MAGIC + struct.pack("<III", COLL_VERSION, 0, len(columns)) + table + blob
 
@@ -338,10 +427,18 @@ def decode_coll(data):
     if version != COLL_VERSION or zero or column_count > 64:
         raise LayoutError("COLL header")
     columns = _read_columns(data, 16, column_count)
-    flat = columns.get("PLNE", [])
-    if len(flat) % 4:
+    ops, refs, flat = columns.get("POPS", []), columns.get("PREF", []), columns.get("PLNE", [])
+    if any(op not in (LIT, REF) for op in ops) or len(refs) != sum(1 for op in ops if op == REF) or \
+            len(flat) != 4 * sum(1 for op in ops if op == LIT):
         raise LayoutError("COLL planes")
-    return _vertices_of(columns, False), [tuple(flat[i:i + 4]) for i in range(0, len(flat), 4)]
+    planes, r, k = [], iter(refs), 0
+    for op in ops:
+        if op == REF:
+            planes.append((REF, next(r)))
+        else:
+            planes.append(tuple(flat[k:k + 4]))
+            k += 4
+    return _vertices_of(columns, False), planes
 
 
 # ---------- canonical tuples
@@ -367,7 +464,8 @@ def section_tuples(kind, data):
                 else:
                     out.append(("position", vertex[1], False, where))
                 out.append(("normal", vertex[2][0], False, where))
-                out.append(("texcoord", vertex[3], False, where))
+                if vertex[3] is not None:
+                    out.append(("texcoord", vertex[3], False, where))
     elif kind == "COLL":
         vertices, planes = decode_coll(data)
         for v, vertex in enumerate(vertices):
@@ -376,7 +474,10 @@ def section_tuples(kind, data):
             else:
                 out.append(("collision_vertex", vertex[1], False, (0, v)))
         for p, plane in enumerate(planes):
-            out.append(("plane", plane_key(*[bits_float(b) for b in plane]), False, (1, p)))
+            if len(plane) == 2:
+                out.append(("plane", plane, True, (1, p)))
+            else:
+                out.append(("plane", plane_key(*[bits_float(b) for b in plane]), False, (1, p)))
     return out
 
 
@@ -394,12 +495,15 @@ def runtime_bytes(kind, data):
                 if vertex[0] == LIT:
                     out += struct.pack("<3f", *[q / GRID for q in vertex[1]])
                 if vertex[0] != REF:
-                    out += struct.pack("<3I", *vertex[2]) + struct.pack("<2I", *vertex[3])
+                    out += struct.pack("<3I", *vertex[2])
+                    if vertex[3] is not None:
+                        out += struct.pack("<2I", *vertex[3])
     elif kind == "COLL":
         vertices, planes = decode_coll(data)
         for vertex in vertices:
             if vertex[0] == LIT:
                 out += struct.pack("<3f", *[q / GRID for q in vertex[1]])
         for plane in planes:
-            out += struct.pack("<4I", *plane)
+            if len(plane) == 4:
+                out += struct.pack("<4I", *plane)
     return bytes(out)

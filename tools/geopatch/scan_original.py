@@ -12,11 +12,18 @@ BSP's bytes and of its vertices' exact decode, and reads every decoded section:
   equal to a retail window is a finding;
 - per section it reports the REF share (a high share flags "the remodel kept the stock mesh" for review) and the
   share of normals and coordinate pairs that coincide with retail ones (reported only: quantization makes them
-  coincide by nature).
+  coincide by nature);
+- per section it reports the near share, the share of LIT positions within NEAR_STEPS grid steps (on every axis)
+  of a retail one, and the transform share, the largest share of LIT positions that one affine map of their
+  nearest retail positions (within 1/4 world unit) puts within TRANSFORM_TOLERANCE grid steps: a stock mesh moved,
+  nudged or scaled a hair is a copy exact equality misses, and either share past its threshold flags the section
+  for review.
 
---negative-controls builds doctored sidecars from the map and requires every one to fail, and a clean remodel to
-pass: a quantized stock vertex run, a compressed-to-uncompressed copy, a single stolen plane, a stolen run inserted
-before encoding, and raw retail bytes in a runtime section. Exit 0 when the sidecar is clean (or every control
+--negative-controls builds doctored sidecars from the map and requires every one to fail (a finding, or a review
+flag), and a clean remodel to pass with neither: a quantized stock vertex run, a compressed-to-uncompressed copy, a
+single stolen plane, a stolen run inserted before encoding, raw retail bytes in a runtime section, another BSP's
+whole mesh pasted in through the real encoder (which nudges it), and the stock mesh moved 1/1024 and 0.01 world
+unit and scaled by 1.0001. Exit 0 when the sidecar is clean (or every control
 behaved), 1 otherwise.
 """
 import argparse
@@ -31,6 +38,36 @@ from geopatch import encode, geom, lint_patch, prsx, retail  # noqa: E402
 from geopatch.geom import LIT  # noqa: E402
 
 HIGH_REF_SHARE = 0.9
+NEAR_STEPS = 8
+HIGH_NEAR_SHARE = 0.2
+TRANSFORM_REACH = 256
+TRANSFORM_TOLERANCE = 2
+HIGH_TRANSFORM_SHARE = 0.2
+TRANSFORM_MINIMUM = 12
+TRANSFORM_TRIALS = 64
+
+
+def transform_share(ours, theirs):
+    """the largest share of pairs (ours[i] near theirs[i], grid positions) one affine map theirs -> ours fits within
+    TRANSFORM_TOLERANCE grid steps (a seeded RANSAC over six-pair fits, refitted on its inliers)"""
+    n = len(ours)
+    if n < TRANSFORM_MINIMUM:
+        return 0.0
+    a = np.hstack([theirs.astype(np.float64), np.ones((n, 1))])
+    b = ours.astype(np.float64)
+    rng = np.random.default_rng(1)
+    best = np.zeros(n, bool)
+    for trial in range(TRANSFORM_TRIALS):
+        pick = rng.choice(n, size=min(6, n), replace=False) if trial else np.arange(n)
+        for _ in range(2):
+            m = np.linalg.lstsq(a[pick], b[pick], rcond=None)[0]
+            inliers = np.abs(a @ m - b).max(axis=1) <= TRANSFORM_TOLERANCE
+            if inliers.sum() < TRANSFORM_MINIMUM:
+                break
+            pick = np.nonzero(inliers)[0]
+        if inliers.sum() > best.sum():
+            best = inliers
+    return float(best.sum()) / n if best.sum() >= TRANSFORM_MINIMUM else 0.0
 
 
 def build_sets(map_paths, native=None):
@@ -60,10 +97,13 @@ def scan(data, sets):
             findings.append("%s: %s" % (where, error))
             tuples, runtime = [], b""
         totals, hits, refs = {}, {}, 0
+        lit = {}
         for kind, value, is_ref, at in tuples:
             if kind in ("position", "collision_vertex"):
                 totals["vertices"] = totals.get("vertices", 0) + 1
                 refs += is_ref
+                if not is_ref:
+                    lit.setdefault(at[0], []).append(value)
             if is_ref:
                 continue
             totals[kind] = totals.get(kind, 0) + 1
@@ -73,7 +113,9 @@ def scan(data, sets):
                     findings.append("%s: %s %s at %s equals a retail one" % (where, kind, value, at))
         stats["ref_share"] = refs / totals["vertices"] if totals.get("vertices") else 0.0
         stats["coincident"] = {k: hits.get(k, 0) / v for k, v in totals.items() if k != "vertices" and v}
-        stats["review"] = stats["ref_share"] > HIGH_REF_SHARE
+        stats["near_share"], stats["transform_share"] = _near_shares(lit, sets)
+        stats["review"] = stats["ref_share"] > HIGH_REF_SHARE or stats["near_share"] > HIGH_NEAR_SHARE or \
+            stats["transform_share"] > HIGH_TRANSFORM_SHARE
         for name, blob in (("bytes", section), ("runtime", runtime)):
             hits = sets.window_hits(blob)
             if hits:
@@ -81,6 +123,22 @@ def scan(data, sets):
                                 (where, name, hits[0], len(hits)))
         sections.append(stats)
     return {"findings": findings, "sections": sections, "clean": not findings}
+
+
+def _near_shares(lit, sets):
+    """(near share, transform share) of a section's LIT positions, {part: [grid positions]}: the transform share
+    is the largest of its parts' (weighted by the section's LIT count)"""
+    count = sum(len(v) for v in lit.values())
+    if not count:
+        return 0.0, 0.0
+    near = 0
+    fitted = 0.0
+    for points in lit.values():
+        points = np.array(points, np.int64).reshape(-1, 3)
+        found, nearest, distance = sets.nearest(points, TRANSFORM_REACH)
+        near += int((found & (distance <= NEAR_STEPS)).sum())
+        fitted = max(fitted, transform_share(points[found], nearest[found]) * found.sum())
+    return near / count, float(fitted) / count
 
 
 # ---------- controls
@@ -127,8 +185,13 @@ def _sidecar(sections):
     return prsx.write(b"\x11" * 32, sections)
 
 
+def caught(report):
+    """a control's verdict: a finding of the scanner or the lint, or a section flagged for review"""
+    return bool(report["findings"] or report["lint"] or any(s["review"] for s in report["sections"]))
+
+
 def controls(map_path, native):
-    """[(name, expected to fail, report)] of the controls built from map_path"""
+    """[(name, expected to be caught, report)] of the controls built from map_path"""
     _, _, bsps = retail.read_map(map_path)
     sets = build_sets([map_path], native)
     bsp = bsps[0]
@@ -178,6 +241,47 @@ def controls(map_path, native):
     at = bsp.raw.find(material.vertices[:96])
     raw = bsp.raw[at:at + 96]
     run("raw retail bytes", [geom_section([clean]), prsx.Section("RHGT", bsp.index, b"RHG0" + raw)], True)
+
+    # 6. another BSP's whole stock mesh pasted into the remodel, through the real encoder: every retail position
+    # of the map is avoided, so it nudges each pasted vertex a grid step
+    avoid = set()
+    for b in bsps:
+        avoid |= set(encode._bsp_lookup(b))
+    source = bsps[-1] if len(bsps) > 1 else bsp
+    foreign = [m for key, m in sorted(source.materials.items()) if source is not bsp or m is not material]
+    pasted = [m.position(k) for m in foreign for k in range(m.vertex_count)]
+    pasted = pasted[:len(pasted) - len(pasted) % 3]
+    nudged, _ = encode.encode_pwg_part(remodel_part(material, native, extra=pasted), material, native, bsp, avoid)
+    run("another BSP's mesh pasted through the encoder", [geom_section([nudged])], True)
+
+    # 7-10. the stock mesh kept, moved or scaled a hair: no position exactly retail. The real encoder snaps a
+    # vertex within encode.SNAP_STEPS of a stock position to a REF, so the 1/1024 move is written as an encoder
+    # without that would write it (all LIT); the others are past the snap and go through the real encoder
+    def moved(name, change, resolve=True):
+        part = remodel_part(material, native)
+        part.vertices = part.vertices.copy()
+        change(part.vertices[:material.vertex_count])
+        if resolve:
+            encoded, _ = encode.encode_pwg_part(part, material, native, bsp, avoid)
+        else:
+            encoded, _ = encode.encode_pwg_part(part, None)
+        run(name, [geom_section([encoded])], True)
+
+    def shift(axis, amount):
+        def change(v):
+            v[:, axis] += np.float32(amount)
+        return change
+
+    def scale(v):
+        # (about a point 1000 world units off, as a real level's coordinates are: a tenth of a unit's move,
+        # past the near share's reach, which only the transform share sees)
+        centre = np.array([-1000.0, -1000.0, 0.0])
+        v[:, 0:3] = ((v[:, 0:3] - centre) * 1.0001 + centre).astype(np.float32)
+
+    moved("stock mesh moved 1/1024 world unit", shift(0, 1.0 / 1024), resolve=False)
+    moved("stock mesh moved 0.01 world unit", shift(2, 0.01))
+    moved("stock mesh moved 0.1 world unit", shift(1, 0.1))
+    moved("stock mesh scaled 1.0001", scale)
     return out
 
 
@@ -195,7 +299,7 @@ def main(argv=None):
         ok = True
         results = []
         for name, should_fail, report in controls(args.map[0], native):
-            failed = bool(report["findings"] or report["lint"])
+            failed = caught(report)
             behaved = failed == should_fail
             ok &= behaved
             results.append({"control": name, "should_fail": should_fail, "failed": failed, "behaved": behaved,
@@ -211,9 +315,9 @@ def main(argv=None):
         for finding in report["findings"]:
             print(finding)
         for s in report["sections"]:
-            print("%s bsp %d: REF share %.3f%s, coincident %s" % (s["kind"], s["bsp"], s["ref_share"],
-                                                                  " (review)" if s["review"] else "",
-                                                                  json.dumps(s["coincident"])))
+            print("%s bsp %d: REF share %.3f, near share %.3f, transform share %.3f%s, coincident %s" %
+                  (s["kind"], s["bsp"], s["ref_share"], s["near_share"], s["transform_share"],
+                   " (review)" if s["review"] else "", json.dumps(s["coincident"])))
         print("clean" if report["clean"] else "%d findings" % len(report["findings"]))
     return 0 if report["clean"] else 1
 

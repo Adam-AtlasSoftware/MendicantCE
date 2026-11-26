@@ -214,3 +214,71 @@ class RetailSets:
 
     def of(self, kind):
         return getattr(self, kind)
+
+    # ---------- near positions (the scanner's "kept the stock mesh" review signals)
+
+    def position_array(self):
+        """every retail position as an M x 3 int64 array, sorted (built once, after the sets are complete)"""
+        import numpy as np
+        cached = getattr(self, "_position_array", None)
+        if cached is None or len(cached) != len(self.position):
+            cached = np.array(sorted(self.position), np.int64).reshape(-1, 3)
+            self._position_array = cached
+        return cached
+
+    def nearest(self, points, steps):
+        """for grid positions (N x 3), the nearest retail position within steps grid steps on every axis: (found
+        mask, nearest positions N x 3, Chebyshev distances)"""
+        import numpy as np
+        stock = self.position_array()
+        index, distance = nearest_within(points, stock, steps)
+        found = index >= 0
+        best = np.zeros((len(index), 3), np.int64)
+        best[found] = stock[index[found]]
+        return found, best, distance
+
+
+def nearest_within(points, stock, steps, chunk=1 << 16):
+    """for grid positions (N x 3) and stock positions (M x 3), the index of the nearest stock position within steps
+    grid steps on every axis (Chebyshev; the lowest index among equals) and its distance, or -1 (and steps + 1).
+    Vectorised: stock binned in cells of steps + 1, so the 27 cells around a point's hold every candidate"""
+    import numpy as np
+    points = np.asarray(points, np.int64).reshape(-1, 3)
+    stock = np.asarray(stock, np.int64).reshape(-1, 3)
+    index = np.full(len(points), -1, np.int64)
+    distance = np.full(len(points), steps + 1, np.int64)
+    if not len(points) or not len(stock):
+        return index, distance
+    cell = steps + 1
+    bias = 1 << 20
+
+    def pack(c):
+        return ((c[:, 0] + bias) << 42) | ((c[:, 1] + bias) << 21) | (c[:, 2] + bias)
+    keys = pack(stock // cell)
+    order = np.argsort(keys, kind="stable")
+    sorted_keys = keys[order]
+    offsets = np.array([(a, b, c) for a in (-1, 0, 1) for b in (-1, 0, 1) for c in (-1, 0, 1)], np.int64)
+    for start in range(0, len(points), chunk):
+        block = points[start:start + chunk]
+        cells = block // cell
+        for offset in offsets:
+            wanted = pack(cells + offset)
+            lo = np.searchsorted(sorted_keys, wanted, "left")
+            counts = np.searchsorted(sorted_keys, wanted, "right") - lo
+            if not counts.any():
+                continue
+            owner = np.repeat(np.arange(len(block)), counts)
+            within = np.arange(len(owner)) - np.repeat(np.cumsum(counts) - counts, counts)
+            candidate = order[np.repeat(lo, counts) + within]
+            d = np.abs(stock[candidate] - block[owner]).max(axis=1)
+            # (per point the smallest distance, then the lowest index)
+            rank = np.lexsort((candidate, d, owner))
+            owner, candidate, d = owner[rank], candidate[rank], d[rank]
+            first = np.ones(len(owner), bool)
+            first[1:] = owner[1:] != owner[:-1]
+            owner, candidate, d = owner[first], candidate[first], d[first]
+            at = start + owner
+            better = (d < distance[at]) | ((d == distance[at]) & (candidate < index[at]))
+            better &= d <= steps
+            index[at[better]], distance[at[better]] = candidate[better], d[better]
+    return index, distance
