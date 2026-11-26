@@ -194,6 +194,39 @@ def test_settings():
     assert "host_vulkan_plugin_ready" in (ROOT / "port/linux/vulkan/host_imports.list").read_text().split()
 
 
+
+@pytest.mark.parametrize("clarity, asked, scale, share", [
+    # ("auto": the G-buffer at 0.5 at least, the light at the scale asked of the screen; the play kit's DLSS 0.33
+    # draws the G-buffer at 0.5 and traces the light at 0.66 of it)
+    ("auto", 0.33, 0.5, 0.66), ("auto", 0.42, 0.5, 0.84), ("auto", 0.5, 0.5, 0.0), ("auto", 0.58, 0.58, 0.0),
+    ("auto", 0.67, 0.67, 0.0), ("auto", 1.0, 1.0, 0.0),
+    # ("max": DLAA's G-buffer, the light at half of it each way, whatever the scale)
+    ("max", 0.33, 1.0, 0.5), ("max", 0.67, 1.0, 0.5), ("max", 1.0, 1.0, 0.5),
+    # ("off", an unknown value or none: the scale as asked, the light at every pixel)
+    ("off", 0.33, 0.33, 0.0), ("off", 0.67, 0.67, 0.0), ("bogus", 0.33, 0.33, 0.0), (None, 0.33, 0.33, 0.0),
+])
+def test_pt_clarity_scale_and_light_share(tmp_path, clarity, asked, scale, share):
+    """display.pt_clarity's mapping (prism_upscale_clarity.h, prism_upscale.c's settings_read), run as C"""
+    cc = os.environ.get("CC") or shutil.which("clang") or shutil.which("cc")
+    if not cc:
+        pytest.skip("needs a C compiler")
+    driver = tmp_path / "clarity.c"
+    value = "NULL" if clarity is None else f'"{clarity}"'
+    driver.write_text('#include <stdio.h>\n#include "prism_upscale_clarity.h"\n'
+                      f"int main(void) {{ float scale = {asked}f; float share = prism_upscale_clarity({value}, &scale);"
+                      ' printf("%.4f %.4f\\n", scale, share); return 0; }\n')
+    out = tmp_path / "clarity"
+    built = subprocess.run([cc, "-std=c99", "-Wall", "-Werror", f"-I{ROOT / 'port/linux/game'}", str(driver), "-o",
+                            str(out)], capture_output=True, text=True)
+    assert built.returncode == 0, built.stderr
+    got = [float(v) for v in subprocess.run([str(out)], capture_output=True, text=True, check=True).stdout.split()]
+    assert got == pytest.approx([scale, share], abs=1e-4)
+    # (settings_read takes it only for Path Traced with its own denoiser under an upscaler)
+    upscale = (ROOT / "port/linux/game/prism_upscale.c").read_text()
+    gate = upscale.split("prism_upscale.pt_light_share = 0.0f;", 1)[1].split("prism_upscale_clarity(", 1)[0]
+    assert "prism_upscale.upscaler != _upscaler_none && prism_upscale.denoiser == _denoiser_prism" in gate
+    assert '!strcmp(config_string("display.lighting"), "pathtraced")' in gate
+
 def _tone_curved(c, curve):
     """xgpu_vulkan_bake_glsl.inc's tone_curved (the path tracer's composite's), in numpy"""
     import numpy as np

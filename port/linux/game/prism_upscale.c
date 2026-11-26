@@ -32,6 +32,7 @@ Classic and Enhanced draw byte for byte as before.
 
 #include "cseries.h"
 #include "prism_upscale.h"
+#include "prism_upscale_clarity.h"
 #include "render/render.h"
 #include "render/render_cameras.h"
 #include "render_cameras_internal.h"
@@ -71,12 +72,6 @@ enum
 each way) and its range */
 #define UPSCALER_SCALE_DEFAULT 0.67f
 #define UPSCALER_SCALE_LEAST 0.33f
-/* display.pt_clarity "auto": the least share each way the path tracer's
-G-buffer is drawn at, the light traced at display.upscaler_scale's share of
-the screen below it; "max": the light's share of a G-buffer at every pixel */
-#define PT_CLARITY_GBUFFER_LEAST 0.5f
-#define PT_CLARITY_MAX_LIGHT 0.5f
-
 /* only the desktop's Vulkan builds upscale (not Android's, not the VR
 build's; the Metal backend ignores the record) */
 #if defined(HALO_VULKAN) && !defined(HALO_ANDROID) && !defined(HALO_VR)
@@ -168,18 +163,10 @@ static void settings_read(
 	if (prism_upscale.upscaler != _upscaler_none && prism_upscale.denoiser == _denoiser_prism &&
 		!strcmp(config_string("display.lighting"), "pathtraced"))
 	{
-		char const *clarity = config_string("display.pt_clarity");
+		float clarity_scale = prism_upscale.scale;
 
-		if (clarity && !strcmp(clarity, "max"))
-		{
-			prism_upscale.scale = 1.0f;
-			prism_upscale.pt_light_share = PT_CLARITY_MAX_LIGHT;
-		}
-		else if (clarity && !strcmp(clarity, "auto") && prism_upscale.scale < PT_CLARITY_GBUFFER_LEAST)
-		{
-			prism_upscale.pt_light_share = prism_upscale.scale / PT_CLARITY_GBUFFER_LEAST;
-			prism_upscale.scale = PT_CLARITY_GBUFFER_LEAST;
-		}
+		prism_upscale.pt_light_share = prism_upscale_clarity(config_string("display.pt_clarity"), &clarity_scale);
+		prism_upscale.scale = clarity_scale;
 	}
 	prism_upscale.sharpness = (real)config_real("display.upscaler_sharpness");
 	if (!(prism_upscale.sharpness > 0.0f))
