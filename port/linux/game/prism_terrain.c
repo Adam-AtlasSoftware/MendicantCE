@@ -50,9 +50,11 @@ no state of the game's. HALO_PORT_NETWORK_VERSION is unchanged.
 #include "shaders/shader_definitions.h"
 #include "prism_deferred.h"
 #include "prism_terrain.h"
+#include "prism_upscale.h"
 #include "../src/xgpu_stream.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -65,6 +67,7 @@ int platform_prism_terrain_pack(char const *folder);
 /* ---------- prototypes */
 
 char const *config_string(char const *name);
+long config_integer(char const *name);
 int config_boolean(char const *name);
 unsigned long config_changes(void);
 void platform_log(const char *format, ...);
@@ -109,6 +112,9 @@ static struct
 	unsigned long changes;
 	int read;
 	boolean on, tracks, drifts, layers_hq, weather, water, view_class, view_events, detail_fade;
+	/* debug.pt_reference is set (its frames take CE's own ripple mips:
+	prism_terrain_water_ripple_bias) */
+	boolean pt_reference;
 	unsigned long quality;
 	/* the frame's events since the last frame, those left out (the ring
 	full), and the foot whose ground comes next (-1 none) */
@@ -170,6 +176,7 @@ static void settings_read(void)
 	prism_terrain.view_class = value && !strcmp(value, "terrain_class");
 	prism_terrain.view_events = config_boolean("debug.terrain_events") != 0;
 	prism_terrain.detail_fade = config_boolean("debug.terrain_detail_fade") != 0;
+	prism_terrain.pt_reference = config_integer("debug.pt_reference") > 0;
 	value = config_string("display.terrain_pack_folder");
 	if (value && value[0])
 	{
@@ -792,6 +799,65 @@ boolean prism_terrain_water_wanted(
 	/* (T7: the host's water layer, which its compute passes draw: where the
 	backend has none, CE's water) */
 	return prism_terrain_wanted() && prism_terrain.water && xgpu_backend_ray_tracing();
+}
+
+/* (T8) the ripple map's mip bias in Path Traced: CE's mips of its ripples
+average a far sea's ripples away at the frame's own size, so its normal is
+the plane's and the water mirrors the horizon's bright band as a soft haze
+where the supersampled reference has fine ripples to the horizon (b30's
+beach: work/openh1_eval/v4_pt_clarity_runs/r4). Under an upscaler (DLSS,
+FSR, DLAA: their frames' jitter averages the finer mip over time) the bias
+is the view's scale's, log2 of it, as their makers advise for textures,
+and RIPPLE_BIAS_UPSCALED more; with none (no anti-aliasing, where a finer
+mip would sparkle) RIPPLE_BIAS_NATIVE. HALO_WATER_RIPPLE_BIAS (tests)
+sets the upscaled "more" within RIPPLE_BIAS_RANGE (0: the view's scale's
+alone); the native one follows it only towards coarser mips, never finer
+than RIPPLE_BIAS_NATIVE. Over b30's 4 s sweep the frames' fine detail and
+their frame-to-frame change then come near the native frame drawn at 4K
+and averaged down, which the haze had halved */
+#define RIPPLE_BIAS_UPSCALED -1.0f
+#define RIPPLE_BIAS_NATIVE -0.5f
+#define RIPPLE_BIAS_RANGE 2.0f
+real prism_terrain_water_ripple_bias(
+	void)
+{
+	static int read;
+	static float upscaled = RIPPLE_BIAS_UPSCALED, native = RIPPLE_BIAS_NATIVE;
+	float scale;
+
+	settings_read();
+	/* (only Path Traced's live frames: debug.pt_reference's take CE's own
+	mips, the reference being supersampled itself) */
+	if (!prism_deferred_pathtraced() || prism_terrain.pt_reference)
+	{
+		return 0.0f;
+	}
+	if (!read)
+	{
+		char const *value = getenv("HALO_WATER_RIPPLE_BIAS");
+
+		read = 1;
+		if (value && *value)
+		{
+			char *end;
+			float more = (float)strtod(value, &end);
+
+			if (end != value && more == more)
+			{
+				upscaled = more < -RIPPLE_BIAS_RANGE ? -RIPPLE_BIAS_RANGE :
+					more > RIPPLE_BIAS_RANGE ? RIPPLE_BIAS_RANGE : more;
+				native = upscaled > RIPPLE_BIAS_NATIVE ? upscaled : RIPPLE_BIAS_NATIVE;
+			}
+			platform_log("prism terrain: HALO_WATER_RIPPLE_BIAS %s: the ripple mips' bias %.2f more under an "
+				"upscaler, %.2f with none", value, upscaled, native);
+		}
+	}
+	scale = prism_upscale_view_scale();
+	if (!(scale > 0.0f))
+	{
+		return native;
+	}
+	return (real)(log(scale < 0.25f ? 0.25f : scale) / log(2.0)) + upscaled;
 }
 
 void prism_terrain_water_step(

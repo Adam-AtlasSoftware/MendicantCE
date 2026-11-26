@@ -90,6 +90,10 @@ enum
 	PRISM_TERRAIN_WATER_SKY = 0x200,
 };
 boolean prism_terrain_water_wanted(void);
+/* (T8) rasterizer_xbox_water.c's rasterizer_water_draw_prism: the bias
+added to CE's own for the ripple map's mips as the layer's capture samples
+it (0 but in Path Traced) */
+real prism_terrain_water_ripple_bias(void);
 void prism_terrain_water_step(unsigned long step, unsigned long flags, real_plane3d const *plane, real ripple_scale,
 	float const perpendicular[4], float const parallel[4], float const fog[8]);
 

@@ -33,5 +33,9 @@ int prism_upscale_denoiser_off(void);
 tracer's light is traced at (prism_deferred.c, where display.pt_light_scale
 is not set); 0 none */
 float prism_upscale_pt_light_share(void);
+/* the window's 3D view's share of its pixels each way while it is drawn
+for an upscaler (1: DLAA's, at every pixel); 0 while it is not (no
+upscaler, or not the window's view) */
+float prism_upscale_view_scale(void);
 
 #endif

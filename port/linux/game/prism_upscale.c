@@ -211,6 +211,12 @@ int prism_upscale_setting_on(
 	return prism_upscale.upscaler != _upscaler_none;
 }
 
+float prism_upscale_view_scale(
+	void)
+{
+	return prism_upscale.drawing && prism_upscale.upscaler != _upscaler_none ? prism_upscale.scale : 0.0f;
+}
+
 int prism_upscale_denoiser_off(
 	void)
 {

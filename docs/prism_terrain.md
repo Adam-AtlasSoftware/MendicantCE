@@ -638,7 +638,9 @@ as in Rebaked (no traced rays yet).
 
 Tuning, for one run (the defaults are the look judged against Classic by pictures): `HALO_WATER_RIPPLES` (0.35),
 `HALO_WATER_ABSORB` (0.25 a world unit), `HALO_WATER_SUN` (1.5), `HALO_WATER_DEEP` (1), `HALO_WATER_CUBE` (1), and
-`HALO_WATER_VIEW` (1 the ripples, 2 the base map, 3 the mask, distance and side, 4 the reflection, 5 the refraction).
+`HALO_WATER_VIEW` (1 the ripples, 2 the base map, 3 the mask, distance and side, 4 the reflection, 5 the refraction),
+and in Path Traced `HALO_WATER_RIPPLE_BIAS` (the ripple map's finer mips past an upscaler's own: -1 by default, held
+within -2 to 2; with no upscaler -0.5, which it only makes coarser; T8 below).
 
 The bake is untouched: water stays out of SCENE_STATIC and the bake's scene, and a bake made by the build before loads
 whole.
@@ -675,6 +677,49 @@ no history (CE's ripples move every frame). With `debug.pt_reference` the pass t
 (`reference_path`: no bake) instead, over the same footprint's directions (the normal turned by a Gaussian of the
 filter's angular size), summed in linear light while the reference sums, and the composite takes the means unfiltered:
 the water's reference.
+
+**The far sea's ripples (the haze)**: a soft reflection of the sky lay over b30's far water in every build, native
+included, where the supersampled reference has fine ripples to the horizon. Two causes, both of the frame's size:
+CE's mips of its ripple map average a far sea's ripples away at the frame's own resolution (at 4K the same pixels
+keep them), and the half resolution's block took one normal, its four pixels' mean, so the far blocks' normal was
+the plane's and the water mirrored the horizon's bright band and the ring's foot, blurred over the footprint. Since
+`work/openh1_eval/v4_pt_clarity_runs/r4`, in Path Traced's live frames:
+
+- the first pass keeps the traced rays' light alone (where they met the level) and the second takes the sky where
+  they left it at each pixel by its own ripples (`environment_of` along the pixel's reflected ray, `sky_per_pixel`),
+  and CE's far sheen by the pixel's ripples, not the block's (the reference's sums keep the block's, as they were);
+- the ripple map's capture takes finer mips (`prism_terrain_water_ripple_bias`, added to CE's own bias): under an
+  upscaler log2 of the view's scale, as the upscalers' makers advise for textures, and 1 more (DLSS, FSR and DLAA
+  average the finer mip over their jittered frames); with none, 0.5 (no anti-aliasing: a finer mip would
+  sparkle); none for `debug.pt_reference`'s frames, which are supersampled themselves. Rebaked (Enhanced) and Classic
+  draw as before: the bias is 0 outside Path Traced (and then not added, so CE's own bias keeps its bits) and the
+  composite's change is under its traced flag. Their stills at b30 are byte for byte the build's before; in motion
+  b30's turn (FSR 0.5 and Rebaked) differs from run to run in the same frames with either build, by up to about 55
+  levels around the Pelican's engine glow (the lens flares' brightness, by a visibility test answered a frame or two
+  later by the GPU's timing, as in `docs/prism_gates.md`): with flare occlusion off both builds' frames are byte for
+  byte alike, moving too.
+
+b30's beach, 1080p, against the supersampled reference (the 4K reference averaged to 1080p), the far band (rows 285
+to 385) and the middle band (385 to 470), SSIM, still; turning in brackets; `hf` the fine detail's level against the
+reference's (1: the reference's):
+
+| | before | after | hf before, after |
+| --- | --- | --- | --- |
+| native | 0.892, 0.684 | 0.929, 0.855 | 0.55, 1.05 (turning alike) |
+| DLSS 0.33 | 0.855 (0.850), 0.444 (0.438) | 0.930 (0.899), 0.866 (0.798) | 0.21 (0.15), 0.96 (0.85) |
+| `display.pt_clarity` `"auto"` | 0.869 (0.862), 0.490 (0.484) | 0.938 (0.920), 0.891 (0.859) | 0.26 (0.20), 1.02 (0.90) |
+| `display.pt_clarity` `"max"` | 0.895 (0.890), 0.688 (0.676) | 0.967 (0.950), 0.944 (0.919) | 0.47, 1.08 |
+
+The whole frame's FLIP and edge SSIM are better in every state and motion (DLSS 0.33 still: FLIP 0.172 to 0.157, edge
+SSIM 0.703 to 0.795). In motion the water does not sparkle more than it should: over the 4 s sweep the native frame's
+fine detail and its frame-to-frame change (rms 8.6 and 16.2 levels; luma jumps of 24 levels and back, 12,400 a frame)
+match the native frame drawn at 4K and averaged down (8.4, 16.6, 13,700), where the haze had halved them (5.4, 11.7,
+5,600). The ghosting measure after a stop rises 7 to 13% in the upscaled states (there is now detail to settle), the
+frames it takes unchanged. Cost: 0.1 ms on an RTX 3070 Ti and 0.3 on an RTX 2060 at native or `"max"`, 0.05 at DLSS
+0.33. Upscaled, the turn keeps less of the fine detail than the still (DLSS 0.33: 0.85 against 0.96; `"auto"`: 0.90
+against 1.02), the upscalers' history not yet caught up; native turns as it stands. Tuning: `HALO_WATER_RIPPLE_BIAS`
+sets the upscaled extra (by default -1; 0: the view's scale's alone), held within -2 to 2; the native one (-0.5)
+follows it only towards coarser mips.
 
 **What the S2 gate checks, plainly**: it is a self-consistency check. The reference is the same layer's composite
 with the same rays converged and unbiased (`reference_path` in place of the bake's light at the hits, the footprint's

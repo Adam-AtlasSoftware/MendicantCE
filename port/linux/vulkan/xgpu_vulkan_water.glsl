@@ -11,8 +11,9 @@ Two dispatches of this shader (pc.flags.w bit 16 the first):
 - the first at half the resolution: each texel a 2x2 block of the frame, at the block's water pixels' mean position
   and CE's ripples' mean there, the reflection (Rebaked: found along the screen, the frame behind where the
   reflected ray meets a surface it has; the sky where it leaves the frame's top through sky; CE's reflection cube,
-  in CE's tint, where it finds neither. Path Traced: the traced rays filtered over the roughness's footprint, the
-  sky as the frame shows it where they left the level) and the sun's visibility (Rebaked: the sun's ray marched
+  in CE's tint, where it finds neither. Path Traced: the traced rays filtered over the roughness's footprint; the
+  sky as the frame shows it where they left the level, which the second pass finds at each pixel by its own
+  ripples in the live frames) and the sun's visibility (Rebaked: the sun's ray marched
   over the frame's distances, only where the block's highlight can be lit), written premultiplied by the block's
   water share (the texel's alpha), so that a linear filter of them is a filter of the water's pixels alone;
 - the second at every pixel: the surface (the group's plane met by the pixel's ray, its normal bent by CE's
@@ -151,6 +152,9 @@ bool opaque_mode()
 bool traced() { return (pc.flags.w & 4u) != 0u; }
 bool reference() { return (pc.flags.w & 8u) != 0u; }
 bool first_pass() { return (pc.flags.w & 16u) != 0u; }
+/* Path Traced's live frames (not the reference's sums): the sky's reflection at every pixel by its own ripples, the
+first pass keeping the traced rays' light alone (where they met the level) */
+bool sky_per_pixel() { return traced() && !reference(); }
 
 /* the water's pixels: the capture's alpha (the capture draws' 1, the rest emptied at BEGIN); an opaque water's, its
 material's class */
@@ -640,6 +644,14 @@ void first(ivec2 h)
         bool met = hit.a > 1.0e-4;
         if (s.above)
         {
+            /* (live: the traced light alone, premultiplied by the share of the water where it met the level, the
+            second pass adding the sky at each pixel) */
+            if (sky_per_pixel())
+            {
+                imageStore(result, h, met ? vec4(hit.rgb / hit.a, 1.0) * share : vec4(0.0));
+                imageStore(second, h, vec4(sun * share, miss * share, down * share, share));
+                return;
+            }
             vec3 environment = miss > 0.002 || !met ? environment_of(s, reflected(s.v, normal)) : vec3(0.0);
             reflection = met ? mix(hit.rgb / hit.a, environment, miss) : environment;
         }
@@ -762,6 +774,17 @@ void main()
         float pattern = dot(textureLod(cube, r, pattern_lod).rgb, LUMA) /
             max(dot(textureLod(cube, r_block, pattern_lod).rgb, LUMA), 0.02);
         reflection *= mix(1.0, clamp(pattern, 0.7, 1.35), 0.8);
+        /* (Path Traced, live: the sky where the rays left the level by the pixel's own reflected ray, not the
+        block's, so that CE's ripples break up the sky's reflection as the supersampled reference's do: the block's
+        mean ripple held a far sea's normal near the plane's, mirroring the horizon's bright band and the ring's foot
+        as a soft haze over b30's far water; work/openh1_eval/v4_pt_clarity_runs/r4) */
+        if (sky_per_pixel())
+        {
+            bool met = first_reflection.a > 1.0e-4;
+            float miss = met ? clamp(first_second.y, 0.0, 1.0) : 1.0;
+            vec3 hit = met ? reflection : vec3(0.0);
+            reflection = miss > 0.002 ? mix(hit, environment_of(s, r), miss) : hit;
+        }
         float sun_seen = clamp(first_second.x, 0.0, 1.0);
 
         /* the water's body: the floor seen through it, fading with depth into the water's own colour as the frame
@@ -850,7 +873,8 @@ void main()
         gives as its tint */
         float far_ce = 0.9 * smoothstep(0.04, 0.6, s.grazing);
         if (far_ce > 0.0)
-            color = mix(color, ce_over(clear * under, ce_sheen(block_rip, 1.0 + 1.5 * s.far_fade, v, mask)), far_ce);
+            color = mix(color, ce_over(clear * under, ce_sheen(sky_per_pixel() ? rip : block_rip,
+                1.0 + 1.5 * s.far_fade, v, mask)), far_ce);
         /* (a water CE draws before the fog: CE's fog laid over the surface as Classic's, its share of the floor
         behind: its shape is the frame's own) */
         if (fogged > 0.0)

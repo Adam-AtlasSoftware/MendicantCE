@@ -1219,7 +1219,15 @@ static void rasterizer_water_draw_prism(
 	pixel_shader.final_combiner_inputs_abcd = 0x200800;
 	pixel_shader.final_combiner_inputs_efg = 0x2000;
 	rasterizer_set_pixel_shader(&pixel_shader);
+	/* port: (Path Traced) the finer ripple mips, the bias's bits as before
+	everywhere else (0 is not added: -0 stays -0) */
 	mipmap_lod_bias.value = -water->ripple_mipmap_lod_bias;
+	{
+		real ripple_bias = prism_terrain_water_ripple_bias();
+
+		if (ripple_bias != 0.0f)
+			mipmap_lod_bias.value += ripple_bias;
+	}
 	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPMAPLODBIAS, mipmap_lod_bias.bits);
 	rasterizer_transparent_geometry_group_draw__internal(group, FALSE);
 	IDirect3DDevice8_SetTextureStageState(global_d3d_device, 0, D3DTSS_MIPMAPLODBIAS, 0);
