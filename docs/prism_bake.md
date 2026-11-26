@@ -484,6 +484,30 @@ What M4 put into it before the freeze (`work/openh1_eval/v4_geopatch_runs/PLAN_F
 | Collision (COLL, ZSOL, COLM, PATO), runtime sections (RHGT, DOBJ), the PRSX format number, the sidecar's file bytes, the pack's encoding (PACK_FORMAT: re-exported from the archived masters) | nothing |
 | Any runtime setting (exposure, tone curve, sky light kind, lamp brightness: the layers' weights) | nothing |
 
+**The pilot** (b30, both worlds, MAX, BAKE_VERSION 20, the farm's RTX 3090s, each card shared with one to three other
+runs; `work/openh1_eval/v4_geopatch_runs/m4`):
+
+| BSP | World | Tiles (M texels) | Bake (s) | Pack |
+| --- | --- | --- | --- | --- |
+| 0 | classic | 188,934 (48.4) | 4,186 | 736 MB |
+| 1 | classic | 83,429 (21.4) | 3,759 | 201 MB |
+| 0 | enhanced | 646,021 (165.4) | 4,828 | 1,168 MB |
+| 1 | enhanced | 191,177 (48.9) | 3,356 | 236 MB |
+
+The level's classic bake took 2.2 card-hours and its enhanced one 2.3 (shared cards, so these are not timings of a card
+alone): the enhanced world's own layout has 3.4 times the classic texels on the beach BSP and 2.3 times in the
+interior, baked at fewer samples a texel (b30's first BSP: 1,186 against 3,426). The masks step, both layers' masks
+together, finished within one 10 s progress line of each bake's log. The foliage-ready records (MSKF, VOLF, FCLS) are
+0.29 to 0.77% of a BSP's file. The canopy check (`v4_geopatch_runs/m4/scripts/foliage_check.py` on the release
+archives' files; b30's first BSP, whose static scenery has 46,099 cutout triangles of 90,319): the stock foliage alone
+shades 3.0% (classic) and 2.1% (enhanced) of the foliage layer's mask points, and 2.2% and 1.9% of the valid probes;
+the interior BSP, with no cutouts, differs by the masks' noise alone (0.01% of the points, no probe). The player's run
+loaded both worlds' packs from their release archives (`prism_bake_ship.py install`), keyed by the map's
+classic_world_id and the sidecar's world_ids, and wrote no bake file. A shipped pack streams in at 2,048 tiles a frame:
+on a 3090 the whole bake (tiles, then the volume) took 25 s from its start for the enhanced first BSP (646,021 tiles),
+11 s for the classic one, 7 and 3 s for the interior's, and Raster lights a texel not yet loaded from the volume or
+the sky (`docs/prism_geometry.md`).
+
 **Bakes are not bit-identical run to run** (the GPU's float order and the converge rule's batch timing:
 `work/openh1_eval/v4_ship_bake_runs/cap/numbers.txt`), and need not be: a pack's key is its world_id (the geometry and
 inputs it is for), never its bytes; the release's manifest names each produced file by its sha256 (download and
