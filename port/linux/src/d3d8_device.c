@@ -7117,6 +7117,10 @@ int halo_upscale_view_begin(int upscaler, int denoiser, float ratio)
 	{
 		view_scale.lod_bias = 0.0f;
 	}
+	/* (a diagnosis: HALO_UPSCALE_LOD_BIAS added under an upscaler, the
+	upscalers' guides' extra -1 below the ratio's) */
+	if (upscaler != XGPU_UPSCALE_UPSCALER_NONE && getenv("HALO_UPSCALE_LOD_BIAS"))
+		view_scale.lod_bias += (float)atof(getenv("HALO_UPSCALE_LOD_BIAS"));
 	view_scale.drawing = TRUE;
 	upscale_view.upscaler = upscaler;
 	upscale_view.denoiser = denoiser;

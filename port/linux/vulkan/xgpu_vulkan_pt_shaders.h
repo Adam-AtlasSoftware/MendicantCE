@@ -34,5 +34,7 @@ extern const uint32_t xgpu_vulkan_pt_water_words[];
 extern const size_t xgpu_vulkan_pt_water_count;
 extern const uint32_t xgpu_vulkan_pt_stabilize_words[];
 extern const size_t xgpu_vulkan_pt_stabilize_count;
+extern const uint32_t xgpu_vulkan_pt_upsample_words[];
+extern const size_t xgpu_vulkan_pt_upsample_count;
 
 #endif

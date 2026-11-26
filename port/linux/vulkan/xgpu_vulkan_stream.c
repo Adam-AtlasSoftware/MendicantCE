@@ -5658,6 +5658,10 @@ static void stream_tone_map(void *context, const struct xgpu_stream_tone_map *re
 	target->written++;
 	if (color_image == target->multisampled)
 		target->unresolved = 1;
+	/* (the view as the transparent surfaces left it, for the upscaler's
+	reactive mask: before these passes change the whole frame) */
+	if (xgpu_vulkan_upscale_before_post(color_image))
+		targets_bind();
 	/* (display.prism_tone_curve's curve over the traced light, then
 	display.prism_tone's grade, then display.prism_bloom: their passes, then
 	the view's pass again for the tone map) */

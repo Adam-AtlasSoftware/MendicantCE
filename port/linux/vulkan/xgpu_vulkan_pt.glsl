@@ -87,6 +87,11 @@ layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer Jo
     cache's cell at a unit's distance, the samples a cell needs before it is
     read, the most it keeps */
     vec4 cache_settings;
+    /* the traced light's upscaling (xgpu_vulkan_pt.c's light_scale): x 1
+    where this job's passes run on the light's own grid, smaller than the
+    G-buffer (counts.y and z its size, the corners and cameras still the
+    G-buffer's), y and z the G-buffer's size; 0 for the G-buffer's grid */
+    vec4 low;
 };
 Job job;
 /* (the light pass's lamps' specular light shared by multiple importance
@@ -209,9 +214,52 @@ layout(set = 0, binding = 38, rgba16f) uniform image2D stab_diff_last;
 layout(set = 0, binding = 39, rgba16f) uniform image2D stab_diff_now;
 layout(set = 0, binding = 40, rgba16f) uniform image2D stab_spec_last;
 layout(set = 0, binding = 41, rgba16f) uniform image2D stab_spec_now;
+/* the traced light's upscaling (the pass "upsample", job.low): the denoised
+light brought from the light's grid to the G-buffer's, which composite then
+reads (its source 5): the diffuse light and the sun's visibility in alpha,
+the specular light, the clean diffuse and specular light */
+layout(set = 0, binding = 42, rgba16f) uniform image2D up_diff;
+layout(set = 0, binding = 43, rgba16f) uniform image2D up_spec;
+layout(set = 0, binding = 44, rgba16f) uniform image2D up_clean_diffuse;
+layout(set = 0, binding = 45, rgba16f) uniform image2D up_clean_specular;
 
 ivec2 size_of() { return ivec2(job.counts.y, job.counts.z); }
 bool inside(ivec2 p) { return p.x >= 0 && p.y >= 0 && p.x < int(job.counts.y) && p.y < int(job.counts.z); }
+
+/* the traced light's upscaling (job.low): the light, its reservoirs and the
+denoiser's passes on a grid smaller than the G-buffer, the grid's pixel p
+the G-buffer's pixel floor((p + 0.5) * ratio) each way (lo_to_hi; between
+two such pixels, linearly), so that each of its pixels is a whole pixel of
+the G-buffer, its distance and normal as drawn; hi_to_lo the inverse. The
+passes' rays (ray_of) and reprojection (last_pixel) go through them, so the
+grid's points are the G-buffer's and its history is found as the G-buffer
+grid's is; low_map is set by low_begin in the passes on the grid alone */
+bool low_map = false;
+vec2 low_ratio = vec2(1.0);
+void low_begin()
+{
+    low_map = job.low.x > 0.5;
+    low_ratio = low_map ? job.low.yz / vec2(size_of()) : vec2(1.0);
+}
+vec2 lo_to_hi(vec2 p)
+{
+    vec2 p0 = floor(p), t = p - p0;
+    return mix(floor((p0 + 0.5) * low_ratio), floor((p0 + 1.5) * low_ratio), t);
+}
+vec2 hi_to_lo(vec2 x)
+{
+    vec2 p0 = floor((x + 0.5) / low_ratio - 0.5);
+    p0 -= vec2(greaterThan(floor((p0 + 0.5) * low_ratio), x));
+    p0 += vec2(lessThanEqual(floor((p0 + 1.5) * low_ratio), x));
+    vec2 a = floor((p0 + 0.5) * low_ratio), b = floor((p0 + 1.5) * low_ratio);
+    return p0 + (x - a) / max(b - a, vec2(1.0));
+}
+/* the view's width in this grid's pixels (a pixel's footprint) */
+float view_width()
+{
+    float w = max(float(job.corners.z - job.corners.x), 1.0);
+    return low_map ? max(w / low_ratio.x, 1.0) : w;
+}
 
 vec3 unfold(vec2 f)
 {
@@ -268,6 +316,8 @@ struct Surface
 
 vec3 ray_of(vec4 camera[4], ivec4 corners, vec2 pixel)
 {
+    if (low_map)
+        pixel = lo_to_hi(pixel);
     vec4 c = vec4(corners);
     vec2 sxy = vec2(2.0 * (pixel.x + 0.5 - c.x) / max(c.z - c.x, 1.0) - 1.0,
         2.0 * (pixel.y + 0.5 - c.y) / max(c.w - c.y, 1.0) - 1.0);
@@ -286,7 +336,7 @@ vec3 last_point(ivec2 at, float distance)
 still, so its point is found in the last frame's camera by its geometry
 (the camera's rays solved for the point: no motion vector trusted); an
 object by its screen motion (the G-buffer's) */
-vec2 last_pixel(vec3 point, vec2 pixel, vec2 motion, bool level)
+vec2 last_pixel_hi(vec3 point, vec2 pixel, vec2 motion, bool level)
 {
     if (!level)
         return pixel + motion;
@@ -300,6 +350,14 @@ vec2 last_pixel(vec3 point, vec2 pixel, vec2 motion, bool level)
     vec4 c = vec4(job.last_corners);
     return vec2((sxy.x + 1.0) * 0.5 * (c.z - c.x) + c.x - 0.5, (sxy.y + 1.0) * 0.5 * (c.w - c.y) + c.y - 0.5);
 }
+/* (on the light's own grid: the G-buffer's place found, then the grid's) */
+vec2 last_pixel(vec3 point, vec2 pixel, vec2 motion, bool level)
+{
+    if (!low_map)
+        return last_pixel_hi(point, pixel, motion, level);
+    vec2 at = last_pixel_hi(point, lo_to_hi(pixel), motion, level);
+    return at.x < -1.0e5 ? at : hi_to_lo(at);
+}
 
 /* (port: the objects' instances a ray sees: 4 and 8, and 16 the player's own
 body in first person (XGPU_GBUFFER_FLAG_TRACE_ONLY: a shadow caster never
@@ -309,8 +367,10 @@ uint object_cull = 28u;
 Surface surface_at(ivec2 pixel)
 {
     Surface g;
-    uvec4 w = texelFetch(words, pixel, 0);
-    uvec4 x = texelFetch(extras, pixel, 0);
+    /* (on the light's own grid: the G-buffer's pixel it is) */
+    ivec2 drawn = low_map ? ivec2(lo_to_hi(vec2(pixel))) : pixel;
+    uvec4 w = texelFetch(words, drawn, 0);
+    uvec4 x = texelFetch(extras, drawn, 0);
     /* (port: a distance that is not finite, a stray word, no surface: never
     a ray's origin) */
     g.present = (w.w & 0x8000u) != 0u && uintBitsToFloat(x.w) > 0.0 && (x.w & 0x7f800000u) != 0x7f800000u;
@@ -340,7 +400,7 @@ Surface surface_at(ivec2 pixel)
     g.roughness = clamp(m.x, 0.04, 1.0);
     g.metal = m.y;
     g.specular = m.z;
-    g.albedo = g.instance == 0u ? texelFetch(base_in, pixel, 0).rgb : unpackUnorm4x8(w.x).rgb;
+    g.albedo = g.instance == 0u ? texelFetch(base_in, drawn, 0).rgb : unpackUnorm4x8(w.x).rgb;
     vec3 em = vec3(unpackHalf2x16(x.y), unpackHalf2x16(x.z & 0xffffu).x);
     g.emissive = g.instance == 0u ? em * g.albedo : em;
     g.has_history = (x.z & 0x10000u) != 0u;
@@ -424,6 +484,23 @@ the two strategies keep the estimate unbiased; both sides compute these the
 same way at a pixel: lamp_direct_total, the bake's direct light here, set by
 the light pass; 0 (no texel, the flag off) the old weight) */
 const uint FLAG_LAMP_MIS = 256u;
+/* (HALO_PT_SHORT_CAP=0, a diagnosis: no neighbours' cap on a short history's samples) */
+const uint FLAG_NO_SHORT_CAP = 512u;
+/* the short history's cap, times the neighbours' brightest (job.frame.y's
+bits 16 to 23; 0: 4, the cap before the clarity rounds); the specular's 4
+times that */
+float short_cap_scale() { uint k = (job.frame.y >> 16) & 255u; return k == 0u ? 4.0 : float(k); }
+/* the light below which the short history's cap holds nothing (job.frame.y's
+bits 24 to 31, in eighths of the light the exposure shows as white; 0 none) */
+float short_cap_floor()
+{
+    uint f = (job.frame.y >> 24) & 255u;
+    if (f == 0u)
+        return 0.0;
+    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
+    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
+    return float(f) * 0.125 / max(exposure, 1.0e-6);
+}
 /* the lamp ray's roughness at most (job.frame.w, in hundredths:
 HALO_PT_LAMP_RAY; 0 none) and its reach */
 float lamp_ray_roughness() { return float(job.frame.w) / 100.0; }
@@ -2539,11 +2616,13 @@ uvec4 guide_of(Surface g)
 }
 
 //@pass light
+
 layout(local_size_x = 8, local_size_y = 8) in;
 void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
+    low_begin();
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
         return;
@@ -2839,6 +2918,7 @@ void main()
 }
 
 //@pass temporal
+
 layout(local_size_x = 8, local_size_y = 8) in;
 /* the dynamic lights' change at a surface: their unshadowed diffuse light
 there this frame and the recent ones' (job.volume.z and .w of them, the
@@ -3099,6 +3179,7 @@ void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
+    low_begin();
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
         return;
@@ -3228,7 +3309,10 @@ void main()
     frames, to the history's mean and 8 times its samples' spread (the slow
     moments'); before, while the history is short (the camera moving, a
     disocclusion, the first frames), to 4 times the brightest of its
-    neighbours on the same surface (eight, two pixels away), so that one
+    neighbours on the same surface (eight, two pixels away; short_cap_scale)
+    but never below 4 times the light shown as white (short_cap_floor: the
+    cap alone took the light a moving eye's new pixels found, the clarity
+    round's darker, blurrier turns and strafes in c40 and a10), so that one
     sample of a small bright light (a keypad's glow met by the bounce, a lamp
     one candidate in thousands finds) is not spread by the fix's wide gather
     and the a-trous steps into a blob (round 1's moving frames in a10: green
@@ -3249,7 +3333,7 @@ void main()
         cap_s = max(hms.z + 8.0 * sigma, 1.0e-4);
     }
     bool short_d = !history || length_d < 16.0, short_s = !history || hs.a < 16.0;
-    if (short_d || short_s)
+    if ((short_d || short_s) && (job.frame.y & FLAG_NO_SHORT_CAP) == 0u)
     {
         uint here = imageLoad(guide_now, pixel).x;
         float most_d = 0.0, most_s = 0.0;
@@ -3263,15 +3347,16 @@ void main()
             most_s = max(most_s, raw ? imageLoad(noisy_specular, q).a : imageLoad(spec_b, q).a);
             any_ = true;
         }
+        float k_short = short_cap_scale(), floor_short = max(short_cap_floor(), 1.0e-3);
         if (any_ && short_d)
-            cap_d = min(cap_d, max(4.0 * most_d, 1.0e-3));
+            cap_d = min(cap_d, max(k_short * most_d, floor_short));
         /* (the specular's at 16 times: a glossy floor's reflection of a lamp
         strip is a few rays in many that meet it, its neighbours' samples
         dark, and 4 times them took it away wherever a moving eye's history
         was short: round 3's G5, the corridor's floor through the door
         windows without the strips R reflects) */
         if (any_ && short_s)
-            cap_s = min(cap_s, max(16.0 * most_s, 1.0e-3));
+            cap_s = min(cap_s, max(4.0 * k_short * most_s, floor_short));
     }
     vec3 cd = ld > cap_d ? nd.rgb * (cap_d / ld) : nd.rgb;
     vec3 cs = ls > cap_s ? ns.rgb * (cap_s / ls) : ns.rgb;
@@ -3416,6 +3501,7 @@ void main()
 }
 
 //@pass fix
+
 layout(local_size_x = 8, local_size_y = 8) in;
 /* ReLAX's history fix: where the history is short (a disocclusion, the
 first frames), the signal gathered wide from the neighbours on the same
@@ -3503,10 +3589,88 @@ void preblur(ivec2 pixel)
     imageStore(diff_b, pixel, vec4(sum_d, luma(sum_d)));
     imageStore(spec_b, pixel, vec4(sum_s, luma(sum_s)));
 }
+/* the histories' anti-firefly (ReLAX's history clamping's, from its
+published descriptions): the slow histories as the temporal pass left them,
+each luminance held to the mean and k standard deviations of its
+neighbours' on the same surface (a 5 x 5 at a stride of 2, itself left
+out), and the held value written back into the history and its moments.
+A bright sample taken while the history was short (a moving eye's, a
+disocclusion's) enters the slow mean at 1 / its length and its moments
+with it, so the fast history's hold, whose width comes from those
+moments, never catches what is left of it (its share falls as 1 / n, the
+width as 1 / sqrt n): one sample of a lamp few rays find stayed a glow
+for a hundred frames after the eye stopped, and the a-trous steps, their
+luminance stops opened by the same moments, spread a few such pixels into
+a splotch as wide as their reach (the clarity round's c40 lab and its
+floors, worse on the light's grid where the reach covers more of the
+screen). A light the neighbours see too (a lamp pool, a sparse lamp that
+every pixel finds now and then) is in their means alike and kept */
+void history_firefly(ivec2 pixel, uvec4 gc, vec3 nc, vec3 pc, float dist, float k, inout vec4 dc, inout vec4 sc)
+{
+    float s1 = 0.0, s2 = 0.0, t1 = 0.0, t2 = 0.0, w = 0.0;
+    for (int y = -2; y <= 2; y++)
+        for (int x = -2; x <= 2; x++)
+        {
+            if (x == 0 && y == 0)
+                continue;
+            ivec2 q = pixel + 2 * ivec2(x, y);
+            if (!inside(q))
+                continue;
+            uvec4 gq = imageLoad(guide_now, q);
+            if (gq.x != gc.x)
+                continue;
+            vec3 nq = unfold(unpackSnorm2x16(gq.y));
+            if (dot(nq, nc) < 0.8)
+                continue;
+            vec3 pq = job.camera[0].xyz + uintBitsToFloat(gq.z) * ray_of(job.camera, job.corners, vec2(q));
+            if (abs(dot(pq - pc, nc)) > 0.05 + 0.01 * dist)
+                continue;
+            float ld = luma(imageLoad(diff_a, q).rgb), ls = luma(imageLoad(spec_a, q).rgb);
+            s1 += ld;
+            s2 += ld * ld;
+            t1 += ls;
+            t2 += ls * ls;
+            w += 1.0;
+        }
+    /* (too few neighbours on this surface to judge: a thin or small thing) */
+    if (w < 6.0)
+        return;
+    s1 /= w;
+    s2 /= w;
+    t1 /= w;
+    t2 /= w;
+    float var_d = max(s2 - s1 * s1, 0.0), var_s = max(t2 - t1 * t1, 0.0);
+    float most_d = s1 + k * sqrt(var_d) + 0.05 * s1 + 1.0e-4;
+    float most_s = t1 + k * sqrt(var_s) + 0.05 * t1 + 1.0e-4;
+    float ld = luma(dc.rgb), ls = luma(sc.rgb);
+    if (ld > most_d)
+    {
+        float f = most_d / ld;
+        dc.rgb *= f;
+        /* (the variance the a-trous steps stop by: the neighbours') */
+        dc.a = dc.a < 0.0 ? dc.a : min(dc.a, var_d);
+        vec4 h = imageLoad(diff_now, pixel);
+        imageStore(diff_now, pixel, vec4(h.rgb * f, h.a));
+        vec4 m = imageLoad(moments_now, pixel);
+        float m1 = min(m.x, most_d), fast = min(m.z, most_d);
+        imageStore(moments_now, pixel, vec4(m1, min(m.y, m1 * m1 + var_d), fast, min(m.w, fast * fast + var_d)));
+    }
+    if (ls > most_s)
+    {
+        float f = most_s / ls;
+        sc.rgb *= f;
+        vec4 h = imageLoad(spec_now, pixel);
+        imageStore(spec_now, pixel, vec4(h.rgb * f, h.a));
+        vec4 m = imageLoad(spec_moments_now, pixel);
+        float fast = min(m.x, most_s), m1 = min(m.z, most_s);
+        imageStore(spec_moments_now, pixel, vec4(fast, min(m.y, fast * fast + var_s), m1, min(m.w, m1 * m1 + var_s)));
+    }
+}
 void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
+    low_begin();
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
         return;
@@ -3537,6 +3701,10 @@ void main()
     vec3 nc = unfold(unpackSnorm2x16(gc.y));
     float dist = uintBitsToFloat(gc.z);
     vec3 pc = job.camera[0].xyz + dist * ray_of(job.camera, job.corners, vec2(pixel));
+    /* (the histories' anti-firefly, push.parameters.y the bound in quarters
+    of the neighbours' standard deviation, 0 none: HIST_FIREFLY below) */
+    if (push.parameters.y != 0u)
+        history_firefly(pixel, gc, nc, pc, dist, float(push.parameters.y) * 0.25, dc, sc);
     float n_d = hist.a;
     float n_s = sc.a;
     bool fix_d = n_d < 4.0, fix_s = n_s < 4.0, fix_v = hist_v.w < 4.0 && vc.w > 0.5;
@@ -3646,6 +3814,7 @@ void main()
 }
 
 //@pass atrous
+
 layout(local_size_x = 8, local_size_y = 8) in;
 /* one step of the a-trous filter (Dammertz et al.; SVGF's and ReLAX's edge
 stops): a 3 x 3 kernel (1/4, 1/2, 1/4 each way) at a stride of 2^step, five
@@ -3666,6 +3835,7 @@ void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
+    low_begin();
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
         return;
@@ -3746,7 +3916,7 @@ void main()
     /* (the sun: in a penumbra only; its kernel's reach in pixels, the
     penumbra's width: the blocker's distance by the disc's angle, over the
     pixel's footprint at this distance) */
-    float footprint = 2.0 * length(job.camera[2].xyz) * dist / max(float(job.corners.z - job.corners.x), 1.0);
+    float footprint = 2.0 * length(job.camera[2].xyz) * dist / view_width();
     float penumbra = vc.z * s.rig[0].w / max(footprint, 1.0e-4);
     /* (only a pixel in a penumbra, its visibility neither all lit nor all
     dark: a lit pixel beside a shadow is never darkened by it, which in G2's
@@ -3829,6 +3999,7 @@ void main()
 }
 
 //@pass composite
+
 layout(local_size_x = 8, local_size_y = 8) in;
 
 /* a denoiser's plugin's reflection motion (Ray Reconstruction's motion
@@ -3869,10 +4040,10 @@ vec3 snow_diffused(ivec2 pixel, Surface g, vec3 clean, vec3 own, vec3 sun_diffus
     both, inside a sunlit or a shaded field, what would be carried is the
     same light, and nothing more is read) */
     ivec2 qa = pixel + axis, qb = pixel - axis;
-    float va = inside(qa) ? (raw ? imageLoad(sun_raw, qa) : source == 1u ? imageLoad(sun_b, qa) : imageLoad(sun_a, qa)).x :
-        sun_v;
-    float vb = inside(qb) ? (raw ? imageLoad(sun_raw, qb) : source == 1u ? imageLoad(sun_b, qb) : imageLoad(sun_a, qb)).x :
-        sun_v;
+    float va = !inside(qa) ? sun_v : source == 5u ? imageLoad(up_diff, qa).a :
+        (raw ? imageLoad(sun_raw, qa) : source == 1u ? imageLoad(sun_b, qa) : imageLoad(sun_a, qa)).x;
+    float vb = !inside(qb) ? sun_v : source == 5u ? imageLoad(up_diff, qb).a :
+        (raw ? imageLoad(sun_raw, qb) : source == 1u ? imageLoad(sun_b, qb) : imageLoad(sun_a, qb)).x;
     va = clamp(va, 0.0, 1.0);
     vb = clamp(vb, 0.0, 1.0);
     if (abs(va - sun_v) < 0.02 && abs(vb - sun_v) < 0.02)
@@ -3892,7 +4063,8 @@ vec3 snow_diffused(ivec2 pixel, Surface g, vec3 clean, vec3 own, vec3 sun_diffus
         vec3 point = job.camera[0].xyz + dq * ray_of(job.camera, job.corners, vec2(q));
         if (abs(dot(point - g.point, g.normal)) > 0.01 + 0.002 * g.distance)
             continue;
-        vec4 dd = raw ? imageLoad(noisy_diffuse, q) : source == 1u ? imageLoad(diff_b, q) : imageLoad(diff_a, q);
+        vec4 dd = source == 5u ? imageLoad(up_diff, q) : raw ? imageLoad(noisy_diffuse, q) : source == 1u ?
+            imageLoad(diff_b, q) : imageLoad(diff_a, q);
         vec3 light = max(dd.rgb, vec3(0.0)) + sun_diffuse * clamp(k == 0 ? va : vb, 0.0, 1.0);
         vec3 w = exp(-length(point - g.point) / (reach * vec3(0.45, 0.7, 1.0)));
         sum += w * light;
@@ -3984,22 +4156,39 @@ void main()
     {
         /* (source 4, the light given raw to the view's plugin: as traced, as 2) */
         bool raw = source == 2u || source == 4u;
-        vec4 dd = raw ? imageLoad(noisy_diffuse, pixel) : source == 1u ? imageLoad(diff_b, pixel) :
-            imageLoad(diff_a, pixel);
-        vec4 ds = raw ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
-            imageLoad(spec_a, pixel);
-        /* (parameters.y 1: the diffuse and specular light as the
-        stabilisation left them, the sun's visibility from the source) */
-        if (!raw && push.parameters.y == 1u)
+        vec4 dd, ds, dv;
+        vec3 cd, cs;
+        /* (source 5, the traced light's upscaling: the light the pass
+        "upsample" brought to the G-buffer's grid; the denoiser's own images
+        are the light grid's size) */
+        if (source == 5u)
         {
-            dd = imageLoad(stab_diff_now, pixel);
-            ds = imageLoad(stab_spec_now, pixel);
+            dd = imageLoad(up_diff, pixel);
+            dv = vec4(dd.a);
+            dd.a = 0.0;
+            ds = imageLoad(up_spec, pixel);
+            cd = imageLoad(up_clean_diffuse, pixel).rgb;
+            cs = imageLoad(up_clean_specular, pixel).rgb;
         }
-        vec4 dv = raw ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
-            imageLoad(sun_a, pixel);
+        else
+        {
+            dd = raw ? imageLoad(noisy_diffuse, pixel) : source == 1u ? imageLoad(diff_b, pixel) :
+                imageLoad(diff_a, pixel);
+            ds = raw ? imageLoad(noisy_specular, pixel) : source == 1u ? imageLoad(spec_b, pixel) :
+                imageLoad(spec_a, pixel);
+            /* (parameters.y 1: the diffuse and specular light as the
+            stabilisation left them, the sun's visibility from the source) */
+            if (!raw && push.parameters.y == 1u)
+            {
+                dd = imageLoad(stab_diff_now, pixel);
+                ds = imageLoad(stab_spec_now, pixel);
+            }
+            dv = raw ? imageLoad(sun_raw, pixel) : source == 1u ? imageLoad(sun_b, pixel) :
+                imageLoad(sun_a, pixel);
+            cd = imageLoad(clean_diffuse, pixel).rgb;
+            cs = imageLoad(clean_specular, pixel).rgb;
+        }
         float v = clamp(dv.x, 0.0, 1.0);
-        vec3 cd = imageLoad(clean_diffuse, pixel).rgb;
-        vec3 cs = imageLoad(clean_specular, pixel).rgb;
         diffuse_light = cd + max(dd.rgb, vec3(0.0)) + sd * v;
         specular_light = cs + max(ds.rgb, vec3(0.0)) * share + ss * v;
         /* the terrain overhaul's ground after the denoiser (T2, T3): the sun's
@@ -4022,13 +4211,13 @@ void main()
             imageStore(frame_out, pixel, vec4(vec3(v), additions.a));
             return;
         }
-        if (view == 25u)
+        if (view == 25u && source != 5u)
         {
             float n = imageLoad(diff_now, pixel).a;
             imageStore(frame_out, pixel, vec4(vec3(n / max(job.denoise.x, 1.0)), additions.a));
             return;
         }
-        if (view == 26u)
+        if (view == 26u && source != 5u)
         {
             vec4 nd = imageLoad(noisy_diffuse, pixel);
             imageStore(frame_out, pixel, vec4(cd + nd.rgb + sd * imageLoad(sun_raw, pixel).x, additions.a));
@@ -4095,6 +4284,7 @@ void main()
 }
 
 //@pass reference
+
 layout(local_size_x = 8, local_size_y = 8) in;
 /* debug.pt_reference in this mode: at each pixel the same scene,
 materials and lights traced unbiased with no bake, no reuse and no
@@ -4270,6 +4460,7 @@ void main()
 }
 
 //@pass reference_stats
+
 layout(local_size_x = 256) in;
 /* the reference's noise: each workgroup's sums over its pixels into job.stats
 (four floats a workgroup), the CPU adding them up: the variance of the
@@ -4344,6 +4535,7 @@ void main()
 }
 
 //@pass lamps
+
 layout(local_size_x = 256) in;
 /* the bake's lamps copied for the host (its light tree, xgpu_vulkan_pt.c):
 job.lamps_out's first word their count (all of them: the host makes no tree
@@ -4371,6 +4563,7 @@ void main()
 }
 
 //@pass cache
+
 layout(local_size_x = 256) in;
 /* the radiance cache's cells take this frame's samples (the light pass's
 sums: their mean folded into the cell's running mean, over at most
@@ -4414,6 +4607,7 @@ void main()
 }
 
 //@pass water
+
 layout(local_size_x = 8, local_size_y = 8) in;
 /* the terrain overhaul's water in Path Traced (T8; xgpu_vulkan_water.glsl composites it): at half the resolution,
 one ray pair a 2x2 block of the frame (the composite's first pass's texel) where it has pixels of a CE water group
@@ -4589,6 +4783,7 @@ void main()
 }
 
 //@pass stabilize
+
 layout(local_size_x = 8, local_size_y = 8) in;
 /* the temporal stabilisation (ReBLUR's, from Zhdan's published talks on
 NVIDIA's denoisers, written from their descriptions; a TAA on the denoised
@@ -4625,6 +4820,7 @@ void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
+    low_begin();
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
         return;
@@ -4701,4 +4897,124 @@ void main()
         out_s = sc.rgb;
     imageStore(stab_diff_now, pixel, vec4(out_d, n_d));
     imageStore(stab_spec_now, pixel, vec4(out_s, n_s));
+}
+
+//@pass upsample
+layout(local_size_x = 8, local_size_y = 8) in;
+/* the traced light's upscaling (job.low, xgpu_vulkan_pt.c's light_scale): at
+each pixel of the G-buffer, the denoised light of the light's grid about it
+(its 4 x 4: the pixel's place on the grid, hi_to_lo) by a joint bilateral
+filter, each grid pixel weighed by the bilinear weight of its distance on
+the grid and its point's distance from the pixel's plane, its normal
+against the pixel's and its surface (instance) the same; where none of the
+2 x 2 matches, the 4 x 4 by a wider tent, then the one of them most like the
+pixel. So geometry and texture edges are the G-buffer's own (the albedo,
+the normal's sun and specular share, the emission at the G-buffer's pixel,
+composite's), and only the light is brought up. parameters.x the denoised
+light's source (0 a, 1 b, 2 the light as traced), y 1 where the
+stabilisation's histories hold it; job the light grid's (low), dispatched
+over the G-buffer's size (low.yz) */
+void main()
+{
+    s = Scene(push.scene);
+    job = Job(push.job);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 drawn_size = ivec2(job.low.yz);
+    if (pixel.x >= drawn_size.x || pixel.y >= drawn_size.y)
+        return;
+    /* (the pixel's own surface, the G-buffer's grid's) */
+    low_map = false;
+    Surface g = surface_at(pixel);
+    if (!g.present)
+    {
+        imageStore(up_diff, pixel, vec4(0.0));
+        imageStore(up_spec, pixel, vec4(0.0));
+        imageStore(up_clean_diffuse, pixel, vec4(0.0));
+        imageStore(up_clean_specular, pixel, vec4(0.0));
+        return;
+    }
+    low_begin();
+    uint source = push.parameters.x;
+    bool stabilized = push.parameters.y == 1u && source < 2u;
+    vec2 at = hi_to_lo(vec2(pixel));
+    ivec2 corner = ivec2(floor(at)) - 1;
+    uint here = g.instance | 0x10000u;
+    float tolerance = 0.01 + 0.004 * g.distance * max(low_ratio.x, 1.0);
+    vec4 sum1[4], sum2[4], best[4];
+    for (int k = 0; k < 4; k++)
+    {
+        sum1[k] = vec4(0.0);
+        sum2[k] = vec4(0.0);
+        best[k] = vec4(0.0);
+    }
+    float w1 = 0.0, w2 = 0.0, wbest = 0.0;
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++)
+        {
+            ivec2 q = corner + ivec2(x, y);
+            if (!inside(q))
+                continue;
+            uvec4 gq = imageLoad(guide_now, q);
+            if (gq.x != here)
+                continue;
+            vec3 nq = unfold(unpackSnorm2x16(gq.y));
+            vec3 pq = job.camera[0].xyz + uintBitsToFloat(gq.z) * ray_of(job.camera, job.corners, vec2(q));
+            float plane = abs(dot(pq - g.point, g.normal)) / tolerance;
+            float wn = max(dot(nq, g.normal), 0.0);
+            wn *= wn;
+            wn *= wn;
+            wn *= wn;
+            float wgeo = exp(-plane) * wn;
+            if (wgeo <= 1.0e-6)
+                continue;
+            vec2 d = abs(vec2(q) - at);
+            float bilinear = max(1.0 - d.x, 0.0) * max(1.0 - d.y, 0.0);
+            vec2 tw = max(1.0 - d / 2.0, vec2(0.0));
+            float tent = tw.x * tw.x * tw.y * tw.y;
+            vec4 l[4];
+            l[0] = stabilized ? imageLoad(stab_diff_now, q) : source == 2u ? imageLoad(noisy_diffuse, q) :
+                source == 1u ? imageLoad(diff_b, q) : imageLoad(diff_a, q);
+            l[0].a = clamp((source == 2u ? imageLoad(sun_raw, q) : source == 1u ? imageLoad(sun_b, q) :
+                imageLoad(sun_a, q)).x, 0.0, 1.0);
+            l[1] = stabilized ? imageLoad(stab_spec_now, q) : source == 2u ? imageLoad(noisy_specular, q) :
+                source == 1u ? imageLoad(spec_b, q) : imageLoad(spec_a, q);
+            l[1].a = 0.0;
+            l[2] = vec4(imageLoad(clean_diffuse, q).rgb, 0.0);
+            l[3] = vec4(imageLoad(clean_specular, q).rgb, 0.0);
+            for (int k = 0; k < 4; k++)
+            {
+                l[k].rgb = max(l[k].rgb, vec3(0.0));
+                sum1[k] += bilinear * wgeo * l[k];
+                sum2[k] += tent * wgeo * l[k];
+            }
+            w1 += bilinear * wgeo;
+            w2 += tent * wgeo;
+            if (wgeo * (0.25 + tent) > wbest)
+            {
+                wbest = wgeo * (0.25 + tent);
+                for (int k = 0; k < 4; k++)
+                    best[k] = l[k];
+            }
+        }
+    vec4 r[4];
+    for (int k = 0; k < 4; k++)
+        r[k] = w1 > 1.0e-3 ? sum1[k] / w1 : w2 > 1.0e-4 ? sum2[k] / w2 : best[k];
+    /* (no grid pixel of this surface about it, the thinnest things the grid
+    steps over: the nearest grid pixel's light, whatever its surface) */
+    if (wbest <= 0.0)
+    {
+        ivec2 q = clamp(ivec2(floor(at + 0.5)), ivec2(0), size_of() - 1);
+        r[0] = stabilized ? imageLoad(stab_diff_now, q) : source == 2u ? imageLoad(noisy_diffuse, q) :
+            source == 1u ? imageLoad(diff_b, q) : imageLoad(diff_a, q);
+        r[0].a = clamp((source == 2u ? imageLoad(sun_raw, q) : source == 1u ? imageLoad(sun_b, q) :
+            imageLoad(sun_a, q)).x, 0.0, 1.0);
+        r[1] = stabilized ? imageLoad(stab_spec_now, q) : source == 2u ? imageLoad(noisy_specular, q) :
+            source == 1u ? imageLoad(spec_b, q) : imageLoad(spec_a, q);
+        r[2] = vec4(imageLoad(clean_diffuse, q).rgb, 0.0);
+        r[3] = vec4(imageLoad(clean_specular, q).rgb, 0.0);
+    }
+    imageStore(up_diff, pixel, r[0]);
+    imageStore(up_spec, pixel, vec4(r[1].rgb, 0.0));
+    imageStore(up_clean_diffuse, pixel, vec4(r[2].rgb, 0.0));
+    imageStore(up_clean_specular, pixel, vec4(r[3].rgb, 0.0));
 }

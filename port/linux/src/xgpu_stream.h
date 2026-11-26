@@ -532,6 +532,12 @@ the two never meet */
 #define XGPU_GBUFFER_PHASE_PT_PROFILE_SHIFT 29
 #define XGPU_GBUFFER_PHASE_PT_PROFILE_MASK 0x60000000u
 #define XGPU_GBUFFER_PHASE_PT_DENOISER_OFF 0x80000000u
+/* (the traced light's upscaling, display.pt_light_scale: the share of the
+G-buffer's pixels each way the light is traced and denoised at, in
+hundredths, bits 20 to 26; 0 the G-buffer's own, as before. Clear of
+Raster's bits, which PT's phase never has) */
+#define XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_SHIFT 20
+#define XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_MASK 0x07f00000u
 #define XGPU_PT_PROFILE_PERFORMANCE 0u
 #define XGPU_PT_PROFILE_QUALITY 1u
 /* (the path tracer's views: the diffuse light (denoised, the albedo left

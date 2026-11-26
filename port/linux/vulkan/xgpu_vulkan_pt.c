@@ -67,7 +67,7 @@ diagnostics), four words in the job's block before its lights */
 #define JOB_COUNTERS_OFFSET 960u
 #define SET_SLOTS 16u
 /* the bindings (xgpu_vulkan_pt.glsl's) */
-#define BINDINGS 42u
+#define BINDINGS 46u
 /* the reference's floats a pixel (the GLSL's SUMS), its noise's bound (the
 gates' reference_noise, as the gates' frames measure it), the frames
 between its noise's measures, the fewest it sums, the gates' frames' width
@@ -124,6 +124,18 @@ reservoirs' confidence at most for a still eye (HALO_PT_RESTIR_M_STILL) */
 /* whether the temporal pass holds a moving eye's glossy specular history to
 this frame's 3 x 3 by default (HALO_PT_SPEC_HOLD) */
 #define SPEC_HOLD_DEFAULT 1
+/* the histories' anti-firefly's bound by default, in standard deviations of
+the neighbours' (HALO_PT_HIST_FIREFLY; 0 none): over the 240 moving frames
+of c40's lab the bright pixels the native frame has not fell 1.8 times
+(DLSS 0.33), 2.8 times (DLSS 0.67 with the light at 0.33 of the screen) and
+7.7 times (DLAA with the light at 0.5), and the glows that stayed 8 frames
+and more in one place to none; against the supersampled
+references every pose's FLIP and edge SSIM are better, its ghosting less
+(a10's corridor native: FLIP 0.087 to 0.069, ghosting 17.5 to 11.2), b30's
+beach unchanged. 1 measured a little better again and 2 or 3 a little
+worse; 1.5 keeps more of a small bright feature's peak than 1
+(work/openh1_eval/v4_pt_clarity_runs/r3) */
+#define HIST_FIREFLY_DEFAULT 1.5f
 /* ReSTIR DI by default: the spatial neighbours a pixel
 (HALO_PT_RESTIR_SPATIAL), the initial candidates where they are reused
 (HALO_PT_CANDIDATES; 8 without them), their disc's radius in pixels
@@ -141,6 +153,11 @@ finds each lamp (HALO_PT_LAMP_MIS, on by default; 0: by its solid angle alone,
 as before) */
 #define LAMP_RAY_DEFAULT 0.0
 #define FLAG_LAMP_MIS 256u
+/* the short history's cap, times its neighbours' brightest, and the light
+below which it holds nothing, in eighths of the light shown as white
+(xgpu_vulkan_pt_frame) */
+#define SHORT_CAP_DEFAULT 4
+#define SHORT_CAP_FLOOR_DEFAULT 32
 /* the light pass's specialization constants (xgpu_vulkan_pt.glsl's
 SPEC_*); whether half the level's 8 x 8 blocks (1) or half its pixels (2)
 take the bake's indirect light as their bounce by default
@@ -184,6 +201,7 @@ enum
 	PASS_CACHE,
 	PASS_WATER,
 	PASS_STABILIZE,
+	PASS_UPSAMPLE,
 	PASSES
 };
 
@@ -230,6 +248,12 @@ enum
 	IMAGE_STAB_DIFF_NOW,
 	IMAGE_STAB_SPEC_LAST,
 	IMAGE_STAB_SPEC_NOW,
+	/* the traced light's upscaling: the light brought to the G-buffer's
+	grid (the pass "upsample") */
+	IMAGE_UP_DIFF,
+	IMAGE_UP_SPEC,
+	IMAGE_UP_CLEAN_DIFFUSE,
+	IMAGE_UP_CLEAN_SPECULAR,
 };
 
 /* the job block's flags (xgpu_vulkan_pt.glsl's FLAG_*) */
@@ -301,6 +325,9 @@ struct pt_job
 	cache's cell at a unit's distance, the samples a cell needs before it is
 	read, the most it keeps */
 	float cache_settings[4];
+	/* the traced light's upscaling: 1 where the job's passes run on the
+	light's own grid, the G-buffer's width and height */
+	float low[4];
 };
 
 struct pt_push
@@ -346,6 +373,12 @@ static struct
 	struct xgpu_vulkan_image *diff_a, *diff_b, *spec_a, *spec_b, *sun_a, *sun_b, *out;
 	/* the temporal stabilisation's histories, by parity */
 	struct xgpu_vulkan_image *stab_diff[2], *stab_spec[2];
+	/* the traced light's upscaling (light_scale): the light's grid's size
+	(the G-buffer's where it is off), the light brought to the G-buffer's
+	grid (1 x 1 where it is off), the scale last logged */
+	uint32_t low_width, low_height;
+	struct xgpu_vulkan_image *up_diff, *up_spec, *up_clean_diffuse, *up_clean_specular;
+	float low_logged;
 	/* the frame's exposure and curve (1x1: xgpu_vulkan_upscale_pt_frame's);
 	whether the last frame gave its light raw to display.denoiser's plugin
 	(the denoiser's images were then its guides: no history across a change) */
@@ -499,7 +532,7 @@ static const char *const pass_names[] =
 	"Path Traced's light pass", "Path Traced's temporal pass", "Path Traced's fix pass", "Path Traced's atrous pass",
 	"Path Traced's composite pass", "Path Traced's reference pass", "Path Traced's reference statistics",
 	"Path Traced's lamps copy", "Path Traced's radiance cache", "Path Traced's water rays",
-	"Path Traced's stabilisation",
+	"Path Traced's stabilisation", "Path Traced's light upsampling",
 };
 typedef char pass_names_complete[sizeof(pass_names) / sizeof(pass_names[0]) == PASSES ? 1 : -1];
 #define BREADCRUMB_BEGUN 20u
@@ -711,6 +744,7 @@ static int make(void)
 		!pipeline_make(PASS_CACHE, xgpu_vulkan_pt_cache_words, xgpu_vulkan_pt_cache_count) ||
 		!pipeline_make(PASS_WATER, xgpu_vulkan_pt_water_words, xgpu_vulkan_pt_water_count) ||
 		!pipeline_make(PASS_STABILIZE, xgpu_vulkan_pt_stabilize_words, xgpu_vulkan_pt_stabilize_count) ||
+		!pipeline_make(PASS_UPSAMPLE, xgpu_vulkan_pt_upsample_words, xgpu_vulkan_pt_upsample_count) ||
 		!pipeline_make(PASS_REFERENCE_STATS, xgpu_vulkan_pt_reference_stats_words,
 		xgpu_vulkan_pt_reference_stats_count))
 	{
@@ -790,21 +824,33 @@ static struct xgpu_vulkan_image *image_make(struct xgpu_vulkan_image *image, uin
 	return xgpu_vulkan_image_create(&wanted);
 }
 
-/* every image at the window's size: 1 if they are (the histories begun
-again where they were made) */
-static int images_make(uint32_t width, uint32_t height)
+/* every image at the window's size, the light's and the denoiser's at the
+light's grid's (low_width x low_height: the window's, or smaller with the
+traced light's upscaling, which then has its images at the window's size):
+1 if they are (the histories begun again where they were made) */
+static int images_make(uint32_t width, uint32_t height, uint32_t low_width, uint32_t low_height)
 {
 	struct xgpu_vulkan_image **half[] =
 	{
 		&pt.noisy_diffuse, &pt.noisy_specular, &pt.clean_diffuse, &pt.clean_specular, &pt.sun_raw, &pt.diff[0],
 		&pt.diff[1], &pt.spec[0], &pt.spec[1], &pt.moments[0], &pt.moments[1], &pt.spec_moments[0],
 		&pt.spec_moments[1], &pt.sun[0], &pt.sun[1], &pt.diff_a, &pt.diff_b, &pt.spec_a, &pt.spec_b, &pt.sun_a,
-		&pt.sun_b, &pt.out, &pt.stab_diff[0], &pt.stab_diff[1], &pt.stab_spec[0], &pt.stab_spec[1],
+		&pt.sun_b, &pt.stab_diff[0], &pt.stab_diff[1], &pt.stab_spec[0], &pt.stab_spec[1],
 	};
-	uint32_t index;
+	struct xgpu_vulkan_image **up[] = { &pt.up_diff, &pt.up_spec, &pt.up_clean_diffuse, &pt.up_clean_specular };
+	int low = low_width != width || low_height != height;
+	uint32_t index, up_width = low ? width : 1u, up_height = low ? height : 1u;
 
-	if (width == pt.width && height == pt.height && pt.out)
+	if (width == pt.width && height == pt.height && low_width == pt.low_width && low_height == pt.low_height &&
+		pt.out)
 		return 1;
+	if (!(pt.out = image_make(pt.out, XGPU_VULKAN_FORMAT_RGBA16F, width, height)))
+		return 0;
+	for (index = 0; index < sizeof(up) / sizeof(up[0]); index++)
+		if (!(*up[index] = image_make(*up[index], XGPU_VULKAN_FORMAT_RGBA16F, up_width, up_height)))
+			return 0;
+	width = low_width;
+	height = low_height;
 	for (index = 0; index < sizeof(half) / sizeof(half[0]); index++)
 		if (!(*half[index] = image_make(*half[index], XGPU_VULKAN_FORMAT_RGBA16F, width, height)))
 			return 0;
@@ -819,8 +865,10 @@ static int images_make(uint32_t width, uint32_t height)
 			return 0;
 	if (!(pt.exposure = image_make(pt.exposure, XGPU_VULKAN_FORMAT_RGBA16F, 1, 1)))
 		return 0;
-	pt.width = width;
-	pt.height = height;
+	pt.width = xgpu_vulkan_image_description(pt.out)->width;
+	pt.height = xgpu_vulkan_image_description(pt.out)->height;
+	pt.low_width = low_width;
+	pt.low_height = low_height;
 	pt.history_valid = 0;
 	return 1;
 }
@@ -1007,6 +1055,20 @@ static void reference_noise_collect(void)
 /* this frame's request (RT_FRAME's, prism_rt.c's reference_frame): 1 if the
 frame is the reference's, its sums made at the size and its count the
 frame's number in the sum (held once it is stopped) */
+/* whether this frame asks for debug.pt_reference (RT_FRAME's request), read
+before the frame's images are sized: the reference traces and sums every
+pixel of the G-buffer, so the light grid is the G-buffer's own while it runs */
+static int reference_requested(void)
+{
+	uint32_t generation_unused, materials_count, alpha_words;
+	const float *materials;
+	const uint32_t *alpha;
+	const struct xgpu_stream_rt_frame *frame = NULL;
+
+	(void)xgpu_vulkan_rt_scene(&generation_unused, &materials, &materials_count, &alpha, &alpha_words, &frame);
+	return frame && (frame->flags & XGPU_RT_FLAG_REFERENCE) && frame->spare[0] >= 1.0f;
+}
+
 static int reference_take(const struct xgpu_stream_scene_view *view, uint64_t scene, uint32_t width, uint32_t height)
 {
 	uint32_t generation_unused, materials_count;
@@ -1398,6 +1460,23 @@ static uint32_t spec_hold(void)
 	return (uint32_t)hold;
 }
 
+/* the histories' anti-firefly in the fix pass (xgpu_vulkan_pt.glsl's
+history_firefly): the bound in quarters of the neighbours' standard
+deviation (HALO_PT_HIST_FIREFLY, in standard deviations; 0 none) */
+static uint32_t hist_firefly(void)
+{
+	static int quarters = -1;
+
+	if (quarters < 0)
+	{
+		const char *v = getenv("HALO_PT_HIST_FIREFLY");
+		float k = v ? (float)atof(v) : HIST_FIREFLY_DEFAULT;
+
+		quarters = k <= 0.0f ? 0 : k > 63.0f ? 252 : (int)(k * 4.0f + 0.5f);
+	}
+	return (uint32_t)quarters;
+}
+
 /* the temporal stabilisation after the filter: its history's frames at most
 (HALO_PT_STABILIZE; 0 none) */
 static int stabilize_on(void)
@@ -1590,6 +1669,29 @@ static uint32_t dynamic_lights_rank(const struct xgpu_stream_scene_light *lights
 		ranked[kept] = found[ranked[kept]];
 	return LIGHTS_MOST;
 }
+/* the traced light's upscaling (display.pt_light_scale, the phase's
+XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE bits; HALO_PT_LIGHT_SCALE is the setting's
+own variable): the share of the G-buffer's pixels each way the light pass
+and the denoiser run at, 0 for all of them (as before). The light's grid
+is then smaller (the job "low" of its passes: each of its pixels a whole
+pixel of the G-buffer, xgpu_vulkan_pt.glsl's lo_to_hi), its denoised light
+brought to the G-buffer's grid by the pass "upsample" (a joint bilateral
+filter by the G-buffer's depth and normals) and composite lights every
+pixel of the G-buffer with its own albedo, normal and emission: geometry
+and texture edges stay the G-buffer's, which display.upscaler then
+anti-aliases at 1.0 (DLAA) or 0.67, where an upscaler from a smaller
+G-buffer upscales the lit frame whole (work/openh1_eval/
+v4_pt_clarity_runs/r2/light). Not with the denoiser off nor with the
+light given raw to a plugin (Ray Reconstruction) */
+static float light_scale_of(uint32_t phase)
+{
+	uint32_t hundredths = (phase & XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_MASK) >> XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_SHIFT;
+
+	if (hundredths == 0u || hundredths >= 100u)
+		return 0.0f;
+	return (float)(hundredths < 25u ? 25u : hundredths) / 100.0f;
+}
+
 /* a camera (SCENE_VIEW's: its eye, axis, step across and step down, the
 rays ray_of in xgpu_vulkan_pt.glsl makes of them) turned so that a pixel's
 centre is its ray moved by the jitter (pixels of the view's target, right
@@ -1628,6 +1730,13 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	float *dynamic_lights;
 	int reference, denoiser_off, steps, step, raw, still;
 	uint32_t stabilized = 0, tree_bits = 0;
+	/* (the traced light's upscaling: its job's slot and block, its grid's
+	size and groups) */
+	uint32_t low_slot = 0, low_width, low_height, low_groups_x, low_groups_y;
+	struct pt_buffer *low_buffer = NULL;
+	VkDeviceAddress light_job;
+	float light_scale;
+	int low;
 	static int history_moving = -1, history_still = -1;
 	static float most_still = -1.0f;
 	uint64_t scene;
@@ -1651,7 +1760,29 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	pt.logged_no_bake = 0;
 	scene = lookup.scene;
 	description = xgpu_vulkan_image_description(light);
-	if (!images_make(description->width, description->height))
+	denoiser_off = (phase & XGPU_GBUFFER_PHASE_PT_DENOISER_OFF) != 0;
+	/* (no light grid without the denoiser, under Ray Reconstruction or while
+	a reference runs: each traces at the G-buffer's pixels) */
+	light_scale = denoiser_off || xgpu_vulkan_upscale_pt_raw() || reference_requested() ? 0.0f :
+		light_scale_of(phase);
+	low_width = description->width;
+	low_height = description->height;
+	if (light_scale > 0.0f)
+	{
+		low_width = (uint32_t)((float)description->width * light_scale + 0.5f);
+		low_height = (uint32_t)((float)description->height * light_scale + 0.5f);
+		low_width = low_width < 16u ? 16u : low_width > description->width ? description->width : low_width;
+		low_height = low_height < 16u ? 16u : low_height > description->height ? description->height : low_height;
+	}
+	if (light_scale != pt.low_logged)
+	{
+		host_logf(HOST_LOG_INFO, light_scale > 0.0f ? "prism pt: the light traced at %ux%u of the G-buffer's %ux%u "
+			"(display.pt_light_scale %.2f), brought up guided by its depth and normals" :
+			"prism pt: the light traced at every pixel of the G-buffer (%ux%u of %ux%u, %.2f)", low_width, low_height,
+			description->width, description->height, (double)light_scale);
+		pt.low_logged = light_scale;
+	}
+	if (!images_make(description->width, description->height, low_width, low_height))
 		return NULL;
 	/* (the job block's slot and the descriptor set's, each once the GPU is
 	done with its last frame) */
@@ -1665,6 +1796,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	pt.job_next = (slot + 1) % JOB_SLOTS;
 	pt.set_next = (set_slot + 1) % SET_SLOTS;
 	slot_buffer = &pt.jobs[slot];
+	low = low_width != description->width || low_height != description->height;
+	if (low)
+	{
+		/* (the light grid's job: the next slot, once the GPU is done with it) */
+		low_slot = pt.job_next;
+		if (pt.job_serial[low_slot] > xgpu_vulkan_completed())
+			xgpu_vulkan_wait(pt.job_serial[low_slot]);
+		pt.job_next = (low_slot + 1) % JOB_SLOTS;
+		low_buffer = &pt.jobs[low_slot];
+	}
 	debug_line(slot);
 	job = (struct pt_job *)slot_buffer->mapped;
 	memset(job, 0, sizeof(*job));
@@ -1672,7 +1813,6 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	pt_view = (phase & XGPU_GBUFFER_PHASE_VIEW_MASK) >> XGPU_GBUFFER_PHASE_VIEW_SHIFT;
 	if (pt_view < XGPU_GBUFFER_VIEW_PT_DIFFUSE || pt_view > XGPU_GBUFFER_VIEW_PT_LAST)
 		pt_view = 0;
-	denoiser_off = (phase & XGPU_GBUFFER_PHASE_PT_DENOISER_OFF) != 0;
 	if (((phase & XGPU_GBUFFER_PHASE_PT_PROFILE_MASK) >> XGPU_GBUFFER_PHASE_PT_PROFILE_SHIFT) ==
 		XGPU_PT_PROFILE_PERFORMANCE)
 		flags |= FLAG_PERFORMANCE;
@@ -1986,6 +2126,49 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->denoise[0] = (float)(still ? history_still : history_moving);
 	job->denoise[1] = 4.0f;
 	job->denoise[3] = 2.0f;
+	/* (a diagnosis: HALO_PT_FAST_GAMMA the fast history's hold in standard
+	deviations) */
+	if (getenv("HALO_PT_FAST_GAMMA"))
+		job->denoise[3] = (float)atof(getenv("HALO_PT_FAST_GAMMA"));
+	/* the short history's cap: a moving eye's new pixels held to K times
+	their neighbours' brightest (the specular's 4 K), but never below F
+	times the light the exposure shows as white (SHORT_CAP_DEFAULT,
+	SHORT_CAP_FLOOR_DEFAULT: 4 and 4 times white). The cap alone took the
+	light those pixels found brighter than their neighbours (c40's lab and
+	a10's corridor darker and blurrier turning and strafing, over 90 frames
+	to come back once still); no cap let single samples far past white
+	through, which the denoiser and an upscaler smeared into white blobs
+	(over the 240 moving frames of a10 and c40 at native and DLSS 0.67 to
+	0.33: 42606 pixels past 230 where the cap had none). With the floor the
+	moving frames keep about 90% of what the cap's removal gained (FLIP
+	against the supersampled reference turning and strafing 0.0998 to
+	0.0950, ghosting 27.3 to 24.8) and the blobs are back to the run to run
+	noise (work/openh1_eval/v4_pt_clarity_runs/r2). The floor was 16 times
+	white until the histories' anti-firefly (history_firefly) took the
+	outliers that floor let through; with it 4 times white halves the
+	bright disocclusions over a10's moving frames (DLSS 0.33 6710 to 3687
+	new bright pixels a sweep, DLSS 0.67 with the light at 0.33 3607 to
+	1400) and lowers c40's (8546 to 5237, 4823 to 3446), FLIP and edge SSIM
+	against the references the same within 0.002, ghosting turning up to
+	1.6 at c40 and 0.5 at a10 (work/openh1_eval/v4_pt_clarity_runs/r3).
+	Diagnoses:
+	HALO_PT_SHORT_CAP=<K> (1 to 255; 0 no cap at all), HALO_PT_SHORT_CAP_FLOOR=<F>
+	in eighths of white (0 to 255; 0 none) */
+	{
+		static int short_cap = -1, short_floor = -1;
+
+		if (short_cap < 0)
+		{
+			short_cap = env_int("HALO_PT_SHORT_CAP", SHORT_CAP_DEFAULT);
+			short_cap = short_cap < 0 ? 0 : short_cap > 255 ? 255 : short_cap;
+			short_floor = env_int("HALO_PT_SHORT_CAP_FLOOR", SHORT_CAP_FLOOR_DEFAULT);
+			short_floor = short_floor < 0 ? 0 : short_floor > 255 ? 255 : short_floor;
+		}
+		if (short_cap == 0)
+			job->frame[1] |= 512u;
+		else
+			job->frame[1] |= (uint32_t)short_cap << 16 | (uint32_t)short_floor << 24;
+	}
 	/* (ReSTIR GI's reservoirs' confidence at most 20 frames, the quality
 	profile's bounce reused; HALO_PT_RESTIR_GI=0: none, each frame's own) */
 	{
@@ -2128,6 +2311,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	bound[IMAGE_STAB_DIFF_NOW] = pt.stab_diff[now];
 	bound[IMAGE_STAB_SPEC_LAST] = pt.stab_spec[last];
 	bound[IMAGE_STAB_SPEC_NOW] = pt.stab_spec[now];
+	bound[IMAGE_UP_DIFF] = pt.up_diff;
+	bound[IMAGE_UP_SPEC] = pt.up_spec;
+	bound[IMAGE_UP_CLEAN_DIFFUSE] = pt.up_clean_diffuse;
+	bound[IMAGE_UP_CLEAN_SPECULAR] = pt.up_clean_specular;
 	set = pt.sets[set_slot];
 	for (index = 0; index < BINDINGS; index++)
 		write_image(&writes[index], &infos[index], set, index, bound[index], index < 4 || index == IMAGE_LIGHT_IN);
@@ -2144,6 +2331,26 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		xgpu_vulkan_image_compute_use(bound[index], !(index < 4 || index == IMAGE_LIGHT_IN));
 	groups_x = (description->width + 7) / 8;
 	groups_y = (description->height + 7) / 8;
+	/* (the light grid's job: this one's, its size the grid's, its corners
+	and cameras the G-buffer's; the reference traces every pixel) */
+	low = low && !reference;
+	light_job = slot_buffer->address;
+	low_groups_x = groups_x;
+	low_groups_y = groups_y;
+	if (low)
+	{
+		struct pt_job *grid = (struct pt_job *)low_buffer->mapped;
+
+		memcpy(grid, job, sizeof(*grid));
+		grid->counts[1] = low_width;
+		grid->counts[2] = low_height;
+		grid->low[0] = 1.0f;
+		grid->low[1] = (float)description->width;
+		grid->low[2] = (float)description->height;
+		light_job = low_buffer->address;
+		low_groups_x = (low_width + 7) / 8;
+		low_groups_y = (low_height + 7) / 8;
+	}
 	if (pt.queries)
 	{
 		time_slot = pt.time_next;
@@ -2248,12 +2455,12 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			pt.cache_generation = lookup.generation;
 			barrier(commands);
 		}
-		dispatch(commands, PASS_LIGHT, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
+		dispatch(commands, PASS_LIGHT, scene, light_job, 0, 0, 0, 0, low_groups_x, low_groups_y);
 		if (job->cache)
 		{
 			/* (the cache's cells take this frame's samples) */
 			barrier(commands);
-			dispatch(commands, PASS_CACHE, scene, slot_buffer->address, CACHE_CELLS, 0, 0, 0, CACHE_CELLS / 256u, 1);
+			dispatch(commands, PASS_CACHE, scene, light_job, CACHE_CELLS, 0, 0, 0, CACHE_CELLS / 256u, 1);
 		}
 		stamp(commands, time_slot, 1);
 		barrier(commands);
@@ -2277,16 +2484,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 				preblur = getenv("HALO_PT_PREBLUR") ? atoi(getenv("HALO_PT_PREBLUR")) != 0 : 0;
 			if (preblur)
 			{
-				dispatch(commands, PASS_FIX, scene, slot_buffer->address, 1u, 0, 0, 0, groups_x, groups_y);
+				dispatch(commands, PASS_FIX, scene, light_job, 1u, 0, 0, 0, low_groups_x, low_groups_y);
 				barrier(commands);
 			}
 			/* (the temporal pass reads the pre-blur's b, else the light as
 			traced itself: no pass copies it) */
-			dispatch(commands, PASS_TEMPORAL, scene, slot_buffer->address, preblur ? 0u : 1u, spec_hold(), 0, 0, groups_x,
-				groups_y);
+			dispatch(commands, PASS_TEMPORAL, scene, light_job, preblur ? 0u : 1u, spec_hold(), 0, 0, low_groups_x,
+				low_groups_y);
 			stamp(commands, time_slot, 2);
 			barrier(commands);
-			dispatch(commands, PASS_FIX, scene, slot_buffer->address, 0, 0, 0, 0, groups_x, groups_y);
+			dispatch(commands, PASS_FIX, scene, light_job, 0, hist_firefly(), 0, 0, low_groups_x, low_groups_y);
 			stamp(commands, time_slot, 3);
 			barrier(commands);
 			/* (the fix wrote b: the steps from b to a and back; the specular's
@@ -2300,8 +2507,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 				taps 16 apart do not alias) */
 				uint32_t level = steps == 4 && atrous_wide() && step == 3 ? 4u : (uint32_t)step;
 
-				dispatch(commands, PASS_ATROUS, scene, slot_buffer->address, level, (step & 1) == 0 ? 1u : 0u,
-					level < 3 ? 7u : 5u, 0, groups_x, groups_y);
+				dispatch(commands, PASS_ATROUS, scene, light_job, level, (step & 1) == 0 ? 1u : 0u,
+					level < 3 ? 7u : 5u, 0, low_groups_x, low_groups_y);
 				barrier(commands);
 			}
 			/* (an even count of steps ends in b, an odd one in a) */
@@ -2310,8 +2517,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			composite then reads its result) */
 			if (stabilize_on())
 			{
-				dispatch(commands, PASS_STABILIZE, scene, slot_buffer->address, source, (uint32_t)stabilize_on(), 0, 0,
-					groups_x, groups_y);
+				dispatch(commands, PASS_STABILIZE, scene, light_job, source, (uint32_t)stabilize_on(), 0, 0,
+					low_groups_x, low_groups_y);
 				barrier(commands);
 				stabilized = 1u;
 			}
@@ -2323,6 +2530,15 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			stamp(commands, time_slot, 3);
 			stamp(commands, time_slot, 4);
 			source = 2u;
+		}
+		if (low)
+		{
+			/* (the traced light's upscaling: the denoised light brought to
+			the G-buffer's grid, which composite reads as its source 5) */
+			dispatch(commands, PASS_UPSAMPLE, scene, light_job, source, stabilized, 0, 0, groups_x, groups_y);
+			barrier(commands);
+			source = 5u;
+			stabilized = 0;
 		}
 		dispatch(commands, PASS_COMPOSITE, scene, slot_buffer->address, source, stabilized, 0, 0, groups_x, groups_y);
 		stamp(commands, time_slot, TIMED);
@@ -2346,6 +2562,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	host_barrier(commands);
 	xgpu_vulkan_breadcrumb(commands, BREADCRUMB_DONE, "Path Traced's frame done");
 	pt.job_serial[slot] = xgpu_vulkan_serial();
+	if (low_buffer)
+		pt.job_serial[low_slot] = xgpu_vulkan_serial();
 	pt.set_serial[set_slot] = xgpu_vulkan_serial();
 	if (time_slot < TIME_SLOTS)
 		pt.time_serial[time_slot] = xgpu_vulkan_serial();

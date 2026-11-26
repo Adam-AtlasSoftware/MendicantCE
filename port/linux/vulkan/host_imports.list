@@ -7,3 +7,4 @@ host_vulkan_vrr
 host_vulkan_plugins_choose
 host_vulkan_plugin_ready
 host_vulkan_terrain_pack
+host_vulkan_plugins_lighting

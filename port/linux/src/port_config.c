@@ -990,6 +990,25 @@ static const struct config_setting config_settings[] =
 		"every pixel (the bake ending it) beside the direct light; \"performance\"\n"
 		"reads the bounced light from the bake where the level has it and\n"
 		"traces a bounce only for the objects. Read each frame." },
+	{ "display.pt_light_scale", _config_real, "0.0", "HALO_PT_LIGHT_SCALE", _environment_value, _platform_desktop,
+		"With display.lighting \"pathtraced\": the traced light's upscaling. The\n"
+		"light is traced and denoised at this share of the 3D view's pixels each\n"
+		"way (0.25 to 1; 0 or 1 off: at every pixel), then brought up to every\n"
+		"pixel guided by the view's depth and normals and lit with every pixel's\n"
+		"own colour, so that the edges and textures stay at the view's size;\n"
+		"best with display.upscaler at 1.0 (DLAA) or 0.67. Read each frame." },
+	{ "display.pt_clarity", _config_string, "\"auto\"", "HALO_PT_CLARITY", _environment_value,
+		_platform_desktop,
+		"With display.lighting \"pathtraced\", display.denoiser \"prism\" and an\n"
+		"upscaler: how the 3D view's pixels and the traced light's are shared.\n"
+		"\"auto\": where display.upscaler_scale is under 0.5, the view (its\n"
+		"edges and textures) is drawn at 0.5 each way and the light traced at\n"
+		"display.upscaler_scale's share of the screen (about the same light to\n"
+		"trace, a sharper picture); \"max\": the view at every pixel (DLAA) and\n"
+		"the light at half of them each way; \"off\": the view at\n"
+		"display.upscaler_scale and the light at every one of its pixels.\n"
+		"display.pt_light_scale, set, chooses the light's share itself. Read each\n"
+		"frame." },
 	{ "display.denoiser", _config_string, "\"prism\"", "HALO_DENOISER", _environment_value, _platform_desktop,
 		"With display.lighting \"pathtraced\": \"prism\" the in-tree denoiser\n"
 		"(its diffuse and specular light and the sun's shadows); \"dlss_rr\"\n"
@@ -4690,7 +4709,8 @@ static const char *const config_display_order[] =
 	"display.enhanced_shadow_resolution", "display.prism_rt_objects", "display.prism_rt_cache",
 	"display.prism_rt_alpha",
 	"=Path Traced lighting (\"pathtraced\") alone: its own settings",
-	"display.pt_profile", "display.denoiser", "display.pt_dynamic_lights", "display.prism_glow_lights",
+	"display.pt_profile", "display.pt_light_scale", "display.pt_clarity", "display.denoiser",
+	"display.pt_dynamic_lights", "display.prism_glow_lights",
 	"display.prism_dynamic_lights", "display.prism_light_saturation", "display.prism_pt_objects",
 	"display.prism_pt_cache", "display.prism_pt_alpha",
 	"=The enhancements (display.enhancements, a preset of the settings it chooses; every lighting mode, the\n"
@@ -4764,6 +4784,8 @@ static const struct
 	{ "display.prism_rt_alpha", "Enhanced with display.prism_ray_tracing on (the level's cutouts are always in "
 		"the lightmaps)" },
 	{ "display.pt_profile", LIGHTING_PATH_TRACED },
+	{ "display.pt_light_scale", LIGHTING_PATH_TRACED },
+	{ "display.pt_clarity", LIGHTING_PATH_TRACED },
 	{ "display.denoiser", LIGHTING_PATH_TRACED },
 	{ "display.pt_dynamic_lights", LIGHTING_PATH_TRACED },
 	{ "display.prism_glow_lights", LIGHTING_PATH_TRACED },
@@ -6617,6 +6639,7 @@ static const struct
 	{ "display.foliage_leaves", { "classic", "enhanced", "realistic", NULL }, "classic" },
 	{ "game.campaign_collision", { "original", "enhanced", NULL }, "original" },
 	{ "display.pt_profile", { "quality", "performance", NULL }, "quality" },
+	{ "display.pt_clarity", { "auto", "max", "off", NULL }, "auto" },
 	{ "display.denoiser", { "prism", "dlss_rr", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
 	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },

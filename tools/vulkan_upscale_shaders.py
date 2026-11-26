@@ -100,13 +100,15 @@ layout(set = 0, binding = 22, r32f) uniform writeonly image2D exposure_out;
 // (the path tracer's diffuse bounce's hit distance and its reflected surfaces' motion, from pt_hit's y and zw)
 layout(set = 0, binding = 24, r16f) uniform writeonly image2D diffuse_hit_out;
 layout(set = 0, binding = 25, rg16f) uniform writeonly image2D motion_reflections_out;
+// (the view as the transparent surfaces left it, before the tone map's passes: the reactive mask's, flag 64)
+layout(set = 0, binding = 26) uniform sampler2D view_before_post;
 layout(set = 0, binding = 9, std140) uniform Inputs
 {
     // the view's left, top, width and height in its targets' pixels
     ivec4 rect;
     // the jitter (pixels), the flags (1 the G-buffer's motion, 2 history, 4 the opaque colour kept, 8 the
     // G-buffer's guides wanted, 16 the colour linear HDR by the path tracer's exposure, 32 the path tracer's
-    // noisy light and guides), unused
+    // noisy light and guides, 64 the view kept before the tone map's passes), unused
     vec4 jitter;
     // the camera this frame (SCENE_VIEW's: the eye and near, the axis at the middle and far, its change a unit of
     // the screen's x and y)
@@ -225,8 +227,11 @@ void main()
     float reactive = 0.0;
     if ((flags & 4u) != 0u)
     {
+        // (the transparent surfaces' change alone: against the view before the curve, grade, bloom and tone map,
+        // which change the whole frame, where it was kept)
         vec3 before = tone(texelFetch(view_opaque, at, 0).rgb);
-        float change = largest(abs(tone(color) - before)) * u.reactive.z;
+        vec3 after = (flags & 64u) != 0u ? texelFetch(view_before_post, at, 0).rgb : color;
+        float change = largest(abs(tone(after) - before)) * u.reactive.z;
         reactive = change < u.reactive.x ? 0.0 : u.reactive.y;
     }
     imageStore(reactive_out, pixel, vec4(reactive));
