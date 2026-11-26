@@ -22,9 +22,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from geopatch import geom, prsx, retail  # noqa: E402
 
-LAYOUTS = {"GEOM": geom.decode_geom, "COLL": geom.decode_coll}
-# types whose layout is not final yet (LMUV: the measuring layout until M4's xatlas one)
-PROVISIONAL = {"LMUV": b"LMU0"}
+LAYOUTS = {"GEOM": geom.decode_geom, "COLL": geom.decode_coll, "LMUV": geom.decode_lmuv}
+# types whose layout is not final yet (none: LMUV v1 is the game's until M4's own lightmap layout, a new version)
+PROVISIONAL = {}
 # the encoder's nudge (encode.encode_pwg_part) moves a vertex up one grid step at a time; b30's whole remodel
 # nudged 5 vertices, none next to another
 NUDGE_STEPS = 4

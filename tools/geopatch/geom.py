@@ -45,6 +45,13 @@ GEOM v1, one per BSP (little endian):
                   part with no surface has the one value 0)
         FRUN u32  per far part, per surface: its far triangles' first and count
         FSPH u32  per far part, per surface: bounding sphere centre and radius, float bits
+LMUV v1, one per BSP beside its GEOM (the lightmap vertices the enhanced world draws with until M4's own lightmap
+layout replaces this one; prism_geom.h has the layout the game reads): "LMU1", u32 version (1), u32 part count
+(GEOM's), u32 column count, then per part u32 vertex count (its GEOM part's), the column table and the columns:
+    LOPS u8   per vertex: 0 LIT, 1 REF
+    LREF u32  per REF vertex: the stock lightmap vertex's index in the part's own material
+    LVTX u32  per LIT vertex, two words: the packed incident radiosity, and lightmap u | v << 16 (the game's
+              compressed lightmap vertex, rasterizer_geometry_compress_vertices's rounding)
 COLL v0 (the enhanced collision, laid out in full in M8; v0 carries what the scanner checks):
     "COL0", u32 version (0), u32 0, u32 column count, column table, columns VOPS VREF VPOS (collision vertices:
     LIT or REF to a stock collision vertex), POPS (u8 per plane: 0 LIT, 1 REF), PREF (u32 per REF plane: the
@@ -69,6 +76,7 @@ PART_FORMAT = "<HHIIIIIIIIIIIII"
 NAMESPACE_STOCK, NAMESPACE_PRISM = 0, 1
 NO_INDEX = 0xFFFF
 GEOM_MAGIC, GEOM_VERSION = b"GEO1", 1
+LMUV_MAGIC, LMUV_VERSION = b"LMU1", 1
 COLL_MAGIC, COLL_VERSION = b"COL0", 0
 
 
@@ -398,6 +406,55 @@ def decode_geom(data):
     if v != len(vertices) or c != len(corners) or r != len(runs) or f != len(far) or s != len(spheres):
         raise LayoutError("GEOM columns longer than its parts")
     return parts
+
+
+# ---------- LMUV v1
+
+def encode_lmuv(parts):
+    """parts: per GEOM part, its lightmap vertices: [(REF, stock index)] or [(LIT, (radiosity, u, v))] (u, v the
+    16-bit fields as unsigned)"""
+    ops, refs, words = [], [], []
+    header = bytearray()
+    for part in parts:
+        header += struct.pack("<I", len(part))
+        for vertex in part:
+            if vertex[0] == REF:
+                ops.append(REF)
+                refs.append(vertex[1])
+            elif vertex[0] == LIT:
+                radiosity, u, v = vertex[1]
+                ops.append(LIT)
+                words += [radiosity & 0xFFFFFFFF, (u & 0xFFFF) | (v & 0xFFFF) << 16]
+            else:
+                raise LayoutError("lightmap vertex op %r" % (vertex[0],))
+    table, blob = _columns_bytes([("LOPS", 1, ops), ("LREF", 4, refs), ("LVTX", 4, words)])
+    return LMUV_MAGIC + struct.pack("<III", LMUV_VERSION, len(parts), 3) + bytes(header) + table + blob
+
+
+def decode_lmuv(data):
+    if len(data) < 16 or data[:4] != LMUV_MAGIC:
+        raise LayoutError("not LMUV v1")
+    version, part_count, column_count = struct.unpack_from("<III", data, 4)
+    if version != LMUV_VERSION or part_count > 1 << 20 or column_count > 64 or 16 + 4 * part_count > len(data):
+        raise LayoutError("LMUV header")
+    counts = struct.unpack_from("<%dI" % part_count, data, 16)
+    columns = _read_columns(data, 16 + 4 * part_count, column_count)
+    ops, refs, words = columns.get("LOPS", []), columns.get("LREF", []), columns.get("LVTX", [])
+    if any(op not in (LIT, REF) for op in ops) or len(ops) != sum(counts) or \
+            len(refs) != sum(1 for op in ops if op == REF) or len(words) != 2 * sum(1 for op in ops if op == LIT):
+        raise LayoutError("LMUV columns disagree")
+    out, r, w, at = [], iter(refs), 0, 0
+    for count in counts:
+        part = []
+        for op in ops[at:at + count]:
+            if op == REF:
+                part.append((REF, next(r)))
+            else:
+                part.append((LIT, (words[w], words[w + 1] & 0xFFFF, words[w + 1] >> 16)))
+                w += 2
+        at += count
+        out.append(part)
+    return out
 
 
 # ---------- COLL v0

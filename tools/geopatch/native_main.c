@@ -14,6 +14,10 @@ sidecar is checked and a world_id is computed by the one code the game runs.
       "entry <i> <type> <bsp> <flags> <collv> <usize> <section result>",
       "world <bsp> classic <hex> enhanced <hex>" for each BSP its directory names
   native base-id <file>                        "base_id <hex>", or exit 2
+  native ladder                                every input of prism_world_ladder and its rung, a line each
+  native geom <stock> <sidecar> <bsp>          the BSP's GEOM and LMUV decoded by prism_geom.c against the stock
+      file (native.py's write_stock: the BSP's materials' compressed vertices and its collision vertices) into
+      the PWG1 image on stdout; "report ..." on stderr; exit 2 and the error on stderr if refused
 */
 
 #include <stdio.h>
@@ -25,6 +29,7 @@ sidecar is checked and a world_id is computed by the one code the game runs.
 #include <io.h>
 #endif
 
+#include "prism_geom.h"
 #include "prism_identity.h"
 #include "prism_prsx.h"
 #include "prism_ref_decode.h"
@@ -192,6 +197,148 @@ static int open_sidecar(const char *path, int appended)
 	return 0;
 }
 
+/* ---------- geom: the stock file
+u32 material count; each: u16 lightmap, u16 material, u32 count, count * 32 bytes, u32 lightmapped, count * 8
+bytes if lightmapped; then u32 collision vertex count and count * 12 bytes (float bits) */
+
+struct stock_file
+{
+	unsigned char *bytes;
+	size_t size;
+	uint32_t material_count;
+	size_t *offsets;
+	uint32_t collision_count;
+	size_t collision;
+};
+
+static int stock_material(void *context, uint32_t lightmap_index, uint32_t material_index, uint32_t *count,
+	const unsigned char **vertices, const unsigned char **lightmap_vertices)
+{
+	struct stock_file *stock = (struct stock_file *)context;
+	uint32_t index;
+
+	for (index = 0; index < stock->material_count; index++)
+	{
+		const unsigned char *at = stock->bytes + stock->offsets[index];
+
+		if ((uint32_t)(at[0] | at[1] << 8) == lightmap_index && (uint32_t)(at[2] | at[3] << 8) == material_index)
+		{
+			*count = get_u32(at + 4);
+			*vertices = at + 8;
+			*lightmap_vertices = get_u32(at + 8 + 32 * (size_t)*count) ? at + 12 + 32 * (size_t)*count : NULL;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static int stock_collision(void *context, uint32_t index, uint32_t bits[3])
+{
+	struct stock_file *stock = (struct stock_file *)context;
+
+	if (index >= stock->collision_count)
+		return 0;
+	bits[0] = get_u32(stock->bytes + stock->collision + 12 * (size_t)index);
+	bits[1] = get_u32(stock->bytes + stock->collision + 12 * (size_t)index + 4);
+	bits[2] = get_u32(stock->bytes + stock->collision + 12 * (size_t)index + 8);
+	return 1;
+}
+
+static unsigned char *read_file(const char *path, size_t *size)
+{
+	FILE *file = fopen(path, "rb");
+	unsigned char *bytes;
+	long end;
+
+	if (!file || fseek(file, 0, SEEK_END) || (end = ftell(file)) < 0 || fseek(file, 0, SEEK_SET))
+	{
+		if (file)
+			fclose(file);
+		return NULL;
+	}
+	bytes = (unsigned char *)malloc((size_t)end + 1);
+	if (bytes && fread(bytes, 1, (size_t)end, file) != (size_t)end)
+	{
+		free(bytes);
+		bytes = NULL;
+	}
+	fclose(file);
+	*size = (size_t)end;
+	return bytes;
+}
+
+static int geom_command(const char *stock_path, const char *sidecar_path, unsigned bsp)
+{
+	struct stock_file stock;
+	struct prism_geom_stock view;
+	struct prism_geom_report report;
+	struct prsx_source source;
+	struct prsx prsx;
+	unsigned char *sections[2] = { NULL, NULL }, *image = NULL;
+	size_t sizes[2] = { 0, 0 }, image_size = 0, at = 4;
+	enum prism_geom_result result;
+	FILE *file;
+	uint32_t index;
+	int k;
+
+	memset(&stock, 0, sizeof(stock));
+	stock.bytes = read_file(stock_path, &stock.size);
+	if (!stock.bytes || stock.size < 8)
+		return 1;
+	stock.material_count = get_u32(stock.bytes);
+	stock.offsets = (size_t *)calloc(stock.material_count + 1, sizeof(size_t));
+	for (index = 0; stock.offsets && index < stock.material_count; index++)
+	{
+		uint32_t count = get_u32(stock.bytes + at + 4);
+
+		stock.offsets[index] = at;
+		at += 8 + 32 * (size_t)count;
+		at += 4 + (get_u32(stock.bytes + at) ? 8 * (size_t)count : 0);
+	}
+	stock.collision_count = get_u32(stock.bytes + at);
+	stock.collision = at + 4;
+	view.context = &stock;
+	view.material = stock_material;
+	view.collision_vertex = stock_collision;
+	file = fopen(sidecar_path, "rb");
+	if (!file || !prsx_source_file(&source, file) || prsx_open(&prsx, &source) != PRSX_OK)
+	{
+		fprintf(stderr, "sidecar refused\n");
+		return 2;
+	}
+	for (k = 0; k < 2; k++)
+	{
+		long found = prsx_find(&prsx, k ? PRSX_LMUV : PRSX_GEOM, (uint16_t)bsp, 0);
+
+		if (found < 0)
+			continue;
+		sizes[k] = (size_t)prsx.entries[found].usize;
+		sections[k] = (unsigned char *)malloc(sizes[k] + 1);
+		if (!sections[k] || prsx_section_read(&prsx, (uint32_t)found, sections[k], sizes[k]) != PRSX_OK)
+		{
+			fprintf(stderr, "section unreadable\n");
+			return 2;
+		}
+	}
+	result = prism_geom_decode(sections[0], sizes[0], sections[1], sizes[1], &view, "native", &image, &image_size,
+		&report);
+	fprintf(stderr, "report %s parts %u skipped %u vertices %u triangles %u lit %u ref %u refp %u refm %u refc %u far %d "
+		"at %u %u\n", prism_geom_result_string(result), (unsigned)report.parts, (unsigned)report.parts_skipped,
+		(unsigned)report.vertices, (unsigned)report.triangles, (unsigned)report.by_op[0], (unsigned)report.by_op[1],
+		(unsigned)report.by_op[2], (unsigned)report.by_op[3], (unsigned)report.by_op[4], report.far,
+		(unsigned)report.error_part, (unsigned)report.error_vertex);
+	if (result == PRISM_GEOM_OK)
+		fwrite(image, 1, image_size, stdout);
+	free(image);
+	free(sections[0]);
+	free(sections[1]);
+	prsx_close(&prsx);
+	fclose(file);
+	free(stock.offsets);
+	free(stock.bytes);
+	return result == PRISM_GEOM_OK ? 0 : 2;
+}
+
 int main(int argc, char **argv)
 {
 #ifdef _WIN32
@@ -212,6 +359,18 @@ int main(int argc, char **argv)
 	}
 	if (!strcmp(argv[1], "open") && argc >= 3)
 		return open_sidecar(argv[2], argc > 3 && !strcmp(argv[3], "appended"));
+	if (!strcmp(argv[1], "ladder") && argc == 2)
+	{
+		int bits;
+
+		/* (every input: "ladder <classic> <geometry> <sidecar> <packs> <unbaked> <rung>") */
+		for (bits = 0; bits < 32; bits++)
+			printf("ladder %d %d %d %d %d %d\n", bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1, bits >> 4 & 1,
+				prism_world_ladder(bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1, bits >> 4 & 1));
+		return 0;
+	}
+	if (!strcmp(argv[1], "geom") && argc == 5)
+		return geom_command(argv[2], argv[3], (unsigned)strtoul(argv[4], NULL, 10));
 	if (!strcmp(argv[1], "base-id") && argc == 3)
 	{
 		FILE *file = fopen(argv[2], "rb");

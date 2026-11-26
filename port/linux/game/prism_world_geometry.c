@@ -1,11 +1,14 @@
 /*
 PRISM_WORLD_GEOMETRY.C
 
-PRISM v2's remodelled level geometry (display.prism_world_geometry,
-"stock" unless set): the structure BSP's surfaces drawn from a denser mesh
-built on this machine from the player's own map (tools/prism_packs/art/world_geo:
-bevelled edges, rounded rock, relief from the level's own textures), in the
-BSP's place on screen and nowhere else.
+PRISM's enhanced world geometry (World Geometry Enhanced): the structure
+BSP's surfaces drawn from a denser mesh (the farm's remodel: bevelled edges,
+rounded rock, relief), in the BSP's place on screen and nowhere else. The
+mesh comes from the map's sidecar (maps_enhanced/<map>.prsx), decoded at the
+BSP's load against the player's own map (prism_world_source.c,
+prism_geom.c), and only where prism_world_source.c's ladder gives the map
+its enhanced world: Enhanced or Path Traced lighting with the enhanced
+lightmaps of that very geometry. Classic lighting never draws it.
 
 The game keeps its BSP. Collision, physics, the AI's paths, visibility
 (clusters, portals, the potentially visible sets), decals, the lights'
@@ -30,8 +33,9 @@ vertex formats: each corner carries the base map and lightmap coordinates
 and incident radiosity of the point of its surface it lies over, so the
 baked light lands where the stock light was.
 
-The file: <data root>/prism_world/<the BSP tag's path, / for \>.pwg, little
-endian, written by tools/prism_packs/art/world_geo (wg_common.py's write_pwg):
+The image (prism_geom.c builds it in memory from the sidecar's GEOM and LMUV
+sections; the farm's remodel pipeline writes the same layout as its .pwg
+intermediate, tools/prism_packs/art/world_geo's write_pwg), little endian:
 
   header, 64 bytes: "PWG1", version (1), material count, flags (0), the
     BSP tag's path (48 bytes, informational)
@@ -143,6 +147,7 @@ byte.
 #include "prism_popin.h"
 #include "prism_scene_static.h"
 #include "prism_deferred.h"
+#include "prism_world_source.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -175,14 +180,10 @@ extern D3DDevice *global_d3d_device;
 #define PWG_FLAG_FAR 1
 #define PWG_HEADER_SIZE 64
 #define PWG_MATERIAL_SIZE 64
-#define PWG_FOLDER "prism_world"
 
 #define ENVIRONMENT_VERTEX_UNCOMPRESSED_SIZE 56
 #define ENVIRONMENT_LIGHTMAP_VERTEX_UNCOMPRESSED_SIZE 20
 
-/* the largest file read (a whole BSP remodelled at about 16 times the
-stock triangles is near 40 MB) */
-#define MAXIMUM_FILE_BYTES (256UL * 1024 * 1024)
 /* the most of the Xbox's contiguous memory a BSP's remodel takes (of the
 port's 512 MB: platform.h's PLATFORM_CONTIGUOUS_SIZE) */
 #define MAXIMUM_CONTIGUOUS_BYTES (176UL * 1024 * 1024)
@@ -446,20 +447,14 @@ static short proxy_setting(
 	return proxy;
 }
 
-static void settings_read(
+/* whether the enhanced geometry is drawn (prism_world_source.c's ladder:
+the map latched to it and the lighting Enhanced or Path Traced), asked each
+time: the map's choice changes with no setting changed */
+static void enabled_update(
 	void)
 {
-	char const *value;
-	boolean enabled;
-	long detail;
+	boolean enabled = prism_world_enhanced();
 
-	if (world_geometry.settings_read == config_changes() + 1)
-	{
-		return;
-	}
-	world_geometry.settings_read = config_changes() + 1;
-	value = config_string("display.prism_world_geometry");
-	enabled = value && !strcmp(value, "remodel");
 	if (enabled != world_geometry.enabled)
 	{
 		/* (turned on again: a BSP that had no remodel is looked for again) */
@@ -467,6 +462,19 @@ static void settings_read(
 		world_geometry.tried_bsp = NULL;
 	}
 	world_geometry.enabled = enabled;
+}
+
+static void settings_read(
+	void)
+{
+	long detail;
+
+	enabled_update();
+	if (world_geometry.settings_read == config_changes() + 1)
+	{
+		return;
+	}
+	world_geometry.settings_read = config_changes() + 1;
 	{
 		static boolean told_shadows, told_occlusion;
 		boolean overrides = config_boolean("debug.geometry_overrides") != 0;
@@ -2182,14 +2190,13 @@ static void world_geometry_load(
 	struct structure_bsp *bsp,
 	long tag_index)
 {
-	char path[512];
+	char path[600];
 	char const *name = tag_get_name(tag_index);
 	struct pwg_material_view *views = NULL;
 	long view_count = 0, index;
-	byte *bytes = NULL;
+	unsigned char *bytes = NULL;
 	unsigned long size = 0;
-	FILE *file;
-	size_t length;
+	short bsp_index = global_structure_bsp_index_get();
 
 	world_geometry.tried_tag_index = tag_index;
 	world_geometry.tried_bsp = bsp;
@@ -2197,40 +2204,12 @@ static void world_geometry_load(
 	{
 		return;
 	}
-	snprintf(path, sizeof(path), "%s/%s.pwg", PWG_FOLDER, name);
-	for (length = strlen(PWG_FOLDER); path[length]; length++)
+	/* (the BSP's enhanced geometry, from the map's sidecar: prism_world_source.c) */
+	if (!prism_world_source_image(bsp, bsp_index, name, &bytes, &size))
 	{
-		if (path[length] == '\\')
-		{
-			path[length] = '/';
-		}
-	}
-	file = fopen(path, "rb");
-	if (!file)
-	{
-		platform_log("prism world geometry: no remodel of %s (%s): drawn stock", name, path);
 		return;
 	}
-	if (!fseek(file, 0, SEEK_END))
-	{
-		long end = ftell(file);
-
-		size = end > 0 ? (unsigned long)end : 0;
-	}
-	fseek(file, 0, SEEK_SET);
-	if (size && size <= MAXIMUM_FILE_BYTES)
-	{
-		bytes = malloc(size);
-	}
-	if (!bytes || fread(bytes, 1, size, file) != size)
-	{
-		platform_log("prism world geometry: %s cannot be read (%lu bytes)", path, size);
-		fclose(file);
-		free(bytes);
-		return;
-	}
-	fclose(file);
-
+	snprintf(path, sizeof(path), "%s's sidecar geometry (%s)", name, prism_world_source_label(bsp_index));
 	if (pwg_parse(bytes, size, bsp, &views, &view_count, path))
 	{
 		for (index = 0; index < view_count; index++)
@@ -3047,6 +3026,7 @@ int prism_world_geometry_drawn(
 	void)
 {
 	settings_read();
+	enabled_update();
 
 	return world_geometry.enabled && world_geometry.loaded_bsp && world_geometry.loaded_bsp == global_structure_bsp_get();
 }
@@ -3055,6 +3035,7 @@ void prism_world_geometry_map_unloaded(
 	void)
 {
 	world_geometry_release();
+	prism_world_source_map_unloaded();
 	world_geometry.tried_tag_index = NONE;
 	world_geometry.tried_bsp = NULL;
 

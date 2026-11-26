@@ -46,8 +46,9 @@ after GOAT H1's, the scene records still last (docs/prism_scene_records.md);
 was 38 on its own branch, after 38's records; 40: the terrain overhaul's PRISM_TERRAIN (T0,
 docs/prism_terrain.md), 39 on its own branch, after UPSCALE, the last scene record; 41: PRISM_TERRAIN's
 FRAME carries the terrain pack's folder (T1); 42: its WATER_DRAW sent (T7), three items of
-xgpu_stream_terrain_water (41 on its own branch, after T1's 41) */
-#define XGPU_STREAM_VERSION 42
+xgpu_stream_terrain_water (41 on its own branch, after T1's 41); 43: PRISM_BAKE carries the BSP's enhanced
+world_id (v4 geopatch M2) */
+#define XGPU_STREAM_VERSION 43
 #define XGPU_STREAM_LOADING_ART_BYTES (640u * 480u * 4u)
 
 /* ---------- the ring
@@ -3043,6 +3044,12 @@ struct xgpu_stream_prism_bake
 	prism_bake.md, "The shipped bake")) */
 	uint32_t shipped;
 	char map_name[XGPU_BAKE_NAME];
+	/* (the BSP's enhanced world_id, port/linux/game/prism_identity.h, where
+	the enhanced world geometry is drawn (the map's sidecar,
+	prism_world_source.c); all zeros for the classic world. The bake's key
+	holds it (its geometry hash), so an enhanced bake is used only for the
+	sidecar geometry it was made from) */
+	unsigned char world_id[32];
 };
 
 /* PRISM_TERRAIN (the terrain, weather and water overhaul, T0;
@@ -3448,7 +3455,7 @@ XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_decal, 120);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog_plane, 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_fog, 48 + XGPU_SCENE_FOG_PLANES * 64);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_view, 16 + 128 + 32);
-XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME);
+XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME + 32);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_scene_material_maps, 20 + 4 * XGPU_SCENE_MATERIAL_MAPS +
 	4 * XGPU_SCENE_MATERIAL_MAP_SCALARS);
 XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_upscale, 36 + 32 + 128 + 16);

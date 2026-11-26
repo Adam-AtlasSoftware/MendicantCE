@@ -78,6 +78,8 @@ still; it writes only its bake, its note and its progress.
 #include "../src/posix.h"
 #include "../src/update.h"
 #include "prism_bake_menu.h"
+#include "prism_identity.h"
+#include "prism_world_source.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -289,32 +291,44 @@ static boolean file_exists(char const *path)
 }
 
 /* a BSP's geometry as the note keeps it (per BSP, so that a change of the
-world's geometry bakes again only the BSPs it changes): "geo:pwg:<tag>:
-<size>:<time>" where display.prism_world_geometry is "remodel" and the BSP
-has a remodel (<data>/prism_world/<its tag>.pwg, prism_world_geometry.c),
-else "geo:stock:<tag>"; its tag's path with / for \ (the note keeps the
-rest of a line as the key, so a space in it is kept) */
+world's geometry bakes again only the BSPs it changes): "geo:prsx:<the BSP's
+enhanced world_id, 64 hex digits>:<tag>" where the enhanced world is drawn
+for the BSP drawn (prism_world_source.c: the map's sidecar), else
+"geo:stock:<tag>"; its tag's path with / for \ (the note keeps the rest of a
+line as the key, so a space in it is kept) */
 static void geometry_token(char const *tag, char *token, unsigned long size)
 {
-	char name[160], path[BAKE_PATH + 200];
-	struct posix_file_information information;
-	char const *geometry = config_string("display.prism_world_geometry");
+	char name[160];
 	unsigned long k;
+	long tag_index = global_structure_bsp_tag_index_get();
+	char const *drawn = tag_index != NONE ? tag_get_name(tag_index) : NULL;
 
 	snprintf(name, sizeof(name), "%s", tag ? tag : "");
-	/* (the path as prism_world_geometry.c opens it: / for \, nothing else
-	changed, so that a tag with a space finds its remodel) */
 	for (k = 0; name[k]; k++)
 	{
 		if (name[k] == '\\')
 			name[k] = '/';
 	}
-	snprintf(path, sizeof(path), "%s/prism_world/%s.pwg", platform_data_root(), name);
-	if (geometry && !strcmp(geometry, "remodel") && name[0] && posix_stat(path, &information) == 0)
-		snprintf(token, size, "geo:pwg:%s:%lu:%lu", name, (unsigned long)information.size_low,
-			(unsigned long)information.modification_seconds);
-	else
-		snprintf(token, size, "geo:stock:%s", name);
+	if (name[0] && drawn && prism_world_enhanced())
+	{
+		char drawn_name[160], hex[65];
+		unsigned char id[32];
+
+		snprintf(drawn_name, sizeof(drawn_name), "%s", drawn);
+		for (k = 0; drawn_name[k]; k++)
+		{
+			if (drawn_name[k] == '\\')
+				drawn_name[k] = '/';
+		}
+		if (!strcmp(drawn_name, name))
+		{
+			prism_world_source_world_id(global_structure_bsp_index_get(), id);
+			prism_id_hex(id, hex);
+			snprintf(token, size, "geo:prsx:%s:%s", hex, name);
+			return;
+		}
+	}
+	snprintf(token, size, "geo:stock:%s", name);
 }
 
 /* a BSP's whole key: the settings' and its geometry's */
@@ -383,21 +397,15 @@ static boolean bsp_key_good(char const *noted, char const *base)
 	if (!token || !base_key_good(noted, (unsigned long)(token - noted), base))
 		return FALSE;
 	token++;
-	/* (the tag: after "geo:stock:", or after "geo:pwg:" to the next ':') */
+	/* (the tag: after "geo:stock:", or after "geo:prsx:<id>:"; an older
+	note's "geo:pwg:" is of a remodel no longer read) */
 	if (!strncmp(token, "geo:stock:", 10))
 		at = token + 10;
-	else if (!strncmp(token, "geo:pwg:", 8))
-		at = token + 8;
+	else if (!strncmp(token, "geo:prsx:", 9) && strlen(token) > 9 + 64 && token[9 + 64] == ':')
+		at = token + 9 + 64 + 1;
 	else
 		return FALSE;
 	snprintf(tag, sizeof(tag), "%s", at);
-	if (token[4] == 'p')
-	{
-		char *colon = strchr(tag, ':');
-
-		if (colon)
-			*colon = 0;
-	}
 	bsp_key(base, tag, now, sizeof(now));
 	now_token = strstr(now, " geo:");
 	return now_token && !strcmp(now_token, token - 1);
@@ -503,16 +511,28 @@ static boolean shipped_key_good(char const *shipped, char const *base)
 	token++;
 	if (!strncmp(token, "geo:stock", 9) && (token[9] == 0 || token[9] == ':'))
 		remodel = FALSE;
-	else if (!strncmp(token, "geo:pwg", 7) && (token[7] == 0 || token[7] == ':'))
+	else if (!strncmp(token, "geo:prsx:", 9))
 		remodel = TRUE;
 	else
 		return FALSE;
-	/* (no tag: the stock world's BSPs are stock, a remodel's either) */
-	if (!strchr(token + 4, ':'))
-		return remodel ? !strcmp(bake_menu.world, "remodel") : TRUE;
+	/* (no tag: the stock world's BSPs are stock) */
+	if (!remodel && !strchr(token + 4, ':'))
+		return TRUE;
+	if (remodel)
+	{
+		/* (the enhanced world's: its world_id and tag must be the BSP's
+		drawn now, the sidecar's opened) */
+		char const *colon = strlen(token) > 9 + 64 ? token + 9 + 64 : NULL;
+
+		if (!colon || *colon != ':')
+			return FALSE;
+		snprintf(tag, sizeof(tag), "%s", colon + 1);
+		geometry_token(tag, now, sizeof(now));
+		return !strcmp(now, token);
+	}
 	snprintf(tag, sizeof(tag), "%s", strchr(token + 4, ':') + 1);
 	geometry_token(tag, now, sizeof(now));
-	return !strncmp(now, remodel ? "geo:pwg:" : "geo:stock:", remodel ? 8 : 10);
+	return !strncmp(now, "geo:stock:", 10);
 }
 
 /* the shipped bake's manifest's BSPs of the map in the world drawn: its
@@ -618,8 +638,7 @@ static void settings_read(void)
 	folder_read(bake_menu.folder, sizeof(bake_menu.folder));
 	shipped_folder_read(bake_menu.shipped, sizeof(bake_menu.shipped));
 	{
-		char const *geometry = config_string("display.prism_world_geometry");
-		char const *world = geometry && !strcmp(geometry, "remodel") ? "remodel" : "stock";
+		char const *world = prism_world_enhanced() ? "remodel" : "stock";
 
 		if (strcmp(world, bake_menu.world))
 		{

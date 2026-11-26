@@ -17,9 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 GAME = ROOT / "port/linux/game"
 ZLIB = ROOT / "port/third_party/zlib"
 SOURCES = [Path(__file__).resolve().parent / "native_main.c", GAME / "prism_prsx.c", GAME / "prism_identity.c",
-           GAME / "prism_ref_decode.c", GAME / "mcc_sha256.c"]
+           GAME / "prism_ref_decode.c", GAME / "prism_geom.c", GAME / "mcc_sha256.c"]
 ZLIB_SOURCES = ["adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "uncompr.c", "zutil.c"]
-HEADERS = [GAME / "prism_prsx.h", GAME / "prism_identity.h", GAME / "prism_ref_decode.h", GAME / "mcc_sha256.h"]
+HEADERS = [GAME / "prism_prsx.h", GAME / "prism_identity.h", GAME / "prism_ref_decode.h", GAME / "prism_geom.h",
+           GAME / "mcc_sha256.h"]
 
 
 class NativeError(Exception):
@@ -131,8 +132,40 @@ class Native:
                 out["world"][int(fields[0])] = (fields[2], fields[4])
         return out
 
+    def geom(self, stock_path, sidecar_path, bsp):
+        """(the PWG1 image or None, the report line) of the game's decode of a sidecar's BSP (prism_geom.c)"""
+        result = subprocess.run([str(self.exe), "geom", str(stock_path), str(sidecar_path), str(bsp)],
+                                capture_output=True)
+        return (result.stdout if result.returncode == 0 else None), result.stderr.decode(errors="replace").strip()
+
+    def ladder(self):
+        """{(classic, geometry, sidecar, packs, unbaked): rung} of prism_world_ladder"""
+        result = subprocess.run([str(self.exe), "ladder"], capture_output=True, text=True, check=True)
+        out = {}
+        for line in result.stdout.splitlines():
+            fields = [int(x) for x in line.split()[1:]]
+            out[tuple(fields[:5])] = fields[5]
+        return out
+
     def base_id(self, path):
         result = subprocess.run([str(self.exe), "base-id", str(path)], capture_output=True, text=True)
         if result.returncode != 0:
             return None
         return result.stdout.split()[1]
+
+
+def write_stock(path, bsp):
+    """a RetailBsp (or anything with .materials {(lightmap, material): .vertices, .lightmap_vertices} and
+    .collision_vertices) as the stock file native's geom reads"""
+    out = bytearray(struct.pack("<I", len(bsp.materials)))
+    for (lightmap, material_index), material in sorted(bsp.materials.items()):
+        count = len(material.vertices) // 32
+        out += struct.pack("<HHI", lightmap, material_index, count) + bytes(material.vertices[:32 * count])
+        lightmapped = len(material.lightmap_vertices) >= 8 * count and count > 0
+        out += struct.pack("<I", 1 if lightmapped else 0)
+        if lightmapped:
+            out += bytes(material.lightmap_vertices[:8 * count])
+    out += struct.pack("<I", len(bsp.collision_vertices))
+    for point in bsp.collision_vertices:
+        out += struct.pack("<3f", *point)
+    Path(path).write_bytes(bytes(out))

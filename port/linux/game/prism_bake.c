@@ -37,6 +37,7 @@ the settings. Nothing crosses the network.
 
 #include "cseries.h"
 #include "cache/cache_files.h"
+#include "prism_world_source.h"
 #include "rasterizer/rasterizer_geometry.h"
 #include "scenario/scenario.h"
 #include "scenario/scenario_definitions.h"
@@ -289,8 +290,6 @@ static void settings_read(
 	{
 		snprintf(prism_bake.shipped, sizeof(prism_bake.shipped), "%s/prism_bake_shipped", platform_data_root());
 	}
-	value = config_string("display.prism_world_geometry");
-	prism_bake.remodel = value && !strcmp(value, "remodel");
 
 	return;
 }
@@ -1589,7 +1588,7 @@ static void control_fill(
 	bake->flags = (prism_bake.foreground ? XGPU_BAKE_FLAG_FOREGROUND : 0) |
 		(prism_bake_menus_up() ? XGPU_BAKE_FLAG_MENU : 0) |
 		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0) |
-		(prism_bake.remodel ? XGPU_BAKE_FLAG_REMODEL : 0) |
+		(prism_world_enhanced() ? XGPU_BAKE_FLAG_REMODEL : 0) |
 		(prism_scene_static_in_play() ? XGPU_BAKE_FLAG_IN_PLAY : 0);
 	bake->map_checksum = (uint32_t)cache_files_get_checksum();
 	bake->bsp_index = global_structure_bsp_index_get();
@@ -1612,6 +1611,10 @@ static void control_fill(
 		}
 	}
 	snprintf(bake->map_name, sizeof(bake->map_name), "%s", map);
+	/* (the BSP's enhanced world_id where the enhanced world is drawn: the
+	bake's key holds it, so a bake is used only for the geometry it was
+	made from; zeros for the classic world) */
+	prism_world_source_world_id((short)bake->bsp_index, bake->world_id);
 }
 
 /* the reach's inputs copied from the BSP drawn once its scene is whole,

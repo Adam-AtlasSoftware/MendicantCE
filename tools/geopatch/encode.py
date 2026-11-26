@@ -9,10 +9,13 @@ columns are byte-plane shuffled, sections compressed.
     encode.py --map <retail map> --classic-world-id <64 hex> --pwg 0=b30a.pwg --pwg 1=b30b.pwg -o b30.prsx
               [--codec zlib|zstd|stored] [--level N] [--lmuv] [--report report.json]
 
---lmuv adds an LMUV section per BSP sized like the farm's own lightmap layout (two 16-bit coordinates and a page
-per vertex, here from the .pwg's projected coordinates): for measuring only, until the farm's xatlas layout (M4)
-writes the real one. zstd uses the system's zstd program and is for measuring only: the game reads stored and
-zlib sections (prism_prsx.c) until a zstd decoder is vendored.
+Each GEOM comes with its LMUV (geom.py): every remodel vertex's lightmap vertex in the game's compressed form, a
+REF to the stock lightmap vertex where it is that one bit for bit, until the farm's own lightmap layout (M4)
+replaces it. The packed vectors and lightmap vertices are rounded as the game's own compressor rounds them
+(rasterizer_geometry_compress_vertices), so the game draws exactly what the .pwg drew; only the positions move,
+onto the 1/1024 world unit grid. --lmuv is accepted and changes nothing (the section is always written). zstd uses
+the system's zstd program and is for measuring only: the game reads stored and zlib sections (prism_prsx.c) until a
+zstd decoder is vendored.
 
 The farm only: it reads retail maps, which never leave the farm; what it writes is checked by lint_patch.py and
 scan_original.py before anything ships.
@@ -84,15 +87,30 @@ def read_pwg(path):
 # ---------- packing
 
 def pack_vectors(v):
-    """unit vectors (N x 3 floats) packed 11:11:10 (nearest field value, as synthmap.pack_vector)"""
-    v = v.astype(np.float64)
+    """vectors (N x 3 floats) packed 11:11:10 as the game's compressor packs them
+    (compress_real_vector3d_to_int32_clamp, rasterizer_geometry.c): each component pinned to [-1, 1], times 1023.5
+    (511.5 for z) in single precision, floored; its decode (2 s + 1) / 2047 floors back to s, so the game packs the
+    decoded vector again to the same bits"""
+    v = np.clip(np.asarray(v, np.float32), np.float32(-1.0), np.float32(1.0))
 
-    def field(x, bits):
-        top = (1 << (bits - 1)) - 1
-        s = np.clip(np.rint((x * ((1 << bits) - 1) - 1) / 2), -top - 1, top).astype(np.int64)
+    def field(x, scale, bits):
+        s = np.floor(x * np.float32(scale)).astype(np.int64)
         return (s & ((1 << bits) - 1)).astype(np.uint64)
-    return (field(v[:, 0], 11) | field(v[:, 1], 11) << np.uint64(11) | field(v[:, 2], 10) << np.uint64(22)) \
-        .astype(np.uint32)
+    return (field(v[:, 0], 1023.5, 11) | field(v[:, 1], 1023.5, 11) << np.uint64(11) |
+            field(v[:, 2], 511.5, 10) << np.uint64(22)).astype(np.uint32)
+
+
+def pack_coordinates(c):
+    """lightmap coordinates (N floats) as the game's compress_real_to_int16_clamp: pinned to [-1, 1], times 32767.5
+    in single precision, floored; as unsigned 16-bit fields"""
+    c = np.clip(np.asarray(c, np.float32), np.float32(-1.0), np.float32(1.0))
+    return (np.floor(c * np.float32(32767.5)).astype(np.int64) & 0xFFFF).astype(np.uint32)
+
+
+def compress_lightmap(lightmap):
+    """.pwg lightmap vertices (N x 5 floats: incident radiosity, u, v) -> (radiosity u32, u, v) arrays, the game's
+    compressed lightmap vertex"""
+    return pack_vectors(lightmap[:, 0:3]), pack_coordinates(lightmap[:, 3]), pack_coordinates(lightmap[:, 4])
 
 
 def grid(values):
@@ -200,6 +218,8 @@ def encode_pwg_part(p, material, native=None, bsp=None, avoid=None):
     memory): such a vertex moves up one grid step (1/1024 world unit) until it is free; counts["nudged_run"] is the
     longest run of consecutive nudged vertices, which the lint refuses past NUDGE_RUN. Returns (part, counts)"""
     n = len(p.vertices)
+    if len(p.lightmap) != n:
+        raise geom.LayoutError("a part's lightmap vertices are not one for each vertex")
     q = grid(p.vertices[:, 0:3])
     ops = np.zeros(n, np.uint8)
     refs = np.zeros(n, np.int64)
@@ -290,27 +310,45 @@ def encode_pwg_part(p, material, native=None, bsp=None, avoid=None):
     vec = p.vertices[attributed]
     e.nrm = np.stack([pack_vectors(vec[:, 3:6]), pack_vectors(vec[:, 6:9]), pack_vectors(vec[:, 9:12])], axis=1)
     e.tex = p.vertices[textured][:, 12:14].copy().view("<u4")
+    # (the lightmap vertices: a REF to the stock one where the vertex is its own material's stock vertex and its
+    # compressed lightmap vertex is that one's bit for bit, else ours)
+    radiosity, lu, lv = compress_lightmap(p.lightmap)
+    lops = np.zeros(n, np.uint8)
+    lrefs = np.zeros(n, np.int64)
+    if material is not None and material.lightmap_vertices:
+        stock_lm = np.frombuffer(material.lightmap_vertices, "<u4").reshape(-1, 2)
+        own_ref = np.isin(ops, (REF, REFP, REFPT))
+        idx = refs.copy()
+        ok = own_ref & (idx < len(stock_lm))
+        cand = np.nonzero(ok)[0]
+        same = (stock_lm[idx[cand], 0] == radiosity[cand]) & \
+            (stock_lm[idx[cand], 1] == (lu[cand] | (lv[cand] << np.uint32(16))))
+        lops[cand[same]] = REF
+        lrefs[cand[same]] = idx[cand[same]]
+    lit_lm = lops == LIT
+    e.lops = lops
+    e.lrefs = lrefs[lops == REF].astype(np.uint32)
+    e.lwords = np.stack([radiosity[lit_lm], (lu[lit_lm] | (lv[lit_lm] << np.uint32(16)))], axis=1) \
+        .astype(np.uint32).reshape(-1)
     e.triangles = p.triangles
     e.sft = p.sft
     e.far_pairs, e.spheres = p.far_pairs, p.spheres
     counts = {"vertices": n, "lit": int(lit.sum()), "ref": int((ops == REF).sum()), "refp": int((ops == REFP).sum()),
               "refm": int((ops == REFM).sum()), "refc": int((ops == REFC).sum()), "refpt": int((ops == REFPT).sum()),
               "refmt": int((ops == REFMT).sum()), "snapped": snapped, "nudged": nudged, "nudged_run": longest,
-              "triangles": int(len(p.triangles))}
+              "triangles": int(len(p.triangles)), "lightmap_ref": int((lops == REF).sum()),
+              "lightmap_lit": int(lit_lm.sum())}
     return e, counts
 
 
-def encode_lmuv(parts_pwg):
-    """an LMUV-sized section for measuring (see the module's help): per part its vertex count and page, per vertex
-    two 16-bit coordinates"""
-    header = bytearray(b"LMU0" + struct.pack("<II", 0, len(parts_pwg)))
-    u = []
-    for p in parts_pwg:
-        header += struct.pack("<IHH", len(p.lightmap), p.lightmap_index & 0xFFFF, 0)
-        u.append(np.clip(np.rint(p.lightmap[:, 3:5].astype(np.float64) * 65535), 0, 65535).astype(np.uint16))
-    flat = np.concatenate(u).reshape(-1) if u else np.zeros(0, np.uint16)
-    planes = np.ascontiguousarray(flat.astype("<u2")).view(np.uint8).reshape(-1, 2).T.tobytes()
-    return bytes(header) + planes
+def encode_lmuv_arrays(parts):
+    """LMUV v1 bytes from EncodedParts (geom.encode_lmuv writes the same for the same content)"""
+    header = b"".join(struct.pack("<I", len(p.ops)) for p in parts)
+    cat = lambda xs, dtype: np.concatenate(xs).astype(dtype) if xs else np.zeros(0, dtype)  # noqa: E731
+    table, blob = columns_bytes([("LOPS", 1, cat([p.lops for p in parts], np.uint8)),
+                                 ("LREF", 4, cat([p.lrefs for p in parts], np.uint32)),
+                                 ("LVTX", 4, cat([p.lwords for p in parts], np.uint32))])
+    return geom.LMUV_MAGIC + struct.pack("<III", geom.LMUV_VERSION, len(parts), 3) + header + table + blob
 
 
 def main(argv=None):
@@ -355,10 +393,9 @@ def main(argv=None):
         data = encode_geom_arrays(encoded)
         sections.append(prsx.Section("GEOM", index, data, codec=codec, level=level))
         entry = {"pwg_bytes": Path(path).stat().st_size, "geom_decoded": len(data), **totals}
-        if args.lmuv:
-            lm = encode_lmuv(pwg_parts)
-            sections.append(prsx.Section("LMUV", index, lm, codec=codec, level=level))
-            entry["lmuv_decoded"] = len(lm)
+        lm = encode_lmuv_arrays(encoded)
+        sections.append(prsx.Section("LMUV", index, lm, codec=codec, level=level))
+        entry["lmuv_decoded"] = len(lm)
         report["bsps"][index] = entry
     blob = prsx.write(cwid, sections)
     Path(args.out).write_bytes(blob)

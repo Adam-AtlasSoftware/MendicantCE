@@ -12,6 +12,36 @@ and `display.prism_rt_world` are as they were; the skin buffer is Classic's 128 
 map's set was sent under Classic (the resolver's ring otherwise, 256 MB on a card of 10 GB or more and 192 MB on a
 smaller one, and a 32 MB keep region; it follows a lighting change at the next map's set).
 
+## Where the world geometry comes from (the sidecar, v4 geopatch M2)
+
+The enhanced world geometry ships as a sidecar of our own beside the player's retail map,
+`<data root>/maps_enhanced/<map>.prsx` (`port/linux/game/prism_prsx.h`): per BSP a GEOM section (the remodel's
+vertices, triangles, runs per stock surface and far levels) and an LMUV section (its lightmap vertices). The retail
+map opens from `maps/` unchanged. At each BSP's load `prism_world_source.c` reads and verifies (SHA-256) the BSP's two
+sections and `prism_geom.c` decodes them into the image `prism_world_geometry.c` has always drawn, resolving every REF
+op from the map's own tags with the exact integer decode (`prism_ref_decode.c`); the resolver's near/far choice, the
+shape checks and the draws are unchanged. The `.pwg` files are the remodel pipeline's intermediate on the farm, which
+`tools/geopatch/encode.py` turns into the sidecar; the game no longer reads them. The packed vectors and lightmap
+vertices are rounded as the game's compressor rounds them, so the GPU draws the same values as from the `.pwg`; the
+positions move onto the 1/1024 world unit grid (b30: at most 0.005 world units, the snapped stock positions
+included).
+
+Which world a map gets is decided once, at its first BSP's load, and latched for the map (`prism_world_ladder`):
+
+| Rung | Geometry | Lighting | When |
+|---|---|---|---|
+| 1 | Enhanced (the sidecar) | Enhanced or Path Traced, from the enhanced packs | World Geometry Enhanced, the sidecar verified, and every BSP's enhanced pack shipped (`prism_bake_shipped/remodel/<map>/bsp<n>.pbk`, named in its `manifest.txt` with `geo:prsx:<world_id>`) |
+| 2 | Classic | Enhanced or Path Traced, from the classic packs | otherwise |
+| 3 | Classic | Classic | Classic lighting |
+
+Classic lighting never opens a sidecar and never draws the enhanced geometry (its lightmaps on the remodel are the
+rock bug); switching to Classic in a map draws the map's own geometry at once. A World Geometry change applies at the
+next map load. Each BSP's enhanced `world_id` (`prism_identity.h`) is computed from the opened sidecar's GEOM and LMUV
+sections and sent with the bake's control (`xgpu_stream_prism_bake.world_id`); the baker mixes it into the key's
+geometry hash, so an enhanced bake is used only for the geometry it was made from. `debug.world_unbaked`
+(`HALO_WORLD_UNBAKED=1`) takes rung 1 without the packs: the farm's (to bake them) and the developers', never a
+player's.
+
 ## Objects (`display.prism_models`)
 
 The resolver is `port/linux/vulkan/xgpu_geometry.c` (pure C: `tools/test_geometry_resolver.py`). The mesh store

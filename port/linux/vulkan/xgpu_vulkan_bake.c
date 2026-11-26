@@ -2444,6 +2444,15 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 	hash = prism_bake_hash64(hash, b->plan.attributes, (size_t)kept * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS * 4);
 	b->key.bsp_hash = hash;
 	b->key.geometry_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, b->plan.tiers, kept);
+	/* (the enhanced world's world_id, where the game draws its sidecar's
+	geometry: a bake keyed to the geometry it was made from; the classic
+	world's key is as it was) */
+	{
+		static const unsigned char zero[32];
+
+		if (memcmp(bake.control.world_id, zero, sizeof(zero)))
+			b->key.geometry_hash = prism_bake_hash64(b->key.geometry_hash, bake.control.world_id, 32);
+	}
 	/* (the static scenery the bake traces with the level: its triangles,
 	albedo and coverage in the geometry's hash) */
 	if (bake.scenery_count && (b->scenery = (float *)malloc((size_t)bake.scenery_count * SCENERY_FLOATS * 4)) != NULL)

@@ -219,6 +219,7 @@ def controls(map_path, native):
     # 2. a compressed-to-uncompressed copy: the stock vertices decoded exactly, kept as LIT
     copy = remodel_part(material, native)
     copy.vertices = copy.vertices[:material.vertex_count]
+    copy.lightmap = copy.lightmap[:material.vertex_count]
     copy.triangles = np.array(material.surfaces, np.int64)
     copy.sft = np.arange(material.surface_count + 1, dtype=np.uint32)
     copy.near_triangle_count = len(material.surfaces)

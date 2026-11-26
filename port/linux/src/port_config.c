@@ -1122,6 +1122,11 @@ static const struct config_setting config_settings[] =
 		"While a level's light is baked in the background, \"Baking lightmaps 37%\"\n"
 		"at the screen's top left (and \"Lightmaps baked\" once it is done);\n"
 		"false hides it." },
+	{ "debug.world_unbaked", _config_boolean, "false", "HALO_WORLD_UNBAKED", _environment_value, _platform_desktop,
+		"The farm's and the developers': draw a level's enhanced world geometry\n"
+		"(its maps_enhanced sidecar) without asking for the enhanced lightmaps\n"
+		"baked for it (port/linux/game/prism_world_source.c's ladder), to bake\n"
+		"them or check the geometry. Never a player's." },
 	{ "debug.bake_exit", _config_boolean, "false", "HALO_BAKE_EXIT", _environment_value, _platform_desktop,
 		"With display.lighting \"raster\": bake the level drawn in the\n"
 		"foreground (60 ms of each frame) and quit once its bake is done, for\n"

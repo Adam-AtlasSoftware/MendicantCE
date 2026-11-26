@@ -297,7 +297,7 @@ jobs:
       - name: Test the sidecar
         run: |
           python -m pip install -q pytest numpy
-          python -m pytest -q -rs tools/test_geopatch.py tools/test_prism_world_ids.py
+          python -m pytest -q -rs tools/test_geopatch.py tools/test_prism_world_ids.py tools/test_prism_world_source.py
 
       - name: Package
         run: python tools/mendicant/package.py zip windows-x64 dist/halo-windows-release dist/release
@@ -373,7 +373,7 @@ jobs:
             tools/test_preparation.py tools/test_progress_ownership.py tools/test_ci_test_shards.py \
             tools/test_fork_identity.py tools/test_port_settings.py tools/test_loading_assets.py tools/test_mouse_sensitivity.py \
             tools/test_prism_packs.py tools/test_prism_gate.py tools/test_prism_plugin.py tools/test_scene_records.py \
-            tools/test_prism_rt_glsl.py tools/test_geopatch.py tools/test_prism_world_ids.py
+            tools/test_prism_rt_glsl.py tools/test_geopatch.py tools/test_prism_world_ids.py tools/test_prism_world_source.py
 
   sums:
     # the two zips' SHA256SUMS, when both built and passed their checks: the

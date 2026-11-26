@@ -86,6 +86,16 @@ void prism_world_id_enhanced(const struct prsx *prsx, uint16_t bsp, unsigned cha
 /* whether a directory entry enters the enhanced world_id of bsp */
 int prism_world_id_counts(const struct prsx_entry *entry, uint16_t bsp);
 
+/* ---------- the map's world (prism_world_source.c's ladder, PLAN_FINAL.md
+section 1.2), as a rule of its inputs alone so that the tests run it:
+1 enhanced geometry lit from the enhanced packs, 2 classic geometry lit by
+Enhanced or Path Traced, 3 classic geometry and Classic lighting. Classic
+lighting is rung 3 whatever else holds (Classic's lightmaps are never drawn
+on the enhanced geometry); rung 1 needs the geometry asked for, the sidecar
+opened and verified, and every BSP's enhanced pack (or the farm's unbaked
+override) */
+int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked);
+
 /* 64 lowercase hex digits and a terminator */
 void prism_id_hex(const unsigned char id[PRISM_ID_SIZE], char text[2 * PRISM_ID_SIZE + 1]);
 /* 1 and id, or 0 if text is not 64 hex digits */

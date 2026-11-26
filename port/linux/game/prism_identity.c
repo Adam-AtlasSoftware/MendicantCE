@@ -234,3 +234,12 @@ int prism_id_parse(const char *text, unsigned char id[PRISM_ID_SIZE])
 		id[index] = (unsigned char)(identity_digit(text[2 * index]) << 4 | identity_digit(text[2 * index + 1]));
 	return 1;
 }
+
+int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked)
+{
+	if (lighting_classic)
+		return 3;
+	if (geometry_enhanced && sidecar_ok && (packs_ok || unbaked))
+		return 1;
+	return 2;
+}

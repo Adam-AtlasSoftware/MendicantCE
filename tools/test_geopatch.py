@@ -409,6 +409,164 @@ def test_encoder_snaps_kept_stock_positions(tool, synth):
     assert found.tolist() == [2, 1, 1, 0]
 
 
+# ---------- the game's decode of GEOM and LMUV (port/linux/game/prism_geom.c, M2)
+
+def test_lmuv_round_trip_and_numpy_twin():
+    np = _numpy()
+    from geopatch import encode
+    parts = [[(REF, 3), (LIT, (0x12345678, 1, 65535)), (REF, 0)], [], [(LIT, (7, 32768, 2))]]
+    data = geom.encode_lmuv(parts)
+    assert geom.decode_lmuv(data) == parts
+    twins = []
+    for part in parts:
+        e = encode.EncodedPart()
+        e.ops = np.zeros(len(part), np.uint8)
+        e.lops = np.array([v[0] for v in part], np.uint8)
+        e.lrefs = np.array([v[1] for v in part if v[0] == REF], np.uint32)
+        e.lwords = np.array([w for v in part if v[0] == LIT for w in (v[1][0], v[1][1] | v[1][2] << 16)], np.uint32)
+        twins.append(e)
+    assert encode.encode_lmuv_arrays(twins) == data
+    for damage in (lambda d: d[:-1], lambda d: b"LMU0" + d[4:], lambda d: d[:8] + struct.pack("<I", 9) + d[12:]):
+        with pytest.raises(geom.LayoutError):
+            geom.decode_lmuv(damage(data))
+
+
+def test_encoder_packs_as_the_game_compresses():
+    """the packed vectors and lightmap coordinates are the game's compressor's (floor of x times 1023.5 / 511.5 /
+    32767.5 in single precision), and the decode of a packed value packs to it again"""
+    np = _numpy()
+    from geopatch import encode
+    rng = np.random.default_rng(5)
+    v = rng.uniform(-1.0, 1.0, (4000, 3)).astype(np.float32)
+    v[:6] = [[1, 1, 1], [-1, -1, -1], [0, 0, 0], [0.5, -0.5, 0.25], [1.5, -2.0, 0.0], [-0.0, 0.0, 1.0]]
+    packed = encode.pack_vectors(v)
+    for k in range(len(v)):
+        x = np.clip(v[k], -1, 1)
+        fields = [int(np.floor(np.float32(x[0]) * np.float32(1023.5))) & 0x7FF,
+                  int(np.floor(np.float32(x[1]) * np.float32(1023.5))) & 0x7FF,
+                  int(np.floor(np.float32(x[2]) * np.float32(511.5))) & 0x3FF]
+        assert int(packed[k]) == fields[0] | fields[1] << 11 | fields[2] << 22
+    # decode then pack: the same bits (the game packs the decoded image's vectors again as it loads it)
+    def decode(p):
+        def field(value, bits):
+            s = value & ((1 << bits) - 1)
+            return s - (1 << bits) if s >> (bits - 1) else s
+        x = (2 * field(int(p), 11) + 1) * np.float32(1.0 / 2047.0)
+        y = (2 * field(int(p) >> 11, 11) + 1) * np.float32(1.0 / 2047.0)
+        z = (2 * field(int(p) >> 22, 10) + 1) * np.float32(1.0 / 1023.0)
+        return np.float32([x, y, z])
+    again = encode.pack_vectors(np.stack([decode(p) for p in packed]))
+    assert np.array_equal(again, packed)
+    c = np.float32([-1.0, 1.0, 0.0, 0.25, -0.75, 2.0])
+    assert encode.pack_coordinates(c).tolist() == [int(np.floor(np.float32(min(max(x, -1), 1)) * np.float32(32767.5)))
+                                                   & 0xFFFF for x in c]
+
+
+def _synth_remodel(tool, synth, tmp_path):
+    """the synthetic map's remodel (scan_original.remodel_part, with lightmap vertices: the stock ones decoded at
+    the stock corners, ours at the centroids) as .pwg files and its encoded sidecar"""
+    np = _numpy()
+    from geopatch import encode, scan_original
+    _, _, bsps = retail.read_map(synth)
+    pwgs = {}
+    for bsp in bsps:
+        parts = []
+        for m in bsp.materials.values():
+            part = scan_original.remodel_part(m, tool)
+            stock_lm = np.frombuffer(tool.lightmap_vertices(m.lightmap_vertices), "<f4").reshape(-1, 5)
+            part.lightmap = np.zeros((len(part.vertices), 5), np.float32)
+            part.lightmap[:m.vertex_count] = stock_lm
+            part.lightmap[m.vertex_count:] = [0.0, 0.6, 0.8, 0.31, -0.42]
+            parts.append(part)
+        pwgs[bsp.index] = tmp_path / ("bsp%d.pwg" % bsp.index)
+        _write_pwg(pwgs[bsp.index], parts)
+    out = tmp_path / "synth.prsx"
+    assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--native-dir", str(tool.exe.parent),
+                        *[a for b in sorted(pwgs) for a in ("--pwg", "%d=%s" % (b, pwgs[b]))], "-o", str(out)]) == 0
+    return bsps, pwgs, out
+
+
+def test_game_decodes_the_sidecar_to_the_remodel(tool, synth, tmp_path, monkeypatch):
+    """prism_geom.c's decode of each BSP's GEOM and LMUV against the player's map is the remodel the .pwg held, as
+    the game draws it: positions on the grid (REF vertices the stock ones bit for bit), the packed vectors, base map
+    coordinates and compressed lightmap vertices exactly, the triangles, runs and far levels equal"""
+    np = _numpy()
+    from geopatch import encode
+    monkeypatch.setenv("GEOPATCH_NATIVE_DIR", str(tool.exe.parent))
+    bsps, pwgs, out = _synth_remodel(tool, synth, tmp_path)
+    for bsp in bsps:
+        stock = tmp_path / ("stock%d.bin" % bsp.index)
+        native.write_stock(stock, bsp)
+        image, report = tool.geom(stock, out, bsp.index)
+        assert image is not None, report
+        assert "report ok" in report and " far 1 " in report
+        (tmp_path / "image.pwg").write_bytes(image)
+        got, want = encode.read_pwg(tmp_path / "image.pwg"), encode.read_pwg(pwgs[bsp.index])
+        assert len(got) == len(want) == len(bsp.materials)
+        lightmap_refs = 0
+        for g, w, m in zip(got, want, bsp.materials.values()):
+            assert (g.lightmap_index, g.material_index, g.stock_surface_count, g.stock_vertex_count,
+                    g.topology_check) == (w.lightmap_index, w.material_index, w.stock_surface_count,
+                                          w.stock_vertex_count, w.topology_check)
+            assert np.array_equal(g.triangles, w.triangles) and np.array_equal(g.sft, w.sft)
+            assert np.array_equal(g.far_pairs, w.far_pairs) and g.near_triangle_count == w.near_triangle_count
+            # the stock corners: the retail vertices decoded, bit for bit
+            stock_decoded = np.frombuffer(tool.environment_vertices(m.vertices), "<u4").reshape(-1, 14)
+            assert np.array_equal(g.vertices[:m.vertex_count].view("<u4"), stock_decoded)
+            assert np.abs(g.vertices[:, 0:3] - w.vertices[:, 0:3]).max() <= 0.5 / 1024 + 1e-6
+            for k in (3, 6, 9):
+                assert np.array_equal(encode.pack_vectors(g.vertices[:, k:k + 3]),
+                                      encode.pack_vectors(w.vertices[:, k:k + 3]))
+            assert np.array_equal(g.vertices[:, 12:14].view("<u4"), w.vertices[:, 12:14].view("<u4"))
+            for a, b in zip(encode.compress_lightmap(g.lightmap), encode.compress_lightmap(w.lightmap)):
+                assert np.array_equal(a, b)
+            lightmap_refs += m.vertex_count
+        # (and its world_id is what the identity says: the GEOM and LMUV sections both count)
+        ids = tool.open(out)["world"][bsp.index]
+        sidecar = prsx.Sidecar(out.read_bytes())
+        assert ids[1] == identity.world_id_enhanced(sidecar, bsp.index)
+        assert {e.kind for e in sidecar.entries if identity.counts(e, bsp.index)} == {"GEOM", "LMUV"}
+
+
+def test_game_refuses_a_broken_or_foreign_sidecar(tool, synth, tmp_path, monkeypatch):
+    """a map without the stock materials the sidecar refers to, a GEOM without its LMUV, a cut GEOM, an LMUV of
+    another part count, a REF past the stock vertices: each refused with its reason, nothing drawn"""
+    monkeypatch.setenv("GEOPATCH_NATIVE_DIR", str(tool.exe.parent))
+    bsps, pwgs, out = _synth_remodel(tool, synth, tmp_path)
+    sidecar = prsx.Sidecar(out.read_bytes())
+    sections = {(e.kind, e.bsp): sidecar.section(i) for i, e in enumerate(sidecar.entries)}
+    stock = tmp_path / "stock.bin"
+    native.write_stock(stock, bsps[0])
+
+    class Empty:
+        materials = {}
+        collision_vertices = []
+    empty = tmp_path / "empty.bin"
+    native.write_stock(empty, Empty())
+
+    def verdict(geom_bytes, lmuv_bytes, stock_path=stock):
+        parts = [prsx.Section("GEOM", 0, geom_bytes)] + ([prsx.Section("LMUV", 0, lmuv_bytes)] if lmuv_bytes else [])
+        path = tmp_path / "case.prsx"
+        path.write_bytes(prsx.write(CWID, parts))
+        return tool.geom(stock_path, path, 0)
+    g, lm = sections[("GEOM", 0)], sections[("LMUV", 0)]
+    assert verdict(g, lm)[0] is not None
+    image, report = verdict(g, lm, empty)
+    assert image is None and "names no stock value" in report
+    image, report = verdict(g, None)
+    assert image is None and "lightmap" in report
+    image, report = verdict(g[:-7], lm)
+    assert image is None and "layout" in report
+    lm_parts = geom.decode_lmuv(lm)
+    image, report = verdict(g, geom.encode_lmuv(lm_parts[:-1]))
+    assert image is None and "lightmap" in report
+    # a lightmap REF past the stock material's vertices
+    broken = [list(part) for part in lm_parts]
+    broken[0][0] = (REF, 10 ** 6)
+    image, report = verdict(g, geom.encode_lmuv(broken))
+    assert image is None and "names no stock value" in report
+
+
 def test_negative_controls(tool, synth):
     """section 2.4: each control must fail and a clean remodel pass"""
     _numpy()
