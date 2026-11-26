@@ -28,8 +28,9 @@ Geometry where the shipped bake lacks that world.
   one WAIT chose (below), the one played last, the saved game's, the one
   after the last finished, then the campaign's order.
 - What is baked is noted beside the bake (<folder>/<map>/baked.txt: the
-  map's BSPs, and each BSP baked with its key), by whichever process
-  finished it, the worker or a game played (prism_bake_note, each frame): a
+  map's BSPs, and each BSP baked with its key), by whichever farm process
+  finished it, the worker or a game played (prism_bake_note, each frame;
+  never a player's run, which makes no bake folder: note_farm): a
   BSP whose note's key is not the settings' (prism_bake_key: the baker's
   version, display.bake_quality, the rig's class, prism_rt_alpha; and the
   BSP's own geometry, geometry_token: stock, or its remodel's file) is
@@ -1177,8 +1178,23 @@ float prism_bake_worker_budget(void)
 	return prism_bake_worker_map() ? WORKER_BUDGET_MILLISECONDS : 0.0f;
 }
 
+/* whether this run may write the bake folder's note: the farm's alone
+(HALO_BAKE_FARM=1, the bake lock's rule: xgpu_vulkan_bake.c's bake_farm).
+A player's run loads shipped bakes, which the shipped manifests describe,
+and makes no bake folder (v4 geopatch M4) */
+static boolean note_farm(void)
+{
+#ifdef PRISM_BAKER_COMPILED_OUT
+	return FALSE;
+#else
+	char const *farm = getenv("HALO_BAKE_FARM");
+
+	return farm && farm[0] == '1' && farm[1] == 0;
+#endif
+}
+
 /* each frame, the BSP drawn noted in its map's note once its bake is done
-(the worker's, a game's) */
+(the farm's worker's, a farm game's: note_farm) */
 static void prism_bake_note(void)
 {
 	char keys[BAKE_BSPS][BAKE_KEY];
@@ -1189,8 +1205,9 @@ static void prism_bake_note(void)
 	unsigned long generation;
 	int bsps;
 
-	if (!prism_bake_wanted() || !game_time_initialized() || !game_in_progress() || main_menu_is_active() ||
-		!(scenario = global_scenario_get()) || (bsp = global_structure_bsp_index_get()) == NONE || bsp >= BAKE_BSPS)
+	if (!note_farm() || !prism_bake_wanted() || !game_time_initialized() || !game_in_progress() ||
+		main_menu_is_active() || !(scenario = global_scenario_get()) ||
+		(bsp = global_structure_bsp_index_get()) == NONE || bsp >= BAKE_BSPS)
 	{
 		return;
 	}
