@@ -174,6 +174,13 @@ static void choose(void)
 		world_source.rung = PRISM_WORLD_RUNG_CLASSIC;
 		return;
 	}
+	/* no scenario yet: no BSPs to check, so draw classic and choose again at the next call */
+	if (!scenario)
+	{
+		world_source.chosen = FALSE;
+		world_source.rung = PRISM_WORLD_RUNG_CLASSIC;
+		return;
+	}
 	if (prism_world_ladder(lighting_classic(), FALSE, FALSE, FALSE, FALSE) == 3)
 	{
 		world_source.rung = PRISM_WORLD_RUNG_CLASSIC;
