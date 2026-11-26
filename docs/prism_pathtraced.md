@@ -592,19 +592,19 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   variance is its 3 × 3 neighbourhood's spread as it is (round 3 divided it again by the history's length, though the
   history is already a mean, so its stops were a fifth as wide as the noise left and the semi-glossy walls' lamp pools
   stayed grainy held still).
-  Then the histories' anti-firefly (`HALO_PT_HIST_FIREFLY`, 1.5 by default; 0 none; the clarity round's third
-  part, ReLAX's history clamping's): each pixel's slow diffuse and specular history, as the temporal pass left it, held
-  to the mean and 1.5 standard deviations of its neighbours' on the same surface (a 5 × 5 at a stride of 2, itself
-  left out; at least 6 of them, else a thin thing is left alone), the held value written back into the history and
-  its moments, and the a-trous steps' variance there the neighbours'. The cause it removes: a bright sample taken while
-  the history is short (a moving eye's, a disocclusion's; the short history's cap lets samples up to 16 times white
-  through) enters the slow mean at 1 / its length and the moments with it, so the fast history's hold, whose width
-  comes from those moments, never caught what was left of it (its share falls as 1 / n, the hold's width as
-  1 / √n): one sample of a lamp stayed a glow for a hundred frames after the eye stopped (the 128-frame still
-  history), and the a-trous steps, their luminance stops opened by the same moments, spread a few such pixels into a
-  splotch as wide as their reach (c40's lab, its hologram glass and its floors; worse on the light's grid,
-  `display.pt_light_scale`, where the reach covers more of the screen). Over the 240 moving frames of c40's lab the
-  bright pixels the native frame does not have fell 1.8 times at DLSS 0.33, 2.8 times at DLSS 0.67 with the light
+  Then the histories' anti-firefly (`HALO_PT_HIST_FIREFLY`, 1.5 by default; 0 none; the clarity round's third part,
+  ReLAX's history clamping's): each pixel's slow diffuse and specular history, as the temporal pass left it, held to
+  the mean and 1.5 standard deviations of its neighbours' on the same surface (a 5 × 5 at a stride of 2, itself left
+  out; at least 6 of them, else a thin thing is left alone), the held value written back into the history and its
+  moments, and the a-trous steps' variance there the neighbours'. The cause it removes: a bright sample taken while
+  the history is short (a moving eye's, a disocclusion's; the short history's cap let samples up to 16 times white
+  through, 4 times since this round) enters the slow mean at 1 / its length and the moments with it, so the fast
+  history's hold, whose width comes from those moments, never caught what was left of it (its share falls as 1 / n,
+  the hold's width as 1 / √n): one sample of a lamp stayed a glow for a hundred frames after the eye stopped (the
+  128-frame still history), and the a-trous steps, their luminance stops opened by the same moments, spread a few such
+  pixels into a splotch as wide as their reach (c40's lab, its hologram glass and its floors; worse on the light's
+  grid, `display.pt_light_scale`, where the reach covers more of the screen). Over the 240 moving frames of c40's lab
+  the bright pixels the native frame does not have fell 1.8 times at DLSS 0.33, 2.8 times at DLSS 0.67 with the light
   at 0.33 of the screen and 7.7 times at DLAA with the light at 0.5, and glows that stay 8 frames in one place to
   none; against the supersampled references every pose's FLIP and edge SSIM are better and its ghosting less (a10's
   corridor native: FLIP 0.087 to 0.069, ghosting 17.5 to 11.2; c40's lab 0.136 to 0.113), b30's beach unchanged

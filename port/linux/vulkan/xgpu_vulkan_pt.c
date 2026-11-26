@@ -157,7 +157,7 @@ as before) */
 below which it holds nothing, in eighths of the light shown as white
 (xgpu_vulkan_pt_frame) */
 #define SHORT_CAP_DEFAULT 4
-#define SHORT_CAP_FLOOR_DEFAULT 128
+#define SHORT_CAP_FLOOR_DEFAULT 32
 /* the light pass's specialization constants (xgpu_vulkan_pt.glsl's
 SPEC_*); whether half the level's 8 x 8 blocks (1) or half its pixels (2)
 take the bake's indirect light as their bounce by default
@@ -2133,7 +2133,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	/* the short history's cap: a moving eye's new pixels held to K times
 	their neighbours' brightest (the specular's 4 K), but never below F
 	times the light the exposure shows as white (SHORT_CAP_DEFAULT,
-	SHORT_CAP_FLOOR_DEFAULT: 4 and 16 times white). The cap alone took the
+	SHORT_CAP_FLOOR_DEFAULT: 4 and 4 times white). The cap alone took the
 	light those pixels found brighter than their neighbours (c40's lab and
 	a10's corridor darker and blurrier turning and strafing, over 90 frames
 	to come back once still); no cap let single samples far past white
@@ -2143,7 +2143,15 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	moving frames keep about 90% of what the cap's removal gained (FLIP
 	against the supersampled reference turning and strafing 0.0998 to
 	0.0950, ghosting 27.3 to 24.8) and the blobs are back to the run to run
-	noise (work/openh1_eval/v4_pt_clarity_runs/r2). Diagnoses:
+	noise (work/openh1_eval/v4_pt_clarity_runs/r2). The floor was 16 times
+	white until the histories' anti-firefly (history_firefly) took the
+	outliers that floor let through; with it 4 times white halves the
+	bright disocclusions over a10's moving frames (DLSS 0.33 6710 to 3687
+	new bright pixels a sweep, DLSS 0.67 with the light at 0.33 3607 to
+	1400) and lowers c40's (8546 to 5237, 4823 to 3446), FLIP and edge SSIM
+	against the references the same within 0.002, ghosting turning up to
+	1.6 at c40 and 0.5 at a10 (work/openh1_eval/v4_pt_clarity_runs/r3).
+	Diagnoses:
 	HALO_PT_SHORT_CAP=<K> (1 to 255; 0 no cap at all), HALO_PT_SHORT_CAP_FLOOR=<F>
 	in eighths of white (0 to 255; 0 none) */
 	{

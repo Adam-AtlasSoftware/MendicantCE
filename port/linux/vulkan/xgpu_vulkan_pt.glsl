@@ -3310,7 +3310,7 @@ void main()
     moments'); before, while the history is short (the camera moving, a
     disocclusion, the first frames), to 4 times the brightest of its
     neighbours on the same surface (eight, two pixels away; short_cap_scale)
-    but never below 16 times the light shown as white (short_cap_floor: the
+    but never below 4 times the light shown as white (short_cap_floor: the
     cap alone took the light a moving eye's new pixels found, the clarity
     round's darker, blurrier turns and strafes in c40 and a10), so that one
     sample of a small bright light (a keypad's glow met by the bounce, a lamp
