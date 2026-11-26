@@ -8,6 +8,15 @@ columns are byte-plane shuffled, sections compressed.
 
     encode.py --map <retail map> --classic-world-id <64 hex> --pwg 0=b30a.pwg --pwg 1=b30b.pwg -o b30.prsx
               [--codec zlib|zstd|stored] [--level N] [--lmuv] [--report report.json]
+    encode.py --map <retail map> --classic-world-id <64 hex> --pwg-dir <the level's .pwg folder> -o b30.prsx
+
+--pwg-dir gives each .pwg of the folder the BSP whose tag path its header names (the scenario's own order), never
+the order of a directory listing (which follows the locale: a10_space sorts first under C, after a10g under
+en_US); with --map, a --pwg BSP=FILE whose header names another BSP is refused. A BSP with no .pwg is not in the
+sidecar (it draws classic).
+
+Sections are deflated by the vendored zlib (port/third_party/zlib, through native.py), so the same inputs give the
+same bytes on every machine; --system-zlib (Python's own zlib) is for measuring only.
 
 Each GEOM comes with its LMUV: by default v2, our own lightmap layout (lmuv.py: charts of the remodel's own
 triangles packed into our own pages; a vertex on a chart seam is copied, and a part past 65535 vertices is cut by
@@ -34,6 +43,31 @@ from geopatch import geom, lmuv, prsx, retail  # noqa: E402
 from geopatch.geom import LIT, REF, REFC, REFM, REFMT, REFP, REFPT  # noqa: E402
 
 PWG_MAGIC = b"PWG1"
+
+
+def pwg_bsp_path(path):
+    """the BSP tag path a .pwg's header names (bytes 16 to 63), lower case with backslashes, as the map's tag names"""
+    with open(path, "rb") as f:
+        head = f.read(64)
+    if head[:4] != PWG_MAGIC:
+        raise ValueError("%s: not a .pwg" % path)
+    return head[16:64].split(b"\0")[0].decode("ascii", "replace").replace("/", "\\").lower()
+
+
+def pwgs_by_bsp(folder, retail_bsps):
+    """{BSP index: .pwg path} of every .pwg in folder, each given the BSP whose tag path its header names; a .pwg
+    naming no BSP of the map, or two naming one, is refused"""
+    names = {b.name.replace("/", "\\").lower(): b.index for b in retail_bsps}
+    out = {}
+    for path in sorted(Path(folder).glob("*.pwg"), key=lambda p: p.name.encode()):
+        name = pwg_bsp_path(path)
+        if name not in names:
+            raise ValueError("%s names BSP %s, which the map does not have" % (path, name))
+        index = names[name]
+        if index in out:
+            raise ValueError("%s and %s both name BSP %d (%s)" % (out[index], path, index, name))
+        out[index] = path
+    return dict(sorted(out.items()))
 # a remodel vertex within this many grid steps (on every axis) of a stock position of its BSP is that stock
 # position: float noise in the art pipeline leaves kept stock vertices a step or two off (b30's second BSP had
 # about 2,000), and as LIT they would be stock data a hair away; snapped, they are REFs. The lint's nudge rule looks
@@ -358,6 +392,10 @@ def main(argv=None):
                                       "lint refuses: for measuring only")
     parser.add_argument("--classic-world-id", required=True)
     parser.add_argument("--pwg", action="append", default=[], metavar="BSP=FILE")
+    parser.add_argument("--pwg-dir", help="every .pwg of the folder, each for the BSP its header names (needs --map)")
+    parser.add_argument("--system-zlib", action="store_true",
+                        help="Python's own zlib, not the vendored deflate: the bytes then depend on the machine "
+                             "(for measuring only)")
     parser.add_argument("-o", "--out", required=True)
     parser.add_argument("--codec", choices=["zlib", "zstd", "stored"], default="zlib")
     parser.add_argument("--level", type=int)
@@ -372,19 +410,32 @@ def main(argv=None):
     level = args.level if args.level is not None else (19 if codec == prsx.ZSTD else 9)
     bsps = {}
     native = None
+    from geopatch import native as native_module
+    if args.map or not args.system_zlib:
+        native = native_module.Native(args.native_dir)
+    prsx.DEFLATE = None if args.system_zlib else native.deflate
     if args.map:
-        from geopatch import native as native_module
         _, _, retail_bsps = retail.read_map(args.map)
         bsps = {b.index: b for b in retail_bsps}
-        native = native_module.Native(args.native_dir)
+    specs = []
+    for spec in args.pwg:
+        index, _, path = spec.partition("=")
+        specs.append((int(index), path))
+    if args.pwg_dir:
+        if not args.map:
+            parser.error("--pwg-dir needs --map (the BSPs' tag paths)")
+        specs += [(index, str(path)) for index, path in pwgs_by_bsp(args.pwg_dir, retail_bsps).items()]
+    if len({index for index, _ in specs}) != len(specs):
+        parser.error("two .pwg files for one BSP")
+    for index, path in specs:
+        if bsps and (index not in bsps or pwg_bsp_path(path) != bsps[index].name.replace("/", "\\").lower()):
+            parser.error("%s is not BSP %d's remodel (its header names %s)" % (path, index, pwg_bsp_path(path)))
     sections, report = [], {"bsps": {}}
     # (every retail position of the map, on the grid: a LIT vertex never takes one)
     avoid = set()
     for b in bsps.values():
         avoid |= set(_bsp_lookup(b))
-    for spec in args.pwg:
-        index, _, path = spec.partition("=")
-        index = int(index)
+    for index, path in sorted(specs):
         pwg_parts = read_pwg(path)
         lmuv_report = None
         if args.lmuv_version == 2:
@@ -418,7 +469,7 @@ def main(argv=None):
     report["level"] = level
     text = json.dumps(report, indent=1)
     if args.report:
-        Path(args.report).write_text(text + "\n")
+        Path(args.report).write_text(text + "\n", newline="\n")
     print(text)
     return 0
 

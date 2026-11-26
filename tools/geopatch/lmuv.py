@@ -55,6 +55,28 @@ class LayoutError(Exception):
     pass
 
 
+# (the arithmetic below is IEEE single operations in a fixed order, nothing else: no matrix product (BLAS kernels
+# differ between machines and fuse multiply-adds), no einsum, no reduction whose order a SIMD path may choose. The
+# layout decides charts and texels by comparisons and floors of these values, so one last-bit difference would move
+# a chart or a texel and the sidecar would differ between the two machines of the double build)
+def _dot(a, b):
+    """row-wise dot products of N x 3 arrays (b may be 3 or N x 3), as ((a0 b0 + a1 b1) + a2 b2)"""
+    a = np.asarray(a, np.float64)
+    b = np.asarray(b, np.float64)
+    return (a[..., 0] * b[..., 0] + a[..., 1] * b[..., 1]) + a[..., 2] * b[..., 2]
+
+
+def _length(a):
+    return np.sqrt(_dot(a, a))
+
+
+def _dots_to_directions(normals):
+    """N x len(DIRECTIONS): each row's dot product with each direction (normals @ DIRECTIONS.T, without BLAS)"""
+    n = np.asarray(normals, np.float64)
+    d = DIRECTIONS
+    return (n[:, 0:1] * d[None, :, 0] + n[:, 1:2] * d[None, :, 1]) + n[:, 2:3] * d[None, :, 2]
+
+
 def directions():
     d = []
     for x in (-1, 0, 1):
@@ -63,7 +85,7 @@ def directions():
                 if x or y or z:
                     d.append((x, y, z))
     d = np.array(d, np.float64)
-    return d / np.linalg.norm(d, axis=1)[:, None]
+    return d / _length(d)[:, None]
 
 
 DIRECTIONS = directions()
@@ -71,7 +93,7 @@ DIRECTIONS = directions()
 
 def bases(dirs):
     t = np.where(np.abs(dirs[:, 2:3]) < 0.95, np.cross(dirs, [0.0, 0.0, 1.0]), np.cross(dirs, [1.0, 0.0, 0.0]))
-    t /= np.linalg.norm(t, axis=1)[:, None]
+    t /= _length(t)[:, None]
     b = np.cross(dirs, t)
     return t, b
 
@@ -119,7 +141,7 @@ def _components(count, a, b):
 def _face_normals(positions, triangles):
     p0, p1, p2 = positions[triangles[:, 0]], positions[triangles[:, 1]], positions[triangles[:, 2]]
     n = np.cross(p1 - p0, p2 - p0)
-    length = np.linalg.norm(n, axis=1)
+    length = _length(n)
     out = np.zeros_like(n)
     ok = length > 1e-12
     out[ok] = n[ok] / length[ok, None]
@@ -139,19 +161,19 @@ def part_charts(part):
     # (a triangle faces the way its stock surface's remodel faces on the whole (its near triangles' area-weighted
     # normal), so the relief's small facets stay with their surface's chart; one turned past FACING_LEAST from that
     # way takes its own)
-    facing = np.argmax(normals @ DIRECTIONS.T, axis=1)
+    facing = np.argmax(_dots_to_directions(normals), axis=1)
     sft = part.sft.astype(np.int64)
     if near_count and len(sft) > 1:
         surface = np.repeat(np.arange(len(sft) - 1), np.diff(sft))[:near_count]
         mean = np.zeros((len(sft) - 1, 3))
         np.add.at(mean, surface, normals[:len(surface)] * area[:len(surface), None])
-        way = np.argmax(mean @ DIRECTIONS.T, axis=1)
+        way = np.argmax(_dots_to_directions(mean), axis=1)
         chosen = way[surface]
-        keep = np.einsum("ij,ij->i", normals[:len(surface)], DIRECTIONS[chosen]) >= FACING_LEAST
+        keep = _dot(normals[:len(surface)], DIRECTIONS[chosen]) >= FACING_LEAST
         facing[:len(surface)] = np.where(keep, chosen, facing[:len(surface)])
-    centroids = positions[triangles].mean(axis=1)
-    u = np.einsum("ij,ij->i", centroids, TANGENTS[facing])
-    v = np.einsum("ij,ij->i", centroids, BITANGENTS[facing])
+    centroids = ((positions[triangles[:, 0]] + positions[triangles[:, 1]]) + positions[triangles[:, 2]]) / 3.0
+    u = _dot(centroids, TANGENTS[facing])
+    v = _dot(centroids, BITANGENTS[facing])
     cu = np.floor(u / CELL).astype(np.int64)
     cv = np.floor(v / CELL).astype(np.int64)
     near = np.arange(count) < near_count
@@ -197,7 +219,7 @@ def part_charts(part):
                 continue
             for k in range(0, len(members), 256):
                 block = members[k:k + 256]
-                d = np.linalg.norm(centroids[block][:, None, :] - centroids[near_members][None, :, :], axis=2)
+                d = _length(centroids[block][:, None, :] - centroids[near_members][None, :, :])
                 mismatch = facing[block][:, None] != facing[near_members][None, :]
                 pick = np.argmin(d + mismatch * 1.0e6, axis=1)
                 chart[block] = chart[near_members[pick]]
@@ -319,8 +341,8 @@ def layout(parts, density=DENSITY, page=PAGE, gutter=GUTTER):
         source, triangles, copy_chart = _copy_part(part, chart)
         positions = part.vertices[source, 0:3].astype(np.float64)
         f = chart_facing[copy_chart]
-        uw = np.einsum("ij,ij->i", positions, TANGENTS[f])
-        vw = np.einsum("ij,ij->i", positions, BITANGENTS[f])
+        uw = _dot(positions, TANGENTS[f])
+        vw = _dot(positions, BITANGENTS[f])
         pieces = _split(part, source, triangles, copy_chart)
         if pieces is None:
             pieces_laid = [_piece(part, 0, len(part.sft) - 1, source, triangles, copy_chart)]
@@ -395,7 +417,7 @@ def layout(parts, density=DENSITY, page=PAGE, gutter=GUTTER):
         # (the stretch: a triangle's area over its area laid flat along its chart's axis)
         normals, area = _face_normals(p.vertices[:, 0:3].astype(np.float64), p.triangles)
         axes = DIRECTIONS[p.chart_facing[p.chart_local[p.triangles[:, 0]]]]
-        cosine = np.abs(np.einsum("ij,ij->i", normals, axes))
+        cosine = np.abs(_dot(normals, axes))
         ok = area > 1e-9
         if ok.any():
             stretch = 1.0 / np.maximum(cosine[ok], 1e-6)

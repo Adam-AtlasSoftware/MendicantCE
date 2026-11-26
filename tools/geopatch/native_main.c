@@ -14,6 +14,9 @@ sidecar is checked and a world_id is computed by the one code the game runs.
       "entry <i> <type> <bsp> <flags> <collv> <usize> <section result>",
       "world <bsp> classic <hex> enhanced <hex>" for each BSP its directory names
   native base-id <file>                        "base_id <hex>", or exit 2
+  native deflate <level>                       stdin as one zlib stream on stdout (the vendored zlib 1.3.2's
+      deflate, window 15, memory level 8, the default strategy): the farm's sidecar sections, the same bytes on
+      every machine whatever zlib its Python has
   native ladder                                every input of prism_world_ladder and its rung, a line each
   native geom <stock> <sidecar> <bsp>          the BSP's GEOM and LMUV decoded by prism_geom.c against the stock
       file (native.py's write_stock: the BSP's materials' compressed vertices and its collision vertices) into
@@ -33,6 +36,7 @@ sidecar is checked and a world_id is computed by the one code the game runs.
 #include "prism_identity.h"
 #include "prism_prsx.h"
 #include "prism_ref_decode.h"
+#include "zlib_prefixed.h"
 
 static unsigned char *read_stdin(size_t *size)
 {
@@ -339,6 +343,49 @@ static int geom_command(const char *stock_path, const char *sidecar_path, unsign
 	return result == PRISM_GEOM_OK ? 0 : 2;
 }
 
+static int deflate_command(int level)
+{
+	size_t size = 0;
+	unsigned char *input = read_stdin(&size);
+	unsigned char *output;
+	uLong bound;
+	z_stream z;
+	int result;
+
+	if (!input || level < 0 || level > 9 || size > 0x7fffffffu)
+	{
+		free(input);
+		return 2;
+	}
+	memset(&z, 0, sizeof(z));
+	if (deflateInit2(&z, level, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY) != Z_OK)
+	{
+		free(input);
+		return 2;
+	}
+	bound = deflateBound(&z, (uLong)size);
+	output = (unsigned char *)malloc(bound ? bound : 1);
+	if (!output)
+	{
+		deflateEnd(&z);
+		free(input);
+		return 2;
+	}
+	z.next_in = input;
+	z.avail_in = (uInt)size;
+	z.next_out = output;
+	z.avail_out = (uInt)bound;
+	result = deflate(&z, Z_FINISH);
+	if (result == Z_STREAM_END)
+		result = fwrite(output, 1, (size_t)z.total_out, stdout) == (size_t)z.total_out && !fflush(stdout) ? 0 : 2;
+	else
+		result = 2;
+	deflateEnd(&z);
+	free(output);
+	free(input);
+	return result;
+}
+
 int main(int argc, char **argv)
 {
 #ifdef _WIN32
@@ -369,6 +416,8 @@ int main(int argc, char **argv)
 				prism_world_ladder(bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1, bits >> 4 & 1));
 		return 0;
 	}
+	if (!strcmp(argv[1], "deflate") && argc == 3)
+		return deflate_command(atoi(argv[2]));
 	if (!strcmp(argv[1], "geom") && argc == 5)
 		return geom_command(argv[2], argv[3], (unsigned)strtoul(argv[4], NULL, 10));
 	if (!strcmp(argv[1], "base-id") && argc == 3)

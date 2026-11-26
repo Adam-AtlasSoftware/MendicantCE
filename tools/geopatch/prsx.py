@@ -87,11 +87,18 @@ class Section:
         self.level = level
 
 
+# the deflate a ZLIB section is written with: (data, level) -> zlib stream. The farm's builds set the vendored one
+# (native.Native.deflate: port/third_party/zlib's deflate, the same bytes on every machine); Python's own zlib
+# (zlib-ng on some systems, another zlib version on others) writes other, equally valid, streams, so a sidecar
+# written with it is not reproducible across machines
+DEFLATE = None
+
+
 def compress(data, codec, level=9):
     if codec == STORED:
         return data
     if codec == ZLIB:
-        return zlib.compress(data, level)
+        return DEFLATE(data, level) if DEFLATE is not None else zlib.compress(data, level)
     if codec == ZSTD:
         return zstd_cli(data, level)
     raise PrsxError("unknown codec %d" % codec)

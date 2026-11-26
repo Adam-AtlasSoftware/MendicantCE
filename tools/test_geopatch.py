@@ -307,10 +307,11 @@ def test_coll_round_trip():
 
 # ---------- encoder, lint and scanner on a synthetic map
 
-def _write_pwg(path, parts_np):
-    """a .pwg v2 as tools/prism_packs/art/world_geo/wg_common.py writes it (the encoder's input)"""
+def _write_pwg(path, parts_np, name):
+    """a .pwg v2 as tools/prism_packs/art/world_geo/wg_common.py writes it (the encoder's input), for the BSP whose
+    tag path is name"""
     import numpy as np
-    out = bytearray(b"PWG1" + struct.pack("<III", 2, len(parts_np), 1) + b"levels\\synth".ljust(48, b"\0"))
+    out = bytearray(b"PWG1" + struct.pack("<III", 2, len(parts_np), 1) + name.encode().ljust(48, b"\0"))
 
     def pad(b):
         return b + b"\0" * (-len(b) % 4)
@@ -335,7 +336,7 @@ def test_encode_lint_scan(tool, synth, tmp_path, monkeypatch):
     _, _, bsps = retail.read_map(synth)
     for bsp in bsps:
         parts = [scan_original.remodel_part(m, tool) for m in bsp.materials.values()]
-        _write_pwg(tmp_path / ("bsp%d.pwg" % bsp.index), parts)
+        _write_pwg(tmp_path / ("bsp%d.pwg" % bsp.index), parts, bsp.name)
     out = tmp_path / "synth.prsx"
     report = tmp_path / "report.json"
     assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--lmuv-version", "1",
@@ -368,6 +369,47 @@ def test_encode_lint_scan(tool, synth, tmp_path, monkeypatch):
     raw = tmp_path / "raw.prsx"
     encode.main(["--classic-world-id", CWID.hex(), "--pwg", "0=%s" % (tmp_path / "bsp0.pwg"), "-o", str(raw)])
     assert lint_patch.main([str(raw), "--map", str(synth)]) == 1
+
+
+def test_encode_is_reproducible(tool, synth, tmp_path, monkeypatch):
+    """the M5 double build in small: a level's .pwg folder, whose listing order is not the BSPs' order, encoded
+    twice from clean is the same bytes, each .pwg on the BSP its header names; a .pwg given to the wrong BSP is
+    refused; the vendored deflate's stream is pinned (the same bytes on every machine and compiler)"""
+    _numpy()
+    import hashlib
+    import zlib
+    from geopatch import encode, prsx, scan_original
+    monkeypatch.setenv("GEOPATCH_NATIVE_DIR", str(tool.exe.parent))
+    _, _, bsps = retail.read_map(synth)
+    folder = tmp_path / "levels"
+    folder.mkdir()
+    # (named against the BSPs' order: the listing would give BSP 1's file to BSP 0)
+    for bsp in bsps:
+        parts = [scan_original.remodel_part(m, tool) for m in bsp.materials.values()]
+        _write_pwg(folder / ("%s.pwg" % "zyxw"[bsp.index]), parts, bsp.name)
+    outs = []
+    for run in range(2):
+        out = tmp_path / ("run%d.prsx" % run)
+        assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--pwg-dir", str(folder),
+                            "--native-dir", str(tool.exe.parent), "-o", str(out)]) == 0
+        outs.append(out.read_bytes())
+    assert outs[0] == outs[1]
+    sidecar = prsx.Sidecar(outs[0])
+    assert sorted(e.bsp for e in sidecar.entries if e.kind == "GEOM") == [b.index for b in bsps]
+    world = tool.open(tmp_path / "run0.prsx")["world"]
+    assert world == tool.open(tmp_path / "run1.prsx")["world"] and sorted(world) == [b.index for b in bsps]
+    with pytest.raises(SystemExit):
+        encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--native-dir", str(tool.exe.parent),
+                     "--pwg", "0=%s" % (folder / "y.pwg"), "-o", str(tmp_path / "wrong.prsx")])
+    data = b"".join(struct.pack("<I", (k * 2654435761) & 0xFFFFFFFF) for k in range(50000)) + bytes(100000)
+    stream = tool.deflate(data, 9)
+    assert zlib.decompress(stream) == data
+    assert hashlib.sha256(stream).hexdigest() == DEFLATE_PINNED
+
+
+# the vendored deflate's stream of test_encode_is_reproducible's data at level 9 (zlib 1.3.2): a change here means
+# every sidecar's bytes change
+DEFLATE_PINNED = "fbdcad0e10d33d0cb09af292f119acf5f2c629e2fc5c272d2d528d79d6f87b9f"
 
 
 def test_encoder_takes_stock_coordinates_by_reference(tool, synth):
@@ -493,7 +535,7 @@ def _synth_remodel(tool, synth, tmp_path, lmuv_version=1):
             part.lightmap[m.vertex_count:] = [0.0, 0.6, 0.8, 0.31, -0.42]
             parts.append(part)
         pwgs[bsp.index] = tmp_path / ("bsp%d.pwg" % bsp.index)
-        _write_pwg(pwgs[bsp.index], parts)
+        _write_pwg(pwgs[bsp.index], parts, bsp.name)
     out = tmp_path / "synth.prsx"
     assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--native-dir", str(tool.exe.parent),
                         "--lmuv-version", str(lmuv_version),

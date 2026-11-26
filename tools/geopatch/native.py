@@ -18,7 +18,9 @@ GAME = ROOT / "port/linux/game"
 ZLIB = ROOT / "port/third_party/zlib"
 SOURCES = [Path(__file__).resolve().parent / "native_main.c", GAME / "prism_prsx.c", GAME / "prism_identity.c",
            GAME / "prism_ref_decode.c", GAME / "prism_geom.c", GAME / "mcc_sha256.c"]
-ZLIB_SOURCES = ["adler32.c", "crc32.c", "inffast.c", "inflate.c", "inftrees.c", "uncompr.c", "zutil.c"]
+# (deflate.c and trees.c: the one deflate the sidecar sections are written with, the same on every machine)
+ZLIB_SOURCES = ["adler32.c", "crc32.c", "deflate.c", "inffast.c", "inflate.c", "inftrees.c", "trees.c", "uncompr.c",
+                "zutil.c"]
 HEADERS = [GAME / "prism_prsx.h", GAME / "prism_identity.h", GAME / "prism_ref_decode.h", GAME / "prism_geom.h",
            GAME / "mcc_sha256.h"]
 
@@ -37,7 +39,7 @@ def compiler():
 def build(folder=None):
     """the command's path, built if its sources changed"""
     digest = hashlib.sha256()
-    for path in SOURCES + HEADERS:
+    for path in SOURCES + HEADERS + [ZLIB / name for name in ZLIB_SOURCES]:
         digest.update(path.name.encode() + b"\0" + path.read_bytes())
     folder = Path(folder or os.environ.get("GEOPATCH_NATIVE_DIR") or ROOT / "build/geopatch_native")
     folder.mkdir(parents=True, exist_ok=True)
@@ -79,6 +81,14 @@ class Native:
         if result.returncode not in (0, 3):
             raise NativeError("%s failed (%d)" % (command, result.returncode))
         return result.stdout, result.returncode == 0
+
+    def deflate(self, data, level=9):
+        """data as one zlib stream by the vendored zlib's deflate (port/third_party/zlib): the same bytes on every
+        machine, unlike the zlib a Python is linked with"""
+        result = subprocess.run([str(self.exe), "deflate", str(int(level))], input=data, capture_output=True)
+        if result.returncode != 0:
+            raise NativeError("deflate failed (%d)" % result.returncode)
+        return result.stdout
 
     def environment_vertices(self, compressed):
         """32-byte compressed environment vertices -> the 56-byte uncompressed ones"""
