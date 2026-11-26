@@ -11590,9 +11590,10 @@ struct device_identity
 
 static void device_identify(VkPhysicalDevice device, struct device_identity *identity)
 {
-	VkPhysicalDevicePCIBusInfoPropertiesEXT bus = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT };
-	VkPhysicalDeviceIDProperties id = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
-	VkPhysicalDeviceProperties2 properties = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	VkPhysicalDevicePCIBusInfoPropertiesEXT bus = {
+		.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT };
+	VkPhysicalDeviceIDProperties id = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
+	VkPhysicalDeviceProperties2 properties = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 	VkExtensionProperties extensions[512];
 	uint32_t count = 0, at;
 	int has_bus = 0;

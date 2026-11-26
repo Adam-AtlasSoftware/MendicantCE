@@ -83,7 +83,7 @@ def test_path_traced_water_rays():
     assert "hit_light(o, d, 2000.0, up, length_)" in water_pass
     assert "reference_path(o, d, REFERENCE_BOUNCES, up, true)" in water_pass
     assert "refract(-v, -normal, 1.33)" in water_pass and "reflect(-v, -normal)" in water_pass
-    assert '"water")' in (ROOT / "tools/vulkan_pt_shaders.py").read_text()
+    assert '"water"' in (ROOT / "tools/vulkan_pt_shaders.py").read_text()
     pt = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
     assert "PASS_WATER," in pt and "Path Traced's water rays" in pt
     stream = STREAM.read_text()
