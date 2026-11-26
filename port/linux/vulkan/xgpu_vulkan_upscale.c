@@ -1113,10 +1113,12 @@ Taken from the view at END, the bloom's glow and the grade's change counted
 as reactive (b30's beach: most of the sunlit sand and every light's halo
 past the threshold), and the upscalers took the current frame there
 (DLSS's bias to the current colour, FSR's reactivity): flicker and the
-frame's aliasing kept */
+frame's aliasing kept. Path Traced's frame alone (the path tracer gave
+this view its exposure: xgpu_vulkan_upscale_pt_frame): Classic and Raster
+keep the mask from the view at END as before, with no copy */
 int xgpu_vulkan_upscale_before_post(struct xgpu_vulkan_image *view)
 {
-	if (!view || !up.jittering || !up.opaque_kept || !up.opaque || view != up.opaque_view)
+	if (!view || !up.jittering || !up.opaque_kept || !up.opaque || view != up.opaque_view || !up.pt_exposure)
 		return 0;
 	up.before_post_kept = view_keep(view, &up.before_post);
 	return 1;
