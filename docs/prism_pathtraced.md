@@ -607,8 +607,17 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   the bright pixels the native frame does not have fell 1.8 times at DLSS 0.33, 2.8 times at DLSS 0.67 with the light
   at 0.33 of the screen and 7.7 times at DLAA with the light at 0.5, and glows that stay 8 frames in one place to
   none; against the supersampled references every pose's FLIP and edge SSIM are better and its ghosting less (a10's
-  corridor native: FLIP 0.087 to 0.069, ghosting 17.5 to 11.2; c40's lab 0.136 to 0.113), b30's beach unchanged
-  (`work/openh1_eval/v4_pt_clarity_runs/r3`).
+  corridor native: FLIP 0.087 to 0.069, ghosting 17.5 to 11.6; c40's lab 0.136 to 0.113), b30's beach unchanged
+  (`work/openh1_eval/v4_pt_clarity_runs/r3`). What it costs: a small highlight on a dark, even surface (the lamps'
+  pools on c40's glossy floor) has neighbours with no spread to bound it by, so it is held near them. Native, that
+  is about 1% of the brightest pixels' level; with `display.pt_clarity` `"auto"` at DLSS 0.33, where the light is
+  traced at a third of the screen and such a pool is a pixel or two of it, the 200 brightest pixels about the
+  right-hand lamps are 15% dimmer than with the bound off (198 against 233 of 255; the reference 243). A separate,
+  looser bound for the specular history, a bound only while the history is short, one waived for a pixel whose own
+  moments are steady, and a floor of up to 2 above the neighbours' mean were tried: none gave the pools back without
+  bringing glows back at that setting (pixels lit 8 frames in one place over c40's 240-frame sweep: 0 with the
+  bound, 48 to 89 with the floor or the waiver, 599 with no bound), so the bound stays as it is
+  (`work/openh1_eval/v4_pt_clarity_runs/r4`).
 - **atrous**: the first step holds a pixel brighter than twice the brightest of its eight neighbours on the same
   surface to that (ReLAX's anti-firefly), for the frame shown only: the histories keep the light whole, and a sample
   of a light few rays find adds its share to them without showing as a single bright pixel (round 3's G7 walls).
@@ -742,7 +751,7 @@ scene changes.
 | `display.lighting` | `"pathtraced"` | Every CE light off, the path tracer's light |
 | `display.pt_profile` | `"quality"`, `"performance"` | The indirect light: a bounce at every pixel, or the bake's where the level has it |
 | `display.pt_light_scale` | `0`, `0.25` to `1` | The traced light's upscaling: the light pass and the denoiser at that share of the G-buffer's pixels each way, the denoised light brought to the G-buffer's pixels by its depth and normals (the pass `upsample`), each pixel lit with its own albedo, normal and emission; `0` every pixel. With `display.upscaler` at 1.0 or 0.67 |
-| `display.pt_clarity` | `"auto"`, `"max"`, `"off"` | Under an upscaler with this denoiser: `"auto"` the G-buffer at 0.5 each way at least, the light at `display.upscaler_scale`'s share of the screen below it; `"max"` the G-buffer at every pixel, the light at half; `"off"` the G-buffer at `display.upscaler_scale` (`prism_upscale.c`) |
+| `display.pt_clarity` | `"auto"`, `"max"`, `"off"` | Under an upscaler with this denoiser: `"auto"` the G-buffer at 0.5 each way at least, the light at `display.upscaler_scale`'s share of the screen below it; `"max"` the G-buffer at every pixel, the light at half; `"off"` the G-buffer at `display.upscaler_scale` (`prism_upscale.c`). The default `"auto"` costs a config at DLSS 0.33 (the play kit's) about 0.9 ms more on an RTX 3070 Ti and 1.6 on an RTX 2060 (b30's beach, 1080p), with no menu row: Settings still shows 0.33 |
 | `display.denoiser` | `"prism"`, `"dlss_rr"`, `"off"` | The in-tree denoiser; NVIDIA DLSS Ray Reconstruction (the plugin `dlss`, built by the player: `docs/prism_plugin.md`, "PRISM Path Traced and a plugin"), which takes the traced light raw with the tracer's guides and replaces the denoiser and the upscaler; or the light as traced |
 | `debug.gbuffer_view` | `"pt_diffuse"`, `"pt_specular"`, `"pt_sun"`, `"pt_direct"`, `"pt_indirect"`, `"pt_history"`, `"pt_noisy"` | The diffuse light (denoised), the specular, the sun's visibility, the direct or indirect light alone (each denoised), the history's length, the diffuse light as traced |
 | `debug.pt_reference` | frames | The reference, at most that many frames |

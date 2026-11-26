@@ -131,7 +131,7 @@ of c40's lab the bright pixels the native frame has not fell 1.8 times
 7.7 times (DLAA with the light at 0.5), and the glows that stayed 8 frames
 and more in one place to none; against the supersampled
 references every pose's FLIP and edge SSIM are better, its ghosting less
-(a10's corridor native: FLIP 0.087 to 0.069, ghosting 17.5 to 11.2), b30's
+(a10's corridor native: FLIP 0.087 to 0.069, ghosting 17.5 to 11.6), b30's
 beach unchanged. 1 measured a little better again and 2 or 3 a little
 worse; 1.5 keeps more of a small bright feature's peak than 1
 (work/openh1_eval/v4_pt_clarity_runs/r3) */
