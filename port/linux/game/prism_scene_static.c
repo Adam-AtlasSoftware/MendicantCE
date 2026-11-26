@@ -737,8 +737,12 @@ void prism_scene_static_frame(
 	bsp = bsp_index != NONE ? global_structure_bsp_get() : NULL;
 	/* (port: the BSP's remodel taken up first, so that a new BSP's first set
 	is the remodel's where it is drawn, not the stock one begun again a
-	frame later, with the bake's key it opened) */
-	prism_world_geometry_prepare();
+	frame later, with the bake's key it opened; in PRISM Rebaked and Path
+	Traced, Classic's ray tracing as it was) */
+	if (prism_deferred_raster())
+	{
+		prism_world_geometry_prepare();
+	}
 	remodel = prism_world_geometry_drawn() != 0;
 	/* (the traced materials: none, or the level's, with its alpha-tested
 	surfaces or not) */

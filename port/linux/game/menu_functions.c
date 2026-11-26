@@ -2834,10 +2834,8 @@ static struct
 	{ "op_prism_shadow_softness", LIGHTING_C, "display.prism_shadows", "cascaded" },
 	{ "op_prism_baked_shadows", LIGHTING_C, NULL, NULL },
 	{ "op_prism_baked_shadow_depth", LIGHTING_C, "display.prism_baked_shadows", "sharp" },
-	/* (World & Terrain's: the remodel's shape for Classic's sun shadows; port:
-	a debug override now, the shadows drawing the geometry drawn, its row
-	shown with debug.geometry_overrides alone) */
-	{ "op_prism_geometry_shadows", LIGHTING_C, "debug.geometry_overrides", "true" },
+	/* (World & Terrain's: the remodel's shape for Classic's sun shadows) */
+	{ "op_prism_geometry_shadows", LIGHTING_C, "display.prism_shadows", "cascaded" },
 	/* (Rebaked Lighting: PRISM Rebaked's frame, its traced object shadows or
 	CE's projected ones (at CE's shadow quality), and the enhanced dynamic
 	lights, which the game gives the plasma bolts' and needles' lights that
@@ -2886,9 +2884,7 @@ static struct
 	{ "op_prism_rt_denoiser", LIGHTING_C, "display.prism_rt", "!off" },
 	{ "op_prism_rt_mood", LIGHTING_C, "display.prism_rt", "!off" },
 	{ "op_prism_rt_sun", LIGHTING_C, "display.prism_rt", "!off" },
-	/* (port: the level traced is the level drawn; another, a debug override,
-	with debug.geometry_overrides) */
-	{ "op_prism_rt_world", LIGHTING_C, "debug.geometry_overrides", "true" },
+	{ "op_prism_rt_world", LIGHTING_C, "display.prism_rt", "!off" },
 	{ "op_traced_light_look", LIGHTING_C, "display.prism_rt", "!off" },
 	/* (the traced scene: the objects' capture (xgpu_vulkan_rt.c), which Path
 	Traced takes always, Rebaked with its object shadows traced and Classic

@@ -93,17 +93,20 @@ segments (MIRROR_SEGMENT_BYTES), so that the GPU draws them from its copy
 and nothing is streamed per draw. They are freed when the BSP changes and
 with the map.
 
-What it costs. The passes before the surfaces draw the remodel as the
-surfaces are drawn, each surface's near or far level as the view chose it
-(port: one geometry for every pass, so that no surface is shadowed or
-occluded by another shape than its own): the sun's shadow maps
-(render_prism_shadow_pass, three cascades, both faces) and the world
-occlusion's pre-pass (render_world_ao_prepass, whose level gives only where
-objects darken it and what hides them). display.prism_world_geometry_shadows
-and _occlusion "far" or "stock" are debug overrides now, drawn only with
-debug.geometry_overrides (logged once): before, the shadows' default "far"
-cast the far level's relief over the near level drawn (blotches, acne and
-peter-panning on the rock), and "stock" CE's triangles over the remodel. Each
+What it costs. The passes before the surfaces do not draw the remodel as
+the surfaces are drawn: the sun's shadow maps (render_prism_shadow_pass,
+three cascades, both faces) draw every surface's far level
+(display.prism_world_geometry_shadows "far"; "remodel" or "stock" the
+map's triangles), and the world occlusion's pre-pass
+(render_world_ao_prepass), whose level gives only where objects darken it
+and what hides them, the surfaces as drawn
+(display.prism_world_geometry_occlusion "remodel", by default: a
+pixel reads its own surface's occlusion; "far", "stock" cheaper). That is
+Classic lighting's, as it always was. Port: in PRISM Rebaked and Path
+Traced every pass draws the geometry drawn (one geometry per surface: no
+surface shadowed or occluded by another shape than its own); there those
+settings' "far" and "stock" are debug overrides, drawn only with
+debug.geometry_overrides (logged once). Each
 surface's near and far levels have a cone of facings (the bounds' sphere,
 the mean of the triangles' facings and the least cosine to it, made as the
 file loads): a level that faces away from the camera whole is skipped in
@@ -139,6 +142,7 @@ byte.
 #include "prism_world_geometry.h"
 #include "prism_popin.h"
 #include "prism_scene_static.h"
+#include "prism_deferred.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -260,8 +264,10 @@ struct world_material
 	unsigned long *choice_stamps;
 	byte *choices;
 	/* each surface's level drawn last (display.prism_lod_hysteresis: 0
-	near, 1 far, 2 none yet), with the far level */
+	near, 1 far, 2 none yet), with the far level; port: the frame it last
+	switched (HALO_GEOMETRY_LOG's near/far switches and flips) */
 	byte *far_state;
+	unsigned long *far_switched;
 };
 
 struct world_run
@@ -333,6 +339,12 @@ struct prism_world_geometry_globals
 	unsigned long away_surfaces;
 	unsigned long filled_triangles;
 	unsigned long batched_runs;
+	/* port: HALO_GEOMETRY_LOG (0 none, 1 a summary each 600 frames, 2 each
+	flip too): the surfaces' near/far switches and flips (a switch undone
+	within GEOMETRY_FLIP_FRAMES), all told, by the frames counted here */
+	int geometry_log;
+	unsigned long geometry_frame;
+	unsigned long near_far_switches, near_far_flips;
 };
 
 /* ---------- globals */
@@ -393,17 +405,25 @@ static unsigned long segment_place(
 	return offset;
 }
 
-/* a pass's shape: as drawn ("drawn", "remodel", the default), or "far" or
+/* a pass's shape. Classic lighting: the setting's, as it always was
+("stock", "far" or "remodel"; "drawn" is "remodel"; else the fallback). PRISM
+Rebaked and Path Traced (one geometry for every pass): as drawn, "far" or
 "stock" with debug.geometry_overrides only (else said once and drawn) */
 static short proxy_setting(
 	char const *name,
+	short fallback,
 	boolean overrides,
 	boolean *told)
 {
 	char const *value = config_string(name);
-	short proxy = !value ? _world_proxy_remodel : !strcmp(value, "stock") ? _world_proxy_stock :
-		!strcmp(value, "far") ? _world_proxy_far : _world_proxy_remodel;
+	short proxy = !value ? fallback : !strcmp(value, "stock") ? _world_proxy_stock :
+		!strcmp(value, "far") ? _world_proxy_far : !strcmp(value, "remodel") || !strcmp(value, "drawn") ?
+		_world_proxy_remodel : fallback;
 
+	if (!prism_deferred_raster())
+	{
+		return proxy;
+	}
 	if (proxy != _world_proxy_remodel && !overrides)
 	{
 		if (!*told)
@@ -446,9 +466,10 @@ static void settings_read(
 		static boolean told_shadows, told_occlusion;
 		boolean overrides = config_boolean("debug.geometry_overrides") != 0;
 
-		world_geometry.shadow_proxy = proxy_setting("display.prism_world_geometry_shadows", overrides, &told_shadows);
-		world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", overrides,
-			&told_occlusion);
+		world_geometry.shadow_proxy = proxy_setting("display.prism_world_geometry_shadows", _world_proxy_far, overrides,
+			&told_shadows);
+		world_geometry.occlusion_proxy = proxy_setting("display.prism_world_geometry_occlusion", _world_proxy_remodel,
+			overrides, &told_occlusion);
 	}
 	/* (port: display.prism_rt traces the remodel's level, prism_rt.c's
 	world_level: the pre-pass its rays start from draws the same, so that
@@ -492,6 +513,7 @@ static void world_geometry_release(
 			free(world_geometry.materials[index].choice_stamps);
 			free(world_geometry.materials[index].choices);
 			free(world_geometry.materials[index].far_state);
+			free(world_geometry.materials[index].far_switched);
 		}
 	}
 	free(world_geometry.materials);
@@ -2009,9 +2031,11 @@ static boolean world_geometry_make(
 		made->choice_stamps = NULL;
 		made->choices = NULL;
 		made->far_state = NULL;
+		made->far_switched = NULL;
 		if (made->far_triangles)
 		{
 			made->far_state = malloc(view->part_surface_count + 1);
+			made->far_switched = calloc(view->part_surface_count + 1, sizeof(unsigned long));
 			if (made->far_state)
 			{
 				memset(made->far_state, 2, view->part_surface_count + 1);
@@ -2266,6 +2290,10 @@ static void statistics_frame(
 /* a surface's choices for the frame's camera (_surface_choice_*: drawn
 far, its near and far levels facing away whole), found once for each
 camera (the passes of a frame, the frames of a still camera ask again) */
+/* (port: HALO_GEOMETRY_LOG's flip window, as the objects' resolver's,
+xgpu_geometry.h's XGPU_GEOMETRY_FLIP_FRAMES) */
+#define GEOMETRY_FLIP_FRAMES 90UL
+
 static byte surface_choice(
 	struct world_material *of,
 	long local)
@@ -2313,6 +2341,26 @@ static byte surface_choice(
 			if (state != 2 && state != now)
 			{
 				prism_popin_world_switched();
+				/* (port: counted, and a switch undone within the flip window
+				a flip: the resolver's measure of the objects', for the
+				world's levels) */
+				world_geometry.near_far_switches++;
+				if (of->far_switched && of->far_switched[local] &&
+					world_geometry.geometry_frame - of->far_switched[local] <= GEOMETRY_FLIP_FRAMES)
+				{
+					world_geometry.near_far_flips++;
+					if (world_geometry.geometry_log >= 2)
+					{
+						platform_log("geometry: world frame %lu surface %ld of lightmap %d material %d near/far flip (%s, "
+							"%.1f wu past its distance)", world_geometry.geometry_frame,
+							(long)(of->first_surface_index + of->part_first_surface + local), (int)of->lightmap_index,
+							(int)of->material_index, now ? "far" : "near", (double)(beyond - distance));
+					}
+				}
+			}
+			if (of->far_switched && state != now)
+			{
+				of->far_switched[local] = world_geometry.geometry_frame ? world_geometry.geometry_frame : 1;
 			}
 			of->far_state[local] = now;
 		}
@@ -2373,6 +2421,29 @@ void prism_world_geometry_frame(
 	void)
 {
 	world_geometry.current = NULL;
+	/* (port: HALO_GEOMETRY_LOG's frames, the renderer's; its summary of the
+	surfaces' near/far switches and flips each 600) */
+	{
+		static int log_read;
+
+		if (!log_read)
+		{
+			char const *log = getenv("HALO_GEOMETRY_LOG");
+
+			world_geometry.geometry_log = log && *log >= '1' && *log <= '9' ? *log - '0' : 0;
+			log_read = TRUE;
+		}
+		if (world_geometry.geometry_frame != (unsigned long)render.frame_index)
+		{
+			world_geometry.geometry_frame = (unsigned long)render.frame_index;
+			if (world_geometry.geometry_log >= 1 && world_geometry.geometry_frame % 600UL == 0)
+			{
+				platform_log("geometry: world: frame %lu: %s; near/far switches %lu, flips %lu",
+					world_geometry.geometry_frame, world_geometry.enabled && world_geometry.loaded_bsp ? "remodel" : "stock",
+					world_geometry.near_far_switches, world_geometry.near_far_flips);
+			}
+		}
+	}
 	if (!prism_world_geometry_prepare())
 	{
 		return;

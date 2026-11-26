@@ -777,26 +777,29 @@ static const struct config_setting config_settings[] =
 		"and visibility stay the map's. A level without a remodel is drawn\n"
 		"stock. \"stock\" draws the map's own. Read each frame\n"
 		"(prism_set \"world_geometry remodel\")." },
-	{ "display.prism_world_geometry_shadows", _config_string, "\"drawn\"", "HALO_PRISM_WORLD_GEOMETRY_SHADOWS",
+	{ "display.prism_world_geometry_shadows", _config_string, "\"far\"", "HALO_PRISM_WORLD_GEOMETRY_SHADOWS",
 		_environment_value, _platform_desktop,
 		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
 		"display.prism_shadows \"cascaded\": the level's shape the sun's shadow\n"
-		"maps are drawn from: \"drawn\" (or \"remodel\"), as the surfaces are\n"
-		"drawn, near and far, the one geometry every pass draws. \"far\" (every\n"
-		"surface's far level) and \"stock\" (the map's own triangles) are debug\n"
-		"overrides, drawn only with debug.geometry_overrides: they shadow a\n"
-		"surface with another shape than its own. Read each frame." },
-	{ "display.prism_world_geometry_occlusion", _config_string, "\"drawn\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
+		"maps are drawn from. \"far\": every surface's far level (the relief's\n"
+		"shadows at a fraction of the cost); \"remodel\": as the surfaces are\n"
+		"drawn, near and far; \"stock\": the map's own triangles (cheapest).\n"
+		"Classic lighting's; PRISM Rebaked and Path Traced draw the geometry\n"
+		"drawn whatever it says (\"far\" and \"stock\" there only with\n"
+		"debug.geometry_overrides). Read each frame\n"
+		"(prism_set \"world_geometry_shadows stock\")." },
+	{ "display.prism_world_geometry_occlusion", _config_string, "\"remodel\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
 		_environment_value, _platform_desktop,
 		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
 		"display.ambient_occlusion \"world\": the level's shape the occlusion's\n"
 		"pre-pass is drawn from (where the objects darken the level, and what\n"
-		"hides them). \"drawn\" (or \"remodel\", the default): as the surfaces\n"
-		"are drawn, so each pixel reads its own surface's occlusion. \"far\"\n"
-		"and \"stock\" are debug overrides, drawn only with\n"
-		"debug.geometry_overrides (a remodelled surface then reads the\n"
-		"occlusion of another shape about it, which shimmers as the camera\n"
-		"moves). Read each frame." },
+		"hides them). \"remodel\" (default): as the surfaces are drawn, so each\n"
+		"pixel reads its own surface's occlusion; \"far\": every surface's far\n"
+		"level; \"stock\": the map's own triangles (cheapest, but a remodelled\n"
+		"surface then reads the occlusion of CE's shape about it, which\n"
+		"shimmers as the camera moves). In PRISM Rebaked and Path Traced \"far\"\n"
+		"and \"stock\" only with debug.geometry_overrides. Read each frame\n"
+		"(prism_set \"world_geometry_occlusion far\")." },
 	{ "display.prism_world_geometry_facing", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_FACING",
 		_environment_value, _platform_desktop,
 		"PRISM v2, with display.prism_world_geometry \"remodel\": true skips a\n"
@@ -1168,10 +1171,9 @@ static const struct config_setting config_settings[] =
 		"the level as it is drawn (PRISM v4's SCENE_STATIC: where\n"
 		"display.prism_world_geometry draws a remodel, each surface's near or\n"
 		"far level as the view draws it, followed as the camera moves; else the\n"
-		"map's). \"remodel\" (the remodel's near level whole), \"far\" (its far\n"
-		"level) and \"stock\" (the map's own triangles) are debug overrides,\n"
-		"traced only with debug.geometry_overrides. The rays start from the\n"
-		"same shape." },
+		"map's); \"remodel\" the remodel's near level whole, \"far\" its far\n"
+		"level, \"stock\" the map's own triangles. The rays start from the same\n"
+		"shape." },
 	{ "display.prism_rt_cache", _config_boolean, "true", "HALO_PRISM_RT_CACHE", _environment_value, _platform_desktop,
 		"PRISM ray tracing: each object's shape kept on the graphics card from\n"
 		"frame to frame, refitted where it moved and not rebuilt where it did\n"
@@ -4189,11 +4191,12 @@ static const struct config_setting config_settings[] =
 		"simulation; 0 to the last frame." },
 	{ "debug.geometry_overrides", _config_boolean, "false", "HALO_GEOMETRY_OVERRIDES", _environment_value,
 		_platform_desktop,
-		"PRISM: let display.prism_world_geometry_shadows, _occlusion and\n"
-		"display.prism_rt_world draw or trace another shape of the level than\n"
-		"the one drawn (\"far\", \"stock\", \"remodel\"), for diagnosis; off,\n"
-		"every pass draws the geometry drawn (one geometry per surface and\n"
-		"object: port/linux/vulkan/xgpu_geometry.h), and those rows are hidden." },
+		"PRISM Rebaked and Path Traced: let display.prism_world_geometry_shadows\n"
+		"and _occlusion draw another shape of the level than the one drawn\n"
+		"(\"far\", \"stock\"), for diagnosis; off, every pass draws the geometry\n"
+		"drawn (one geometry per surface and object:\n"
+		"port/linux/vulkan/xgpu_geometry.h). Classic lighting draws those\n"
+		"settings as it always did." },
 	{ "debug.camera_path", _config_string, "\"\"", "HALO_CAMERA_PATH", _environment_value, _platform_all,
 		"A file of the camera's poses at frames (port/linux/game/camera_pose.c:\n"
 		"start, cmd and key lines) it is moved along once the map is in, the\n"
