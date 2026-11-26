@@ -382,8 +382,10 @@ runtime light. The plan and its sources: `work/openh1_eval/v4_ship_bake_runs/PLA
 **What ships** (`display.bake_shipped_folder`, the data folder's `prism_bake_shipped` by default):
 `<stock|remodel>/<map>/bsp<n>.pbk`, each a finished bake file as the baker writes it, and `manifest.txt` (the game's:
 `bsp <world> <map> <index> <of> <key>`, the key as the main menu's note keeps it, its geometry by kind,
-`geo:stock` or `geo:pwg`, with the BSP's tag where the export knew it) beside `manifest.json` (each file's size and
-sha256, each BSP's per-BSP input hashes). Lighting only: the plan's job ids, the texels' light, direction, indirect
+`geo:stock` or the enhanced world's `geo:prsx:<world_id>`, with the BSP's tag where the export knew it, and each
+level's `world <map> <base_id> <classic_world_id>`), the same lines a level in `<world>/<map>/manifest.txt` (what the
+ladder and the Lightmap Downloads rows read), beside `manifest.json` (each file's size and sha256, each BSP's per-BSP
+input hashes and world_id). Lighting only: the plan's job ids, the texels' light, direction, indirect
 light, sun visibility and layers' shares, the sun mask, the volume's probes and their shares, the reflection probes,
 the probes' placement (the reach's bricks), the lamp grid's lamp indices, the footprints and the layers' base. No
 triangle, albedo, texture or remodel geometry: the player's machine rebuilds the plan from its own maps (and builds
@@ -406,8 +408,9 @@ file a whole lighting-only bake of its manifest's key).
 **The baker** (`xgpu_vulkan_bake.c`'s `file_open`): the world drawn's shipped file first (the game sends the folder and
 the world: `XGPU_BAKE_FLAG_REMODEL`), read only. Where its key is this BSP's it is loaded and drawn and nothing is
 baked ("the shipped bake (...) is this BSP's: loaded, nothing baked"); the status block's `XGPU_BAKE_STATUS_SOURCE` says
-so. Where it is not (a mod, a custom map, a remodel built otherwise), the log names the key's fields that differ and
-this BSP alone is baked here, as before. Either way the baker notes it beside the local bake (`<folder>/<map>/
+so. Where it is not (a mod, a custom map, a remodel built otherwise), the log names the key's fields that differ; this BSP
+is baked here only on the farm (the bake lock, "The frozen bake" below: a player's game draws its light without the
+bake). Either way the baker notes it beside the local bake (`<folder>/<map>/
 shipped.txt`: `bsp<n> <world> used <quality>`, or `mismatch` and the fields), for the main menu. **A better bake is good
 for a lesser quality**: a whole bake of the same inputs whose quality is better than the one asked is taken (the key's
 settings made again at the file's quality, the `max` tier's noise floor among them: `key_settings_hash`), so a shipped
@@ -434,6 +437,59 @@ bakes made here and the notes, keeps the shipped light and checks it again.
 Not yet (the plan's other steps): the farm's MAX bake of every level and both worlds, the remodel's bit-identical
 build (its geometry hash checked in the manifest), the BC6H/BC4/BC7 release encoding (about 4.5 bytes a texel against
 about 18), the baked sun masks and rebaked pages of Classic's PRISM shipped alongside, and the installer's download.
+
+## The frozen bake: BAKE_VERSION 20 (v4 geopatch M4)
+
+`XGPU_BAKE_VERSION` 20 is the first frozen baker: the farm bakes every level for both worlds with it (geopatch M6), and
+a later change that moves it re-farms every pack of both worlds (a planned, batched content release, decision A13).
+What M4 put into it before the freeze (`work/openh1_eval/v4_geopatch_runs/PLAN_FINAL.md`, M4):
+
+- **Keyed to the world_id.** Every bake's key (its header, `prism_bake_cache.h`) holds the BSP's `world_id`, the
+  engine's `SCENE_VERSION` (`XGPU_BAKE_SCENE_VERSION`, `PRISM_SCENE_VERSION`: one number) and the variant (0 classic,
+  1 enhanced). The enhanced world_id comes from the sidecar the game opened (`docs/prism_geometry.md`); the classic one
+  from the map's `classic_world_id`, the farm's hash of a map version's bake inputs (`tools/geopatch/classic_world.py`:
+  its structure BSPs, and the tag data of its scenario, shaders, bitmaps (and their pixels), static scenery, devices,
+  light fixtures, models, skies and lights), which the game looks up by the player's map's `base_id` in the shipped
+  manifests' `world <map> <base_id> <classic_world_id>` lines (M7's signed manifest replaces them) and the farm passes
+  as `HALO_CLASSIC_WORLD_ID`. With a world_id the key's map checksum is 0, so two map versions of equal bake inputs
+  share one pack. Without one (a custom map) the key is the map's checksum, as before.
+- **Foliage-ready layers** (decision A5, PLAN_FINAL section 4.4): beside the bake's own light, the light with the stock
+  foliage passed, for a runtime that draws its own leaves. The foliage is the static scenery's cutouts (alpha-tested
+  model shaders, the leaves' cards: mask 8 in the bake's structure); the level's own alpha-tested surfaces (fences,
+  grates) are not foliage and block in both. Three records: `MSKF`, a tile's sun mask with the cutouts passed (every
+  tile some of whose texels face the sun and are not lit whole: removing occluders only lights a texel more, so a tile
+  lit whole needs none), `VOLF`, a brick's probes' sun visibility with them passed (a byte a probe, traced along the
+  same direction as the bake's own, `sun_visible_layers`), and `FCLS`, the foliage classes (a bit a static scenery
+  triangle: which of them the layers leave out; classes, no geometry). The sky's and the bounces' light under the
+  canopy keep the stock foliage (the runtime's canopy term handles them, as the plan says); only the sun's visibility
+  is layered. Nothing reads the layers yet: no foliage ships before the FOLIAGE rows.
+- **The bake lock** (PLAN_FINAL section 3.5): a bake is made or resumed only where `HALO_BAKE_FARM=1` is set (the
+  farm's runs); everywhere else the baker only loads whole bakes, and writes no `.pbk`, `.pbk.new` or `.reach` (and makes
+  no bake folder). A build made with `PRISM_BAKER_COMPILED_OUT` never bakes (M7's release builds, once the farm half
+  is split off). `display.bake` and `HALO_BAKE=auto` alone no longer start a bake.
+- **The enhanced world's own lightmap layout** (LMUV v2, decision A4): the enhanced bake's atlas is laid out on the
+  sidecar's own pages (`docs/prism_geometry.md`), which follow the BSP's own lightmap pages in SCENE_STATIC's page list
+  and in the G-buffer's page. The baker's code is the same for both worlds: its atlas takes any page's size and any
+  chart's coordinates.
+
+**What forces a re-farm, and what does not:**
+
+| Change | Re-farms |
+| --- | --- |
+| The baker's estimator, its records or their layout, the layers, the rig's units, the atlas's densities, the quality's rules (anything that moves `XGPU_BAKE_VERSION`) | every pack of both worlds |
+| The engine's derivation of the bake's scene from the map (static scenery rules, alpha coverage, triangle order and filtering: `SCENE_VERSION`, in every world_id) | every pack of the world it changes |
+| A level's enhanced geometry (a BAKE_RELEVANT sidecar section: GEOM, LMUV, SCEN) | that BSP's enhanced pack |
+| A map version with other bake inputs (a new `classic_world_id`) | that version's packs |
+| `RENDER_FORMAT` (GEOM's meaning to the renderer) | every enhanced pack |
+| Collision (COLL, ZSOL, COLM, PATO), runtime sections (RHGT, DOBJ), the PRSX format number, the sidecar's file bytes, the pack's encoding (PACK_FORMAT: re-exported from the archived masters) | nothing |
+| Any runtime setting (exposure, tone curve, sky light kind, lamp brightness: the layers' weights) | nothing |
+
+**Bakes are not bit-identical run to run** (the GPU's float order and the converge rule's batch timing:
+`work/openh1_eval/v4_ship_bake_runs/cap/numbers.txt`), and need not be: a pack's key is its world_id (the geometry and
+inputs it is for), never its bytes; the release's manifest names each produced file by its sha256 (download and
+install integrity only), and the frozen packs are archived by content hash and never baked again for the same release
+(PLAN_FINAL section 2.1: the bake masters are archived because GPU bakes are not reproducible). A re-bake of the same
+world_id is a different file of the same light, within the bake's noise.
 
 ## What is baked
 

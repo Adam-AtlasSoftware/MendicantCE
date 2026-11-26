@@ -442,6 +442,7 @@ int cache_slot_source_matches(short slot, const char *map_path, const char *name
 source record, read from the slot's copy the first time it is asked for;
 FALSE if the slot is no whole copy */
 int cache_slot_source_base_id(short slot, unsigned char id[32]);
+short cache_file_open_slot(void);
 /* ... the folder of this copy of the game's slots, z:\ or, while another
 copy holds that, a z:\cache-N\ of its own (with its backslash) */
 const char *cache_slot_folder(void);

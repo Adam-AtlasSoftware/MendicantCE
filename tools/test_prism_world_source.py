@@ -77,8 +77,10 @@ def test_classic_lighting_never_draws_it():
 
 
 def test_the_bake_is_keyed_to_the_world_id():
-    """the game sends the BSP's enhanced world_id with the bake's control (zeros for the classic world) and the
-    baker mixes it into the key's geometry hash, so a bake is used only for the sidecar geometry it was made from"""
+    """the game sends the BSP's world_id with the bake's control (the enhanced one, else the classic one where the
+    map's classic_world_id is known: M4) and the baker keys the bake to it (the key's own world_id, SCENE_VERSION
+    and variant, the map's checksum 0, and the geometry hash), so a bake is used only for the world it was made
+    from"""
     stream = (ROOT / "port/linux/src/xgpu_stream.h").read_text()
     record = stream[stream.index("struct xgpu_stream_prism_bake\n"):]
     record = record[:record.index("};")]
@@ -86,8 +88,16 @@ def test_the_bake_is_keyed_to_the_world_id():
     assert "XGPU_STREAM_ASSERT_SIZE(struct xgpu_stream_prism_bake, 80 + XGPU_BAKE_NAME + 32);" in stream
     assert "prism_world_source_world_id((short)bake->bsp_index, bake->world_id);" in _source("prism_bake.c")
     baker = (ROOT / "port/linux/vulkan/xgpu_vulkan_bake.c").read_text()
-    assert re.search(r"memcmp\(bake\.control\.world_id, zero, sizeof\(zero\)\)\)\s*\n\s*b->key\.geometry_hash = "
-                     r"prism_bake_hash64\(b->key\.geometry_hash, bake\.control\.world_id, 32\);", baker)
+    assert re.search(r"memcmp\(bake\.control\.world_id, zero, sizeof\(zero\)\)\)\s*\n\s*\{\s*\n\s*b->key\.geometry_hash = "
+                     r"prism_bake_hash64\(b->key\.geometry_hash, bake\.control\.world_id, 32\);\s*\n\s*"
+                     r"memcpy\(b->key\.world_id, bake\.control\.world_id, 32\);\s*\n\s*"
+                     r"b->key\.scene_version = XGPU_BAKE_SCENE_VERSION;\s*\n\s*b->key\.map_checksum = 0;", baker)
+    cache = (ROOT / "port/linux/vulkan/prism_bake_cache.c").read_text()
+    assert "memcmp(a->world_id, b->world_id, 32)" in cache and "HEADER_WORLD_ID" in cache
+    # (the classic world's ids, from the map's classic_world_id)
+    source = _source("prism_world_source.c")
+    assert "prism_world_id_classic(world_source.classic_world_id" in source
+    assert 'getenv("HALO_CLASSIC_WORLD_ID")' in source
     # (the shipped bake's manifest names the enhanced world's BSPs by that id, and the ladder looks for it)
     assert '"geo:prsx:%s:%s"' in _source("prism_bake_menu.c")
     assert '"geo:prsx:%s"' in _source("prism_world_source.c")
@@ -102,3 +112,22 @@ def test_prepared_records_keyed_to_the_world_id():
     choose = choose[:choose.index("\n}\n")]
     assert "prism_world_source_world_id(global_structure_bsp_index_get(), id);" in choose
     assert choose.index("hash ^= world;") < choose.index("prepared.key = hash;")
+
+
+def test_players_never_bake():
+    """the bake lock (M4, PLAN_FINAL section 3.5): a bake is wanted only where the farm's HALO_BAKE_FARM=1 is set
+    (and never in a PRISM_BAKER_COMPILED_OUT build), and only then are a reach's file and a bake's folder written;
+    the foliage-ready layers' records are light the shipped bake may carry"""
+    baker = re.sub(r"/\*.*?\*/", "", (ROOT / "port/linux/vulkan/xgpu_vulkan_bake.c").read_text(), flags=re.S)
+    assert re.search(r"wanted = \(bake\.control\.mode == XGPU_BAKE_MODE_AUTO \|\| bake\.control\.request != 0\) && "
+                     r"!in_play && bake_allowed\(\);", baker)
+    farm = baker[baker.index("static int bake_farm(void)\n{"):]
+    farm = farm[:farm.index("\n}\n")]
+    assert "#ifdef PRISM_BAKER_COMPILED_OUT" in farm and 'getenv("HALO_BAKE_FARM")' in farm
+    assert "farm[0] == '1' && farm[1] == 0" in farm
+    write = baker[baker.index("static void reach_file_write(uint64_t hash)"):]
+    write = write[:write.index("memcpy(head, \"PRCH\", 4);")]
+    assert "!bake_farm()" in write
+    assert re.search(r"if \(bake_farm\(\)\)\s*\n\s*folder_make\(folder\);", baker)
+    import prism_bake_ship as ship
+    assert {"MSKF", "VOLF", "FCLS"} <= set(ship.LIGHT_RECORDS.values())

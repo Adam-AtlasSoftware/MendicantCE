@@ -137,7 +137,16 @@ enum prism_bake_record_type
 	its VOLB) */
 	PRISM_BAKE_RECORD_LAYER_BASE = PRISM_BAKE_CACHE_FOURCC('L', 'Y', 'R', 'B'),
 	PRISM_BAKE_RECORD_ATLAS_LAYERS = PRISM_BAKE_CACHE_FOURCC('A', 'T', 'L', 'Y'),
-	PRISM_BAKE_RECORD_VOLUME_LAYERS = PRISM_BAKE_CACHE_FOURCC('V', 'O', 'L', 'Y')
+	PRISM_BAKE_RECORD_VOLUME_LAYERS = PRISM_BAKE_CACHE_FOURCC('V', 'O', 'L', 'Y'),
+	/* the foliage-ready layers (v4 geopatch M4, PLAN_FINAL.md section 4.4: the
+	light with the static scenery's cutouts, the leaves' cards, passed, for
+	foliage drawn by the runtime): a tile's sun mask (MASK_TEXELS bytes,
+	the tile's mask job), a brick's probes' sun visibility (a byte each, the
+	brick's job), and the foliage classes (FCLS, no job: the format in
+	xgpu_vulkan_bake.c's foliage_classes_write) */
+	PRISM_BAKE_RECORD_SUN_MASK_FOLIAGE = PRISM_BAKE_CACHE_FOURCC('M', 'S', 'K', 'F'),
+	PRISM_BAKE_RECORD_VOLUME_FOLIAGE = PRISM_BAKE_CACHE_FOURCC('V', 'O', 'L', 'F'),
+	PRISM_BAKE_RECORD_FOLIAGE_CLASSES = PRISM_BAKE_CACHE_FOURCC('F', 'C', 'L', 'S')
 };
 
 /* what a bake was made from: a change to any field makes it stale */
@@ -155,6 +164,15 @@ struct prism_bake_cache_key
 	uint32_t baker_version;
 	uint32_t quality; /* prism_bake_atlas.h's prism_bake_quality */
 	float convergence_threshold; /* prism_bake_converge.h's, set in M0 */
+	/* (v4 geopatch M4) the world the bake was made for: the BSP's world_id
+	(port/linux/game/prism_identity.h; all zero where the game had none: a
+	custom map, a developer's run without the farm's classic_world_id),
+	SCENE_VERSION and the variant (0 classic, 1 enhanced). With a world_id
+	the map's checksum is 0: the world_id names the bake's inputs, so two
+	map versions of equal inputs share a pack */
+	unsigned char world_id[32];
+	uint32_t scene_version;
+	uint32_t variant;
 };
 
 /* which fields of two keys differ */

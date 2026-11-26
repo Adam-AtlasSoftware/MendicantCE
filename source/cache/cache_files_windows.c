@@ -2327,3 +2327,11 @@ void cache_files_unpack_wait(
 
 	return;
 }
+
+/* port: the open map's cache slot (its source record holds the map's
+base_id: port/linux/game/prism_world_source.c), or NONE */
+short cache_file_open_slot(
+	void)
+{
+	return cache_file_globals.open_map_file_index;
+}

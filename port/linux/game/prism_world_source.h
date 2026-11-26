@@ -67,8 +67,11 @@ boolean prism_world_source_image(struct structure_bsp *bsp, short bsp_index, cha
 	unsigned char **image, unsigned long *size);
 
 /* the BSP's world_id (prism_identity.h) as the bake keys it: the enhanced
-one while prism_world_enhanced, all zeros for the classic world (its
-classic_world_id is the signed manifest's, M7) */
+one while prism_world_enhanced, else the classic one where the map's
+classic_world_id is known (the shipped manifests' "world" line for the
+player's base_id, until M7's signed manifest; the farm's
+HALO_CLASSIC_WORLD_ID), else all zeros (the bake keyed by the map's
+checksum) */
 void prism_world_source_world_id(short bsp_index, unsigned char id[32]);
 
 /* the world_id's first 16 hex digits and the sidecar's name for the log and

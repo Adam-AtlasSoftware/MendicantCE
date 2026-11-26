@@ -372,7 +372,9 @@ static boolean prepared_choose(boolean mirrors)
 		global_structure_bsp_index_get()));
 	/* (v4 geopatch M2: a map drawn with its enhanced world geometry keys its
 	records by the checksum and the BSP's enhanced world_id, as the render
-	caches built from that geometry are: prism_world_source.c) */
+	caches built from that geometry are: prism_world_source.c; the classic
+	world's records as before, whatever its classic world_id) */
+	if (prism_world_enhanced())
 	{
 		unsigned char id[32];
 		uint64_t world = 0;

@@ -2960,7 +2960,11 @@ enum
 /* the bake file's maker (xgpu_vulkan_bake.c's BAKE_VERSION: a change makes
 every bake stale), which the game's note of the BSPs baked holds too
 (port/linux/game/prism_bake.c's prism_bake_key) */
-#define XGPU_BAKE_VERSION 19u
+#define XGPU_BAKE_VERSION 20u
+/* the engine's derivation of the bake's scene from the map, which every
+world_id holds (port/linux/game/prism_identity.h's PRISM_SCENE_VERSION, the
+same number: test_prism_world_ids checks they agree) */
+#define XGPU_BAKE_SCENE_VERSION 1u
 #define XGPU_BAKE_PATH 512u
 #define XGPU_BAKE_SLICE 65536u
 #define XGPU_BAKE_NAME 64u
@@ -3050,11 +3054,12 @@ struct xgpu_stream_prism_bake
 	prism_bake.md, "The shipped bake")) */
 	uint32_t shipped;
 	char map_name[XGPU_BAKE_NAME];
-	/* (the BSP's enhanced world_id, port/linux/game/prism_identity.h, where
-	the enhanced world geometry is drawn (the map's sidecar,
-	prism_world_source.c); all zeros for the classic world. The bake's key
-	holds it (its geometry hash), so an enhanced bake is used only for the
-	sidecar geometry it was made from) */
+	/* (the BSP's world_id, port/linux/game/prism_identity.h: the enhanced
+	one where the enhanced world geometry is drawn (the map's sidecar,
+	prism_world_source.c), else the classic one where the map's
+	classic_world_id is known (the shipped manifest, or the farm's
+	HALO_CLASSIC_WORLD_ID); all zeros otherwise. The bake's key holds it,
+	so a bake is used only for the world it was made from (v4 geopatch M4)) */
 	unsigned char world_id[32];
 };
 

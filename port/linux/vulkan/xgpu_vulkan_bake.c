@@ -299,6 +299,10 @@ struct bake_tile
 	uint16_t x, y;
 	uint32_t triangle_first, triangle_count;
 	uint8_t state, mask_state, masked;
+	/* the foliage-ready layer's sun mask (PLAN_FINAL.md section 4.4: the
+	static scenery's cutouts passed): 0 none needed (every texel facing the
+	sun is lit in the bake's own, or none faces it), 1 to be made, 2 made */
+	uint8_t foliage_state;
 	uint32_t physical;
 	uint32_t sun;
 	uint64_t job;
@@ -507,6 +511,10 @@ struct bake_state
 	/* the masks: the tiles to mask, the next */
 	uint32_t *mask_tiles;
 	uint32_t mask_tile_count, masks_done, masks_batched;
+	/* the foliage-ready layer's masks: its tiles (after the bake's own), done
+	and batched */
+	uint32_t *foliage_tiles;
+	uint32_t foliage_tile_count, foliage_done, foliage_batched;
 	struct bake_buffer mask_ranges, mask_out;
 	/* the volume: its batches of probes (done: those written) */
 	struct prism_bake_batches volume;
@@ -676,6 +684,9 @@ static double now_seconds(void)
 }
 
 /* ---------- memory */
+
+/* (the bake lock, below with bake_frame) */
+static int bake_farm(void);
 
 static int memory_type(uint32_t bits, VkMemoryPropertyFlags wanted)
 {
@@ -2033,6 +2044,7 @@ static void bake_free(struct bake_state *b)
 	free(b->sun_host);
 	free(b->weights_host);
 	free(b->mask_tiles);
+	free(b->foliage_tiles);
 	free(b->probe_host);
 	free(b);
 }
@@ -2444,14 +2456,23 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 	hash = prism_bake_hash64(hash, b->plan.attributes, (size_t)kept * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS * 4);
 	b->key.bsp_hash = hash;
 	b->key.geometry_hash = prism_bake_hash64(PRISM_BAKE_HASH64_SEED, b->plan.tiers, kept);
-	/* (the enhanced world's world_id, where the game draws its sidecar's
-	geometry: a bake keyed to the geometry it was made from; the classic
-	world's key is as it was) */
+	/* (v4 geopatch M4: the bake keyed to the BSP's world_id, either world's,
+	where the game has one (prism_world_source.c): the key's own world_id,
+	SCENE_VERSION and variant, and the map's checksum 0, since the world_id
+	names the bake's inputs and two map versions of equal inputs share a
+	pack; also in the geometry hash, as M2 had it. Without one (a custom
+	map, a developer's run) the key is the map's checksum, as before) */
 	{
 		static const unsigned char zero[32];
 
+		b->key.variant = (bake.control.flags & XGPU_BAKE_FLAG_REMODEL) ? 1u : 0u;
 		if (memcmp(bake.control.world_id, zero, sizeof(zero)))
+		{
 			b->key.geometry_hash = prism_bake_hash64(b->key.geometry_hash, bake.control.world_id, 32);
+			memcpy(b->key.world_id, bake.control.world_id, 32);
+			b->key.scene_version = XGPU_BAKE_SCENE_VERSION;
+			b->key.map_checksum = 0;
+		}
 	}
 	/* (the static scenery the bake traces with the level: its triangles,
 	albedo and coverage in the geometry's hash) */
@@ -2524,7 +2545,8 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 		char folder[XGPU_BAKE_PATH + 160];
 
 		snprintf(folder, sizeof(folder), "%s/%s", b->folder, name);
-		folder_make(folder);
+		if (bake_farm())
+			folder_make(folder);
 	}
 	/* (a whole bake of this BSP: the shipped one, or this machine's; the
 	plan at its quality) */
@@ -3467,6 +3489,28 @@ static int tile_words(struct texel_result *texels, uint32_t *raster, uint32_t *f
 /* the raster's: a tile's words into the pool (a physical tile taken), its
 table entry; its sun's state (and a mask's coarse first content from the
 texels' visibility) */
+/* whether a finished tile needs the foliage-ready layer's sun mask: some of
+its texels face the sun and are not all lit (removing the static scenery's
+cutouts can only light a texel more, so a tile lit whole stays lit). file:
+its TILE_TEXELS records' words (4 each), sun_state: tile_words' */
+static int foliage_needed(const uint32_t *file, int sun_state)
+{
+	uint32_t index;
+
+	if (sun_state == 2)
+		return 0;
+	if (sun_state >= 3)
+		return 1;
+	for (index = 0; index < TILE_TEXELS; index++)
+	{
+		uint32_t w3 = file[index * 4 + 3];
+
+		if (((w3 >> 24) & 3u) == 1u && ((w3 >> 24) & 4u))
+			return 1;
+	}
+	return 0;
+}
+
 static int tile_draw(VkCommandBuffer commands, struct bake_state *b, uint32_t tile_index, const uint32_t *raster,
 	int sun_state, const uint8_t *sun_texels, const uint8_t *fine_mask)
 {
@@ -3700,6 +3744,7 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 		return;
 	b->plan.tiles[tile_index].state = TILE_DONE;
 	b->plan.tiles[tile_index].mask_state = sun_state >= 3 ? 1 : 0;
+	b->plan.tiles[tile_index].foliage_state = (uint8_t)foliage_needed(file, sun_state);
 	b->tiles_done++;
 	for (index = 0; index < TILE_TEXELS; index++)
 	{
@@ -4682,9 +4727,15 @@ static void lightmap_collect(VkCommandBuffer commands, struct bake_state *b, str
 
 /* ---------- the sun mask */
 
+/* the sun mask: the bake's own (the tiles neither lit nor dark whole), then
+the foliage-ready layer's (the tiles it needs, foliage_needed: their points
+traced with the static scenery's cutouts passed, PLAN_FINAL.md section 4.4).
+A readback's tile index has FOLIAGE_TILE set for the latter */
+#define FOLIAGE_TILE 0x80000000u
+
 static void mask_frame(VkCommandBuffer commands, struct bake_state *b)
 {
-	uint32_t count = 0, index;
+	uint32_t count = 0, index, *list, list_count, *batched, layer;
 	VkDeviceAddress job, addresses[8];
 	struct bake_readback *r;
 	float entry_words[8];
@@ -4692,22 +4743,41 @@ static void mask_frame(VkCommandBuffer commands, struct bake_state *b)
 	if (!b->mask_tiles)
 	{
 		b->mask_tiles = (uint32_t *)malloc(((size_t)b->plan.tile_count + 1) * 4);
-		if (!b->mask_tiles)
+		b->foliage_tiles = (uint32_t *)malloc(((size_t)b->plan.tile_count + 1) * 4);
+		if (!b->mask_tiles || !b->foliage_tiles)
 		{
 			bake_fail(b, "no memory for the sun mask");
 			return;
 		}
 		for (index = 0; index < b->plan.tile_count; index++)
+		{
 			if (b->plan.tiles[index].mask_state == 1)
 				b->mask_tiles[b->mask_tile_count++] = index;
-		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the sun mask: %u of %u tiles", b->map, (int)b->bsp,
-			b->mask_tile_count, b->plan.tile_count);
+			if (b->plan.tiles[index].foliage_state == 1)
+				b->foliage_tiles[b->foliage_tile_count++] = index;
+		}
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the sun mask: %u of %u tiles; the foliage-ready layer's: %u",
+			b->map, (int)b->bsp, b->mask_tile_count, b->plan.tile_count, b->foliage_tile_count);
 	}
-	if (b->masks_batched >= b->mask_tile_count)
-		return;
-	for (index = 0; index < MASK_BATCH && b->masks_batched + index < b->mask_tile_count; index++)
+	if (b->masks_batched < b->mask_tile_count)
 	{
-		struct bake_tile const *tile = &b->plan.tiles[b->mask_tiles[b->masks_batched + index]];
+		list = b->mask_tiles;
+		list_count = b->mask_tile_count;
+		batched = &b->masks_batched;
+		layer = 0;
+	}
+	else if (b->foliage_batched < b->foliage_tile_count)
+	{
+		list = b->foliage_tiles;
+		list_count = b->foliage_tile_count;
+		batched = &b->foliage_batched;
+		layer = 1;
+	}
+	else
+		return;
+	for (index = 0; index < MASK_BATCH && *batched + index < list_count; index++)
+	{
+		struct bake_tile const *tile = &b->plan.tiles[list[*batched + index]];
 		uint32_t words[3] = { index, tile->triangle_first, tile->triangle_count };
 
 		entry_words[0] = (float)tile->x * (float)TILE;
@@ -4742,14 +4812,14 @@ static void mask_frame(VkCommandBuffer commands, struct bake_state *b)
 	job = job_block(commands, b, 4, addresses, 2);
 	if (!job)
 		return;
-	run(commands, PIPELINE_MASK, b, job, count * MASK_TEXELS, 16, 256, b->frame++, 0, 0, 0, 0,
+	run(commands, PIPELINE_MASK, b, job, count * MASK_TEXELS, 16, 256, b->frame++, (float)layer, 0, 0, 0,
 		(count * MASK_TEXELS + 63) / 64);
 	barrier(commands);
 	copy_region(commands, &b->mask_out, 0, &r->buffer, 0, (VkDeviceSize)count * MASK_TEXELS);
 	for (index = 0; index < count; index++)
-		r->tiles[index] = b->mask_tiles[b->masks_batched + index];
+		r->tiles[index] = list[*batched + index] | (layer ? FOLIAGE_TILE : 0u);
 	r->finished = count;
-	b->masks_batched += count;
+	*batched += count;
 }
 
 static void mask_collect(VkCommandBuffer commands, struct bake_state *b, struct bake_readback *r)
@@ -4758,9 +4828,20 @@ static void mask_collect(VkCommandBuffer commands, struct bake_state *b, struct 
 
 	for (index = 0; index < r->finished; index++)
 	{
-		struct bake_tile *tile = &b->plan.tiles[r->tiles[index]];
+		int foliage = (r->tiles[index] & FOLIAGE_TILE) != 0;
+		struct bake_tile *tile = &b->plan.tiles[r->tiles[index] & ~FOLIAGE_TILE];
 		const uint8_t *mask = (const uint8_t *)r->buffer.mapped + (size_t)index * MASK_TEXELS;
 
+		if (foliage)
+		{
+			/* (the foliage-ready layer's: kept for the foliage's runtime, not
+			drawn) */
+			file_append(b, PRISM_BAKE_RECORD_SUN_MASK_FOLIAGE, prism_bake_job_sun_mask_tile(tile->vpage, 0, tile->x,
+				tile->y), mask, MASK_TEXELS);
+			tile->foliage_state = 2;
+			b->foliage_done++;
+			continue;
+		}
 		if (tile->sun >= 3)
 			upload(commands, &b->masks, (VkDeviceSize)(tile->sun - 3) * MASK_TEXELS, mask, MASK_TEXELS);
 		file_append(b, PRISM_BAKE_RECORD_SUN_MASK_TILE, prism_bake_job_sun_mask_tile(tile->vpage, 0, tile->x, tile->y),
@@ -5026,6 +5107,15 @@ static void volume_collect(VkCommandBuffer commands, struct bake_state *b, struc
 				prism_bake_layer_shares_put(total, (const float (*)[3])shares, a[26] < 0.5f, layers, k, BRICK_PROBES);
 			}
 			memcpy(words, at, sizeof(words));
+			/* (the foliage-ready layer's sun visibility a probe, a byte each,
+			before the brick, whose record says it is done) */
+			{
+				uint8_t open[BRICK_PROBES];
+
+				for (k = 0; k < BRICK_PROBES; k++)
+					open[k] = unorm8(accumulators[(size_t)(index + k) * ACCUMULATOR_FLOATS + 27]);
+				file_append(b, PRISM_BAKE_RECORD_VOLUME_FOLIAGE, brick_job(plan, first + index), open, sizeof(open));
+			}
 			file_append(b, PRISM_BAKE_RECORD_VOLUME_BRICK, brick_job(plan, first + index), words, sizeof(words));
 			file_append(b, PRISM_BAKE_RECORD_VOLUME_LAYERS, brick_job(plan, first + index), layers, sizeof(layers));
 			prism_bake_layers_probes_mean(&b->weights, words, layers, BRICK_PROBES, b->volume_ratio_sum,
@@ -5359,7 +5449,9 @@ static int plan_write(struct bake_state *b, int with_masks)
 	{
 		struct bake_tile const *tile = &plan->tiles[index];
 
-		if (tile->mask_state >= 1)
+		/* (the bake's own mask and the foliage-ready layer's share the tile's
+		mask job) */
+		if (tile->mask_state >= 1 || tile->foliage_state >= 1)
 			jobs[at++] = prism_bake_job_sun_mask_tile(tile->vpage, 0, tile->x, tile->y);
 	}
 	result = b->writing ? prism_bake_cache_append_plan(&b->writer, jobs, at) : 0;
@@ -5399,6 +5491,35 @@ static int layer_light_differs(const struct prism_bake_layer_light *a, const str
 		fabsf(a->fixtures - b->fixtures) > 1.0e-4f || fabsf(a->emissive_scale - b->emissive_scale) > 1.0e-4f;
 }
 
+/* the foliage classes (PLAN_FINAL.md section 4.4, decision A5): which of
+the bake's static scenery triangles the foliage-ready layers leave out (its
+cutouts: alpha-tested model shaders, the leaves' cards; mask 8 in the
+bake's structure), so that a runtime drawing its own foliage knows which
+stock light its layers removed. FCLS, little endian: u32 version (1), u32
+the scenery's triangles, u32 its cutouts, then a bit a triangle in the
+scenery's order (1: foliage), padded to a word. Classes, not geometry: no
+place, shape or texture. The level's own alpha-tested surfaces (fences,
+grates) are not foliage: they stay in both layers */
+static void foliage_classes_write(struct bake_state *b)
+{
+	uint32_t words = 3 + (b->scenery_count + 31) / 32, index, cutouts = 0;
+	uint32_t *payload = (uint32_t *)calloc(words, 4);
+
+	if (!payload)
+		return;
+	for (index = 0; index < b->scenery_count; index++)
+		if (b->scenery && b->scenery[(size_t)index * SCENERY_FLOATS + 12] < 0.999f)
+		{
+			payload[3 + index / 32] |= 1u << (index % 32);
+			cutouts++;
+		}
+	payload[0] = 1;
+	payload[1] = b->scenery_count;
+	payload[2] = cutouts;
+	file_append(b, PRISM_BAKE_RECORD_FOLIAGE_CLASSES, PRISM_BAKE_JOB_NONE, payload, (size_t)words * 4);
+	free(payload);
+}
+
 /* the layers' base written (the bake's light, and whether it is of the
 stock world so far) */
 static void base_write(struct bake_state *b)
@@ -5408,6 +5529,7 @@ static void base_write(struct bake_state *b)
 	b->base.stock = !b->saw_remodel;
 	prism_bake_layer_base_write(&b->base, words);
 	file_append(b, PRISM_BAKE_RECORD_LAYER_BASE, PRISM_BAKE_JOB_NONE, words, sizeof(words));
+	foliage_classes_write(b);
 }
 
 /* the file: a whole bake of this key loaded (DONE), the log of an unfinished
@@ -5725,7 +5847,8 @@ static int file_compact(struct bake_state *b)
 			record->type == PRISM_BAKE_RECORD_PROBE)
 			failed |= prism_bake_cache_append_packed(&writer, record->type, record->job, payload, record->size, 4) != 0;
 		else if (record->type == PRISM_BAKE_RECORD_ATLAS_LAYERS || record->type == PRISM_BAKE_RECORD_VOLUME_LAYERS ||
-			record->type == PRISM_BAKE_RECORD_SUN_MASK_TILE)
+			record->type == PRISM_BAKE_RECORD_SUN_MASK_TILE || record->type == PRISM_BAKE_RECORD_SUN_MASK_FOLIAGE ||
+			record->type == PRISM_BAKE_RECORD_VOLUME_FOLIAGE)
 			failed |= prism_bake_cache_append_packed(&writer, record->type, record->job, payload, record->size, 1) != 0;
 		else if (prism_bake_cache_append(&writer, record->type, record->job, payload, record->size))
 			failed = 1;
@@ -5884,6 +6007,11 @@ static int file_load(VkCommandBuffer commands, struct bake_state *b)
 			return 0;
 		if (!tile_indirect(commands, b, cursor, indirect))
 			return 0;
+		/* (the foliage-ready layer's mask: made where the file has it) */
+		tile->foliage_state = (uint8_t)foliage_needed(file, sun_state);
+		if (tile->foliage_state && prism_bake_cache_job_done(&b->cache, PRISM_BAKE_RECORD_SUN_MASK_FOLIAGE,
+			prism_bake_job_sun_mask_tile(tile->vpage, 0, tile->x, tile->y)))
+			tile->foliage_state = 2;
 		tile->state = TILE_DONE;
 		b->tiles_done++;
 		loaded++;
@@ -6240,8 +6368,8 @@ static void status_write(struct bake_state *b)
 	volume 10%) */
 	planned = b->plan.tile_count ? (double)b->plan.tile_count : 1.0;
 	done = (double)b->tiles_done / planned * 0.8;
-	if (b->mask_tile_count)
-		done += (double)b->masks_done / (double)b->mask_tile_count * 0.1;
+	if (b->mask_tile_count + b->foliage_tile_count)
+		done += (double)(b->masks_done + b->foliage_done) / (double)(b->mask_tile_count + b->foliage_tile_count) * 0.1;
 	else if (step > STEP_MASK)
 		done += 0.1;
 	if (b->plan.probe_count)
@@ -6291,6 +6419,38 @@ static void bake_log_progress(struct bake_state *b)
 		(double)b->rays / (t - b->started + 1.0e-3) / 1.0e6, b->gpu_seconds);
 }
 
+/* the bake lock (v4 geopatch M4, PLAN_FINAL.md section 3.5: players never
+bake): a bake is made or resumed only by a farm build run by the farm, with
+HALO_BAKE_FARM=1 in its environment; everywhere else the baker only loads
+whole bakes (the shipped packs). A build made with PRISM_BAKER_COMPILED_OUT
+(M7's release builds, once the farm half is split off) never bakes at all.
+display.bake (config.toml's player rows are gone, M3) and HALO_BAKE=auto alone
+no longer start one. Logged once */
+static int bake_farm(void)
+{
+#ifdef PRISM_BAKER_COMPILED_OUT
+	return 0;
+#else
+	const char *farm = getenv("HALO_BAKE_FARM");
+
+	return farm && farm[0] == '1' && farm[1] == 0;
+#endif
+}
+
+static int bake_allowed(void)
+{
+	static int logged;
+	int allowed = bake_farm();
+
+	if (!logged)
+	{
+		logged = 1;
+		host_logf(HOST_LOG_INFO, "prism bake: %s", allowed ? "the farm's run (HALO_BAKE_FARM=1): bakes are made" :
+			"no bake is ever made here (players never bake; the farm sets HALO_BAKE_FARM=1): whole bakes are loaded");
+	}
+	return allowed;
+}
+
 static void bake_frame(void)
 {
 	struct bake_state *b = bake.bake;
@@ -6302,7 +6462,7 @@ static void bake_frame(void)
 	/* (port: nothing baked for a set begun again in play: a setting changed,
 	XGPU_BAKE_FLAG_IN_PLAY) */
 	in_play = (bake.control.flags & XGPU_BAKE_FLAG_IN_PLAY) != 0;
-	wanted = (bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0) && !in_play;
+	wanted = (bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0) && !in_play && bake_allowed();
 	/* (port: such a set of the BSP drawn: its whole bake loaded where there
 	is one, else the bake drawn kept, its generation remembered, until the
 	next load; never a bake begun in play) */
@@ -6510,7 +6670,7 @@ bake still traces) */
 			plan_write(b, 1);
 			break;
 		}
-		if (b->masks_done >= b->mask_tile_count)
+		if (b->masks_done >= b->mask_tile_count && b->foliage_done >= b->foliage_tile_count)
 		{
 			b->step = STEP_VOLUME;
 			break;
@@ -6714,7 +6874,9 @@ static void reach_file_write(uint64_t hash)
 	FILE *f;
 	int ok;
 
-	if (!bake.reach_path[0] || !bake.bricks)
+	/* (the bake lock: only the farm writes a reach's file; elsewhere the
+	reach is the shipped pack's REAC record, or made in memory) */
+	if (!bake.reach_path[0] || !bake.bricks || !bake_farm())
 		return;
 	memcpy(head, "PRCH", 4);
 	snprintf(temporary, sizeof(temporary), "%s.new", bake.reach_path);

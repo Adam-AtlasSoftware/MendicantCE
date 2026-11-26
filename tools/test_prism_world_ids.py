@@ -172,3 +172,39 @@ def test_world_id_is_the_contents_not_the_order(tool, tmp_path):
     assert tool.open(path)["result"] == "a malformed directory"
     with pytest.raises(prsx.PrsxError):
         prsx.Sidecar(bytes(swapped))
+
+
+def test_scene_version_is_one_number():
+    """SCENE_VERSION, which every world_id holds, is one number in the game (prism_identity.h), the baker's key
+    (xgpu_stream.h's XGPU_BAKE_SCENE_VERSION) and the farm's Python (identity.py)"""
+    game = (ROOT / "port/linux/game/prism_identity.h").read_text()
+    stream = (ROOT / "port/linux/src/xgpu_stream.h").read_text()
+    a = int(re.search(r"#define PRISM_SCENE_VERSION (\d+)u", game).group(1))
+    b = int(re.search(r"#define XGPU_BAKE_SCENE_VERSION (\d+)u", stream).group(1))
+    assert a == b == identity.SCENE_VERSION
+
+
+def test_classic_world_id_of_a_map(tmp_path):
+    """the farm's classic_world_id (tools/geopatch/classic_world.py): the same map hashes the same, recompressed
+    or not; a change to a bake input (a BSP's bytes) moves it; a change outside the bake's inputs (the header's
+    name text, the zlib stream's level) does not"""
+    from geopatch import classic_world
+    inflated = synthmap.build(geometries=[synthmap.Geometry(1)])
+    a, b = tmp_path / "a.map", tmp_path / "b.map"
+    a.write_bytes(synthmap.compress(inflated))
+    b.write_bytes(inflated)
+    cwid_a, report = classic_world.classic_world_id(a)
+    assert report["bsps"] == 1 and len(cwid_a) == 64
+    assert classic_world.classic_world_id(b)[0] == cwid_a
+    # (a BSP byte changed: its file offset from the scenario's reference)
+    import struct
+    sys.path.insert(0, str(ROOT / "tools/prism_bake"))
+    import ce_map
+    m = ce_map.Map(str(b))
+    reference = m.cache.block(m.scenario + ce_map.SCNR_STRUCTURE_BSPS, 0x20, 32)[0]
+    offset, size = struct.unpack("<ii", m.cache.read(reference, 8))
+    changed = bytearray(inflated)
+    changed[offset + size - 1] ^= 0xFF
+    c = tmp_path / "c.map"
+    c.write_bytes(bytes(changed))
+    assert classic_world.classic_world_id(c)[0] != cwid_a

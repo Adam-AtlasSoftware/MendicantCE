@@ -6,7 +6,7 @@ player's own BSP's and bakes nothing.
 
     export <bake folder> <stock|remodel> <shipped folder> [--maps b30,a30]
            [--quality max] [--bsps d40:10,...] [--maps-folder <maps>]
-           [--empty d40:9,...] [--archives <folder>]
+           [--empty d40:9,...] [--archives <folder>] [--world-ids cwid.json]
         copies each finished BSP bake (<map>/bsp<n>.pbk) of the bake folder
         into <shipped>/<world>/<map>/, after checking that it is whole (a
         DONE record), of the quality asked or better, of this baker's file
@@ -20,11 +20,23 @@ player's own BSP's and bakes nothing.
         shipped one: a note that says otherwise is refused). Writes
         manifest.txt (the game's: each BSP's settings key,
         prism_bake_menu.c's) and manifest.json (the files' sizes and
-        sha256, each BSP's per-BSP input hashes) and, with --archives, a
-        release asset per level and world
+        sha256, each BSP's per-BSP input hashes and world_id) and, with
+        --archives, a release asset per level and world
         (prism_bake_<map>_<world>_v<baker>.ppk: an uncompressed tar of that
         level's files and its manifest lines; the records are packed
         already), each under GitHub's 2 GiB asset limit.
+        v4 geopatch M4: every bake is keyed to its BSP's world_id (its
+        header's, xgpu_vulkan_bake.c): a stock bake's must be the classic
+        world_id of the map's classic_world_id (--world-ids: the farm's
+        tools/geopatch/classic_world.py output, which also writes each
+        level's "world <map> <base_id> <classic_world_id>" line, the game's
+        lookup until M7's signed manifest), a remodel bake's an enhanced one
+        (its key "geo:prsx:<world_id>"). Each level's folder gets its own
+        manifest.txt (<world>/<map>/manifest.txt: its lines), which the
+        game's ladder and its Lightmap Downloads rows read. A bake's
+        nondeterminism (GPU bakes are not bit-identical run to run) never
+        matters here: the world_id names the geometry the light is for, and
+        the manifest's sha256 names the bytes this export produced.
     verify <shipped folder>
         every file manifest.json names is there, of its size and sha256, a
         whole lighting-only bake whose header matches its entry.
@@ -78,7 +90,10 @@ def fourcc(text: str) -> int:
 # and DONE. Not ATLX (the filter's aux: texel normals and charts) nor CKPT (a
 # job part-way): a finished file has neither
 LIGHT_RECORDS = {fourcc(name): name for name in (
-    "PLAN", "DONE", "ATLS", "ATLF", "ATLY", "MASK", "VOLB", "VOLY", "PROB", "IMPG", "REAC", "FOOT", "LYRB")}
+    "PLAN", "DONE", "ATLS", "ATLF", "ATLY", "MASK", "VOLB", "VOLY", "PROB", "IMPG", "REAC", "FOOT", "LYRB",
+    # (the foliage-ready layers, M4: the sun mask and the probes' sun visibility with the static scenery's cutouts
+    # passed, and the foliage classes, a bit a scenery triangle: light and classes, no geometry)
+    "MSKF", "VOLF", "FCLS")}
 GEOMETRY_RECORDS = {fourcc(name): name for name in ("ATLX", "CKPT")}
 # the rig every shipped bake is made with (docs/prism_bake.md: the rig is
 # pinned to its shipped default on the farm and in the game)
@@ -104,7 +119,10 @@ def read_header(data: bytes) -> dict:
     bsp_hash, geometry_hash, material_hash, light_hash, settings_hash = struct.unpack_from("<5Q", data, 152)
     baker_version, quality = struct.unpack_from("<II", data, 192)
     threshold = struct.unpack_from("<f", data, 200)[0]
+    world_id = data[204:236].hex()
+    scene_version, variant = struct.unpack_from("<II", data, 236)
     return {
+        "world_id": world_id, "scene_version": scene_version, "variant": variant,
         "map_checksum": map_checksum, "map_name": map_name, "bsp_index": bsp_index, "bsp_name": bsp_name,
         "bsp_hash": f"{bsp_hash:016x}", "geometry_hash": f"{geometry_hash:016x}",
         "material_hash": f"{material_hash:016x}", "light_hash": f"{light_hash:016x}",
@@ -188,11 +206,13 @@ def read_note(bake_folder: Path, map_name: str) -> dict:
             match = re.match(r"bsp(\d+) (\S+) (\S+) (\S+) ", line)
             if match:
                 note["rigs"][int(match.group(1))] = match.group(4)
-            match = re.match(r"bsp(\d+) .* geo:(?:stock|pwg):(.*)$", line)
+            match = re.match(r"bsp(\d+) .* geo:(?:stock|pwg|prsx):(.*)$", line)
             if match:
                 tag = match.group(2)
                 if " geo:pwg:" in line:
                     tag = tag.split(":", 1)[0]
+                if " geo:prsx:" in line:
+                    tag = tag.split(":", 1)[1] if ":" in tag else ""
                 note["tags"][int(match.group(1))] = tag
     return note
 
@@ -263,9 +283,10 @@ def level_bsp_count(map_name: str, note: dict, bsps: dict[str, list[int]], maps_
 def manifest_key(header: dict, rig: str, stock: bool, tag: str | None) -> str:
     """the BSP's settings key as the game's note keeps it (prism_bake_menu.c's
     prism_bake_key; its quality the file's, which is good for every quality
-    under it), its geometry by kind ("geo:stock", "geo:pwg") and its tag
-    where the note gave it"""
-    geometry = "geo:stock" if stock else "geo:pwg"
+    under it), its geometry by kind ("geo:stock", or the enhanced world's
+    "geo:prsx:<world_id>", which prism_world_source.c's ladder looks for) and
+    its tag where the note gave it"""
+    geometry = "geo:stock" if stock else f"geo:prsx:{header['world_id']}"
     return f"v{header['baker_version']} {header['quality']} {rig} cutouts {geometry}" + (f":{tag}" if tag else "")
 
 
@@ -280,18 +301,42 @@ def manifest_save(shipped: Path, manifest: dict) -> None:
     manifest["bsps"].sort(key=lambda e: (e["world"], e["map"], e["bsp"]))
     (shipped / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", "utf-8")
     lines = ["prism_bake_shipped 1"]
+    levels: dict[tuple, list[str]] = {}
+    worlds = manifest.get("worlds", {})
     for entry in manifest["bsps"]:
-        lines.append(f"bsp {entry['world']} {entry['map']} {entry['bsp']} {entry['of']} {entry['key']}")
+        line = f"bsp {entry['world']} {entry['map']} {entry['bsp']} {entry['of']} {entry['key']}"
+        lines.append(line)
+        levels.setdefault((entry["world"], entry["map"]), []).append(line)
+    for name, info in sorted(worlds.items()):
+        lines.append(f"world {name} {info['base_id']} {info['classic_world_id']}")
     (shipped / "manifest.txt").write_text("\n".join(lines) + "\n", "utf-8")
+    # (each level's own: the game's ladder and its Lightmap Downloads rows read <world>/<map>/manifest.txt)
+    for (world, name), level_lines in sorted(levels.items()):
+        folder = shipped / world / name
+        folder.mkdir(parents=True, exist_ok=True)
+        extra = [f"world {name} {worlds[name]['base_id']} {worlds[name]['classic_world_id']}"] if name in worlds else []
+        (folder / "manifest.txt").write_text("\n".join(["prism_bake_shipped 1"] + level_lines + extra) + "\n", "utf-8")
+
+
+def world_id_classic(classic_world_id: str, bsp: int) -> str:
+    """tools/geopatch/identity.py's (port/linux/game/prism_identity.c's)"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        from geopatch import identity
+    finally:
+        sys.path.pop(0)
+    return identity.world_id_classic(bytes.fromhex(classic_world_id), bsp)
 
 
 def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None, quality: str,
-           archives: Path | None, bsps: str = "", maps_folder: Path | None = None, empty: str = "") -> list[dict]:
+           archives: Path | None, bsps: str = "", maps_folder: Path | None = None, empty: str = "",
+           world_ids: dict | None = None) -> list[dict]:
     """every level's BSPs checked first, then copied: a level with a BSP
     missing, of the wrong world or not a whole light bake is refused and
     nothing of the export is written"""
     if world not in ("stock", "remodel"):
         raise BakeError("the world is stock or remodel")
+    world_ids = world_ids or {}
     bsps_given = per_map(bsps, "--bsps", maps)
     empty_given = per_map(empty, "--empty", maps)
     folders = sorted(p for p in bake_folder.iterdir() if p.is_dir() and (not maps or p.name in maps))
@@ -344,6 +389,15 @@ def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None,
                 raise BakeError(f"{file}: a bake of the remodel, exported as the stock world's")
             if world == "remodel" and stock:
                 raise BakeError(f"{file}: a bake of the stock world (its LYRB record), exported as the remodel's")
+            if header["variant"] != (0 if world == "stock" else 1):
+                raise BakeError(f"{file}: its key's variant is {header['variant']}, not the {world} world's")
+            if world == "remodel" and header["world_id"] == "00" * 32:
+                raise BakeError(f"{file}: a remodel bake keyed to no world_id (not the sidecar's geometry)")
+            if world == "stock" and folder.name in world_ids:
+                want = world_id_classic(world_ids[folder.name]["classic_world_id"], index)
+                if header["world_id"] != want:
+                    raise BakeError(f"{file}: keyed to world_id {header['world_id'][:16]}..., not this map "
+                                    f"version's classic BSP {index} ({want[:16]}...)")
             entries.append({
                 "world": world, "map": folder.name, "bsp": index, "of": count, "source": file, "data": data,
                 "file": f"{world}/{folder.name}/{file.name}", "size": len(data),
@@ -361,6 +415,10 @@ def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None,
         levels.append((folder.name, entries))
     shipped.mkdir(parents=True, exist_ok=True)
     manifest = manifest_load(shipped)
+    for name, info in world_ids.items():
+        if not maps or name in maps:
+            manifest.setdefault("worlds", {})[name] = {"base_id": info["base_id"],
+                                                       "classic_world_id": info["classic_world_id"]}
     exported = []
     for name, entries in levels:
         for entry in entries:
@@ -396,8 +454,9 @@ def write_archives(shipped: Path, manifest: dict, archives: Path, levels: set) -
             suffix = "" if len(groups) == 1 else f"_bsp{first['bsp']}"
             path = archives / f"prism_bake_{map_name}_{world}_v{version}{suffix}.ppk"
             with tarfile.open(path, "w", format=tarfile.PAX_FORMAT) as tar:
-                part = json.dumps({"format": 1, "kind": "prism_bake_shipped", "bsps": group}, indent=1,
-                                  sort_keys=True).encode("utf-8")
+                worlds = {k: v for k, v in manifest.get("worlds", {}).items() if k == map_name}
+                part = json.dumps({"format": 1, "kind": "prism_bake_shipped", "bsps": group, "worlds": worlds},
+                                  indent=1, sort_keys=True).encode("utf-8")
                 info = tarfile.TarInfo("manifest.part.json")
                 info.size = len(part)
                 info.mtime = 0
@@ -477,6 +536,7 @@ def install(shipped: Path, archives: list[Path]) -> list[str]:
             names = {(e["world"], e["map"], e["bsp"]) for e in part["bsps"]}
             manifest["bsps"] = [e for e in manifest["bsps"] if (e["world"], e["map"], e["bsp"]) not in names]
             manifest["bsps"].extend(part["bsps"])
+            manifest.setdefault("worlds", {}).update(part.get("worlds", {}))
     manifest_save(shipped, manifest)
     return verify(shipped)
 
@@ -505,6 +565,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--maps-folder", type=Path, help="the retail maps, each level's BSP count read from its map")
     p.add_argument("--empty", default="", help="BSPs with nothing to bake (no lightmapped surface), map:index[,...]")
     p.add_argument("--archives", type=Path)
+    p.add_argument("--world-ids", type=Path, help="tools/geopatch/classic_world.py's json: each map's base_id and "
+                   "classic_world_id")
     p = commands.add_parser("verify")
     p.add_argument("shipped", type=Path)
     p = commands.add_parser("install")
@@ -517,7 +579,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "export":
             entries = export(args.bake_folder, args.world, args.shipped,
                              [m for m in args.maps.split(",") if m] or None, args.quality, args.archives,
-                             args.bsps, args.maps_folder, args.empty)
+                             args.bsps, args.maps_folder, args.empty,
+                             json.loads(args.world_ids.read_text()) if args.world_ids else None)
             for entry in entries:
                 if entry.get("empty"):
                     print(f"{entry['world']}/{entry['map']} BSP {entry['bsp']}: nothing to bake, {entry['key']}")

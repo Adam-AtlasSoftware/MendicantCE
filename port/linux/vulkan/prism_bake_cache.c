@@ -117,10 +117,15 @@ enum
 	HEADER_BAKER_VERSION = HEADER_SETTINGS_HASH + 8,
 	HEADER_QUALITY = HEADER_BAKER_VERSION + 4,
 	HEADER_THRESHOLD = HEADER_QUALITY + 4,
+	/* (v4 geopatch M4: in the bytes version 3 left zero, so an older file
+	reads as of no world) */
+	HEADER_WORLD_ID = HEADER_THRESHOLD + 4,
+	HEADER_SCENE_VERSION = HEADER_WORLD_ID + 32,
+	HEADER_VARIANT = HEADER_SCENE_VERSION + 4,
 	HEADER_CRC = PRISM_BAKE_CACHE_HEADER_SIZE - 4
 };
 
-typedef char header_fits[HEADER_THRESHOLD + 4 <= HEADER_CRC ? 1 : -1];
+typedef char header_fits[HEADER_VARIANT + 4 <= HEADER_CRC ? 1 : -1];
 
 static uint32_t float_bits(float value)
 {
@@ -172,6 +177,9 @@ static void header_write(unsigned char *h, struct prism_bake_cache_key const *ke
 	put32(h + HEADER_BAKER_VERSION, key->baker_version);
 	put32(h + HEADER_QUALITY, key->quality);
 	put32(h + HEADER_THRESHOLD, float_bits(key->convergence_threshold));
+	memcpy(h + HEADER_WORLD_ID, key->world_id, 32);
+	put32(h + HEADER_SCENE_VERSION, key->scene_version);
+	put32(h + HEADER_VARIANT, key->variant);
 	put32(h + HEADER_CRC, prism_bake_crc32(0, h, HEADER_CRC));
 }
 
@@ -203,6 +211,9 @@ static int header_read(unsigned char const *h, struct prism_bake_cache_key *key)
 	key->baker_version = get32(h + HEADER_BAKER_VERSION);
 	key->quality = get32(h + HEADER_QUALITY);
 	key->convergence_threshold = bits_float(get32(h + HEADER_THRESHOLD));
+	memcpy(key->world_id, h + HEADER_WORLD_ID, 32);
+	key->scene_version = get32(h + HEADER_SCENE_VERSION);
+	key->variant = get32(h + HEADER_VARIANT);
 	return 0;
 }
 
@@ -217,7 +228,8 @@ uint32_t prism_bake_key_compare(struct prism_bake_cache_key const *a, struct pri
 	{
 		differences |= PRISM_BAKE_KEY_BSP;
 	}
-	if (a->geometry_hash != b->geometry_hash)
+	if (a->geometry_hash != b->geometry_hash || memcmp(a->world_id, b->world_id, 32) ||
+		a->scene_version != b->scene_version || a->variant != b->variant)
 		differences |= PRISM_BAKE_KEY_GEOMETRY;
 	if (a->material_hash != b->material_hash)
 		differences |= PRISM_BAKE_KEY_MATERIALS;

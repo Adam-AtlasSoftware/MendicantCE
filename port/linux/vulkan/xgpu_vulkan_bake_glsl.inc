@@ -60,6 +60,10 @@ over 2 pi, a0 = 1 - k . n0. */
 	"float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }\n" \
 	"\n" \
 	"uint seed;\n" \
+	"/* (the instances the bake's structure tests see: 15 all of them; 7 the\n" \
+	"foliage-ready layer's, the static scenery's cutouts (mask 8: the leaves'\n" \
+	"cards) left out, PLAN_FINAL.md section 4.4) */\n" \
+	"uint ray_cull = 15u;\n" \
 	"uint hash_u(uint v)\n" \
 	"{\n" \
 	"    uint state = v * 747796405u + 2891336453u;\n" \
@@ -153,7 +157,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    if (!ray_ok(o, d, 0.0, t_max))\n" \
 	"        return false;\n" \
 	"    rayQueryEXT q;\n" \
-	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), gl_RayFlagsTerminateOnFirstHitEXT, 15u, o, 0.0, d,\n" \
+	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), gl_RayFlagsTerminateOnFirstHitEXT, ray_cull, o, 0.0, d,\n" \
 	"        t_max);\n" \
 	"    ALPHA_PROCEED(q)\n" \
 	"    return rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionNoneEXT;\n" \
@@ -169,7 +173,7 @@ over 2 pi, a0 = 1 - k . n0. */
 	"    if (!ray_ok(o, d, 0.0, t_max))\n" \
 	"        return -1.0;\n" \
 	"    rayQueryEXT q;\n" \
-	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), 0u, 15u, o, 0.0, d, t_max);\n" \
+	"    rayQueryInitializeEXT(q, accelerationStructureEXT(s.tlas), 0u, ray_cull, o, 0.0, d, t_max);\n" \
 	"    ALPHA_PROCEED(q)\n" \
 	"    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT)\n" \
 	"        return -1.0;\n" \
@@ -268,6 +272,26 @@ over 2 pi, a0 = 1 - k . n0. */
 	"        return 0.0;\n" \
 	"    vec3 d = cone_dir(s.sun.xyz, cos(0.5 * s.rig[0].w));\n" \
 	"    return sky_blocked(o, d, sun_reach()) ? 0.0 : 1.0;\n" \
+	"}\n" \
+	"/* the sun's visibility from o and the foliage-ready layer's (the static\n" \
+	"scenery's cutouts passed), along one direction of its disc: the second is\n" \
+	"1 wherever the first is */\n" \
+	"void sun_visible_layers(vec3 o, out float v, out float v_open)\n" \
+	"{\n" \
+	"    v = 0.0;\n" \
+	"    v_open = 0.0;\n" \
+	"    if (s.sun.w <= 0.0)\n" \
+	"        return;\n" \
+	"    vec3 d = cone_dir(s.sun.xyz, cos(0.5 * s.rig[0].w));\n" \
+	"    v = sky_blocked(o, d, sun_reach()) ? 0.0 : 1.0;\n" \
+	"    if (v > 0.0)\n" \
+	"    {\n" \
+	"        v_open = 1.0;\n" \
+	"        return;\n" \
+	"    }\n" \
+	"    ray_cull = 7u;\n" \
+	"    v_open = sky_blocked(o, d, sun_reach()) ? 0.0 : 1.0;\n" \
+	"    ray_cull = 15u;\n" \
 	"}\n" \
 	"vec3 sun_at(vec3 o, vec3 n)\n" \
 	"{\n" \
@@ -1375,7 +1399,8 @@ texels' visibility is neither all lit nor all dark): each texel's point
 (the setup pass's, at the mask's density) and parameters.y directions of
 the sun's disc, stratified, then more while they disagree, up to
 parameters.z. Written: the visibility, 0 to 255, a byte a texel (the job
-block's [1], a word for 4 texels). [0] the records; parameters.x the texels */
+block's [1], a word for 4 texels). [0] the records; parameters.x the texels;
+values.x 1: the foliage-ready layer (the static scenery's cutouts passed) */
 static const char mask_source[] =
 	BAKE_COMMON
 	"layout(local_size_x = 64) in;\n"
@@ -1392,6 +1417,7 @@ static const char mask_source[] =
 	"    vec3 n = vec3(tx.v[index * 8u + 3u], tx.v[index * 8u + 4u], tx.v[index * 8u + 5u]);\n"
 	"    uint flags = floatBitsToUint(tx.v[index * 8u + 6u]);\n"
 	"    float v = 0.0;\n"
+	"    ray_cull = push.values.x > 0.5 ? 7u : 15u;\n"
 	"    if (flags != 0u && s.sun.w > 0.0 && dot(n, s.sun.xyz) > 0.0)\n"
 	"    {\n"
 	"        seed = hash_u(index ^ hash_u(push.parameters.w + 0x51ed270bu));\n"
@@ -1500,7 +1526,8 @@ invalid); the rule asked on its L0's luminance. The job block: [0] the
 probes' points (4 floats each), [1] the accumulators (32 floats: SH red 4,
 green 4, blue 4, the sun's visibility, the backs' share, the layers' SH L0
 (RGB each: the sun's bounce, the sky, the domes, the fixtures), whether its
-cluster is outdoor (1) or indoor (0), 5 spare), [2] the
+cluster is outdoor (1) or indoor (0), the foliage-ready layer's sun's
+visibility (the static scenery's cutouts passed), 4 spare), [2] the
 states, [3] the statistics (count, hits, mean, m2, maximum: 5 words), [4]
 the batch's count of running probes; parameters as the lightmap's */
 static const char volume_source[] =
@@ -1534,7 +1561,7 @@ static const char volume_source[] =
 	"    /* (the layers' SH L0, RGB each: the sun's bounce, the sky, the domes,\n"
 	"    the fixtures) */\n"
 	"    vec3 l_sun = vec3(0.0), l_sky = vec3(0.0), l_domes = vec3(0.0), l_fixtures = vec3(0.0);\n"
-	"    float sun = 0.0, back = 0.0;\n"
+	"    float sun = 0.0, sun_open = 0.0, back = 0.0;\n"
 	"    uint bc = 0u, bh = 0u;\n"
 	"    float bmean = 0.0, bm2 = 0.0, bmost = 0.0;\n"
 	"    /* (the units rig's floor of light where the probe is: the indoor one\n"
@@ -1595,7 +1622,12 @@ static const char volume_source[] =
 	"                l_domes += e * yd.x;\n"
 	"            }\n"
 	"        }\n"
-	"        sun += s.sun.w > 0.0 ? sun_visible(p) : 0.0;\n"
+	"        {\n"
+	"            float v, v_open;\n"
+	"            sun_visible_layers(p, v, v_open);\n"
+	"            sun += v;\n"
+	"            sun_open += v_open;\n"
+	"        }\n"
 	"        back += backface ? 1.0 : 0.0;\n"
 	"        float x = luma(shc0);\n"
 	"        batch_add(batch_sum, count + k, batches, batch_mean, batch_m2, x);\n"
@@ -1628,6 +1660,7 @@ static const char volume_source[] =
 	"    }\n"
 	"    ac.v[base + 12u] = mix(ac.v[base + 12u], sun / float(bc), wb);\n"
 	"    ac.v[base + 13u] = mix(ac.v[base + 13u], back / float(bc), wb);\n"
+	"    ac.v[base + 27u] = mix(ac.v[base + 27u], sun_open / float(bc), wb);\n"
 	"    uint hits = stats.v[index * 9u + 1u];\n"
 	"    float mean = uintBitsToFloat(stats.v[index * 9u + 2u]), m2 = uintBitsToFloat(stats.v[index * 9u + 3u]);\n"
 	"    float most = uintBitsToFloat(stats.v[index * 9u + 4u]);\n"

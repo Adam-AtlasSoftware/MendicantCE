@@ -32,6 +32,10 @@ char const *config_string(char const *name);
 int config_boolean(char const *name);
 void platform_log(char const *format, ...);
 const char *platform_data_root(void);
+/* (port/linux/src/xbox_files.c's, and the cache's open map's slot:
+cache_files_windows.c's) */
+int cache_slot_source_base_id(short slot, unsigned char id[32]);
+short cache_file_open_slot(void);
 
 #define SIDECAR_FOLDER "maps_enhanced"
 #define MAXIMUM_BSPS 32
@@ -50,6 +54,12 @@ static struct
 	short bsp_count;
 	unsigned char world_ids[MAXIMUM_BSPS][PRISM_ID_SIZE];
 	char labels[MAXIMUM_BSPS][96];
+	/* the map's classic_world_id (the farm's hash of its bake inputs) where
+	known, and its BSPs' classic world_ids (v4 geopatch M4) */
+	boolean classic_known;
+	unsigned char classic_world_id[PRISM_ID_SIZE];
+	unsigned char classic_ids[MAXIMUM_BSPS][PRISM_ID_SIZE];
+	char classic_from[64];
 } world_source;
 
 /* ---------- private code */
@@ -148,6 +158,69 @@ static boolean packs_present(char const *map, char *why, unsigned long why_size)
 	return TRUE;
 }
 
+/* the shipped folder (display.bake_shipped_folder, else the data root's
+prism_bake_shipped) */
+static void shipped_folder(char *folder, unsigned long size)
+{
+	char const *shipped = config_string("display.bake_shipped_folder");
+
+	snprintf(folder, size, "%s", shipped && *shipped ? shipped : "prism_bake_shipped");
+}
+
+/* the map's classic_world_id (PLAN_FINAL.md section 2.5: computed on the
+farm over the map version's bake inputs, tools/geopatch/classic_world.py),
+looked up by the player's map's base_id: until M7's signed manifest, in the
+shipped bake's manifests (<shipped>/<stock|remodel>/<map>/manifest.txt, a
+line "world <map> <base_id> <classic_world_id>", tools/prism_bake_ship.py's);
+else the farm's HALO_CLASSIC_WORLD_ID (the map it bakes). FALSE where
+neither has it: a custom map, a map version no release supports */
+static boolean classic_world_id_find(char const *map, unsigned char id[PRISM_ID_SIZE], char *from,
+	unsigned long from_size)
+{
+	static char const *const worlds[2] = { "stock", "remodel" };
+	unsigned char base[PRISM_ID_SIZE];
+	char folder[512], path[700], line[512], base_hex[2 * PRISM_ID_SIZE + 1], prefix[160];
+	char const *farm = getenv("HALO_CLASSIC_WORLD_ID");
+	int world;
+
+	if (cache_slot_source_base_id(cache_file_open_slot(), base))
+	{
+		shipped_folder(folder, sizeof(folder));
+		prism_id_hex(base, base_hex);
+		snprintf(prefix, sizeof(prefix), "world %s %s ", map, base_hex);
+		for (world = 0; world < 2; world++)
+		{
+			FILE *file;
+
+			snprintf(path, sizeof(path), "%s/%s/%s/manifest.txt", folder, worlds[world], map);
+			if ((file = fopen(path, "r")) == NULL)
+				continue;
+			while (fgets(line, sizeof(line), file))
+			{
+				char hex[2 * PRISM_ID_SIZE + 1];
+
+				if (strncmp(line, prefix, strlen(prefix)))
+					continue;
+				memcpy(hex, line + strlen(prefix), 2 * PRISM_ID_SIZE);
+				hex[2 * PRISM_ID_SIZE] = 0;
+				if (prism_id_parse(hex, id))
+				{
+					fclose(file);
+					snprintf(from, from_size, "the %s manifest", worlds[world]);
+					return TRUE;
+				}
+			}
+			fclose(file);
+		}
+	}
+	if (farm && prism_id_parse(farm, id))
+	{
+		snprintf(from, from_size, "HALO_CLASSIC_WORLD_ID");
+		return TRUE;
+	}
+	return FALSE;
+}
+
 static void choose(void)
 {
 	char const *map = map_name();
@@ -165,6 +238,8 @@ static void choose(void)
 	snprintf(world_source.map, sizeof(world_source.map), "%s", map);
 	memset(world_source.world_ids, 0, sizeof(world_source.world_ids));
 	memset(world_source.labels, 0, sizeof(world_source.labels));
+	memset(world_source.classic_ids, 0, sizeof(world_source.classic_ids));
+	world_source.classic_known = FALSE;
 	scenario = global_scenario_try_and_get();
 	world_source.bsp_count = scenario ? scenario->structure_bsp_references.count : 0;
 	if (world_source.bsp_count > MAXIMUM_BSPS)
@@ -188,6 +263,21 @@ static void choose(void)
 		return;
 	}
 	world_source.rung = PRISM_WORLD_RUNG_CLASSIC_LIT;
+	/* (the classic world's ids, which key its bakes, where the map's
+	classic_world_id is known) */
+	world_source.classic_known = classic_world_id_find(map, world_source.classic_world_id, world_source.classic_from,
+		sizeof(world_source.classic_from));
+	if (world_source.classic_known)
+	{
+		char hex[2 * PRISM_ID_SIZE + 1];
+
+		for (bsp = 0; bsp < world_source.bsp_count; bsp++)
+			prism_world_id_classic(world_source.classic_world_id, (uint16_t)bsp, world_source.classic_ids[bsp]);
+		prism_id_hex(world_source.classic_world_id, hex);
+		platform_log("prism world: %s: classic_world_id %.16s... (%s)", map, hex, world_source.classic_from);
+	}
+	else
+		platform_log("prism world: %s: no classic_world_id for this map version: its bakes keyed by its checksum", map);
 	if (!prism_world_geometry_wanted())
 	{
 		platform_log("prism world: %s: classic geometry (World Geometry is Classic; rung 2)", map);
@@ -215,6 +305,15 @@ static void choose(void)
 		return;
 	}
 	world_source.open = TRUE;
+	/* (a sidecar is of one classic_world_id: never another map version's) */
+	if (world_source.classic_known &&
+		memcmp(world_source.prsx.classic_world_id, world_source.classic_world_id, PRISM_ID_SIZE))
+	{
+		platform_log("prism world: %s: classic geometry: %s is of another map version (its classic_world_id is not "
+			"this map's; rung 2)", map, world_source.path);
+		sidecar_close();
+		return;
+	}
 	for (bsp = 0; bsp < world_source.bsp_count; bsp++)
 	{
 		char hex[2 * PRISM_ID_SIZE + 1];
@@ -390,8 +489,12 @@ refused:
 void prism_world_source_world_id(short bsp_index, unsigned char id[32])
 {
 	memset(id, 0, 32);
-	if (prism_world_enhanced() && bsp_index >= 0 && bsp_index < world_source.bsp_count)
+	if (bsp_index < 0 || bsp_index >= world_source.bsp_count)
+		return;
+	if (prism_world_enhanced())
 		memcpy(id, world_source.world_ids[bsp_index], 32);
+	else if (world_source.classic_known && world_source.rung != PRISM_WORLD_RUNG_NONE)
+		memcpy(id, world_source.classic_ids[bsp_index], 32);
 }
 
 char const *prism_world_source_label(short bsp_index)

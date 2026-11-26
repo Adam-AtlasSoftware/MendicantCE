@@ -1611,9 +1611,9 @@ static void control_fill(
 		}
 	}
 	snprintf(bake->map_name, sizeof(bake->map_name), "%s", map);
-	/* (the BSP's enhanced world_id where the enhanced world is drawn: the
-	bake's key holds it, so a bake is used only for the geometry it was
-	made from; zeros for the classic world) */
+	/* (the BSP's world_id, enhanced where the enhanced world is drawn, else
+	classic where the map's classic_world_id is known: the bake's key holds
+	it, so a bake is used only for the world it was made from) */
 	prism_world_source_world_id((short)bake->bsp_index, bake->world_id);
 }
 
