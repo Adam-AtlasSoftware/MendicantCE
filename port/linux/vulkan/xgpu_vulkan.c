@@ -8592,6 +8592,8 @@ static struct
 	int32_t keep_slots[SKIN_KEEP_SLOTS];
 	uint32_t keep_gone;
 	uint64_t keep_hits, keep_made, keep_evicted, keep_refused;
+	/* the ring's bytes in use (SKIN_RING_SIZE; legacy's 128 MB) */
+	uint64_t ring_size;
 } skin;
 
 static int skin_make(void)
@@ -8658,13 +8660,20 @@ static int skin_make(void)
 	if (!check(vkCreateDescriptorPool(vk.device, &pool_info, NULL, &skin.pool), "vkCreateDescriptorPool"))
 		return 0;
 	memset(&skin.ring_memory, 0, sizeof(skin.ring_memory));
+	/* (HALO_GEOMETRY_RESOLVER=legacy, the choices before the resolver for
+	comparisons: the ring as it was then, 128 MB, nothing kept) */
+	{
+		const char *mode = getenv("HALO_GEOMETRY_RESOLVER");
+
+		skin.ring_size = mode && !strcmp(mode, "legacy") ? (128ull << 20) : SKIN_RING_SIZE;
+	}
 	if (!buffer_make(SKIN_RING_SIZE + SKIN_KEEP_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
 		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BUFFER_DEVICE, &skin.ring, &skin.ring_memory, NULL))
 		return 0;
 	skin.failed = 0;
 	skin.made = 1;
 	host_logf(HOST_LOG_INFO, "meshstore: skinning made: a %llu MB ring of skinned vertices, %llu MB kept",
-		(unsigned long long)(SKIN_RING_SIZE >> 20), (unsigned long long)(SKIN_KEEP_SIZE >> 20));
+		(unsigned long long)(skin.ring_size >> 20), (unsigned long long)(SKIN_KEEP_SIZE >> 20));
 	return 1;
 }
 
@@ -8827,9 +8836,9 @@ static int skin_ring_take(uint64_t size, VkDeviceSize *offset)
 	if (!skin.span_count)
 		skin.free_from = skin.head;
 	start = (skin.head + 255) & ~(uint64_t)255;
-	if (start % SKIN_RING_SIZE + size > SKIN_RING_SIZE)
-		start += SKIN_RING_SIZE - start % SKIN_RING_SIZE;
-	if (size > SKIN_RING_SIZE || start + size - skin.free_from > SKIN_RING_SIZE)
+	if (start % skin.ring_size + size > skin.ring_size)
+		start += skin.ring_size - start % skin.ring_size;
+	if (size > skin.ring_size || start + size - skin.free_from > skin.ring_size)
 		return 0;
 	if (skin.span_count && skin.spans[(skin.span_first + skin.span_count - 1) % SKIN_SPANS].serial == vk.serial)
 		skin.spans[(skin.span_first + skin.span_count - 1) % SKIN_SPANS].end = start + size;
@@ -8844,7 +8853,7 @@ static int skin_ring_take(uint64_t size, VkDeviceSize *offset)
 	else
 		return 0;
 	skin.head = start + size;
-	*offset = start % SKIN_RING_SIZE;
+	*offset = start % skin.ring_size;
 	return 1;
 }
 
