@@ -412,6 +412,55 @@ static void test_notes(void)
 	xgpu_geometry_destroy(geometry);
 }
 
+/* a shadow back after frames without one, at the level the view took
+meanwhile, takes the view's change: the view's next change, made long after
+its own, is no flip of the shadow (b30's CE shadows, each drawn a while,
+gone, drawn again); a shadow undoing its own change at once still flips */
+static void test_shadow_back(void)
+{
+	struct xgpu_geometry *geometry = made(0.3f, 0);
+	struct xgpu_geometry_statistics statistics;
+	int frame;
+
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 0);
+	/* (the view to level 1 at once; the shadow not drawn for 200 frames) */
+	for (frame = 0; frame < 200; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 1);
+	}
+	/* (the shadow back at 1, then the view and the shadow to 0 ten frames on) */
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 1);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 1);
+	for (frame = 0; frame < 10; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 1);
+		xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 1);
+	}
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_note(geometry, 5, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.switches[XGPU_GEOMETRY_SHADOW] == 2);
+	CHECK(statistics.flips[XGPU_GEOMETRY_SHADOW] == 0);
+	CHECK(statistics.flips[XGPU_GEOMETRY_VIEW] == 0);
+	/* (drawn every frame: 0, 1, 0 at once is a flip) */
+	xgpu_geometry_note(geometry, 6, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_note(geometry, 6, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 1);
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_note(geometry, 6, 9, 0u, XGPU_GEOMETRY_SHADOW, XGPU_GEOMETRY_REMODEL, 0);
+	xgpu_geometry_frame(geometry, eye);
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.flips[XGPU_GEOMETRY_SHADOW] == 1);
+	xgpu_geometry_destroy(geometry);
+}
+
 /* objects of no datum: one decision each by the cell of their place, a
 moved one taking its decision along, never one shared by two places */
 static void test_datumless(void)
@@ -512,6 +561,7 @@ int main(void)
 	test_skinned_budget();
 	test_variant_and_map();
 	test_notes();
+	test_shadow_back();
 	test_datumless();
 	test_fallbacks();
 	test_ageing();

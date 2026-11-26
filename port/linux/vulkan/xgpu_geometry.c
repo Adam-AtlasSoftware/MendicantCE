@@ -839,6 +839,27 @@ void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_
 	if (entry->notes[channel].value && entry->notes[channel].frame == geometry->frame &&
 		!(variant == XGPU_GEOMETRY_STOCK && ((entry->notes[channel].value - 1u) >> 8) == XGPU_GEOMETRY_REMODEL))
 		return;
+	/* (a shadow or traced draw back after frames without one, at the level
+	the view has drawn since: it takes the view's change, its frame and
+	direction, so that the view's own later change is no flip of it; the
+	shape it catches up to was never drawn otherwise) */
+	if (channel != XGPU_GEOMETRY_VIEW && entry->notes[channel].value && entry->notes[channel].value != value &&
+		entry->notes[channel].frame + 1u < geometry->frame && entry->notes[XGPU_GEOMETRY_VIEW].value == value)
+	{
+		struct channel_note *note = &entry->notes[channel];
+		const struct channel_note *view = &entry->notes[XGPU_GEOMETRY_VIEW];
+
+		note->value = value;
+		note->direction = view->direction;
+		note->change_frame = view->change_frame;
+		note->frame = geometry->frame;
+		geometry->statistics.switches[channel]++;
+		say(geometry, 2, "geometry: frame %llu object %08x mesh %x %s drew %s %u (back, as the view since frame %llu)",
+			(unsigned long long)geometry->frame, object, mesh, channel_names[channel],
+			variant == XGPU_GEOMETRY_REMODEL ? "remodel" : variant == XGPU_GEOMETRY_STOCK ? "stock" : "nothing", lod,
+			(unsigned long long)view->change_frame);
+		return;
+	}
 	if (note_change(&entry->notes[channel], value, geometry->frame, &flipped))
 	{
 		geometry->statistics.switches[channel]++;
