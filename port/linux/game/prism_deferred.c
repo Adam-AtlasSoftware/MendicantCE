@@ -231,7 +231,7 @@ static void settings_read(
 	/* (port: "pathtraced" (M3) is lit from the bake as Raster is: its scene,
 	rig and bake are Raster's, its resolve the path tracer's) */
 	prism_deferred.pathtraced = value && !strcmp(value, "pathtraced");
-	prism_deferred.raster = value && (!strcmp(value, "raster") || prism_deferred.pathtraced);
+	prism_deferred.raster = value && (!strcmp(value, "enhanced") || prism_deferred.pathtraced);
 	prism_deferred.wanted = value && (!strcmp(value, "ce_deferred") || prism_deferred.raster);
 	value = config_string("display.pt_profile");
 	prism_deferred.pt_profile = value && !strcmp(value, "performance") ? 0 : 1;
@@ -253,6 +253,11 @@ static void settings_read(
 	CE's projected shadows) */
 	value = config_string("display.prism_raster_object_shadows");
 	prism_deferred.raster_object_shadows = !value || strcmp(value, "classic");
+	/* (v4 geopatch M3: Enhanced lighting's RAY TRACING off traces nothing:
+	the game's own object shadows) */
+	value = config_string("display.prism_ray_tracing");
+	if (value && !strcmp(value, "off"))
+		prism_deferred.raster_object_shadows = FALSE;
 	/* (display.player_shadow: the player's own body traced in first person,
 	its shadow cast in the traced modes) */
 	prism_deferred.body_shadow = config_boolean("display.player_shadow") != 0;

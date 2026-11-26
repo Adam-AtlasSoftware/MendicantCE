@@ -32,19 +32,14 @@
 		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/classic_lighting_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_rebaked_lighting" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/rebaked/rebaked_lighting_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/rebaked/rebaked_lighting_screen"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_enhanced_lighting" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_lighting_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_lighting_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_path_tracing" flags="pass_unhandled_to_focused_child">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/path_tracing/path_tracing_screen"/>
 		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/path_tracing/path_tracing_screen"/>
-		<on event="left_mouse" run="mouse emit accept event"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_ray_tracing" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing/ray_tracing_settings_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing/ray_tracing_settings_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_prism_image" flags="pass_unhandled_to_focused_child">
@@ -57,24 +52,33 @@
 		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/upscaling/upscaling_settings_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_light_bake" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/light_bake_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake/light_bake_screen"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_lightmap_downloads" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/lightmaps/lightmap_downloads_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/lightmaps/lightmap_downloads_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_materials_textures" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/materials_textures_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/materials_textures_screen"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_enhancements" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhancements_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_world_geometry_page" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_geometry_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_geometry_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_models_streaming" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/models_streaming_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/models_streaming_screen"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_materials_terrain" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/materials_terrain_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/materials_terrain_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_world_terrain" flags="pass_unhandled_to_focused_child">
-		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_terrain_screen"/>
-		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_terrain_screen"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_foliage" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/foliage/foliage_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/foliage/foliage_screen"/>
+		<on event="left_mouse" run="mouse emit accept event"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_models_textures" flags="pass_unhandled_to_focused_child">
+		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/models_textures_screen"/>
+		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/models_textures_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
 </model>

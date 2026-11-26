@@ -51,6 +51,14 @@ int config_graphics_value(const char *graphics, const char *name, char *text, si
 /* the name of the entry'th setting display.graphics chooses, NULL past the
 last */
 const char *config_graphics_setting(int entry);
+/* display.enhancements (v4 geopatch M3): the name of the entry'th setting
+it chooses (NULL past the last), the value a preset ("classic",
+"remastered", "realistic") gives one, and a setting's group, lighting
+modes ("CEP": Classic, Enhanced, Path Traced) and the content it needs
+(NULL none): 1, or 0 if it is none of the preset's */
+const char *config_enhancements_setting(int entry);
+int config_enhancements_value(const char *preset, const char *name, char *text, size_t size);
+int config_enhancement_info(const char *name, const char **group, const char **modes, const char **content);
 /* how many times config_write has changed a setting: what keeps one reads
 it again when this moves */
 unsigned long config_changes(void);

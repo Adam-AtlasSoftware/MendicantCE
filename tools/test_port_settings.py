@@ -620,13 +620,13 @@ def test_lighting_rows_agree():
 
 def test_lighting_choice():
     """Video has one PRISM row and none of the lighting's; PRISM's page has the Lighting choice first, offering
-    exactly Classic, PRISM Rebaked and PRISM Path Traced, and opens every PRISM page"""
+    exactly Classic, Enhanced and Path Traced (v4 geopatch M3), and opens every PRISM page"""
     video = {_key(entry) for entry in PAGES["video_settings"]["rows"] if entry[0] != SECTION}
     assert "prism_settings" in video and not {"lighting", "lighting_settings", "ray_tracing"} & video
     prism = [entry for entry in PAGES["video_settings/prism"]["rows"] if entry[0] != SECTION]
     assert _key(prism[0]) == "lighting"
-    assert [value for _, value in prism[0][2]] == ["ce", "raster", "pathtraced"]
-    assert [shown for shown, _ in prism[0][2]] == ["CLASSIC", "PRISM REBAKED", "PATH TRACED"]
+    assert [value for _, value in prism[0][2]] == ["classic", "enhanced", "pathtraced"]
+    assert [shown for shown, _ in prism[0][2]] == ["CLASSIC", "ENHANCED", "PATH TRACED"]
     # (every PRISM page is under PRISM's, and nothing else opens one: Video's PRISM row opens PRISM's page alone)
     opened = {entry[2] for entry in prism if entry[1] is None}
     pages = {port_settings._page_screen(folder, page["screen"]) for folder, page in PAGES.items()
@@ -654,58 +654,57 @@ def test_prism_settings_all_under_prism():
 
 
 def test_lighting_pages_per_mode():
-    """each mode's pages show only its own rows: PRISM's links to Classic's, Rebaked's and Path Traced's own
-    lighting pages each in its mode; no bake, exposure or upscaler under Classic, no Classic extras under the PRISM
-    modes, none of Classic's ray tracer outside Classic, the material packs in both PRISM modes"""
+    """each mode's pages show only its own rows (v4 geopatch M3): PRISM's links to Classic's, Enhanced's and Path
+    Traced's own lighting pages each in its mode; no exposure or upscaler under Classic, Classic's options alone on
+    its page, Enhanced's traced rows on its own page, Path Traced's own keys, the enhancement groups in every mode"""
     def shown(folder, mode):
         return {_key(entry) for entry in PAGES[folder]["rows"] if entry[0] != SECTION and
-                mode in LIGHTING_MODE_ROWS.get(_key(entry), "CRP")}
+                mode in LIGHTING_MODE_ROWS.get(_key(entry), "CEP")}
     prism = "video_settings/prism"
-    assert shown(prism, "C") >= {"lighting", "classic_lighting", "ray_tracing", "prism_image", "materials_textures"}
-    assert not {"rebaked_lighting", "path_tracing", "upscaling", "light_bake"} & shown(prism, "C")
-    assert "rebaked_lighting" in shown(prism, "R") and not {"classic_lighting", "path_tracing"} & shown(prism, "R")
-    assert "path_tracing" in shown(prism, "P") and not {"classic_lighting", "rebaked_lighting"} & shown(prism, "P")
-    assert {"upscaling", "light_bake"} <= shown(prism, "R") & shown(prism, "P")
-    assert not shown(f"{prism}/light_bake", "C") and "prism_sky_light" in shown(f"{prism}/light_bake", "P")
+    groups = {"world_geometry_page", "materials_terrain", "foliage", "models_textures", "enhancements"}
+    assert shown(prism, "C") >= {"lighting", "classic_lighting", "prism_image"} | groups
+    assert not {"enhanced_lighting", "path_tracing", "upscaling", "lightmap_downloads"} & shown(prism, "C")
+    assert "enhanced_lighting" in shown(prism, "E") and not {"classic_lighting", "path_tracing"} & shown(prism, "E")
+    assert "path_tracing" in shown(prism, "P") and not {"classic_lighting", "enhanced_lighting"} & shown(prism, "P")
+    assert {"upscaling", "lightmap_downloads"} <= shown(prism, "E") & shown(prism, "P")
+    assert groups <= shown(prism, "E") & shown(prism, "P")
+    assert shown(f"{prism}/classic", "C") == {"shadow_resolution", "per_pixel_lighting", "dynamic_lights"}
     assert shown(f"{prism}/image", "C") == {"prism_bloom", "prism_tone"}
-    assert "prism_exposure" in shown(f"{prism}/image", "R") & shown(f"{prism}/image", "P")
-    tracing = f"{prism}/ray_tracing"
-    assert "prism_rt" in shown(tracing, "C") and not {"prism_rt", "prism_rt_quality"} & shown(tracing, "P")
-    assert "prism_object_shadows" in shown(f"{prism}/rebaked", "R")
-    materials = f"{prism}/materials"
-    assert "material_packs" in shown(materials, "R") & shown(materials, "P")
-    assert "prism_materials" in shown(materials, "P") and "prism_surface_maps" not in shown(materials, "P")
-    assert not {"terrain", "water"} & shown(f"{prism}/world", "C")
-    assert {"terrain", "terrain_layers", "water"} <= shown(f"{prism}/world", "P")
+    assert "prism_exposure" in shown(f"{prism}/image", "E") & shown(f"{prism}/image", "P")
+    enhanced = shown(f"{prism}/enhanced", "E")
+    assert {"prism_sky_light", "prism_ray_tracing", "prism_object_shadows", "prism_rt_objects"} <= enhanced
+    assert not shown(f"{prism}/enhanced", "C") and not shown(f"{prism}/enhanced", "P")
+    assert {"prism_pt_objects", "prism_pt_cache", "prism_pt_alpha", "pt_dynamic_lights"} <= \
+        shown(f"{prism}/path_tracing", "P")
+    assert "material_packs" in shown(f"{prism}/materials", "E")
+    assert {"world_geometry", "campaign_collision"} <= {_key(e) for e in PAGES[f"{prism}/world"]["rows"]
+                                                        if e[0] != SECTION}
 
 
-def test_light_bake_page():
-    """Light Bake (the main menu bakes what the shipped light does not cover, prism_bake_menu.c): its sky light, a
-    row of each campaign level's bake (a status row menu_functions.c's bake_rows_show fills), and REBAKE LOCAL; no
-    quality (a release ships MAX: display.bake_quality is config.toml's), no choice of when it bakes
-    (display.bake "ask", gone) and no Rebake Lightmaps"""
-    page = PAGES["video_settings/prism/light_bake"]
+def test_lightmap_downloads_page():
+    """Lightmap Downloads (v4 geopatch M3, PLAN_FINAL section 10): exactly two rows, the classic geometry's and
+    the enhanced geometry's lightmaps, each a status row menu_functions.c's lightmap_rows_show fills; no bake row,
+    no bake status, no quality anywhere"""
+    page = PAGES["video_settings/prism/lightmaps"]
     keys = [_key(entry) for entry in page["rows"] if entry[0] != SECTION]
-    levels = ["a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40"]
-    assert keys == ["prism_sky_light", *(f"bake_{level}" for level in levels), "bake_rebake_all"]
-    assert not {"bake", "bake_rebake", "bake_indicator", "bake_quality"} & set(keys)
-    for key in keys[1:]:
-        assert key in port_settings.SETTINGS_STATUS_ROWS and LIGHTING_MODE_ROWS[key] == "RP"
-    rebake = [entry for entry in page["rows"] if entry[0] != SECTION and _key(entry) == "bake_rebake_all"][0]
-    assert rebake[-1] == "port settings bake rebake all"
-
+    assert keys == ["lightmaps_classic", "lightmaps_enhanced"]
+    for key in keys:
+        assert key in port_settings.SETTINGS_STATUS_ROWS
+    every = {_key(entry) for page in PAGES.values() for entry in page["rows"] if entry[0] != SECTION}
+    assert not {k for k in every if k and k.startswith(("bake", "light_bake"))}
+    settings = {entry[1] for page in PAGES.values() for entry in page["rows"] if entry[0] != SECTION and entry[1]}
+    assert not {name for name in settings if name.startswith("display.bake")}
 
 
 @pytest.mark.parametrize("aspect", sorted(port_settings.WIDE_SCREENS))
-def test_light_bake_level_values_fit(aspect):
-    """Light Bake's levels' values (the words prism_bake_menu.c's prism_bake_menu_level_words gives, each frame) fit
-    their status rows' value at every aspect (their names are the page's labels: test_tall_rows_words_fit)"""
+def test_lightmap_values_fit(aspect):
+    """Lightmap Downloads' values (prism_bake_menu.c's prism_bake_lightmap_words) fit their status rows' value at
+    every aspect"""
     extra = port_settings.wide_extra_of(port_settings.WIDE_SCREENS[aspect])
     widgets = _tall_widgets()
-    base = f"{port_settings.PE}/video_settings/prism/light_bake"
-    for level in ("a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40"):
-        value = widgets[f"{base}/bake_{level}_value"]
-        for words in ("BAKING 99%", "PART BAKED", "NOT BAKED", "LOADING", "BAKED", "NO MAP", "FAILED", "NEXT",
-                      "SHIPPED", "CHECKING"):
+    base = f"{port_settings.PE}/video_settings/prism/lightmaps"
+    for key in ("lightmaps_classic", "lightmaps_enhanced"):
+        value = widgets[f"{base}/{key}_value"]
+        for words in ("INSTALLED", "NOT DOWNLOADED", "10 OF 10 LEVELS", "4 OF 10 LEVELS"):
             assert port_settings.small_ui_width(words) * _tall_scale(value, extra) <= _tall_width(value, extra), \
-                (aspect, level, words)
+                (aspect, key, words)

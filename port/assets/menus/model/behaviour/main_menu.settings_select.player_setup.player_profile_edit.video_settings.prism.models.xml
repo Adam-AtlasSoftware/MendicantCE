@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The behaviour of ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.prism.models.xml's widgets, for the menu engine (docs/menu_engine.md; tools/menu_behaviour.py) -->
 <model>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/models_streaming_screen" flags="pass_unhandled_to_focused_child pause_game">
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/models_textures_screen" flags="pass_unhandled_to_focused_child pause_game">
 		<on event="b" run="port settings page cancel" back="true"/>
 		<on event="back" run="port settings page cancel" back="true"/>
 		<on event="y" run="port settings search"/>
@@ -28,14 +28,31 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/op_prism_textures" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/prism_textures_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
+	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/op_prism_model_budget_mb" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/prism_model_budget_mb_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/op_prism_texture_budget_mb" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/prism_texture_budget_mb_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/op_prism_secondary_motion" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/prism_secondary_motion_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/op_prism_texture_fade" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/prism_texture_fade_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
+	</behaviour>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/op_prism_texture_wait" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/prism_texture_wait_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+		<on event="created" run="port setting load"/>
 	</behaviour>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/op_prism_prefetch" flags="pass_unhandled_to_focused_child"/>
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models/prism_prefetch_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">

@@ -57,6 +57,36 @@ static void config_graphics_line(long setting, char *line, size_t size)
 static void config_graphics_apply(void)
 {
 }
+
+/* display.enhancements, which chooses others (none of the test's) */
+static const struct
+{
+	const char *name;
+} config_enhancements[] = { { "display.enhancements" } };
+#define NUMBER_OF_CONFIG_ENHANCEMENTS (sizeof(config_enhancements) / sizeof(config_enhancements[0]))
+
+static long config_enhancements_entry(long setting)
+{
+	(void)setting;
+	return -1;
+}
+
+static int config_enhancements_gives(long setting)
+{
+	(void)setting;
+	return 0;
+}
+
+static void config_enhancements_line(long setting, char *line, size_t size)
+{
+	(void)setting;
+	(void)line;
+	(void)size;
+}
+
+static void config_enhancements_apply(void)
+{
+}
 static volatile unsigned long config_change_count;
 static int config_answer_only;
 

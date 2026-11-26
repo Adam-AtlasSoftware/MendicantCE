@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The behaviour of ce/main_menu.settings_select.player_setup.player_profile_edit.video_settings.prism.world.xml's widgets, for the menu engine (docs/menu_engine.md; tools/menu_behaviour.py) -->
 <model>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_terrain_screen" flags="pass_unhandled_to_focused_child pause_game">
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_geometry_screen" flags="pass_unhandled_to_focused_child pause_game">
 		<on event="b" run="port settings page cancel" back="true"/>
 		<on event="back" run="port settings page cancel" back="true"/>
 		<on event="y" run="port settings search"/>
@@ -23,8 +23,8 @@
 		<on event="start" run="port settings page cancel" back="true"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_prism_world_geometry" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/prism_world_geometry_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_world_geometry" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/world_geometry_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</behaviour>
@@ -37,28 +37,8 @@
 	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/prism_world_geometry_band_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_prism_geometry_shadows" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/prism_geometry_shadows_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_terrain" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/terrain_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_terrain_layers" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/terrain_layers_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_terrain_tracks" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/terrain_tracks_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</behaviour>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_water" flags="pass_unhandled_to_focused_child"/>
-	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/water_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/op_campaign_collision" flags="pass_unhandled_to_focused_child"/>
+	<behaviour name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world/campaign_collision_spinner" flags="pass_unhandled_to_focused_child left_right_tabs_items">
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</behaviour>

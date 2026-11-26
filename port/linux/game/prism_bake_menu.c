@@ -607,26 +607,6 @@ static void shipped_seen(char const *map, int seen[BAKE_BSPS])
 	fclose(file);
 }
 
-/* whether the shipped bake has every campaign level here of a world
-("stock", "remodel"): a change of the world's geometry then bakes nothing */
-static boolean shipped_world_whole(char const *world)
-{
-	char keep[16], keys[BAKE_BSPS][BAKE_KEY], path[BAKE_PATH + 96];
-	short level;
-	boolean whole = TRUE;
-
-	snprintf(keep, sizeof(keep), "%s", bake_menu.world);
-	snprintf(bake_menu.world, sizeof(bake_menu.world), "%s", world);
-	for (level = 0; level < BAKE_LEVELS && whole; level++)
-	{
-		snprintf(path, sizeof(path), "%s/maps/%s.map", platform_data_root(), bake_levels[level].map);
-		if (file_exists(path) && !shipped_read(bake_levels[level].map, keys))
-			whole = FALSE;
-	}
-	snprintf(bake_menu.world, sizeof(bake_menu.world), "%s", keep);
-	return whole;
-}
-
 static void settings_read(void)
 {
 	char const *lighting;
@@ -654,7 +634,7 @@ static void settings_read(void)
 		bake_menu.notes_read = 0;
 	}
 	lighting = config_string("display.lighting");
-	bake_menu.wanted = lighting && (!strcmp(lighting, "raster") || !strcmp(lighting, "pathtraced")) &&
+	bake_menu.wanted = lighting && (!strcmp(lighting, "enhanced") || !strcmp(lighting, "pathtraced")) &&
 		strcmp(config_string("display.bake"), "off") != 0 && !prism_bake_worker_map();
 }
 
@@ -1160,13 +1140,11 @@ boolean prism_bake_key_setting(char const *name, char const *before, char const 
 {
 	if (!name)
 		return FALSE;
-	if (!strcmp(name, "display.prism_rig"))
-		return strcmp(rig_class(before), rig_class(after)) != 0;
-	if (!strcmp(name, "display.prism_world_geometry"))
-	{
-		settings_read();
-		return !shipped_world_whole(after && !strcmp(after, "remodel") ? "remodel" : "stock");
-	}
+	/* (v4 geopatch M3: players never bake, so no setting asks for a REBAKE:
+	a world geometry without its shipped lightmaps draws the classic shape
+	(prism_world_source.c's ladder), and the rig is the farm's) */
+	(void)before;
+	(void)after;
 	return FALSE;
 }
 
@@ -1637,4 +1615,50 @@ int prism_bake_menu_value(char const *name, char *value, unsigned long size)
 	else
 		return 0;
 	return 1;
+}
+
+/* ---------- Lightmap Downloads (v4 geopatch M3) */
+
+boolean prism_bake_lightmap_words(boolean enhanced, char *text, unsigned long size)
+{
+	static char const *const maps[] = { "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40" };
+	static unsigned long changes_read = (unsigned long)-1;
+	static int counts[2];
+	int k;
+
+	/* (counted again when a setting changes, and every 60 asks otherwise: a
+	page's rows ask each frame) */
+	{
+		static unsigned long asks;
+
+		if (changes_read != config_changes() || ++asks >= 60)
+		{
+			char folder[BAKE_PATH];
+
+			changes_read = config_changes();
+			asks = 0;
+			shipped_folder_read(folder, sizeof(folder));
+			for (k = 0; k < 2; k++)
+			{
+				long index;
+
+				counts[k] = 0;
+				for (index = 0; index < (long)NUMBEROF(maps); index++)
+				{
+					char path[BAKE_PATH + 64];
+
+					snprintf(path, sizeof(path), "%s/%s/%s/manifest.txt", folder, k ? "remodel" : "stock", maps[index]);
+					counts[k] += file_exists(path) ? 1 : 0;
+				}
+			}
+		}
+	}
+	k = enhanced ? 1 : 0;
+	if (counts[k] == (int)NUMBEROF(maps))
+		snprintf(text, size, "INSTALLED");
+	else if (!counts[k])
+		snprintf(text, size, "NOT DOWNLOADED");
+	else
+		snprintf(text, size, "%d OF %d LEVELS", counts[k], (int)NUMBEROF(maps));
+	return TRUE;
 }

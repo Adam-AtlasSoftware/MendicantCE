@@ -268,11 +268,21 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics_android" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="android" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_spinner" x="188"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_seg0" x="188" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_seg1" x="283" y="1"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_seg2" x="378" y="1"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ENHANCED|XBOX|PRISM EXTRAS|CUSTOM" setting="display.graphics" values="enhanced|classic|prism|custom" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_seg0" type="text" controller="1" width="91" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ENHANCED" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_seg1" type="text" controller="1" width="91" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="XBOX" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_seg2" type="text" controller="1" width="91" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="CUSTOM" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_android_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ENHANCED|XBOX|CUSTOM" setting="display.graphics" values="enhanced|classic|custom" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
+		<on event="a" run="port setting segment"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_high_res_text" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/high_res_text_label"/>
@@ -365,7 +375,7 @@
 		<string text="Where the picture sits on a screen taller than it, its shape, and the frame around it in portrait."/>
 		<string text="The vehicles' and scopes' fields of view, the Panini projection, how far you see, the reticle, a passenger's view, and your weapon, body and shields."/>
 		<string text=""/>
-		<string text="Enhanced: smoother edges, sharper textures and shadows, smoother model light. Xbox: as the Xbox drew it. PRISM Extras: Enhanced with PRISM's finer Classic light. Its light settings are Lighting Classic's.|Changing one shows CUSTOM."/>
+		<string text="Enhanced: smoother edges, sharper textures and shadows, smoother model light. Xbox: as the Xbox drew it.|Changing one shows CUSTOM."/>
 		<string text="Draws text and titles with sharp high-resolution fonts. Off draws the game's own."/>
 		<string text="Up to 60 frames a second and Classic graphics, for a longer battery and a cooler device. Auto turns it on while the device runs on its battery. Your own settings come back as it turns off."/>
 		<string text="The lighting, Classic, PRISM Rebaked or PRISM Path Traced, then only the settings that apply to it: light and shadows, ray tracing, exposure, upscaling, the light bake, materials, remodels and terrain."/>

@@ -291,9 +291,9 @@ static int stock_collision_vertex(void *context, uint32_t index, uint32_t bits[3
 
 boolean prism_world_geometry_wanted(void)
 {
-	char const *value = config_string("display.prism_world_geometry");
+	char const *value = config_string("display.world_geometry");
 
-	return value && (!strcmp(value, "remodel") || !strcmp(value, "enhanced"));
+	return value && !strcmp(value, "enhanced");
 }
 
 enum prism_world_rung prism_world_rung(void)

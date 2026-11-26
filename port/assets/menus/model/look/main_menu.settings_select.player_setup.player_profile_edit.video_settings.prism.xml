@@ -13,16 +13,17 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_0" x="28" y="50"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_lighting" x="28" y="72"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_classic_lighting" x="28" y="97"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_rebaked_lighting" x="28" y="122"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_enhanced_lighting" x="28" y="122"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_path_tracing" x="28" y="147"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_ray_tracing" x="28" y="172"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_prism_image" x="28" y="197"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_upscaling" x="28" y="222"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_light_bake" x="28" y="247"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_9" x="28" y="278"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_materials_textures" x="28" y="300"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_models_streaming" x="28" y="325"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_world_terrain" x="28" y="350"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_prism_image" x="28" y="172"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_upscaling" x="28" y="197"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_lightmap_downloads" x="28" y="222"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_8" x="28" y="253"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_enhancements" x="28" y="275"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_world_geometry_page" x="28" y="300"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_materials_terrain" x="28" y="325"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_foliage" x="28" y="350"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_models_textures" x="28" y="375"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/button_bar" x="0" y="448"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/button_bar" role="buttons" type="column_list" box="0 0 640 28" place="foot">
@@ -54,7 +55,7 @@
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="1" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/lighting_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
-		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="CLASSIC|PRISM REBAKED|PATH TRACED" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="CLASSIC|ENHANCED|PATH TRACED" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_classic_lighting" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
@@ -63,11 +64,11 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic_lighting_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="2" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_rebaked_lighting" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_enhanced_lighting" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/rebaked_lighting_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced_lighting_label" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/rebaked_lighting_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced_lighting_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="3" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_path_tracing" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
@@ -77,59 +78,70 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/path_tracing_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="4" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_ray_tracing" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
-		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing_label" x="0" y="0"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/ray_tracing_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="5" scale="1 1.2"/>
-	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_prism_image" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/prism_image_label" x="0" y="0"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/prism_image_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="6" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="5" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_upscaling" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/upscaling_label" x="0" y="0"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/upscaling_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="6" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_lightmap_downloads" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/lightmap_downloads_label" x="0" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/lightmap_downloads_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="7" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_light_bake" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_8" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_8_title" x="0" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_8_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="8" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_enhancements" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhancements_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhancements_spinner" x="188" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/light_bake_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="8" scale="1 1.2"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhancements_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="9" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_9" box="0 0 344 20" wide="-106 244" past="-143 193" picture="main_menu/settings/section_tall">
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_9_title" x="0" y="0"/>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhancements_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="CLASSIC|REMASTERED|REALISTIC|CUSTOM" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/section_9_title" type="text" box="0 0 344 20" wide="0 244" past="0 193">
-		<text font="ui\small_ui" color="#FF6F9CD0" at="2 2" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="9" scale="1 1.2"/>
-	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_materials_textures" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_world_geometry_page" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials_textures_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world_geometry_page_label" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials_textures_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world_geometry_page_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="10" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_models_streaming" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_materials_terrain" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models_streaming_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials_terrain_label" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models_streaming_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials_terrain_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="11" scale="1 1.2"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_world_terrain" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_foliage" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world_terrain_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/foliage_label" x="0" y="0"/>
 	</look>
-	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/world_terrain_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/foliage_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
 		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="12" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/op_models_textures" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models_textures_label" x="0" y="0"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/models_textures_label" type="text" box="0 0 332 24" wide="0 244" past="0 193">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/labels" index="13" scale="1 1.2"/>
 	</look>
 </model>

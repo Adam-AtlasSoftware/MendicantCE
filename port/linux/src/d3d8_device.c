@@ -2955,7 +2955,7 @@ static BOOL output_depth_wanted(void)
 	{
 		const char *lighting = config_string("display.lighting");
 
-		if (lighting && *lighting && strcmp(lighting, "ce"))
+		if (lighting && *lighting && strcmp(lighting, "classic"))
 			return FALSE;
 	}
 	if (setting && !strcmp(setting, "10"))

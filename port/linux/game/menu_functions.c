@@ -187,6 +187,10 @@ int config_write_boolean(const char *name, int value);
 int config_default(char const *name, char *text, unsigned int size);
 int config_graphics_value(char const *graphics, char const *name, char *text, unsigned int size);
 char const *config_graphics_setting(int entry);
+/* display.enhancements' (port_config.h) */
+char const *config_enhancements_setting(int entry);
+int config_enhancements_value(char const *preset, char const *name, char *text, unsigned int size);
+int config_enhancement_info(char const *name, char const **group, char const **modes, char const **content);
 /* each weapon's own first-person offsets (port_config.h) */
 #define CONFIG_WEAPON_VALUES 6
 int config_viewmodel_weapon(char const *path, double values[CONFIG_WEAPON_VALUES]);
@@ -768,6 +772,13 @@ static struct
 	short shown;
 } graphics_preset = { NULL, NONE };
 
+/* PRISM's Enhancements spinner, and the value it showed (enhancements_preset_show) */
+static struct
+{
+	struct widget_instance *spinner;
+	short shown;
+} enhancements_preset = { NULL, NONE };
+
 /* ---------- Settings' changes kept (tools/port_settings.py's PAGES)
 
 What a tab or a page of Settings shows changed is kept here, by setting,
@@ -861,6 +872,12 @@ static boolean setting_load(struct widget_instance *widget)
 	{
 		graphics_preset.spinner = widget;
 		graphics_preset.shown = widget->parameters.list.selected_index;
+	}
+	/* (PRISM's Enhancements: the group rows it chooses follow it) */
+	if (!strcmp(setting->setting, "display.enhancements"))
+	{
+		enhancements_preset.spinner = widget;
+		enhancements_preset.shown = widget->parameters.list.selected_index;
 	}
 	return TRUE;
 }
@@ -2570,6 +2587,98 @@ static void graphics_preset_show(struct widget_instance *list)
 	}
 }
 
+/* ---------- PRISM's Enhancements (display.enhancements, v4 geopatch M3):
+CLASSIC, REMASTERED or REALISTIC, or CUSTOM while a setting it chooses (on
+any group's page) is another value; choosing one puts them all at its
+values, as Quality does for its own (graphics_preset_show) */
+
+static boolean enhancements_preset_custom(char const *preset)
+{
+	char const *name;
+	int entry;
+
+	for (entry = 0; (name = config_enhancements_setting(entry)) != NULL; entry++)
+	{
+		char given[300], shown[300];
+
+		if (config_enhancements_value(preset, name, given, sizeof(given)) &&
+			settings_value(name, shown, sizeof(shown)) && !settings_values_same(given, shown))
+		{
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+static char const *enhancements_preset_choice;
+
+static boolean enhancements_preset_row_show(struct widget_instance *spinner, struct pc_menu_setting *setting)
+{
+	char text[300];
+
+	if (config_enhancements_value(enhancements_preset_choice, setting->setting, text, sizeof(text)))
+		spinner->parameters.list.selected_index = setting_value_index(setting, text);
+	return TRUE;
+}
+
+static void enhancements_preset_choose(struct widget_instance *list, char const *preset)
+{
+	char const *name;
+	int entry;
+
+	settings_pending_set("display.enhancements", preset);
+	for (entry = 0; (name = config_enhancements_setting(entry)) != NULL; entry++)
+	{
+		char given[300];
+
+		if (config_enhancements_value(preset, name, given, sizeof(given)))
+			settings_pending_set(name, given);
+	}
+	enhancements_preset_choice = preset;
+	settings_each(screen_of(list), enhancements_preset_row_show);
+}
+
+static void enhancements_preset_show(struct widget_instance *list)
+{
+	struct widget_instance *spinner = named(list, "enhancements_spinner", 0);
+	struct pc_menu_setting *setting = settings_setting_of(spinner);
+	short index, custom, count;
+	char base[64];
+
+	if (!setting || spinner != enhancements_preset.spinner)
+		return;
+	count = (short)setting->value_count;
+	custom = setting_value_index(setting, "custom");
+	if (strcmp(setting->values[custom], "custom") || !settings_value("display.enhancements", base, sizeof(base)))
+		return;
+	index = spinner->parameters.list.selected_index;
+	if (index < 0 || index >= count)
+		return;
+	if (index != enhancements_preset.shown)
+	{
+		if (index == custom && !enhancements_preset_custom(base))
+		{
+			short step = enhancements_preset.shown != NONE && (enhancements_preset.shown + 1) % count == index ? 1 :
+				count - 1;
+
+			index = (short)((index + step) % count);
+			spinner->parameters.list.selected_index = index;
+		}
+		if (index != custom)
+			enhancements_preset_choose(list, setting->values[index]);
+		enhancements_preset.shown = index;
+		return;
+	}
+	if (index != custom)
+		snprintf(base, sizeof(base), "%s", setting->values[index]);
+	if (enhancements_preset_custom(base) != (index == custom))
+	{
+		index = index == custom ? setting_value_index(setting, base) : custom;
+		spinner->parameters.list.selected_index = index;
+		enhancements_preset.shown = index;
+	}
+}
+
 /* Graphics' SIMULATION row (game.sim_rate): where the game sets the setting
 aside (sim_rate_locked: a network game of other machines, a film's
 playback), the row is locked. It shows the rate the game takes (ORIGINAL
@@ -2684,19 +2793,15 @@ static void prism_rt_rows_show(struct widget_instance *list)
 {
 	static char const *const rows[][2] =
 	{
-		{ "op_prism_rt", "prism_rt_spinner" }, { "op_prism_rt_quality", "prism_rt_quality_spinner" },
-		{ "op_prism_rt_resolution", "prism_rt_resolution_spinner" },
-		{ "op_prism_rt_denoiser", "prism_rt_denoiser_spinner" }, { "op_prism_rt_mood", "prism_rt_mood_spinner" },
-		{ "op_prism_rt_world", "prism_rt_world_spinner" }, { "op_prism_rt_objects", "prism_rt_objects_spinner" },
-		{ "op_prism_rt_cache", "prism_rt_cache_spinner" }, { "op_prism_rt_sun", "prism_rt_sun_spinner" },
-		/* (TRACED LIGHT LOOK's page) */
-		{ "op_prism_rt_style", "prism_rt_style_spinner" }, { "op_prism_rt_anchor", "prism_rt_anchor_spinner" },
-		{ "op_prism_exposure_traced", "prism_exposure_traced_spinner" },
-		{ "op_prism_tone_curve_traced", "prism_tone_curve_traced_spinner" },
-		{ "op_prism_rt_emissive", "prism_rt_emissive_spinner" },
-		{ "op_prism_rt_emissive_scale", "prism_rt_emissive_scale_spinner" },
-		{ "op_prism_sun_size", "prism_sun_size_spinner" }, { "op_prism_rt_materials", "prism_rt_materials_spinner" },
-		{ "op_prism_rt_alpha", "prism_rt_alpha_spinner" }, { "op_prism_rt_bounces", "prism_rt_bounces_spinner" },
+		/* (Enhanced's ray tracing (display.prism_ray_tracing, off where the
+		card cannot trace: prism_deferred.c) and its traced rows) */
+		{ "op_prism_ray_tracing", "prism_ray_tracing_spinner" },
+		{ "op_prism_object_shadows", "prism_object_shadows_spinner" },
+		{ "op_prism_rt_objects", "prism_rt_objects_spinner" }, { "op_prism_rt_cache", "prism_rt_cache_spinner" },
+		{ "op_prism_rt_alpha", "prism_rt_alpha_spinner" },
+		/* (Path Traced's traced scene) */
+		{ "op_prism_pt_objects", "prism_pt_objects_spinner" }, { "op_prism_pt_cache", "prism_pt_cache_spinner" },
+		{ "op_prism_pt_alpha", "prism_pt_alpha_spinner" },
 	};
 	boolean locked = !halo_prism_rt_available();
 	short index;
@@ -2784,22 +2889,23 @@ static void layout_export_press(void);
 static boolean layout_files_panel(struct widget_instance *row, wchar_t const **help);
 
 /* Video's PRISM page's Lighting (display.lighting) and the rows that apply
-to the mode it shows: PRISM's links and its pages' rows of one mode or two
-are shown only with it (the value shown, before OK: a change of Lighting
-shows on its page and the pages it opens at once), and
-some only while another row is at a value, as Frame Rate Limit follows VSync.
-A hidden row keeps its value, which Defaults leaves as it is
-(lighting_row_hidden). tools/port_settings.py's LIGHTING_MODE_ROWS has the
-same modes (test_port_settings.py checks it), and packs each page for each.
-A row of none of these shows in every mode. Android, which has no Lighting
+to the mode it shows (v4 geopatch M3: Classic, Enhanced and Path Traced
+never mix): PRISM's links and its pages' rows of one mode or two are shown
+only with it (the value shown, before OK: a change of Lighting shows on its
+page and the pages it opens at once), and some only while another row is at
+a value, as Enhanced's traced rows follow its RAY TRACING. A hidden row
+keeps its value, which Defaults leaves as it is (lighting_row_hidden).
+tools/port_settings.py's LIGHTING_MODE_ROWS has the same modes
+(test_port_settings.py checks it), and packs each page for each. A row of
+none of these shows in every mode. Android, which has no Lighting
 (display.lighting is the desktop's), is Classic's. */
 enum
 {
-	/* Classic: "ce", and the "ce_deferred" diagnostic, Classic's frame */
+	/* Classic: "classic", and the "ce_deferred" diagnostic, Classic's frame */
 	LIGHTING_C = 1,
-	/* PRISM Rebaked: "raster" */
-	LIGHTING_R = 2,
-	/* PRISM Path Traced: "pathtraced" */
+	/* Enhanced: "enhanced" */
+	LIGHTING_E = 2,
+	/* Path Traced: "pathtraced" */
 	LIGHTING_P = 4,
 };
 
@@ -2814,100 +2920,48 @@ static struct
 	char const *value;
 } const lighting_rows[] =
 {
-	/* (PRISM's page: the way to each mode's own lighting page; its Image,
-	Ray Tracing and the world's and assets' pages show in every mode) */
+	/* (PRISM's page: the way to each mode's own lighting page; the PRISM
+	modes' upscaling (Classic draws without an upscaler: prism_upscale.c; on
+	it the upscaler's scale while one is on, as only this link opens it) and
+	the lightmaps they read) */
 	{ "op_classic_lighting", LIGHTING_C, NULL, NULL },
-	{ "op_rebaked_lighting", LIGHTING_R, NULL, NULL },
+	{ "op_enhanced_lighting", LIGHTING_E, NULL, NULL },
 	{ "op_path_tracing", LIGHTING_P, NULL, NULL },
-	/* (Classic Lighting: Classic's own light and PRISM's extras on it, which
-	the bake's or the path tracer's light replaces in the PRISM modes) */
+	{ "op_upscaling", LIGHTING_E | LIGHTING_P, NULL, NULL },
+	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_E | LIGHTING_P, "display.upscaler", "!off" },
+	{ "op_lightmap_downloads", LIGHTING_E | LIGHTING_P, NULL, NULL },
+	/* (Classic Lighting: the game's own options alone) */
 	{ "op_shadow_resolution", LIGHTING_C, NULL, NULL },
 	{ "op_per_pixel_lighting", LIGHTING_C, NULL, NULL },
 	{ "op_dynamic_lights", LIGHTING_C, NULL, NULL },
-	{ "op_ambient_occlusion", LIGHTING_C, NULL, NULL },
-	{ "op_ambient_occlusion_strength", LIGHTING_C, "display.ambient_occlusion", "world" },
-	{ "op_prism_lightmaps", LIGHTING_C, NULL, NULL },
-	{ "op_prism_specular", LIGHTING_C, NULL, NULL },
-	{ "op_prism_reflections", LIGHTING_C, NULL, NULL },
-	{ "op_prism_shadows", LIGHTING_C, NULL, NULL },
-	{ "op_prism_shadow_resolution", LIGHTING_C, "display.prism_shadows", "cascaded" },
-	{ "op_prism_shadow_softness", LIGHTING_C, "display.prism_shadows", "cascaded" },
-	{ "op_prism_baked_shadows", LIGHTING_C, NULL, NULL },
-	{ "op_prism_baked_shadow_depth", LIGHTING_C, "display.prism_baked_shadows", "sharp" },
-	/* (World & Terrain's: the remodel's shape for Classic's sun shadows) */
-	{ "op_prism_geometry_shadows", LIGHTING_C, "display.prism_shadows", "cascaded" },
-	/* (Rebaked Lighting: PRISM Rebaked's frame, its traced object shadows or
-	CE's projected ones (at CE's shadow quality), and the enhanced dynamic
-	lights, which the game gives the plasma bolts' and needles' lights that
-	the bake's frame lights by, and whose glows it draws) */
-	{ "op_prism_raster_composition", LIGHTING_R, NULL, NULL },
-	{ "op_prism_raster_objects", LIGHTING_R, NULL, NULL },
-	{ "op_prism_object_shadows", LIGHTING_R, NULL, NULL },
-	{ "op_shadow_resolution_rebaked", LIGHTING_R, "display.prism_raster_object_shadows", "classic" },
-	{ "op_dynamic_lights_prism", LIGHTING_R, NULL, NULL },
-	/* (Path Tracing: PRISM Path Traced's profile and denoiser, and its moving
-	lights: the enhanced dynamic lights, their brightness and colour) */
+	/* (Enhanced Lighting: the lightmaps' look, its own dynamic lights, its
+	ray tracing, each traced row while it is on, and the game's object
+	shadows' quality while they are not traced) */
+	{ "op_prism_sky_light", LIGHTING_E, NULL, NULL },
+	{ "op_prism_raster_composition", LIGHTING_E, NULL, NULL },
+	{ "op_prism_raster_objects", LIGHTING_E, NULL, NULL },
+	{ "op_enhanced_dynamic_lights", LIGHTING_E, NULL, NULL },
+	{ "op_prism_ray_tracing", LIGHTING_E, NULL, NULL },
+	{ "op_prism_object_shadows", LIGHTING_E, "display.prism_ray_tracing", "on" },
+	{ "op_enhanced_shadow_resolution", LIGHTING_E, "display.prism_ray_tracing", "off" },
+	{ "op_enhanced_shadow_resolution", LIGHTING_E, "display.prism_raster_object_shadows", "classic" },
+	{ "op_prism_rt_objects", LIGHTING_E, "display.prism_ray_tracing", "on" },
+	{ "op_prism_rt_cache", LIGHTING_E, "display.prism_ray_tracing", "on" },
+	{ "op_prism_rt_alpha", LIGHTING_E, "display.prism_ray_tracing", "on" },
+	/* (Path Tracing: its profile and denoiser, its moving lights and its own
+	traced scene, each its own key) */
 	{ "op_pt_profile", LIGHTING_P, NULL, NULL },
 	{ "op_denoiser", LIGHTING_P, NULL, NULL },
-	{ "op_dynamic_lights_pt", LIGHTING_P, NULL, NULL },
+	{ "op_pt_dynamic_lights", LIGHTING_P, NULL, NULL },
 	{ "op_prism_dynamic_lights", LIGHTING_P, NULL, NULL },
 	{ "op_prism_light_saturation", LIGHTING_P, NULL, NULL },
-	/* (both PRISM modes: their exposure and tone curve (Image), the way to
-	their Upscaling page (Classic draws without an upscaler: prism_upscale.c;
-	on it, the upscaler's scale while one is on, whatever the mode, as only
-	this link opens it), and the bake that both read (Light Bake): Rebaked's
-	light, Path Traced's scene and bounced light) */
-	{ "op_prism_exposure", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_prism_exposure_bias", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_prism_tone_curve", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_upscaling", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_upscaler_scale", LIGHTING_C | LIGHTING_R | LIGHTING_P, "display.upscaler", "!off" },
-	{ "op_light_bake", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_prism_sky_light", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_a10", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_a30", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_a50", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_b30", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_b40", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_c10", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_c20", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_c40", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_d20", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_d40", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_bake_rebake_all", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	/* (Ray Tracing: Classic's ray tracer, display.prism_rt, which both PRISM
-	modes turn off (prism_rt.c), its settings only while it is on) */
-	{ "op_prism_rt", LIGHTING_C, NULL, NULL },
-	{ "op_prism_rt_quality", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_resolution", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_denoiser", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_mood", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_sun", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_world", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_traced_light_look", LIGHTING_C, "display.prism_rt", "!off" },
-	/* (the traced scene: the objects' capture (xgpu_vulkan_rt.c), which Path
-	Traced takes always, Rebaked with its object shadows traced and Classic
-	with its ray tracer on; the see-through surfaces, in the bake's scene) */
-	{ "op_prism_rt_objects", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_objects", LIGHTING_R, "display.prism_raster_object_shadows", "traced" },
-	{ "op_prism_rt_objects", LIGHTING_P, NULL, NULL },
-	{ "op_prism_rt_cache", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_cache", LIGHTING_R, "display.prism_raster_object_shadows", "traced" },
-	{ "op_prism_rt_cache", LIGHTING_P, NULL, NULL },
-	{ "op_prism_rt_alpha", LIGHTING_C, "display.prism_rt", "!off" },
-	{ "op_prism_rt_alpha", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	/* (Materials & Textures: the model shaders' forward light, Classic's;
-	the material packs, both PRISM modes' G-buffer's, which Rebaked composes
-	and the path tracer lights) */
-	{ "op_prism_material_overlay", LIGHTING_C, NULL, NULL },
-	{ "op_prism_surface_maps", LIGHTING_C, NULL, NULL },
-	{ "op_material_packs", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	/* (World & Terrain: the terrain and water overhaul, both PRISM modes'
-	(prism_terrain_wanted)) */
-	{ "op_terrain", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_terrain_layers", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_terrain_tracks", LIGHTING_R | LIGHTING_P, NULL, NULL },
-	{ "op_water", LIGHTING_R | LIGHTING_P, NULL, NULL },
+	{ "op_prism_pt_objects", LIGHTING_P, NULL, NULL },
+	{ "op_prism_pt_cache", LIGHTING_P, NULL, NULL },
+	{ "op_prism_pt_alpha", LIGHTING_P, NULL, NULL },
+	/* (Image: the PRISM modes' exposure and tone curve) */
+	{ "op_prism_exposure", LIGHTING_E | LIGHTING_P, NULL, NULL },
+	{ "op_prism_exposure_bias", LIGHTING_E | LIGHTING_P, NULL, NULL },
+	{ "op_prism_tone_curve", LIGHTING_E | LIGHTING_P, NULL, NULL },
 };
 
 /* the mode Settings shows (PRISM's Lighting, changed or not) */
@@ -2917,7 +2971,7 @@ static unsigned char lighting_mode_shown(void)
 
 	if (!settings_value("display.lighting", text, sizeof(text)))
 		return LIGHTING_C;
-	return !strcmp(text, "pathtraced") ? LIGHTING_P : !strcmp(text, "raster") ? LIGHTING_R : LIGHTING_C;
+	return !strcmp(text, "pathtraced") ? LIGHTING_P : !strcmp(text, "enhanced") ? LIGHTING_E : LIGHTING_C;
 }
 
 /* whether the row is one of lighting_rows' (found), and shown: by the mode
@@ -2969,6 +3023,48 @@ static void lighting_rows_show(struct widget_instance *list)
 		shown = lighting_row_shown(row->name, FALSE, &found);
 		if (found)
 			row->visible = shown;
+	}
+}
+
+/* the enhancement groups' rows that cannot apply now, greyed (their help
+says why): a row whose lighting modes (config_enhancement_info: World
+Geometry, the material packs, the terrain and the water need Enhanced or
+Path Traced) leave out the mode PRISM's Lighting shows, a row of content no
+release has brought yet (the foliage), and Campaign Collision until it ships
+(v4 geopatch M8). A greyed row keeps its value: Classic lighting never
+draws the enhanced geometry whatever World Geometry says
+(prism_world_source.c) */
+static void enhancement_rows_show(struct widget_instance *list)
+{
+	struct widget_instance *row;
+	unsigned char mode = lighting_mode_shown();
+	char const letter = mode == LIGHTING_P ? 'P' : mode == LIGHTING_E ? 'E' : 'C';
+
+	for (row = list->child; row; row = row->next)
+	{
+		char setting_name[96], spinner_name[96];
+		char const *group, *modes, *content;
+		struct widget_instance *spinner;
+		boolean locked;
+
+		if (!row->name || strncmp(row->name, "op_", 3))
+			continue;
+		if (!strcmp(row->name, "op_campaign_collision"))
+			locked = TRUE;
+		else
+		{
+			snprintf(setting_name, sizeof(setting_name), "display.%s", row->name + 3);
+			if (!config_enhancement_info(setting_name, &group, &modes, &content))
+				continue;
+			locked = !strchr(modes, letter) || content != NULL;
+		}
+		snprintf(spinner_name, sizeof(spinner_name), "%s_spinner", row->name + 3);
+		spinner = named(list, spinner_name, 0);
+		if (!spinner || spinner->disabled == locked)
+			continue;
+		row->disabled = locked;
+		spinner->disabled = locked;
+		row->alpha_modifier = locked ? 0.4f : 1.0f;
 	}
 }
 
@@ -4220,20 +4316,16 @@ static void discord_account_show(struct widget_instance *list)
 
 /* each frame of Light Bake's list: each campaign level's row's value, its
 bake's state (prism_bake_menu.c: BAKED, BAKING 37%, NOT BAKED, NO MAP) */
-static void bake_rows_show(struct widget_instance *list)
+static void lightmap_rows_show(struct widget_instance *list)
 {
-	static char const *const maps[] = { "a10", "a30", "a50", "b30", "b40", "c10", "c20", "c40", "d20", "d40" };
-	char key[16], text[ROW_TEXT_LENGTH];
-	long index;
+	char text[ROW_TEXT_LENGTH];
 
-	if (!settings_model_row(list, "bake_a10"))
+	if (!settings_model_row(list, "lightmaps_classic"))
 		return;
-	for (index = 0; index < (long)NUMBEROF(maps); index++)
-	{
-		snprintf(key, sizeof(key), "bake_%s", maps[index]);
-		if (prism_bake_menu_level_words(maps[index], text, sizeof(text)))
-			settings_status_set(list, key, text);
-	}
+	if (prism_bake_lightmap_words(FALSE, text, sizeof(text)))
+		settings_status_set(list, "lightmaps_classic", text);
+	if (prism_bake_lightmap_words(TRUE, text, sizeof(text)))
+		settings_status_set(list, "lightmaps_enhanced", text);
 }
 
 /* each frame of Advanced Graphics' list: the DISPLAY PEAK row's value,
@@ -5415,10 +5507,12 @@ static void settings_page_update(struct widget_instance *list)
 	clear_caches_show(list);
 	add_maps_show(list);
 	hdr_display_show(list);
-	bake_rows_show(list);
+	lightmap_rows_show(list);
+	enhancement_rows_show(list);
 	pad_editor_update(list);
 	controls_page_update(list);
 	graphics_preset_show(list);
+	enhancements_preset_show(list);
 	sim_rate_row_show(list);
 	prism_rt_rows_show(list);
 	prism_assets_rows_show(list);

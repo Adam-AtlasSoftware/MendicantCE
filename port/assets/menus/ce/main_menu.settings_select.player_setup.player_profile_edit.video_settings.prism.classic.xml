@@ -17,17 +17,6 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_shadow_resolution" x="28" y="100" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_per_pixel_lighting" x="28" y="121" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_dynamic_lights" x="28" y="142" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_ambient_occlusion" x="28" y="163" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_ambient_occlusion_strength" x="28" y="184" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/section_6" x="28" y="211" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_lightmaps" x="28" y="231" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_specular" x="28" y="252" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_reflections" x="28" y="273" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_shadows" x="28" y="294" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_shadow_resolution" x="28" y="315" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_shadow_softness" x="28" y="336" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_baked_shadows" x="28" y="357" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_baked_shadow_depth" x="28" y="378" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -96,201 +85,11 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_ambient_occlusion" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_seg1" x="298" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_seg2" x="408" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="4" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_seg0" type="text" controller="1" width="106" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_seg1" type="text" controller="1" width="106" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="WORLD" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_seg2" type="text" controller="1" width="106" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="RAY TRACED" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|WORLD|RAY TRACED" setting="display.ambient_occlusion" values="off|world|ray_traced" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_ambient_occlusion_strength" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_seg1" x="276" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_seg2" x="364" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="5" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_seg0" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="LIGHT" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_seg1" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="NATURAL" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_seg2" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="DEEP" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/ambient_occlusion_strength_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="LIGHT|NATURAL|DEEP" setting="display.ambient_occlusion_strength" values="0.5|0.8|1" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/section_6" width="344" height="18" bitmap="main_menu/settings/section" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/section_6_title"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/section_6_title" type="text" controller="1" width="344" height="18" wide="0 244" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="6" color="#FF6F9CD0" text_x="2" text_y="1" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_lightmaps" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_seg1" x="297" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_seg2" x="406" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="7" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_seg0" type="text" controller="1" width="105" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="XBOX" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_seg1" type="text" controller="1" width="105" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="SMOOTH" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_seg2" type="text" controller="1" width="105" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="RELIT PAGES" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_lightmaps_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="XBOX|SMOOTH|RELIT PAGES" setting="display.prism_lightmaps" values="stock|smooth|rebaked" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_specular" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_seg1" x="263" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_seg2" x="338" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="8" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_seg0" type="text" controller="1" width="71" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_seg1" type="text" controller="1" width="71" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="SUBTLE" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_seg2" type="text" controller="1" width="71" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="FULL" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_specular_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|SUBTLE|FULL" setting="display.prism_specular" values="off|subtle|full" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_reflections" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_seg1" x="266" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_seg0" type="text" controller="1" width="74" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="CLASSIC" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_seg1" type="text" controller="1" width="74" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="LOCAL" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_reflections_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="CLASSIC|LOCAL" setting="display.prism_reflections" values="stock|local" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_shadows" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadows_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadows_spinner" x="188"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadows_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadows_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="CLASSIC|SOFT|TRACED|SUN" setting="display.prism_shadows" values="stock|soft|traced|cascaded" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_shadow_resolution" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_seg1" x="256" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_seg2" x="324" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_seg0" type="text" controller="1" width="64" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="LOW" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_seg1" type="text" controller="1" width="64" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="HIGH" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_seg2" type="text" controller="1" width="64" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ULTRA" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_resolution_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="LOW|HIGH|ULTRA" setting="display.prism_shadow_resolution" values="1024|2048|4096" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_shadow_softness" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_seg1" x="276" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_seg2" x="364" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_seg0" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="SHARP" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_seg1" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="NATURAL" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_seg2" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="SOFT" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_shadow_softness_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="SHARP|NATURAL|SOFT" setting="display.prism_shadow_softness" values="0.5|1|2" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_baked_shadows" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_seg1" x="256" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_seg0" type="text" controller="1" width="64" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="OFF" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_seg1" type="text" controller="1" width="64" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="SHARP" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadows_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="OFF|SHARP" setting="display.prism_baked_shadows" values="off|sharp" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/op_prism_baked_shadow_depth" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_label"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_spinner" x="188"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_seg0" x="188" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_seg1" x="276" y="1"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_seg2" x="364" y="1"/>
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels" string_index="14" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_seg0" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="LIGHT" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_seg1" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="NATURAL" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_seg2" type="text" controller="1" width="84" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="DEEP" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
-	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/prism_baked_shadow_depth_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="LIGHT|NATURAL|DEEP" setting="display.prism_baked_shadow_strength" values="0.5|1|1.5" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
-		<on event="created" run="port setting load"/>
-		<on event="a" run="port setting segment"/>
-	</widget>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/labels">
 		<string text="CLASSIC LIGHTING"/>
 		<string text="SHADOW QUALITY"/>
 		<string text="SMOOTH LIGHTING"/>
 		<string text="DYNAMIC LIGHTS"/>
-		<string text="AMBIENT OCCLUSION"/>
-		<string text="SHADE DEPTH"/>
-		<string text="PRISM EXTRAS FOR CLASSIC"/>
-		<string text="LIGHTMAPS"/>
-		<string text="MODEL HIGHLIGHTS"/>
-		<string text="MODEL REFLECTIONS"/>
-		<string text="SUN SHADOWS"/>
-		<string text="SUN SHADOW DETAIL"/>
-		<string text="SUN SHADOW EDGES"/>
-		<string text="BAKED SHADOWS"/>
-		<string text="SHADOW DEPTH"/>
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/classic/help_strings">
 		<string text=""/>
@@ -298,16 +97,5 @@
 		<string text="How sharp the shadows of characters, vehicles and weapons are. Xbox is the original's soft, blocky shadow; each step up is crisper, and costs a little more of the graphics card."/>
 		<string text="Lights characters and weapons smoothly, without the flat facets of the Xbox's lighting, at a small cost."/>
 		<string text="Enhanced: plasma bolts, muzzle flashes and blasts light their surroundings smoothly, with a glow. Classic lights them as the Xbox did.|Classic for everyone in a Pro 2v2 game; yours again after it."/>
-		<string text="World: soft shade where characters, vehicles and scenery meet the level and each other, from the level's shape; the levels keep their own lighting. Ray Traced: the shade of characters and vehicles traced by the graphics card, where it can (else World)."/>
-		<string text="How deep ambient occlusion World's shade is where characters, vehicles and scenery meet the level."/>
-		<string text=""/>
-		<string text="Smooth: the levels' own light without its bands and blocky edges. Relit Pages: the relight pack's pages where the data folder has them (otherwise Smooth); not PRISM Rebaked, which is a Lighting of its own."/>
-		<string text="Characters, weapons and vehicles catch the level's own lights as highlights, where their armour is shiny. Off draws them as the Xbox did."/>
-		<string text="Local: shiny armour reflects the place it is in, from probes in the data folder; none come with the game. Without them, as Classic."/>
-		<string text="Sun: the sky's sun casts real shadows of characters, vehicles and scenery onto the level and each other. Soft and Traced: characters shade themselves from the main light (need ambient occlusion World). Classic keeps the Xbox's shadows alone."/>
-		<string text="How sharp Sun's shadows are, and how much of the graphics card they take."/>
-		<string text="How fast Sun's shadows soften away from what casts them. A dim sun or moon softens them more."/>
-		<string text="Sharp: the sun's shadows in the levels' own baked light drawn crisp, from a sun map baked on this computer from your maps. Each place keeps its brightness. Off draws the lightmaps' own soft edges."/>
-		<string text="How far Baked Shadows' Sharp goes: Light keeps some of the lightmaps' softness, Deep darkens the shaded side more."/>
 	</strings>
 </menus>

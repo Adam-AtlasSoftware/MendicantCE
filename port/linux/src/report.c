@@ -2090,10 +2090,10 @@ int report_path_traced_fallback(void)
 	{
 		return 0;
 	}
-	if (!config_write("display.lighting", "raster"))
+	if (!config_write("display.lighting", "enhanced"))
 		return 0;
 	platform_log("report: the graphics card's driver stopped in PRISM Path Traced last time: display.lighting is "
-		"\"raster\" (PRISM Rebaked) now");
+		"\"enhanced\" now");
 	return 1;
 }
 

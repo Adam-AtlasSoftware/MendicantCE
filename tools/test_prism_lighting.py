@@ -107,24 +107,24 @@ def test_settings_off_by_default():
     config = (SOURCE / "port_config.c").read_text()
     assert re.search(r'"display\.prism_lightmaps", _config_string, "\\"stock\\""', config)
     assert re.search(r'"display\.prism_bloom", _config_string, "\\"off\\""', config)
-    assert '{ "display.prism_lightmaps", "\\"stock\\"", 0, "\\"smooth\\"" }' in config
     assert '{ "display.ambient_occlusion", "\\"off\\"", 0, "\\"world\\"" }' in config
     assert "display.prism_bloom\", \"" not in config.split("config_graphics[] =", 1)[1].split("};", 1)[0]
 
 
-def test_prism_preset_is_faithful():
-    """display.graphics "prism": the model light's faithful choices on, off in classic and enhanced; what is beyond
-    CE (bloom, the remodelled level geometry) and the local reflections (they change the scene's colour) in no
-    preset"""
+def test_classic_has_no_prism_extras():
+    """v4 geopatch M3: Classic is CE's own options alone. Classic's PRISM extras (the model light's choices, the
+    shadows, the smoothed lightmaps, the surface maps) are no player's settings any more (_platform_internal: never
+    read from config.toml), off; display.graphics' "prism" preset of them is read as "enhanced", and no preset
+    chooses them"""
     config = (SOURCE / "port_config.c").read_text()
-    for name, default in (("prism_specular", '"off"'), ("prism_shadows", '"stock"'), ("prism_reflections", '"stock"'),
-                          ("prism_world_geometry", '"stock"')):
-        assert re.search(r'"display\.%s", _config_string, "%s"' % (name, re.escape(default).replace('"', '\\\\"')),
-                         config), name
+    for name, default in (("prism_specular", "off"), ("prism_shadows", "stock"), ("prism_reflections", "stock"),
+                          ("prism_lightmaps", "stock")):
+        entry = config.split('\t{ "display.%s", ' % name, 1)[1].split("},\n", 1)[0]
+        assert entry.startswith('_config_string, "\\"%s\\""' % default), name
+        assert "_platform_internal" in entry, name
     assert re.search(r'"display\.prism_surface_maps", _config_boolean, "false"', config)
     table = config.split("config_graphics[] =", 1)[1].split("};", 1)[0]
-    assert '{ "display.prism_surface_maps", "false", 0, "true" }' in table
-    assert '{ "display.prism_specular", "\\"off\\"", 0, "\\"subtle\\"" }' in table
-    assert '{ "display.prism_shadows", "\\"stock\\"", 0, "\\"soft\\"" }' in table
-    for name in ("prism_bloom", "prism_world_geometry", "prism_reflections"):
+    for name in ("prism_bloom", "prism_world_geometry", "prism_reflections", "prism_specular", "prism_shadows",
+                 "prism_lightmaps", "prism_surface_maps", "prism_rt"):
         assert '"display.%s"' % name not in table, name
+    assert '{ "display.graphics", "prism", "enhanced" },' in config

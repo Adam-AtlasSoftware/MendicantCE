@@ -79,6 +79,12 @@ enum
 	bridge and logs, which Windows and the Apple builds compile out; port:
 	the 64-bit Linux builds' guest too) */
 	_platform_linux = 128,
+	/* (no build's player setting any more: never read from the file, never
+	written to it, the environment's and the console's alone (the farm's and
+	the developers'); its line taken out of an older file
+	(config_migrate_retired). Kept, not retired, because code still reads
+	it: v4 geopatch M3, docs/prism_settings.md) */
+	_platform_internal = 256,
 };
 
 /* Whose a setting is. The machine's (_scope_machine, the table's default,
@@ -125,6 +131,10 @@ struct config_setting
 
 /* crouching's keys */
 #define CROUCH_KEYS "\"Left Ctrl, C\""
+
+/* the comment's end of a setting display.enhancements chooses
+(config_enhancements) */
+#define ENHANCEMENTS_CHOOSES "\nWhere not set here, display.enhancements chooses it."
 
 /* display.graphics = "enhanced": the values it gives the settings it
 chooses (config_graphics), which are their defaults, the same on every
@@ -629,24 +639,24 @@ static const struct config_setting config_settings[] =
 		"of each vertex shows across curved surfaces; false lights each vertex,\n"
 		"as the Xbox does." GRAPHICS_CHOOSES },
 	{ "display.prism_material_overlay", _config_boolean, "false", "HALO_PRISM_MATERIAL_OVERLAY", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM: light the model shaders a mod's material overlay names\n"
 		"(tags/materials/overlay.json) for each pixel, with the fine grain of\n"
 		"their surfaces (a micro normal, cavity and roughness from the mod's\n"
 		"tiles); no color changes. Read each frame (the console's prism_set\n"
 		"\"material_overlay true\"). Vulkan only; false draws them as the Xbox does." },
 	{ "display.prism_overlay_strength", _config_real, "1.0", "HALO_PRISM_OVERLAY_STRENGTH", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM: how strong the material overlay is, 0 to 2 (0 lights the\n"
 		"overlaid shaders for each pixel and adds nothing)." },
 	{ "display.prism_overlay_view", _config_integer, "0", "HALO_PRISM_OVERLAY_VIEW", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM, for checking an overlay: 1 shows its two tiles' weights (red A,\n"
 		"blue B, green left alone; with a class mask its four: white A, purple B,\n"
 		"orange C, green D, black left alone), 2 the micro normal, 3 its fade, 4\n"
 		"the light alone; 0 the game." },
 	{ "display.prism_surface_maps", _config_boolean, "false", "HALO_PRISM_SURFACE_MAPS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM v2: light the model shaders whose base map has a surface map\n"
 		"in a mod (tags\\<bitmap>.surface.png, baked on this machine from your\n"
 		"maps and a remodel; or one the material overlay names) by its normal,\n"
@@ -656,7 +666,7 @@ static const struct config_setting config_settings[] =
 		"Needs neither the material overlay nor an overlay.json entry. Vulkan\n"
 		"only; read each frame (prism_set \"surface_maps true\")." GRAPHICS_CHOOSES },
 	{ "display.prism_specular", _config_string, "\"off\"", "HALO_PRISM_SPECULAR", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM v2: highlights on the models (characters, weapons, vehicles)\n"
 		"from the level's own lights about them (its sun or main light, and the\n"
 		"two nearest lights), as rough or as polished as their surface map says,\n"
@@ -666,7 +676,7 @@ static const struct config_setting config_settings[] =
 		"the main light alone, soft; \"full\": every light, sharper. Vulkan only;\n"
 		"read each frame (prism_set \"specular full\")." GRAPHICS_CHOOSES },
 	{ "display.prism_reflections", _config_string, "\"stock\"", "HALO_PRISM_REFLECTIONS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM v2: what the models' reflections show. \"stock\": the shader's\n"
 		"own cube map, as the game draws; \"local\": the place the model is in,\n"
 		"from the level's probes, captured on this machine by the game's own\n"
@@ -675,7 +685,7 @@ static const struct config_setting config_settings[] =
 		"Stylised cube maps (shields, glows) keep their own. A map with no\n"
 		"probes draws as stock. Vulkan only; read each frame." },
 	{ "display.prism_shadows", _config_string, "\"stock\"", "HALO_PRISM_SHADOWS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM v2: shadows on the models from the level's main light about\n"
 		"them, traced through the distance-field scene's objects\n"
 		"(display.ambient_occlusion \"world\"'s: without it, stock): their own\n"
@@ -692,24 +702,24 @@ static const struct config_setting config_settings[] =
 		"under each object gives way to them. Where no sky is seen, none.\n"
 		"Vulkan only; read each frame." GRAPHICS_CHOOSES },
 	{ "display.prism_shadow_resolution", _config_integer, "2048", "HALO_PRISM_SHADOW_RESOLUTION", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM, with display.prism_shadows \"cascaded\": each shadow map's texels\n"
 		"along a side (three maps): 1024, 2048 or 4096. Higher is crisper and\n"
 		"costs more of the GPU's memory and time. Read each frame." },
 	{ "display.prism_shadow_softness", _config_real, "1.0", "HALO_PRISM_SHADOW_SOFTNESS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM, with display.prism_shadows \"cascaded\": how fast the sun's\n"
 		"shadows soften with the distance from what casts them (the sun's\n"
 		"apparent size), 0.25 to 4: 1 about a degree and a half, more is softer.\n"
 		"Read each frame." },
 	{ "display.prism_shadow_strength", _config_real, "1.0", "HALO_PRISM_SHADOW_STRENGTH", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM, with display.prism_shadows \"cascaded\": how much of the sun's\n"
 		"light a shadow takes, 0 to 1 (1: all of the sun's share the level's\n"
 		"baked light gave the spot; never what the bake already shadowed).\n"
 		"Read each frame." },
 	{ "display.prism_lightmaps", _config_string, "\"stock\"", "HALO_PRISM_LIGHTMAPS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM: the level's own baked light, drawn smoother: \"stock\" as the Xbox\n"
 		"drew it; \"smooth\" reads each lightmap with a cubic filter and evens out\n"
 		"the steps of its 16-bit colour (its bands) where the light is even, and\n"
@@ -726,13 +736,13 @@ static const struct config_setting config_settings[] =
 		"from the stock lightmap. Vulkan; read each frame (prism_set\n"
 		"\"lightmaps smooth\")." GRAPHICS_CHOOSES },
 	{ "display.prism_lightmap_upsample", _config_integer, "2", "HALO_PRISM_LIGHTMAP_UPSAMPLE", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM, with display.prism_lightmaps \"smooth\": how much finer the\n"
 		"lightmaps' copies are, 2 or 4 times along each side, built the first time\n"
 		"a level is played with it (in the background, cached in the data\n"
 		"folder's prism_lightmaps); 0 none: the cubic filter alone." },
 	{ "display.prism_baked_shadows", _config_string, "\"off\"", "HALO_PRISM_BAKED_SHADOWS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM, beyond CE: the sun's shadows in the level's baked light made\n"
 		"sharp, as the ray tracing's are: \"off\", as the lightmaps draw them;\n"
 		"\"sharp\": each page that has one sharpened by the sun's visibility\n"
@@ -746,7 +756,7 @@ static const struct config_setting config_settings[] =
 		"and display.prism_rt (the casters never darken the level's own shadow\n"
 		"again). Vulkan; read each frame (prism_set \"baked_shadows sharp\")." },
 	{ "display.prism_baked_shadow_strength", _config_real, "1.0", "HALO_PRISM_BAKED_SHADOW_STRENGTH",
-		_environment_value, _platform_desktop,
+		_environment_value, _platform_internal,
 		"PRISM, with display.prism_baked_shadows \"sharp\": how far the baked\n"
 		"light moves toward the sharp shadows, 0 to 2 (0 the lightmaps' own\n"
 		"edges, 1 the bake's, more deepens them). Read each frame." },
@@ -767,21 +777,43 @@ static const struct config_setting config_settings[] =
 		"none, as the game draws; \"prism\": a lift; \"vivid\": more of each.\n"
 		"Draws the 3D view in half floats, as display.hdr does. Vulkan; read\n"
 		"each frame (prism_set \"tone prism\")." },
-	{ "display.prism_world_geometry", _config_string, "\"stock\"", "HALO_PRISM_WORLD_GEOMETRY", _environment_value,
+	{ "display.world_geometry", _config_string, "\"enhanced\"", "HALO_WORLD_GEOMETRY", _environment_value,
 		_platform_desktop,
-		"PRISM v2: \"remodel\" draws the level's walls, rock and ground from a\n"
-		"denser remodel in the data folder (prism_world\\; none comes with the\n"
-		"game, and a level without one is drawn stock: smooth rock and\n"
-		"cliffs with ledges, cracks and runnels, rounded hills and sand,\n"
-		"bevels on the metal's own edges and its bump map's channels\n"
-		"set into the flat metal, after the level's\n"
-		"own textures), lit by the level's own lightmaps with the light the new\n"
-		"shape takes; far surfaces drawn from a coarser level. Collision, paths\n"
-		"and visibility stay the map's. A level without a remodel is drawn\n"
-		"stock. \"stock\" draws the map's own. Read each frame\n"
-		"(prism_set \"world_geometry remodel\")." },
+		"The levels' shape under Enhanced and Path Traced lighting:\n"
+		"\"enhanced\" the release's remodelled world (the level's sidecar in\n"
+		"maps_enhanced, lit by the lightmaps baked for it), \"classic\" the\n"
+		"map's own. Applies at the next level's load. Classic lighting always\n"
+		"draws the map's own (its lightmaps are of it). Collision stays the\n"
+		"map's (game.campaign_collision). The older display.prism_world_geometry\n"
+		"(\"stock\", \"remodel\") is read into it once. One of\n"
+		"display.enhancements' settings." ENHANCEMENTS_CHOOSES },
+	{ "display.enhancements", _config_string, "\"realistic\"", "HALO_ENHANCEMENTS", _environment_value,
+		_platform_desktop,
+		"The enhancements preset (Settings > Video > PRISM > Enhancements):\n"
+		"\"classic\", \"remastered\" or \"realistic\" sets each enhancement\n"
+		"group's settings (World Geometry, Materials & Terrain, Foliage, Models\n"
+		"& Textures, Water & Weather) that are not set here to its level;\n"
+		"\"custom\" is what Settings shows once one differs. A group added in a\n"
+		"later version arrives at the preset's level. Never the lighting mode,\n"
+		"display.graphics' settings or collision." },
+	{ "display.foliage_grass", _config_string, "\"realistic\"", "HALO_FOLIAGE_GRASS", _environment_value,
+		_platform_desktop,
+		"Foliage, for a content release that brings it: the grass, \"classic\"\n"
+		"(the game's), \"enhanced\" or \"realistic\". Nothing draws it yet." ENHANCEMENTS_CHOOSES },
+	{ "display.foliage_trees", _config_string, "\"enhanced\"", "HALO_FOLIAGE_TREES", _environment_value,
+		_platform_desktop,
+		"Foliage, for a content release that brings it: the trees' bark,\n"
+		"branches, sway and canopy, \"classic\" or \"enhanced\" (their trunks\n"
+		"follow display.world_geometry). Nothing draws it yet." ENHANCEMENTS_CHOOSES },
+	{ "display.foliage_leaves", _config_string, "\"realistic\"", "HALO_FOLIAGE_LEAVES", _environment_value,
+		_platform_desktop,
+		"Foliage, for a content release that brings it: the leaves,\n"
+		"\"classic\", \"enhanced\" or \"realistic\". Nothing draws it yet." ENHANCEMENTS_CHOOSES },
+	{ "display.foliage_wind", _config_boolean, "true", "HALO_FOLIAGE_WIND", _environment_value, _platform_desktop,
+		"Foliage, for a content release that brings it: grass and leaves move\n"
+		"in the wind. Nothing draws it yet." ENHANCEMENTS_CHOOSES },
 	{ "display.prism_world_geometry_shadows", _config_string, "\"far\"", "HALO_PRISM_WORLD_GEOMETRY_SHADOWS",
-		_environment_value, _platform_desktop,
+		_environment_value, _platform_internal,
 		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
 		"display.prism_shadows \"cascaded\": the level's shape the sun's shadow\n"
 		"maps are drawn from. \"far\": every surface's far level (the relief's\n"
@@ -792,7 +824,7 @@ static const struct config_setting config_settings[] =
 		"debug.geometry_overrides). Read each frame\n"
 		"(prism_set \"world_geometry_shadows stock\")." },
 	{ "display.prism_world_geometry_occlusion", _config_string, "\"remodel\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
-		_environment_value, _platform_desktop,
+		_environment_value, _platform_internal,
 		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
 		"display.ambient_occlusion \"world\": the level's shape the occlusion's\n"
 		"pre-pass is drawn from (where the objects darken the level, and what\n"
@@ -838,7 +870,7 @@ static const struct config_setting config_settings[] =
 		"this many percent of the remodel's distance past it (0 to 50), so that\n"
 		"the surfaces at one distance do not switch at once, a ring of them in\n"
 		"one frame; 0 all at the remodel's distance." },
-	{ "display.prism_lod_hysteresis", _config_integer, "0", "HALO_PRISM_LOD_HYSTERESIS", _environment_value,
+	{ "display.prism_lod_hysteresis", _config_integer, "15", "HALO_PRISM_LOD_HYSTERESIS", _environment_value,
 		_platform_desktop,
 		"PRISM: the levels of detail it chooses (the remodel's near and far\n"
 		"surfaces, the replacement meshes' levels) keep a more detailed level\n"
@@ -846,23 +878,23 @@ static const struct config_setting config_settings[] =
 		"before the lighter one is drawn, and take it back at the distance, so\n"
 		"that a camera near the distance does not switch them back and forth;\n"
 		"0 at the distance. The meshes' from the next map." },
-	{ "display.prism_texture_wait", _config_integer, "0", "HALO_PRISM_TEXTURE_WAIT", _environment_value,
+	{ "display.prism_texture_wait", _config_integer, "4", "HALO_PRISM_TEXTURE_WAIT", _environment_value,
 		_platform_desktop,
 		"A draw whose texture the game is still reading is left out of the frame\n"
 		"until it is in, as on the Xbox (a surface or an object appears a frame\n"
 		"or more late): this many milliseconds a frame (0 to 50) the draws wait\n"
 		"for theirs instead, before they are left out again; 0 as the Xbox." },
-	{ "display.prism_texture_fade", _config_integer, "0", "HALO_PRISM_TEXTURE_FADE", _environment_value,
+	{ "display.prism_texture_fade", _config_integer, "250", "HALO_PRISM_TEXTURE_FADE", _environment_value,
 		_platform_desktop,
 		"PRISM: the milliseconds a replacement texture takes to sharpen by one\n"
 		"level as its levels come in (0 to 2000), blended between them; 0 at\n"
 		"once, a level at a time. From the next map." },
-	{ "display.prism_prefetch", _config_boolean, "false", "HALO_PRISM_PREFETCH", _environment_value,
+	{ "display.prism_prefetch", _config_boolean, "true", "HALO_PRISM_PREFETCH", _environment_value,
 		_platform_desktop,
 		"PRISM: a map's replacement textures and meshes read as it loads, within\n"
 		"their budgets, those drawn first ahead of the rest; false each when it\n"
 		"is first drawn (drawn stock until it is in). From the next map." },
-	{ "display.prism_textures", _config_string, "\"stock\"", "HALO_PRISM_TEXTURES", _environment_value,
+	{ "display.prism_textures", _config_string, "\"max\"", "HALO_PRISM_TEXTURES", _environment_value,
 		_platform_desktop,
 		"PRISM: the replacement textures mods ship (textures/<tier>/ in a mod:\n"
 		"KTX2 files the renderer reads straight into the graphics card's\n"
@@ -870,13 +902,13 @@ static const struct config_setting config_settings[] =
 		"the game's own; \"enhanced\" the mods' enhanced tier; \"max\" their max\n"
 		"tier, else enhanced. Read each frame (the console's prism_set\n"
 		"\"textures max\"). Vulkan only, and not in the Windows build yet; the\n"
-		"Mac's Metal renderer draws stock." },
+		"Mac's Metal renderer draws stock." ENHANCEMENTS_CHOOSES },
 	{ "display.prism_texture_budget_mb", _config_integer, "0", "HALO_PRISM_TEXTURE_BUDGET_MB", _environment_value,
 		_platform_desktop,
 		"PRISM: the graphics card's memory the replacement textures may take,\n"
 		"in MB; past it those not drawn lately go back to the stock resolution,\n"
 		"then stock. 0 is six tenths of what the card has free." },
-	{ "display.prism_models", _config_string, "\"stock\"", "HALO_PRISM_MODELS", _environment_value,
+	{ "display.prism_models", _config_string, "\"max\"", "HALO_PRISM_MODELS", _environment_value,
 		_platform_desktop,
 		"PRISM: the replacement meshes mods ship (meshes/<tier>/ in a mod:\n"
 		".pmesh files the renderer reads straight into the graphics card's\n"
@@ -886,7 +918,7 @@ static const struct config_setting config_settings[] =
 		"enhanced tier; \"max\" their max tier, else enhanced. Read each frame\n"
 		"(the console's prism_set \"models max\"). Vulkan only, and not in the\n"
 		"Windows build yet; the Mac's Metal\n"
-		"renderer draws stock." },
+		"renderer draws stock." ENHANCEMENTS_CHOOSES },
 	{ "display.prism_model_budget_mb", _config_integer, "0", "HALO_PRISM_MODEL_BUDGET_MB", _environment_value,
 		_platform_desktop,
 		"PRISM: the graphics card's memory the replacement meshes may take, in\n"
@@ -898,7 +930,7 @@ static const struct config_setting config_settings[] =
 		"extended skeletons (a pouch's swing, a knee's volume: docs/prism_rigs.md);\n"
 		"false: those helpers follow their parents (twists, copies and aims\n"
 		"still turn). Only for replacement meshes (display.prism_models)." },
-	{ "display.prism_materials", _config_string, "\"stock\"", "HALO_PRISM_MATERIALS", _environment_value,
+	{ "display.prism_materials", _config_string, "\"pbr\"", "HALO_PRISM_MATERIALS", _environment_value,
 		_platform_desktop,
 		"PRISM: the materials mods give model shaders (materials/<shader>.\n"
 		"material.json in a mod: albedo, normal, occlusion, roughness and metal,\n"
@@ -908,30 +940,50 @@ static const struct config_setting config_settings[] =
 		"self-illumination and detail maps kept); \"stock\" none, as the Xbox\n"
 		"drew them. Read each frame (the console's prism_set \"materials pbr\").\n"
 		"Vulkan only, and not in the Windows build yet; the Mac's Metal renderer\n"
-		"draws stock." },
-	{ "display.lighting", _config_string, "\"ce\"", "HALO_LIGHTING", _environment_value, _platform_desktop,
-		"PRISM v4: how the 3D view is lit. \"ce\" the game's own renderer (and\n"
-		"PRISM's forward extras, as set). \"ce_deferred\" a diagnostic of the\n"
-		"deferred renderer's first step: CE's environment passes drawn into\n"
-		"targets of their own (the light, the base colour, the specular and\n"
-		"reflection additions) and the frame put together from them before\n"
-		"the transparent geometry, to prove they carry every surface (the\n"
-		"picture is Classic's up to rounding and the decals). \"raster\" PRISM\n"
-		"Raster: the same deferred core lit from this machine's own bake of\n"
-		"the level (docs/prism_bake.md: the baked light at each pixel's\n"
-		"normal, the sun's sharp shadows from the baked sun mask, the objects\n"
-		"from the irradiance volume; CE's light where the bake has nothing\n"
-		"yet), no ray tracing while playing; the bake (display.bake) needs a\n"
-		"graphics card with ray tracing. \"pathtraced\" PRISM Path Traced\n"
-		"(docs/prism_pathtraced.md): every CE light off, the same deferred\n"
-		"core lit by the path tracer (the sun's shadows, the sky's domes, the\n"
-		"lamps and the dynamic lights traced each frame, the bounced light\n"
-		"from the bake, denoised); needs ray tracing and a bake of the level\n"
-		"(made while you play, display.bake). Read each frame. Vulkan only; no\n"
-		"anti-aliasing by multisampling. Settings > Video > PRISM > Lighting:\n"
-		"Classic (\"ce\"), PRISM Rebaked (\"raster\"), PRISM Path Traced\n"
-		"(\"pathtraced\"); \"classic\", \"rebaked\" and \"path_traced\" are read as\n"
-		"those. The rows under it show only what applies to the mode." },
+		"draws stock." ENHANCEMENTS_CHOOSES },
+	{ "display.lighting", _config_string, "\"enhanced\"", "HALO_LIGHTING", _environment_value, _platform_desktop,
+		"How the 3D view is lit (v4 geopatch M3: three modes that never mix).\n"
+		"\"classic\": the game's own light and its own options alone (Settings >\n"
+		"Video > PRISM > Classic Lighting), with no ray tracing of any kind.\n"
+		"\"enhanced\": the levels lit from the release's MAX lightmaps, baked on\n"
+		"the farm and shipped (docs/prism_bake.md; nothing is baked here),\n"
+		"with the ray traced features of display.prism_ray_tracing where the\n"
+		"graphics card traces rays. \"pathtraced\": every light traced each\n"
+		"frame, with the lightmaps' scene and bounced light (docs/\n"
+		"prism_pathtraced.md); needs ray tracing. \"ce_deferred\" is a\n"
+		"diagnostic of Classic. The older \"ce\", \"raster\", \"rebaked\" and\n"
+		"\"path_traced\" are read as \"classic\", \"enhanced\", \"enhanced\" and\n"
+		"\"pathtraced\". Read each frame. Vulkan only." },
+	{ "display.prism_ray_tracing", _config_string, "\"on\"", "HALO_PRISM_RAY_TRACING", _environment_value,
+		_platform_desktop,
+		"Enhanced lighting's ray tracing: \"on\" traces the moving objects' sun\n"
+		"shadows and the shapes below (display.prism_raster_object_shadows,\n"
+		"display.prism_rt_objects, _cache, _alpha), where the graphics card\n"
+		"traces rays (off where it cannot); \"off\" none (the game's own object\n"
+		"shadows). Enhanced lighting alone; Path Traced traces by itself." },
+	{ "display.enhanced_dynamic_lights", _config_string, GRAPHICS_DYNAMIC_LIGHTS, "HALO_ENHANCED_DYNAMIC_LIGHTS",
+		_environment_value, _platform_desktop,
+		"display.dynamic_lights under Enhanced lighting (each lighting mode has\n"
+		"its own: the older shared one's value on the first start of this\n"
+		"version): \"classic\" or \"enhanced\"." GRAPHICS_CHOOSES },
+	{ "display.enhanced_shadow_resolution", _config_integer, GRAPHICS_SHADOW_RESOLUTION,
+		"HALO_ENHANCED_SHADOW_RESOLUTION", _environment_value, _platform_desktop,
+		"display.shadow_resolution under Enhanced lighting, for the game's own\n"
+		"object shadows (ray tracing off, or Object Shadows Classic): 128 to\n"
+		"1024." GRAPHICS_CHOOSES },
+	{ "display.pt_dynamic_lights", _config_string, GRAPHICS_DYNAMIC_LIGHTS, "HALO_PT_DYNAMIC_LIGHTS",
+		_environment_value, _platform_desktop,
+		"display.dynamic_lights under Path Traced lighting (its own key: the\n"
+		"older shared one's value on the first start of this version)." GRAPHICS_CHOOSES },
+	{ "display.prism_pt_objects", _config_string, "\"auto\"", "HALO_PRISM_PT_OBJECTS", _environment_value,
+		_platform_desktop,
+		"display.prism_rt_objects under Path Traced lighting: \"auto\",\n"
+		"\"view_lod\" or \"low_lod\" (its own key: the older shared one's value\n"
+		"on the first start of this version)." },
+	{ "display.prism_pt_cache", _config_boolean, "true", "HALO_PRISM_PT_CACHE", _environment_value, _platform_desktop,
+		"display.prism_rt_cache under Path Traced lighting (its own key)." },
+	{ "display.prism_pt_alpha", _config_boolean, "true", "HALO_PRISM_PT_ALPHA", _environment_value, _platform_desktop,
+		"display.prism_rt_alpha under Path Traced lighting (its own key)." },
 	{ "display.pt_profile", _config_string, "\"quality\"", "HALO_PT_PROFILE", _environment_value,
 		_platform_desktop,
 		"With display.lighting \"pathtraced\": \"quality\" traces a bounce at\n"
@@ -1015,7 +1067,7 @@ static const struct config_setting config_settings[] =
 		"CE's painted light taken out, its bump, roughness and metal) in place of\n"
 		"the one made from CE's shader as the map loads; false: every shader's\n"
 		"made from CE's. Needs a graphics card that draws display.prism_materials'\n"
-		"materials. Read each frame." },
+		"materials. Read each frame." ENHANCEMENTS_CHOOSES },
 	{ "display.upscaler", _config_string, "\"off\"", "HALO_UPSCALER", _environment_value, _platform_desktop,
 		"PRISM v4: the 3D view drawn smaller (display.upscaler_scale) and brought\n"
 		"to the screen's pixels before the HUD is drawn, the upscaler its\n"
@@ -1038,7 +1090,7 @@ static const struct config_setting config_settings[] =
 		"is drawn: 0.67 Quality, 0.58 Balanced, 0.5 Performance, 0.33 Ultra\n"
 		"Performance; 0 is 0.67. Apart from display.render_scale, which scales\n"
 		"the whole frame, the HUD too. Read each frame." },
-	{ "display.bake", _config_string, "\"auto\"", "HALO_BAKE", _environment_value, _platform_desktop,
+	{ "display.bake", _config_string, "\"off\"", "HALO_BAKE", _environment_value, _platform_internal,
 		"PRISM's light bake (docs/prism_bake.md), with display.lighting\n"
 		"\"raster\" or \"pathtraced\" (both read the bake): \"auto\" bakes the\n"
 		"campaign's levels on the main menu, before you play them, as other games\n"
@@ -1048,7 +1100,7 @@ static const struct config_setting config_settings[] =
 		"\"off\" never (a bake made before is still drawn). The older \"ask\" is\n"
 		"read as \"auto\"." },
 	{ "display.bake_quality", _config_string, "\"ultra\"", "HALO_BAKE_QUALITY", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"The bake's quality: \"ultra\" (the default: minutes a level on the main\n"
 		"menu, as games compile their shaders), \"max\" the finest (16 texels a\n"
 		"world unit where the player can be and finer where the light needs it,\n"
@@ -1061,7 +1113,7 @@ static const struct config_setting config_settings[] =
 		"or \"pathtraced\"): \"on\" the game tells the renderer of its ground,\n"
 		"footsteps, tyres, impacts, wind and weather each frame; \"off\" none\n"
 		"of it. Never in Classic or multiplayer. The ground takes the HQ\n"
-		"layers (display.terrain_layers). Read each frame." },
+		"layers (display.terrain_layers). Read each frame." ENHANCEMENTS_CHOOSES },
 	{ "display.terrain_quality", _config_string, "\"auto\"", "HALO_TERRAIN_QUALITY", _environment_value,
 		_platform_desktop,
 		"With display.terrain: \"auto\" (by the graphics card), \"low\",\n"
@@ -1071,7 +1123,7 @@ static const struct config_setting config_settings[] =
 		_platform_desktop,
 		"With display.terrain: \"hq\" sand, dirt, mud, rock, snow and ice get\n"
 		"the terrain pack's high-quality layers over CE's colours where the\n"
-		"pack is installed (CE's alone otherwise); \"ce\" CE's alone." },
+		"pack is installed (CE's alone otherwise); \"ce\" CE's alone." ENHANCEMENTS_CHOOSES },
 	{ "display.terrain_pack_folder", _config_string, "\"\"", "HALO_TERRAIN_PACK_FOLDER", _environment_value,
 		_platform_desktop,
 		"Where the terrain pack is (tools/prism_terrain_layers builds it);\n"
@@ -1081,7 +1133,7 @@ static const struct config_setting config_settings[] =
 		"With display.terrain: footprints in sand, snow, dirt and mud, kept\n"
 		"for the level, pressed by every biped's feet (the HQ layers' pass\n"
 		"draws them: display.terrain_layers \"hq\"); tyre tracks and craters\n"
-		"are not drawn yet." },
+		"are not drawn yet." ENHANCEMENTS_CHOOSES },
 	{ "display.terrain_drifts", _config_boolean, "true", "HALO_TERRAIN_DRIFTS", _environment_value,
 		_platform_desktop,
 		"With display.terrain: sand and snow piled at the walls' feet (not\n"
@@ -1094,8 +1146,8 @@ static const struct config_setting config_settings[] =
 	{ "display.water", _config_string, "\"prism\"", "HALO_WATER", _environment_value, _platform_desktop,
 		"With display.terrain: \"prism\" the water's surface drawn by the\n"
 		"renderer (reflection, refraction, waves) in CE's place; \"ce\" CE's\n"
-		"own. So far (T0) CE's is drawn either way." },
-	{ "display.bake_folder", _config_string, "\"\"", "HALO_BAKE_FOLDER", _environment_value, _platform_desktop,
+		"own. So far (T0) CE's is drawn either way." ENHANCEMENTS_CHOOSES },
+	{ "display.bake_folder", _config_string, "\"\"", "HALO_BAKE_FOLDER", _environment_value, _platform_internal,
 		"Where the bakes are kept (a folder of each map's, a file of each\n"
 		"BSP's; made on this machine, never shared); empty: the data folder's\n"
 		"prism_bake." },
@@ -1105,7 +1157,7 @@ static const struct config_setting config_settings[] =
 		"the stock and the remodelled world: <stock|remodel>/<map>/bsp<n>.pbk\n"
 		"and manifest.txt; read only, used wherever it matches this machine's\n"
 		"maps); empty: the data folder's prism_bake_shipped." },
-	{ "display.bake_budget", _config_real, "2.0", "HALO_BAKE_BUDGET", _environment_value, _platform_desktop,
+	{ "display.bake_budget", _config_real, "2.0", "HALO_BAKE_BUDGET", _environment_value, _platform_internal,
 		"The milliseconds of each frame's graphics time a background bake may\n"
 		"take while you play (0.25 to 200; in the menus it takes 30, and the\n"
 		"main menu's bake its own process's 40 a frame)." },
@@ -1113,12 +1165,12 @@ static const struct config_setting config_settings[] =
 		"The `max` bake's noise floor (D4 amended): a texel stops once its\n"
 		"standard error is at most 1% of its light or of this share of middle\n"
 		"grey, the more (0 to 10; 0: of its light alone, the literal rule)." },
-	{ "display.bake_rebake", _config_integer, "0", "HALO_BAKE_REBAKE", _environment_value, _platform_desktop,
+	{ "display.bake_rebake", _config_integer, "0", "HALO_BAKE_REBAKE", _environment_value, _platform_internal,
 		"Raised by the console's prism_set \"bake_rebake <n>\": each change\n"
 		"bakes the level drawn again from nothing (Settings' Light Bake has\n"
 		"Rebake All for every level, on the main menu)." },
-	{ "display.bake_indicator", _config_boolean, "true", "HALO_BAKE_INDICATOR", _environment_value,
-		_platform_desktop,
+	{ "display.bake_indicator", _config_boolean, "false", "HALO_BAKE_INDICATOR", _environment_value,
+		_platform_internal,
 		"While a level's light is baked in the background, \"Baking lightmaps 37%\"\n"
 		"at the screen's top left (and \"Lightmaps baked\" once it is done);\n"
 		"false hides it." },
@@ -1141,7 +1193,7 @@ static const struct config_setting config_settings[] =
 		"With debug.bake_worker: bake only this BSP of its map (0 the first),\n"
 		"then quit, so that a farm runs a map's BSPs side by side, a job each.\n"
 		"-1: every BSP in turn." },
-	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
+	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_internal,
 		"PRISM: hardware ray tracing over Classic's light (docs/prism_rt.md;\n"
 		"off under display.lighting \"raster\" and \"pathtraced\", which light the\n"
 		"frame themselves; its \"pathtraced\" is not PRISM Path Traced), on graphics cards that\n"
@@ -1155,25 +1207,25 @@ static const struct config_setting config_settings[] =
 		"each frame (the console's prism_set \"rt shadows\"). Vulkan only: greyed\n"
 		"out where the card cannot trace rays." },
 	{ "display.prism_rt_quality", _config_string, "\"medium\"", "HALO_PRISM_RT_QUALITY", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing's quality: \"low\" (Steam Deck: half the pixels, one\n"
 		"ray), \"medium\", \"high\" or \"ultra\" (more rays each pixel, softer\n"
 		"and steadier shadows, more of the light that bounces)." },
 	{ "display.prism_rt_resolution", _config_string, "\"auto\"", "HALO_PRISM_RT_RESOLUTION", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing's pixels: \"half\" a ray for each 2x2 block,\n"
 		"\"full\" each pixel, \"auto\" full but at low quality." },
 	{ "display.prism_rt_denoiser", _config_string, "\"spatiotemporal\"", "HALO_PRISM_RT_DENOISER",
-		_environment_value, _platform_desktop,
+		_environment_value, _platform_internal,
 		"PRISM ray tracing's filter of its rays' noise: \"spatiotemporal\" (the\n"
 		"frames before and the pixels about), \"temporal\" (the frames before\n"
 		"alone) or \"off\" (the rays as they are: for checking)." },
 	{ "display.prism_rt_reflections", _config_string, "\"off\"", "HALO_PRISM_RT_REFLECTIONS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing's reflections (with \"gi\" or above): \"visor\" the\n"
 		"Chief's visor and polished metal, \"all\" the level's shiny surfaces and\n"
 		"water too; \"off\" the game's own reflections." },
-	{ "display.prism_rt_mood", _config_integer, "100", "HALO_PRISM_RT_MOOD", _environment_value, _platform_desktop,
+	{ "display.prism_rt_mood", _config_integer, "100", "HALO_PRISM_RT_MOOD", _environment_value, _platform_internal,
 		"PRISM ray tracing: how closely its light keeps to the brightness the\n"
 		"level had (0 to 100; 100 keeps CE's mood, 0 the traced light alone)." },
 	{ "display.prism_rt_objects", _config_string, "\"auto\"", "HALO_PRISM_RT_OBJECTS", _environment_value,
@@ -1185,7 +1237,7 @@ static const struct config_setting config_settings[] =
 		"share an object beyond 40 units left out; \"view_lod\" as drawn\n"
 		"always; \"low_lod\" the game's own models (cheaper)." },
 	{ "display.prism_rt_world", _config_string, "\"auto\"", "HALO_PRISM_RT_WORLD", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing: the level's shape traced: \"auto\" (or \"drawn\")\n"
 		"the level as it is drawn (PRISM v4's SCENE_STATIC: where\n"
 		"display.prism_world_geometry draws a remodel, each surface's near or\n"
@@ -1199,13 +1251,13 @@ static const struct config_setting config_settings[] =
 		"not (the cheapest); false skins and refits every object each frame\n"
 		"(for checking)." },
 	{ "display.prism_rt_rate", _config_string, "\"full\"", "HALO_PRISM_RT_RATE", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing: \"half\" traces the bounced light every other frame\n"
 		"(shadows every frame); path traced traces half the pixels' paths a\n"
 		"frame (\"quarter\" a quarter), the others lit by the radiance cache;\n"
 		"\"full\" every pixel, every frame." },
 	{ "display.prism_rt_style", _config_string, "\"faithful\"", "HALO_PRISM_RT_STYLE", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing's look (docs/prism_rt.md, \"Styles\"): \"faithful\"\n"
 		"keeps each region of the level as bright as CE's lightmaps made it and\n"
 		"CE's exposure; \"remix\" lights the level by the traced rig alone (CE's\n"
@@ -1213,17 +1265,17 @@ static const struct config_setting config_settings[] =
 		"about CE's, its highlights rolled off and every glowing surface a\n"
 		"light. Chooses the defaults of the look settings left \"style\" (or -1)." },
 	{ "display.prism_rt_anchor", _config_integer, "-1", "HALO_PRISM_RT_ANCHOR", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM path tracing: how closely each region's traced light is held to\n"
 		"the light CE's lightmap gave it, 0 to 100 (100 within a half either\n"
 		"way, 0 not at all); -1 the style's (faithful 100, remix 0)." },
 	{ "display.prism_rt_sun", _config_string, "\"all\"", "HALO_PRISM_RT_SUN", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing's sun (\"shadows\" and \"gi\"): \"all\" traces the\n"
 		"sun's light whole, the level's own shadows as sharp as the objects'\n"
 		"and both as dark as the light rig says; \"objects\" only darkens\n"
 		"where an object blocks the sun (the level's shadows the lightmap's)." },
-	{ "display.prism_rig", _config_string, "\"auto\"", "HALO_PRISM_RIG", _environment_value, _platform_desktop,
+	{ "display.prism_rig", _config_string, "\"auto\"", "HALO_PRISM_RIG", _environment_value, _platform_internal,
 		"PRISM's light rig: \"units\" every light by its tag's power in the\n"
 		"light's units, the same for every map (PRISM v4's); \"fitted\" by a\n"
 		"map's relight fit (prism_lightmaps/rebaked/*.scales.json) where one\n"
@@ -1234,23 +1286,23 @@ static const struct config_setting config_settings[] =
 		"domes'), the sky's, the light cards' and the fixtures' (\"1 1 1 1\"\n"
 		"none), for calibrating them and for diagnosis." },
 	{ "display.prism_sun_size", _config_string, "\"auto\"", "HALO_PRISM_SUN_SIZE", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing: the sun's disc its shadows' edges soften by: \"ce\"\n"
 		"the sky's own (0.2 degrees on most maps), \"real\" the real sun's\n"
 		"(0.53 degrees), \"soft\" 2.3 degrees, \"auto\" the sky's or the real\n"
 		"sun's, the wider." },
 	{ "display.prism_rt_emissive", _config_string, "\"style\"", "HALO_PRISM_RT_EMISSIVE", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM path tracing's lamps: \"lights\" the light panels and lamps CE's\n"
 		"lightmaps were lit by light the traced level; \"all\" the glowing parts\n"
 		"of surfaces (screens, panels) too; \"off\" none; \"style\" the style's\n"
 		"(faithful lights, remix all)." },
 	{ "display.prism_rt_emissive_scale", _config_real, "1.0", "HALO_PRISM_RT_EMISSIVE_SCALE", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM path tracing: the lamps' and glows' brightness, 0 to 4 (1 the\n"
 		"brightness fitted to CE's lightmaps)." },
 	{ "display.prism_rt_materials", _config_string, "\"average\"", "HALO_PRISM_RT_MATERIALS", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM ray tracing: the colour light takes from what it bounces off:\n"
 		"\"average\" each surface's own (its textures' mean), \"grey\" one grey\n"
 		"for everything (as before, for comparing)." },
@@ -1260,7 +1312,7 @@ static const struct config_setting config_settings[] =
 		"leaves drawn with holes) cast shadows through their holes; false\n"
 		"leaves them out (cheaper)." },
 	{ "display.prism_rt_bounces", _config_integer, "0", "HALO_PRISM_RT_BOUNCES", _environment_value,
-		_platform_desktop,
+		_platform_internal,
 		"PRISM path tracing: how many times light bounces before the cache\n"
 		"takes over, 1 to 4; 0 by display.prism_rt_quality (low and medium 1,\n"
 		"high 2, ultra 3)." },
@@ -2217,6 +2269,13 @@ static const struct config_setting config_settings[] =
 		"rider up, and the body, so the campaign's AI plays as on the Xbox. A\n"
 		"rule of the game, read as its map begins: in a GOAT H1 network game the\n"
 		"host's, on every machine (a Legacy game's players turn)." GRAPHICS_CHOOSES },
+	{ "game.campaign_collision", _config_string, "\"original\"", "HALO_CAMPAIGN_COLLISION", _environment_value,
+		_platform_desktop,
+		"Campaign collision with the enhanced world geometry: \"original\" (the\n"
+		"map's own) or \"enhanced\" (the remodel's, close to the original where\n"
+		"it matters to play). Applies at the next level; multiplayer always\n"
+		"plays on the original. Not in this version yet: always \"original\"\n"
+		"(v4 geopatch M8)." },
 	{ "game.campaign_difficulty", _config_integer, "1", "HALO_CAMPAIGN_DIFFICULTY", _environment_value, _platform_all,
 		"The difficulty Choose Difficulty opens on: the one chosen last (0 Easy,\n"
 		"1 Normal, 2 Heroic, 3 Legendary). The campaign's menus write it." },
@@ -2526,7 +2585,7 @@ static const struct config_setting config_settings[] =
 		"the bolt between ticks, brighter in its core and fading softly, with\n"
 		"a glow about each plasma bolt, and lighting your own weapon and hands." GRAPHICS_CHOOSES },
 	{ "display.ambient_occlusion", _config_string, GRAPHICS_AMBIENT_OCCLUSION, "HALO_AMBIENT_OCCLUSION",
-		_environment_value, _platform_all,
+		_environment_value, _platform_android | _platform_internal,
 		"Ambient occlusion, which the Xbox did not have: the ambient light of\n"
 		"characters, vehicles and scenery dimmed where they meet the world and\n"
 		"in their creases, and the level's dimmed under them (a marine on a\n"
@@ -2547,7 +2606,7 @@ static const struct config_setting config_settings[] =
 		"your own weapon's effects. Where the renderer draws it (Vulkan's)."
 		GRAPHICS_CHOOSES },
 	{ "display.ambient_occlusion_strength", _config_real, "0.8", "HALO_AMBIENT_OCCLUSION_STRENGTH",
-		_environment_value, _platform_all,
+		_environment_value, _platform_android | _platform_internal,
 		"How deep display.ambient_occlusion \"world\"'s shade is, 0 to 1.5: 1 the\n"
 		"full depth found, 0.8 lighter (the default: the levels' and the\n"
 		"foliage's light kept), 0 none. Read each frame." },
@@ -4552,14 +4611,20 @@ static const struct
 	medium one; a file's true or false read as these words too) */
 	{ "input.gyro_smoothing", "true", "medium" },
 	{ "input.gyro_smoothing", "false", "off" },
-	/* (display.lighting's modes by the names Settings shows them by:
-	Classic, PRISM Rebaked, PRISM Path Traced) */
-	{ "display.lighting", "classic", "ce" },
-	{ "display.lighting", "rebaked", "raster" },
+	/* (display.lighting's three modes by their names, v4 geopatch M3:
+	Classic, Enhanced, Path Traced; the older words, and the names Settings
+	showed before) */
+	{ "display.lighting", "ce", "classic" },
+	{ "display.lighting", "raster", "enhanced" },
+	{ "display.lighting", "rebaked", "enhanced" },
 	{ "display.lighting", "path_traced", "pathtraced" },
-	/* (the bake only when Settings' Rebake Lightmaps asked: the main menu
-	bakes now, by itself, whatever needs it) */
-	{ "display.bake", "ask", "auto" },
+	/* (display.graphics' "prism", Classic's PRISM extras: Classic is CE's
+	own options alone now) */
+	{ "display.graphics", "prism", "enhanced" },
+	/* (the world's geometry by the names Settings shows: the older key's
+	words, read into it once: config_migrate_enhancements) */
+	{ "display.world_geometry", "stock", "classic" },
+	{ "display.world_geometry", "remodel", "enhanced" },
 	{ NULL, NULL, NULL },
 };
 
@@ -4585,6 +4650,9 @@ static const char *const config_retired_settings[] =
 	"simple", config_migrate_frame_rate) */
 	"display.show_fps",
 	"display.show_frame_rate",
+	/* (the world's geometry by its old key, "stock" or "remodel":
+	display.world_geometry's now, config_migrate_enhancements) */
+	"display.prism_world_geometry",
 	NULL,
 };
 
@@ -4614,49 +4682,39 @@ static const char *const config_display_order[] =
 	"display.graphics", "display.resolution_scaling", "display.supersampling", "display.anti_aliasing", "display.anisotropic_filtering",
 	"display.model_detail", "display.structure_culling", "display.astc_textures", "display.prepare_shaders",
 	"display.soft_particles", "display.dynamic_lights",
-	"=Lighting: Classic (\"ce\"), PRISM Rebaked (\"raster\") or PRISM Path Traced (\"pathtraced\")",
+	"=Lighting: Classic (\"classic\"), Enhanced (\"enhanced\") or Path Traced (\"pathtraced\"), never mixed",
 	"display.lighting",
-	"=PRISM's image (PRISM Rebaked and PRISM Path Traced; Classic's ray tracing too)",
+	"=Enhanced lighting (\"enhanced\") alone: its look and its ray tracing",
+	"display.prism_sky_light", "display.prism_raster_composition", "display.prism_raster_objects",
+	"display.enhanced_dynamic_lights", "display.prism_ray_tracing", "display.prism_raster_object_shadows",
+	"display.enhanced_shadow_resolution", "display.prism_rt_objects", "display.prism_rt_cache",
+	"display.prism_rt_alpha",
+	"=Path Traced lighting (\"pathtraced\") alone: its own settings",
+	"display.pt_profile", "display.denoiser", "display.pt_dynamic_lights", "display.prism_glow_lights",
+	"display.prism_dynamic_lights", "display.prism_light_saturation", "display.prism_pt_objects",
+	"display.prism_pt_cache", "display.prism_pt_alpha",
+	"=The enhancements (display.enhancements, a preset of the settings it chooses; every lighting mode, the\n"
+		"world's geometry under Enhanced and Path Traced)",
+	"display.enhancements", "display.world_geometry", "display.prism_world_geometry_detail",
+	"display.prism_world_geometry_band", "display.prism_materials", "display.material_packs", "display.terrain",
+	"display.terrain_layers", "display.terrain_tracks", "display.foliage_grass", "display.foliage_trees",
+	"display.foliage_leaves", "display.foliage_wind", "display.prism_models", "display.prism_textures",
+	"display.water",
+	"=The image (exposure and tone curve under Enhanced and Path Traced; bloom and tone grade every mode)",
 	"display.prism_exposure", "display.prism_exposure_bias", "display.prism_exposure_range",
 	"display.prism_exposure_speed", "display.prism_tone_curve",
-	"=The light bake (PRISM Rebaked and PRISM Path Traced: both read it)",
-	"display.bake", "display.bake_quality", "display.prism_sky_light", "display.bake_rebake",
-	"display.bake_indicator", "display.bake_folder", "display.bake_shipped_folder", "display.bake_budget",
-	"display.material_packs", "display.prism_rig",
-	"=PRISM Rebaked (\"raster\") alone",
-	"display.prism_raster_composition", "display.prism_raster_objects",
-	"=PRISM Path Traced (\"pathtraced\") alone",
-	"display.pt_profile", "display.denoiser", "display.prism_glow_lights", "display.prism_dynamic_lights",
-	"display.prism_light_saturation",
-	"=Upscaling (PRISM Rebaked and PRISM Path Traced; DLSS Ray Reconstruction under Path Traced alone)",
-	"display.upscaler", "display.upscaler_scale", "display.upscaler_sharpness",
-	"=Ray tracing: the traced scene (Classic with display.prism_rt on, PRISM Rebaked's traced object shadows,\n"
-		"PRISM Path Traced), Rebaked's object shadows, then Classic's ray tracer (display.prism_rt, off under\n"
-		"both PRISM modes) and its look",
-	"display.prism_rt_objects", "display.prism_rt_cache", "display.prism_rt_alpha",
-	"display.prism_raster_object_shadows",
-	"display.prism_rt", "display.prism_rt_quality", "display.prism_rt_resolution", "display.prism_rt_denoiser",
-	"display.prism_rt_mood", "display.prism_rt_sun", "display.prism_rt_world", "display.prism_rt_reflections",
-	"display.prism_rt_rate", "display.prism_rt_style", "display.prism_rt_anchor", "display.prism_rt_emissive",
-	"display.prism_rt_emissive_scale", "display.prism_sun_size", "display.prism_rt_materials",
-	"display.prism_rt_bounces",
-	"=Classic's lighting (\"ce\"; the PRISM modes light the frame themselves): its own, then PRISM's extras on it",
-	"display.shadow_resolution", "display.per_pixel_lighting",
-	"display.ambient_occlusion", "display.ambient_occlusion_strength", "display.prism_lightmaps",
-	"display.prism_lightmap_upsample", "display.prism_specular", "display.prism_reflections",
-	"display.prism_shadows", "display.prism_shadow_resolution", "display.prism_shadow_softness",
-	"display.prism_shadow_strength", "display.prism_baked_shadows", "display.prism_baked_shadow_strength",
-	"display.prism_material_overlay", "display.prism_overlay_strength", "display.prism_overlay_view",
-	"display.prism_surface_maps",
-	"=Post effects (every lighting mode)",
 	"display.prism_bloom", "display.prism_tone",
-	"=The remodelled level and the mods' assets (every lighting mode)",
-	"display.prism_world_geometry", "display.prism_world_geometry_detail", "display.prism_world_geometry_band",
-	"display.prism_world_geometry_shadows", "display.prism_world_geometry_occlusion",
+	"=The lightmaps the release ships (Enhanced and Path Traced read them; nothing is baked here)",
+	"display.bake_shipped_folder",
+	"=Upscaling (Enhanced and Path Traced; DLSS Ray Reconstruction under Path Traced alone)",
+	"display.upscaler", "display.upscaler_scale", "display.upscaler_sharpness",
+	"=Classic lighting (\"classic\"): the game's own options",
+	"display.shadow_resolution", "display.per_pixel_lighting",
+	"=The world geometry's drawing and the mods' assets (every lighting mode)",
 	"display.prism_world_geometry_facing", "display.prism_world_geometry_check",
-	"display.prism_world_geometry_batch", "display.prism_lod_hysteresis", "display.prism_textures",
-	"display.prism_texture_budget_mb", "display.prism_models", "display.prism_model_budget_mb",
-	"display.prism_secondary_motion", "display.prism_materials", "display.prism_texture_wait",
+	"display.prism_world_geometry_batch", "display.prism_lod_hysteresis",
+	"display.prism_texture_budget_mb", "display.prism_model_budget_mb",
+	"display.prism_secondary_motion", "display.prism_texture_wait",
 	"display.prism_texture_fade", "display.prism_prefetch",
 	"=The view and the first person (every lighting mode)",
 	"display.fov", "display.vehicle_fov", "display.scale_scoped_fov", "display.panini",
@@ -4672,88 +4730,56 @@ static const char *const config_display_order[] =
 };
 
 /* the lighting modes a setting reaches, said under its comment (Video's
-Lighting; docs/prism_settings.md) */
-#define LIGHTING_CLASSIC "Classic (display.lighting \"ce\") alone"
-#define LIGHTING_CLASSIC_RT "Classic with display.prism_rt on (both PRISM modes turn it off)"
-#define LIGHTING_PRISM "PRISM Rebaked and PRISM Path Traced (both read the bake)"
+Lighting; docs/prism_settings.md). The settings no player has any more
+(_platform_internal) are never written, so they have none */
+#define LIGHTING_CLASSIC "Classic (display.lighting \"classic\") alone"
+#define LIGHTING_ENHANCED "Enhanced (display.lighting \"enhanced\") alone"
+#define LIGHTING_PATH_TRACED "Path Traced (display.lighting \"pathtraced\") alone"
+#define LIGHTING_PRISM "Enhanced and Path Traced (both read the shipped lightmaps)"
+#define LIGHTING_EVERY "every lighting mode"
 static const struct
 {
 	const char *name;
 	const char *modes;
 } config_lighting_modes[] =
 {
-	{ "display.graphics", "its edges, textures and models every mode; its lighting settings Classic's" },
-	{ "display.lighting", "chooses them" },
-	{ "display.prism_exposure", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
-	{ "display.prism_exposure_bias", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
-	{ "display.prism_exposure_range", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
-	{ "display.prism_exposure_speed", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
-	{ "display.prism_tone_curve", "PRISM Rebaked, PRISM Path Traced, and Classic with display.prism_rt on" },
-	{ "display.bake", LIGHTING_PRISM },
-	{ "display.bake_quality", LIGHTING_PRISM },
+	{ "display.graphics", "its edges, textures and models every mode; its shadows and dynamic lights Classic's" },
+	{ "display.lighting", "chooses them; they never mix" },
+	{ "display.prism_exposure", LIGHTING_PRISM },
+	{ "display.prism_exposure_bias", LIGHTING_PRISM },
+	{ "display.prism_exposure_range", LIGHTING_PRISM },
+	{ "display.prism_exposure_speed", LIGHTING_PRISM },
+	{ "display.prism_tone_curve", LIGHTING_PRISM },
 	{ "display.prism_sky_light", LIGHTING_PRISM },
-	{ "display.bake_rebake", LIGHTING_PRISM },
-	{ "display.bake_indicator", LIGHTING_PRISM },
-	{ "display.bake_folder", LIGHTING_PRISM },
 	{ "display.bake_shipped_folder", LIGHTING_PRISM },
-	{ "display.bake_budget", LIGHTING_PRISM },
 	{ "display.material_packs", LIGHTING_PRISM },
-	{ "display.prism_rig", "PRISM Rebaked and PRISM Path Traced (units), Classic's ray tracing (fitted)" },
-	{ "display.prism_raster_composition", "PRISM Rebaked (display.lighting \"raster\") alone" },
-	{ "display.prism_raster_objects", "PRISM Rebaked (display.lighting \"raster\") alone" },
-	{ "display.prism_raster_object_shadows", "PRISM Rebaked (display.lighting \"raster\") alone" },
-	{ "display.pt_profile", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
-	{ "display.denoiser", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
-	{ "display.upscaler", "every mode's 3D view (Settings offers it under PRISM Rebaked and PRISM Path Traced)" },
-	{ "display.upscaler_scale", "every mode's 3D view, with display.upscaler on" },
-	{ "display.upscaler_sharpness", "every mode's 3D view, with display.upscaler on" },
-	{ "display.prism_glow_lights", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
-	{ "display.prism_dynamic_lights", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
-	{ "display.prism_light_saturation", "PRISM Path Traced (and PRISM Rebaked's \"materials\" composition)" },
-	{ "display.prism_rt_objects", "Classic with display.prism_rt on, PRISM Rebaked with its object shadows traced, "
-		"PRISM Path Traced" },
-	{ "display.prism_rt_cache", "Classic with display.prism_rt on, PRISM Rebaked with its object shadows traced, "
-		"PRISM Path Traced" },
-	{ "display.prism_rt_alpha", "Classic with display.prism_rt on, PRISM Rebaked and PRISM Path Traced (in the "
-		"bake: a change bakes again)" },
-	{ "display.prism_rt", LIGHTING_CLASSIC },
-	{ "display.prism_rt_quality", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_resolution", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_denoiser", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_reflections", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_mood", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_world", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_rate", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_style", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_anchor", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_sun", LIGHTING_CLASSIC_RT },
-	{ "display.prism_sun_size", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_emissive", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_emissive_scale", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_materials", LIGHTING_CLASSIC_RT },
-	{ "display.prism_rt_bounces", LIGHTING_CLASSIC_RT },
-	{ "display.shadow_resolution", "Classic; PRISM Rebaked with its object shadows \"classic\"" },
+	{ "display.prism_raster_composition", LIGHTING_ENHANCED },
+	{ "display.prism_raster_objects", LIGHTING_ENHANCED },
+	{ "display.prism_raster_object_shadows", "Enhanced with display.prism_ray_tracing on" },
+	{ "display.prism_ray_tracing", LIGHTING_ENHANCED },
+	{ "display.enhanced_dynamic_lights", LIGHTING_ENHANCED },
+	{ "display.enhanced_shadow_resolution", LIGHTING_ENHANCED },
+	{ "display.prism_rt_objects", "Enhanced with display.prism_ray_tracing on" },
+	{ "display.prism_rt_cache", "Enhanced with display.prism_ray_tracing on" },
+	{ "display.prism_rt_alpha", "Enhanced with display.prism_ray_tracing on (the level's cutouts are always in "
+		"the lightmaps)" },
+	{ "display.pt_profile", LIGHTING_PATH_TRACED },
+	{ "display.denoiser", LIGHTING_PATH_TRACED },
+	{ "display.pt_dynamic_lights", LIGHTING_PATH_TRACED },
+	{ "display.prism_glow_lights", LIGHTING_PATH_TRACED },
+	{ "display.prism_dynamic_lights", LIGHTING_PATH_TRACED },
+	{ "display.prism_light_saturation", LIGHTING_PATH_TRACED },
+	{ "display.prism_pt_objects", LIGHTING_PATH_TRACED },
+	{ "display.prism_pt_cache", LIGHTING_PATH_TRACED },
+	{ "display.prism_pt_alpha", LIGHTING_PATH_TRACED },
+	{ "display.upscaler", "Enhanced and Path Traced (Classic draws without one)" },
+	{ "display.upscaler_scale", "Enhanced and Path Traced, with display.upscaler on" },
+	{ "display.upscaler_sharpness", "Enhanced and Path Traced, with display.upscaler on" },
+	{ "display.shadow_resolution", LIGHTING_CLASSIC },
 	{ "display.per_pixel_lighting", LIGHTING_CLASSIC },
-	{ "display.dynamic_lights", "every mode: Classic draws them itself; under PRISM Rebaked and PRISM Path Traced it "
-		"chooses the lights they light by (the plasma bolts' and needles') and draws their glows" },
-	{ "display.ambient_occlusion", LIGHTING_CLASSIC },
-	{ "display.ambient_occlusion_strength", LIGHTING_CLASSIC },
-	{ "display.prism_lightmaps", LIGHTING_CLASSIC },
-	{ "display.prism_lightmap_upsample", LIGHTING_CLASSIC },
-	{ "display.prism_specular", LIGHTING_CLASSIC },
-	{ "display.prism_reflections", LIGHTING_CLASSIC },
-	{ "display.prism_shadows", LIGHTING_CLASSIC },
-	{ "display.prism_shadow_resolution", LIGHTING_CLASSIC },
-	{ "display.prism_shadow_softness", LIGHTING_CLASSIC },
-	{ "display.prism_shadow_strength", LIGHTING_CLASSIC },
-	{ "display.prism_baked_shadows", LIGHTING_CLASSIC },
-	{ "display.prism_baked_shadow_strength", LIGHTING_CLASSIC },
-	{ "display.prism_material_overlay", LIGHTING_CLASSIC },
-	{ "display.prism_overlay_strength", LIGHTING_CLASSIC },
-	{ "display.prism_overlay_view", LIGHTING_CLASSIC },
-	{ "display.prism_surface_maps", LIGHTING_CLASSIC },
-	{ "display.prism_world_geometry_shadows", LIGHTING_CLASSIC },
-	{ "display.prism_world_geometry_occlusion", LIGHTING_CLASSIC },
+	{ "display.dynamic_lights", "Classic (Enhanced and Path Traced have their own)" },
+	{ "display.world_geometry", LIGHTING_PRISM },
+	{ "display.enhancements", LIGHTING_EVERY },
 	{ NULL, NULL },
 };
 
@@ -5319,6 +5345,14 @@ static char *config_migrate_words(const char *text, toml_datum_t table)
 	return result;
 }
 
+/* whether a setting is no player's here (_platform_internal, and not this
+build's otherwise): never read from the file nor written to it */
+static int config_setting_internal(long setting)
+{
+	return setting >= 0 && (config_settings[setting].platforms & _platform_internal) &&
+		!(config_settings[setting].platforms & CONFIG_PLATFORM);
+}
+
 /* whether a setting is one an older version had (config_retired_settings) */
 static int config_setting_retired(const char *name)
 {
@@ -5378,6 +5412,62 @@ static char *config_migrate_retired(const char *text)
 			if (!commented)
 				platform_log("settings: %s is an older version's setting, gone from this one: taken out of the file",
 					name);
+			free(result);
+			result = out.buffer;
+		}
+	}
+	return result;
+}
+
+/* a file with settings that are no player's any more (_platform_internal:
+the bake's, Classic's PRISM extras and ray tracer, v4 geopatch M3): each
+one's line taken out as a retired setting's is (config_migrate_retired), its
+value never read (config_load). Returns the new text, or NULL if it has none */
+static char *config_migrate_internal(const char *text)
+{
+	char *result = NULL;
+	size_t index;
+
+	for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
+	{
+		const char *name = config_settings[index].name;
+
+		if (!config_setting_internal((long)index))
+			continue;
+		const char *dot = strchr(name, '.');
+		char section[64];
+		int commented;
+
+		if (!dot)
+			continue;
+		snprintf(section, sizeof(section), "%.*s", (int)(dot - name), name);
+		for (commented = 0; commented < 2; commented++)
+		{
+			const char *current = result ? result : text;
+			const char *line = config_find_line(current, section, dot + 1, commented);
+			const char *start, *end;
+			struct config_text out = { NULL, 0, 0 };
+			char *before;
+
+			if (!line)
+				continue;
+			end = line + strcspn(line, "\n");
+			if (*end)
+				end++;
+			start = config_comment_start(current, line);
+			if (start - current >= 2 && start[-1] == '\n' && start[-2] == '\n')
+				start--;
+			before = config_copy(current, (size_t)(start - current));
+			if (!before)
+				continue;
+			config_append(&out, before);
+			free(before);
+			config_append(&out, end);
+			if (!out.buffer)
+				continue;
+			if (!commented)
+				platform_log("settings: %s is no player's setting any more (no bake, no Classic extras): taken out of "
+					"the file, its value not read", name);
 			free(result);
 			result = out.buffer;
 		}
@@ -5901,16 +5991,19 @@ static const struct
 	/* ("native" in VR, whose eyes' many lines the Xbox's 480 stand for) */
 	{ "display.model_detail", "\"auto\"" },
 	{ "display.dynamic_lights", "\"classic\"" },
+	/* (each PRISM lighting's own: v4 geopatch M3's config_mode_keys) */
+	{ "display.enhanced_dynamic_lights", "\"classic\"" },
+	{ "display.pt_dynamic_lights", "\"classic\"" },
+	{ "display.enhanced_shadow_resolution", "128" },
+	/* (Android's Classic; the desktop's has none: Classic's PRISM extras and
+	"prism", the preset of them, are gone there) */
 	{ "display.ambient_occlusion", "\"off\"", 0, "\"world\"" },
-	{ "display.prism_lightmaps", "\"stock\"", 0, "\"smooth\"" },
-	{ "display.prism_surface_maps", "false", 0, "true" },
-	{ "display.prism_specular", "\"off\"", 0, "\"subtle\"" },
-	{ "display.prism_shadows", "\"stock\"", 0, "\"soft\"" },
-	{ "display.prism_rt", "\"off\"" },
-	{ "display.prism_texture_wait", "0", 0, "4" },
-	{ "display.prism_texture_fade", "0", 0, "250" },
-	{ "display.prism_prefetch", "false", 0, "true" },
-	{ "display.prism_lod_hysteresis", "0", 0, "15" },
+	/* (the streams' steadiness against pop-in, which "prism" gave: Enhanced's
+	own since v4 geopatch M3 retired "prism", its defaults) */
+	{ "display.prism_texture_wait", "0" },
+	{ "display.prism_texture_fade", "0" },
+	{ "display.prism_prefetch", "false" },
+	{ "display.prism_lod_hysteresis", "0" },
 	{ "display.soft_particles", "false" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },
@@ -5996,6 +6089,256 @@ static void config_graphics_apply(void)
 			config_set_from_table_text(&config_values[setting], config_settings[setting].type,
 				config_graphics_text(graphics, setting));
 	}
+}
+
+/* ---------- display.enhancements (v4 geopatch M3, docs/prism_settings.md)
+
+The enhancements preset: each enhancement group's settings at the level
+"classic", "remastered" or "realistic" gives them, where the player has not
+set them, as display.graphics does for its own (the two never share a
+setting: tools/test_prism_enhancements.py). A setting written at the value
+the preset gives it is left to the preset again, so a group that ships in a
+later version arrives at the player's level with no menu visit; "custom" is
+only what Settings shows once a set one differs. The table is the
+enhancements' registry: tools/port_settings.py's ENHANCEMENTS is its twin
+(the menu's rows), checked by tools/test_prism_enhancements.py, with each
+row's group, the lighting modes it applies in (C Classic, E Enhanced,
+P Path Traced; greyed in the others), its class (WORLD_BAKED: the one
+setting that changes the bake, the world's geometry; RUNTIME: reads the
+bake; BAKE_LAYER: a layer of the same bake, none yet; SIM: collision, none
+in the preset) and the content it needs ("foliage": greyed until a content
+release brings it). */
+enum
+{
+	_enhancement_world_baked,
+	_enhancement_bake_layer,
+	_enhancement_runtime,
+	_enhancement_sim,
+};
+static const struct
+{
+	const char *name;
+	/* each level's value, as the table above writes it */
+	const char *classic, *remastered, *realistic;
+	const char *group;
+	const char *modes;
+	int kind;
+	const char *content;
+} config_enhancements[] =
+{
+	{ "display.world_geometry", "\"classic\"", "\"enhanced\"", "\"enhanced\"", "world_geometry", "EP",
+		_enhancement_world_baked, NULL },
+	{ "display.prism_materials", "\"stock\"", "\"pbr\"", "\"pbr\"", "materials", "CEP", _enhancement_runtime, NULL },
+	{ "display.material_packs", "false", "true", "true", "materials", "EP", _enhancement_runtime, NULL },
+	{ "display.terrain", "\"off\"", "\"on\"", "\"on\"", "materials", "EP", _enhancement_runtime, NULL },
+	{ "display.terrain_layers", "\"ce\"", "\"hq\"", "\"hq\"", "materials", "EP", _enhancement_runtime, NULL },
+	{ "display.terrain_tracks", "false", "true", "true", "materials", "EP", _enhancement_runtime, NULL },
+	{ "display.foliage_grass", "\"classic\"", "\"enhanced\"", "\"realistic\"", "foliage", "EP",
+		_enhancement_runtime, "foliage" },
+	{ "display.foliage_trees", "\"classic\"", "\"enhanced\"", "\"enhanced\"", "foliage", "EP",
+		_enhancement_runtime, "foliage" },
+	{ "display.foliage_leaves", "\"classic\"", "\"enhanced\"", "\"realistic\"", "foliage", "EP",
+		_enhancement_runtime, "foliage" },
+	{ "display.foliage_wind", "false", "true", "true", "foliage", "EP", _enhancement_runtime, "foliage" },
+	{ "display.prism_models", "\"stock\"", "\"enhanced\"", "\"max\"", "models", "CEP", _enhancement_runtime, NULL },
+	{ "display.prism_textures", "\"stock\"", "\"enhanced\"", "\"max\"", "models", "CEP", _enhancement_runtime,
+		NULL },
+	{ "display.water", "\"ce\"", "\"prism\"", "\"prism\"", "materials", "EP", _enhancement_runtime, NULL },
+};
+
+#define NUMBER_OF_CONFIG_ENHANCEMENTS (sizeof(config_enhancements) / sizeof(config_enhancements[0]))
+
+/* the setting's entry in config_enhancements, or -1 */
+static long config_enhancements_entry(long setting)
+{
+	size_t entry;
+
+	for (entry = 0; setting >= 0 && entry < NUMBER_OF_CONFIG_ENHANCEMENTS; entry++)
+	{
+		if (!strcmp(config_enhancements[entry].name, config_settings[setting].name))
+			return (long)entry;
+	}
+	return -1;
+}
+
+/* the value the preset ("classic", "remastered", else "realistic") gives
+the setting, as the table above writes it */
+static const char *config_enhancements_text(const char *preset, long setting)
+{
+	long entry = config_enhancements_entry(setting);
+
+	if (entry < 0)
+		return config_settings[setting].default_value;
+	if (preset && !strcmp(preset, "classic"))
+		return config_enhancements[entry].classic;
+	if (preset && !strcmp(preset, "remastered"))
+		return config_enhancements[entry].remastered;
+	return config_enhancements[entry].realistic;
+}
+
+static int config_values_equal(const struct config_value *a, const struct config_value *b, enum config_type type);
+
+static const char *config_enhancements_preset(void)
+{
+	return config_values[config_setting_index("display.enhancements")].string;
+}
+
+/* whether the setting's value is the one display.enhancements gives it */
+static int config_enhancements_gives(long setting)
+{
+	struct config_value preset = { 0, 0, 0.0, NULL };
+	int equal;
+
+	config_set_from_table_text(&preset, config_settings[setting].type,
+		config_enhancements_text(config_enhancements_preset(), setting));
+	equal = config_values_equal(&config_values[setting], &preset, config_settings[setting].type);
+	free(preset.string);
+	return equal;
+}
+
+/* the setting's line, left to display.enhancements: commented out at the
+value it gives it */
+static void config_enhancements_line(long setting, char *line, size_t size)
+{
+	snprintf(line, size, "# %s = %s\n", strchr(config_settings[setting].name, '.') + 1,
+		config_enhancements_text(config_enhancements_preset(), setting));
+}
+
+/* the settings display.enhancements chooses that the player has not set,
+at its values */
+static void config_enhancements_apply(void)
+{
+	const char *preset = config_enhancements_preset();
+	size_t entry;
+
+	for (entry = 0; entry < NUMBER_OF_CONFIG_ENHANCEMENTS; entry++)
+	{
+		long setting = config_setting_index(config_enhancements[entry].name);
+
+		if (setting >= 0 && !config_set[setting])
+			config_set_from_table_text(&config_values[setting], config_settings[setting].type,
+				config_enhancements_text(preset, setting));
+	}
+}
+
+/* ---------- each PRISM lighting's own settings (v4 geopatch M3)
+
+A setting the game reads by one name (display.dynamic_lights, read by the
+renderer under every lighting) that each lighting has a row of its own for:
+the game's read (config_boolean, config_integer, config_string) takes the
+lighting's own key under Enhanced or Path Traced, so no key is reachable
+from two lighting pages and no lighting's choice leaks into another's. The
+lighting's key is the older shared one's value on the first start of this
+version (config_migrate_enhancements). */
+static const struct
+{
+	const char *name;
+	/* under Enhanced and under Path Traced (NULL: the name's own) */
+	const char *enhanced, *path_traced;
+} config_mode_keys[] =
+{
+	{ "display.dynamic_lights", "display.enhanced_dynamic_lights", "display.pt_dynamic_lights" },
+	{ "display.shadow_resolution", "display.enhanced_shadow_resolution", NULL },
+	{ "display.prism_rt_objects", NULL, "display.prism_pt_objects" },
+	{ "display.prism_rt_cache", NULL, "display.prism_pt_cache" },
+	{ "display.prism_rt_alpha", NULL, "display.prism_pt_alpha" },
+};
+
+#define NUMBER_OF_CONFIG_MODE_KEYS (sizeof(config_mode_keys) / sizeof(config_mode_keys[0]))
+
+/* the value the game reads for value (config_values' entry of a setting):
+the lighting's own key's where the setting is one of config_mode_keys' */
+static const struct config_value *config_mode_value(const struct config_value *value, enum config_type type)
+{
+	size_t entry;
+
+	if (value < config_values || value >= config_values + NUMBER_OF_CONFIG_SETTINGS)
+		return value;
+	for (entry = 0; entry < NUMBER_OF_CONFIG_MODE_KEYS; entry++)
+	{
+		long base = config_setting_index(config_mode_keys[entry].name);
+		const char *lighting, *own = NULL;
+		long setting;
+
+		if (base < 0 || value != &config_values[base])
+			continue;
+		lighting = config_values[config_setting_index("display.lighting")].string;
+		if (lighting && !strcmp(lighting, "enhanced"))
+			own = config_mode_keys[entry].enhanced;
+		else if (lighting && !strcmp(lighting, "pathtraced"))
+			own = config_mode_keys[entry].path_traced;
+		setting = own ? config_setting_index(own) : -1;
+		return setting >= 0 && config_settings[setting].type == type ? &config_values[setting] : value;
+	}
+	return value;
+}
+
+/* a file of an older version (v4 geopatch M3): display.prism_world_geometry
+("stock", "remodel") into display.world_geometry, and each lighting's own
+key (config_mode_keys) at the older shared one's value, where the file
+sets the older and not the newer. Returns the new text, or NULL */
+static char *config_migrate_enhancements(const char *text, toml_datum_t table)
+{
+	char *completed = NULL, *result = NULL;
+	char value[96];
+	size_t entry;
+	int k;
+
+	for (entry = 0; entry <= NUMBER_OF_CONFIG_MODE_KEYS; entry++)
+	{
+		for (k = 0; k < 2; k++)
+		{
+			const char *from, *to;
+			toml_datum_t old, now;
+			long setting;
+			char *updated;
+
+			if (entry == NUMBER_OF_CONFIG_MODE_KEYS)
+			{
+				if (k)
+					continue;
+				from = "display.prism_world_geometry";
+				to = "display.world_geometry";
+			}
+			else
+			{
+				from = config_mode_keys[entry].name;
+				to = k ? config_mode_keys[entry].path_traced : config_mode_keys[entry].enhanced;
+			}
+			setting = to ? config_setting_index(to) : -1;
+			if (setting < 0 || !(config_settings[setting].platforms & CONFIG_PLATFORM))
+				continue;
+			old = toml_seek(table, from);
+			now = toml_seek(table, to);
+			if (now.type != TOML_UNKNOWN)
+				continue;
+			if (old.type == TOML_STRING)
+			{
+				const char *word = old.u.s;
+
+				if (entry == NUMBER_OF_CONFIG_MODE_KEYS)
+					word = !strcmp(word, "remodel") || !strcmp(word, "enhanced") ? "enhanced" : "classic";
+				snprintf(value, sizeof(value), "\"%s\"", word);
+			}
+			else if (old.type == TOML_INT64)
+				snprintf(value, sizeof(value), "%lld", (long long)old.u.int64);
+			else if (old.type == TOML_BOOLEAN)
+				snprintf(value, sizeof(value), "%s", old.u.boolean ? "true" : "false");
+			else
+				continue;
+			if (!completed && !result)
+				completed = config_add_missing(text, table);
+			updated = config_replace_setting(result ? result : completed ? completed : text, &config_settings[setting],
+				value);
+			if (!updated)
+				continue;
+			free(result);
+			result = updated;
+			platform_log("settings: %s = %s, the older %s's, on the first start of this version", to, value, from);
+		}
+	}
+	free(completed);
+	return result;
 }
 
 /* ---------- battery saver (display.battery_saver: battery_saver.c)
@@ -6262,7 +6605,17 @@ static const struct
 	{ "display.resolution_scaling", { "native", "original", NULL }, NULL },
 	{ "display.anti_aliasing", { "off", "fxaa", "smaa", "ssaa2x", "msaa2x", "msaa4x", "msaa8x", NULL }, NULL },
 	{ "display.ambient_occlusion", { "off", "world", "ray_traced", NULL }, "off" },
-	{ "display.lighting", { "ce", "ce_deferred", "raster", "pathtraced", NULL }, "ce" },
+	{ "display.lighting", { "classic", "enhanced", "pathtraced", "ce_deferred", NULL }, "classic" },
+	{ "display.prism_ray_tracing", { "on", "off", NULL }, "on" },
+	{ "display.enhanced_dynamic_lights", { "classic", "enhanced", NULL }, "classic" },
+	{ "display.pt_dynamic_lights", { "classic", "enhanced", NULL }, "classic" },
+	{ "display.prism_pt_objects", { "auto", "view_lod", "low_lod", NULL }, "auto" },
+	{ "display.world_geometry", { "classic", "enhanced", NULL }, "classic" },
+	{ "display.enhancements", { "classic", "remastered", "realistic", "custom", NULL }, "realistic" },
+	{ "display.foliage_grass", { "classic", "enhanced", "realistic", NULL }, "classic" },
+	{ "display.foliage_trees", { "classic", "enhanced", NULL }, "classic" },
+	{ "display.foliage_leaves", { "classic", "enhanced", "realistic", NULL }, "classic" },
+	{ "game.campaign_collision", { "original", "enhanced", NULL }, "original" },
 	{ "display.pt_profile", { "quality", "performance", NULL }, "quality" },
 	{ "display.denoiser", { "prism", "dlss_rr", "off", NULL }, "prism" },
 	{ "display.prism_raster_composition", { "ce", "materials", NULL }, "ce" },
@@ -6752,6 +7105,35 @@ static void config_load(void)
 				migrated = text;
 			}
 		}
+		/* (the world's geometry's older key, and each lighting's own keys:
+		v4 geopatch M3) */
+		if (result.ok && !skipped)
+		{
+			char *enhancements = config_migrate_enhancements(text, result.toptab);
+
+			if (enhancements)
+			{
+				toml_free(result);
+				free(text);
+				text = enhancements;
+				result = toml_parse(text, (int)strlen(text));
+				migrated = text;
+			}
+		}
+		/* (the settings no player has any more: v4 geopatch M3) */
+		if (result.ok && !skipped)
+		{
+			char *internal = config_migrate_internal(text);
+
+			if (internal)
+			{
+				toml_free(result);
+				free(text);
+				text = internal;
+				result = toml_parse(text, (int)strlen(text));
+				migrated = text;
+			}
+		}
 		/* (the settings an older version had) */
 		if (result.ok && !skipped)
 		{
@@ -6778,8 +7160,8 @@ static void config_load(void)
 					platform_log("settings: cannot write %s", path);
 			}
 			for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
-				config_set[index] = (unsigned char)config_set_from_file(&config_values[index], &config_settings[index],
-					result.toptab);
+				config_set[index] = config_setting_internal((long)index) ? 0 :
+					(unsigned char)config_set_from_file(&config_values[index], &config_settings[index], result.toptab);
 			config_weapons_read_global(result.toptab);
 #ifndef HALO_ANDROID
 			if (config_values[config_setting_index("server.enabled")].boolean && !config_probe_mode)
@@ -6847,10 +7229,12 @@ static void config_load(void)
 	{
 		const char *graphics = config_values[config_setting_index("display.graphics")].string;
 
-		if (strcmp(graphics, "classic") && strcmp(graphics, "enhanced") && strcmp(graphics, "prism"))
+		if (strcmp(graphics, "classic") && strcmp(graphics, "enhanced"))
 			platform_log("settings: display.graphics \"%s\" is unknown, so enhanced", graphics);
 		config_graphics_apply();
 	}
+	if (config_setting_index("display.enhancements") >= 0)
+		config_enhancements_apply();
 	config_battery_values_set();
 #ifndef HALO_ANDROID
 	if (config_server_mode)
@@ -6943,7 +7327,7 @@ while they are rendered (config_picture_viewing), else battery saver's
 where it chooses it (config_battery_saving) */
 static const struct config_value *config_read(const char *name, enum config_type type)
 {
-	const struct config_value *value = config_value(name, type);
+	const struct config_value *value = config_mode_value(config_value(name, type), type);
 	long setting, entry;
 
 	if (config_picture_viewing)
@@ -7205,6 +7589,11 @@ int config_write(const char *name, const char *value)
 		config_set[index] = 0;
 		config_graphics_line(index, line_text, line_size);
 	}
+	if (config_enhancements_entry(index) >= 0 && config_enhancements_gives(index))
+	{
+		config_set[index] = 0;
+		config_enhancements_line(index, line_text, line_size);
+	}
 	config_path(path, sizeof(path));
 	text = config_read_file(path, &size);
 	updated = config_set_line(text ? text : "", section, key, line_text);
@@ -7233,6 +7622,31 @@ int config_write(const char *name, const char *value)
 			config_set[setting] = 0;
 		}
 		config_graphics_apply();
+	}
+	/* (display.enhancements: the same for the settings it chooses) */
+	if (!strcmp(name, "display.enhancements"))
+	{
+		size_t entry;
+
+		for (entry = 0; entry < NUMBER_OF_CONFIG_ENHANCEMENTS && updated; entry++)
+		{
+			long setting = config_setting_index(config_enhancements[entry].name);
+			const char *setting_dot = strchr(config_enhancements[entry].name, '.');
+			char *next;
+
+			if (setting < 0 || !setting_dot || !config_set[setting] || !config_enhancements_gives(setting))
+				continue;
+			config_enhancements_line(setting, line_text, line_size);
+			snprintf(section, sizeof(section), "%.*s", (int)(setting_dot - config_enhancements[entry].name),
+				config_enhancements[entry].name);
+			next = config_set_line(updated, section, setting_dot + 1, line_text);
+			if (!next)
+				continue;
+			free(updated);
+			updated = next;
+			config_set[setting] = 0;
+		}
+		config_enhancements_apply();
 	}
 	succeeded = updated && config_write_file(path, updated);
 	config_change_count++;
@@ -8274,6 +8688,43 @@ the last (Settings' Quality row: menu_functions.c's graphics_preset_show) */
 const char *config_graphics_setting(int entry)
 {
 	return entry >= 0 && (size_t)entry < NUMBER_OF_CONFIG_GRAPHICS ? config_graphics[entry].name : NULL;
+}
+
+const char *config_enhancements_setting(int entry)
+{
+	return entry >= 0 && (size_t)entry < NUMBER_OF_CONFIG_ENHANCEMENTS ? config_enhancements[entry].name : NULL;
+}
+
+int config_enhancements_value(const char *preset, const char *name, char *text, size_t size)
+{
+	long index = config_setting_index(name);
+	const char *value;
+	size_t length;
+
+	if (index < 0 || config_enhancements_entry(index) < 0)
+		return 0;
+	value = config_enhancements_text(preset, index);
+	length = strlen(value);
+	if (config_settings[index].type == _config_string && length >= 2 && value[0] == '"')
+	{
+		value++;
+		length -= 2;
+	}
+	snprintf(text, size, "%.*s", (int)length, value);
+	return 1;
+}
+
+int config_enhancement_info(const char *name, const char **group, const char **modes, const char **content)
+{
+	long index = config_setting_index(name);
+	long entry = index >= 0 ? config_enhancements_entry(index) : -1;
+
+	if (entry < 0)
+		return 0;
+	*group = config_enhancements[entry].group;
+	*modes = config_enhancements[entry].modes;
+	*content = config_enhancements[entry].content;
+	return 1;
 }
 
 int config_graphics_value(const char *graphics, const char *name, char *text, size_t size)

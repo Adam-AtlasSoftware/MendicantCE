@@ -7,6 +7,9 @@ tests of config.toml: built with stand-ins for SDL, the platform layer
 
     config_check <folder> get <setting>          prints its value
     config_check <folder> write <setting> <value>
+    config_check <folder> read <setting>         prints the value the game reads
+                                                 (config_string and the rest: a
+                                                 lighting's own key, v4 geopatch M3)
     config_check <folder> saving <setting>       prints the value the game reads
                                                  with battery saver on, then the
                                                  one Settings shows
@@ -92,6 +95,17 @@ int main(int argc, char **argv)
 	}
 	if (!strcmp(argv[2], "write") && argc == 5)
 		return config_write(argv[3], argv[4]) ? 0 : 1;
+	/* (as the game reads it, by the type its text says) */
+	if (!strcmp(argv[2], "read") && config_text(argv[3], text, sizeof(text)))
+	{
+		if (!strcmp(text, "true") || !strcmp(text, "false"))
+			printf("%s\n", config_boolean(argv[3]) ? "true" : "false");
+		else if (text[0] >= '0' && text[0] <= '9')
+			printf("%ld\n", config_integer(argv[3]));
+		else
+			printf("%s\n", config_string(argv[3]));
+		return 0;
+	}
 	/* (as the game reads it with battery saver on, by the type its text
 	says, then config_text's, which Settings shows) */
 	if (!strcmp(argv[2], "saving") && config_text(argv[3], text, sizeof(text)))

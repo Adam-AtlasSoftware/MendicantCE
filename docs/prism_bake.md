@@ -6,6 +6,13 @@ the game lit from that bake, with no ray tracing while playing. This document de
 bake file, the settings, how Raster reads the bake, and what was measured. The gates' figures are in
 `docs/prism_gates.md` ("M2: the bake and PRISM Raster").
 
+**Players never bake (v4 geopatch M3, `docs/prism_settings.md`).** The baker below is the farm's and the developers':
+`display.bake`, `_quality`, `_rebake`, `_indicator`, `_budget`, `_folder` and `display.prism_rig` are no player's settings
+(never read from config.toml; `HALO_BAKE=auto` and the rest on the farm), so the main menu's bake, its questions
+(PLAY NOW, REBAKE) and the Light Bake page described below never run or show for a player, and Enhanced lighting
+(`display.lighting` `"enhanced"`, Raster below) and Path Traced draw the shipped MAX lightmaps alone. The enhanced
+world's bakes are keyed to each BSP's `world_id` (`docs/prism_geometry.md`).
+
 A release ships every campaign level's light baked at MAX for both worlds, lighting only ("The shipped bake", below):
 the player's machine uses it wherever its key is that machine's own BSP's, and bakes only what it does not cover (a
 mod, a custom map). A bake made on the player's machine stays there (`<data>/prism_bake`, or `display.bake_folder`).

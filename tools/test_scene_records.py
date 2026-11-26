@@ -134,7 +134,7 @@ def test_sizes_multiples_of_four(driver64):
         "xgpu_stream_scene_fog_plane": 64,
         "xgpu_stream_scene_fog": 48 + 8 * 64,
         "xgpu_stream_scene_view": 16 + 128 + 32,
-        "xgpu_stream_prism_bake": 80 + 64,
+        "xgpu_stream_prism_bake": 80 + 64 + 32,
         "xgpu_stream_scene_material_maps": 148,
         "xgpu_stream_upscale": 36 + 32 + 128 + 16,
         "xgpu_stream_terrain_event": 32,
@@ -145,7 +145,7 @@ def test_sizes_multiples_of_four(driver64):
 
 
 def test_stream_types(constants):
-    # (42: PRISM_TERRAIN's WATER_DRAW sent (T7), three items (41 on its own branch); 41: PRISM_TERRAIN's FRAME carries the terrain pack's folder (T1); 40: the terrain overhaul's PRISM_TERRAIN (T0), after UPSCALE (39 on its own branch), the last scene record;
+    # (43: PRISM_BAKE carries the BSP's enhanced world_id (v4 geopatch M2); 42: PRISM_TERRAIN's WATER_DRAW sent (T7), three items (41 on its own branch); 41: PRISM_TERRAIN's FRAME carries the terrain pack's folder (T1); 40: the terrain overhaul's PRISM_TERRAIN (T0), after UPSCALE (39 on its own branch), the last scene record;
     # 39: the integration of M5's UPSCALE (38 on its own branch), after the scene's types; 38: the merge with GOAT H1
     # (OpenH1/goath1 ff83e8d62), whose own 20 to 23 come first in the list, PRISM's records after them, the scene
     # records still last; 37: prism-v4-raster-int's RT_FRAME flag RASTER_OBJECTS, 32, and GBUFFER_DRAW's STATIC_SCENERY; 36: M3's
@@ -154,9 +154,9 @@ def test_stream_types(constants):
     # SCENE_STATIC's pages, levels and attributes as sent, SCENE_LIGHTS' emitters, SCENE_VIEW; 31: M1 sends
     # SCENE_MATERIAL and GBUFFER_DRAW, display.lighting "ce_deferred"'s G-buffer pass; 30 was GBUFFER_PHASE, its first
     # record)
-    assert constants["version"] == 42
+    assert constants["version"] == 43
     text = (SOURCE / "xgpu_stream.h").read_text()
-    assert re.search(r"#define XGPU_STREAM_VERSION 42\b", text)
+    assert re.search(r"#define XGPU_STREAM_VERSION 43\b", text)
     # (the scene's types joined the stream's own list after GBUFFER_PHASE, the numbers they were specified with:
     # the decoder takes every one of them)
     assert constants["rt_frame"] == constants["record_types"] - 15

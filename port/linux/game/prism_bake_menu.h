@@ -35,6 +35,12 @@ void prism_bake_menu_first(char const *map_name);
 void prism_bake_menu_level_started(char const *map_name);
 void prism_bake_menu_rebake_all(void);
 boolean prism_bake_menu_level_words(char const *map, char *text, unsigned long size);
+/* Lightmap Downloads' row of a world geometry (enhanced: the remodel's; else
+the classic world's): the release's lightmaps of the campaign's levels on
+this computer, "INSTALLED", "NOT DOWNLOADED" or "4 OF 10 LEVELS" (each
+level's shipped manifest, display.bake_shipped_folder's <world>/<map>/
+manifest.txt); TRUE with text. Nothing is ever baked here */
+boolean prism_bake_lightmap_words(boolean enhanced, char *text, unsigned long size);
 /* the level the question is of, and the questions' bindings ("bake.level",
 "bake.left") */
 void prism_bake_menu_asked(char const *map_name);

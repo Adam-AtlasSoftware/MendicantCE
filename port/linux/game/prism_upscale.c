@@ -124,7 +124,7 @@ static void settings_read(
 	"dlss_rr" chosen for Path Traced is the in-tree filter's, as the
 	settings' help says, never the plugin's) */
 	prism_upscale.denoiser = plugin_named(denoiser) ||
-		(!strcmp(denoiser, "dlss_rr") && strcmp(config_string("display.lighting"), "raster")) ? _denoiser_plugin :
+		(!strcmp(denoiser, "dlss_rr") && strcmp(config_string("display.lighting"), "enhanced")) ? _denoiser_plugin :
 		!strcmp(denoiser, "off") ? _denoiser_off : _denoiser_prism;
 	if (!UPSCALE_BUILT)
 	{
@@ -136,7 +136,8 @@ static void settings_read(
 	that one chosen there never stays on, unseen, in Classic's frame; a
 	denoiser's plugin with no upscaler would still jitter the view and
 	resolve it at its own size) */
-	else if (!strcmp(config_string("display.lighting"), "ce"))
+	else if (!strcmp(config_string("display.lighting"), "classic") ||
+		!strcmp(config_string("display.lighting"), "ce_deferred"))
 	{
 		prism_upscale.upscaler = _upscaler_none;
 		prism_upscale.denoiser = _denoiser_prism;
@@ -161,7 +162,7 @@ static void settings_read(
 		if (prism_upscale.upscaler == _upscaler_none && strcmp(upscaler, "off"))
 		{
 			platform_log("upscaler: \"%s\" is %s, so off", upscaler,
-				!UPSCALE_BUILT ? "not in this build" : !strcmp(config_string("display.lighting"), "ce") ?
+				!UPSCALE_BUILT ? "not in this build" : !strcmp(config_string("display.lighting"), "classic") ?
 				"for the PRISM lightings (Classic draws without one)" : "unknown");
 		}
 		else
