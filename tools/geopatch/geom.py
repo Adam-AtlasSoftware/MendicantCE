@@ -45,8 +45,9 @@ GEOM v1, one per BSP (little endian):
                   part with no surface has the one value 0)
         FRUN u32  per far part, per surface: its far triangles' first and count
         FSPH u32  per far part, per surface: bounding sphere centre and radius, float bits
-LMUV v1, one per BSP beside its GEOM (the lightmap vertices the enhanced world draws with until M4's own lightmap
-layout replaces this one; prism_geom.h has the layout the game reads): "LMU1", u32 version (1), u32 part count
+LMUV v1, one per BSP beside its GEOM (M2's stand-in, CE's lightmap coordinates; since M4 the encoder writes v2, our
+own layout, lmuv.py, and the game reads both; prism_geom.h has the layouts the game reads): "LMU1", u32 version (1),
+u32 part count
 (GEOM's), u32 column count, then per part u32 vertex count (its GEOM part's), the column table and the columns:
     LOPS u8   per vertex: 0 LIT, 1 REF
     LREF u32  per REF vertex: the stock lightmap vertex's index in the part's own material

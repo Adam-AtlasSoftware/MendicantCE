@@ -31,6 +31,12 @@ enum
 	GEOM_VERSION = 1,
 	LMUV_HEADER_SIZE = 16,
 	LMUV_VERSION = 1,
+	/* (v2, our own layout: a page count after the v1 header's words, then
+	the pages and each part's vertex count and page) */
+	LMUV_VERSION_OWN = 2,
+	LMUV_OWN_HEADER_SIZE = 20,
+	LMUV_PAGES_MOST = 64,
+	LMUV_PAGE_SIDE_MOST = 4096,
 	NAMESPACE_STOCK = 0,
 	NAMESPACE_PRISM = 1,
 	MAXIMUM_COLUMNS = 64,
@@ -218,6 +224,8 @@ struct geom_part
 	const unsigned char *stock_vertices_data;
 	const unsigned char *stock_lightmap_data;
 	int written;
+	/* its page in LMUV v2's own layout */
+	uint32_t page;
 };
 
 struct geom_state
@@ -270,6 +278,12 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 	unsigned char *out = NULL;
 	int memory = 0, far = 1;
 	uint64_t lightmap_vertex = 0, lightmap_ref = 0, lightmap_word = 0;
+	/* LMUV v2 (our own layout): its pages, and where each part's count and
+	page are */
+	int own = 0;
+	uint32_t page_count = 0;
+	size_t part_table = LMUV_HEADER_SIZE, part_stride = 4;
+	const struct geom_column *luv2 = NULL;
 
 	*image = NULL;
 	*image_size = 0;
@@ -292,16 +306,44 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 	if (!geom_columns_read(geom, geom_size, GEOM_HEADER_SIZE + (size_t)part_size * part_count, column_count,
 		&columns, &memory))
 		goto done;
-	/* the LMUV header */
-	if (!lmuv || lmuv_size < LMUV_HEADER_SIZE || memcmp(lmuv, "LMU1", 4) || geom_u32(lmuv + 4) != LMUV_VERSION)
+	/* the LMUV header: v1 (M2's: CE's coordinates, a REF to the stock
+	lightmap vertex or ours) or v2 (our own layout, geopatch M4) */
+	if (!lmuv || lmuv_size < LMUV_HEADER_SIZE || memcmp(lmuv, "LMU1", 4) ||
+		(geom_u32(lmuv + 4) != LMUV_VERSION && geom_u32(lmuv + 4) != LMUV_VERSION_OWN))
 	{
 		result = PRISM_GEOM_ERROR_LIGHTMAP;
 		goto done;
 	}
+	own = geom_u32(lmuv + 4) == LMUV_VERSION_OWN;
 	lightmap_part_count = geom_u32(lmuv + 8);
 	lightmap_column_count = geom_u32(lmuv + 12);
-	if (lightmap_part_count != part_count || (uint64_t)part_count * 4 > lmuv_size - LMUV_HEADER_SIZE ||
-		!geom_columns_read(lmuv, lmuv_size, LMUV_HEADER_SIZE + (size_t)part_count * 4, lightmap_column_count,
+	if (own)
+	{
+		uint32_t k;
+
+		if (lmuv_size < LMUV_OWN_HEADER_SIZE || (page_count = geom_u32(lmuv + 16)) > LMUV_PAGES_MOST ||
+			(uint64_t)page_count * 8 > lmuv_size - LMUV_OWN_HEADER_SIZE)
+		{
+			result = PRISM_GEOM_ERROR_LIGHTMAP;
+			goto done;
+		}
+		for (k = 0; k < page_count; k++)
+		{
+			uint32_t width = geom_u32(lmuv + LMUV_OWN_HEADER_SIZE + 8 * (size_t)k);
+			uint32_t height = geom_u32(lmuv + LMUV_OWN_HEADER_SIZE + 8 * (size_t)k + 4);
+
+			if (!width || !height || width > LMUV_PAGE_SIDE_MOST || height > LMUV_PAGE_SIDE_MOST)
+			{
+				result = PRISM_GEOM_ERROR_LIGHTMAP;
+				goto done;
+			}
+		}
+		part_table = LMUV_OWN_HEADER_SIZE + 8 * (size_t)page_count;
+		part_stride = 8;
+	}
+	if (lightmap_part_count != part_count || part_table > lmuv_size ||
+		(uint64_t)part_count * part_stride > lmuv_size - part_table ||
+		!geom_columns_read(lmuv, lmuv_size, part_table + (size_t)part_count * part_stride, lightmap_column_count,
 			&lightmap_columns, &memory))
 	{
 		result = memory ? PRISM_GEOM_ERROR_MEMORY : PRISM_GEOM_ERROR_LIGHTMAP;
@@ -320,6 +362,7 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 	lops = geom_column(&lightmap_columns, GEOM_FOURCC('L', 'O', 'P', 'S'), 1);
 	lref = geom_column(&lightmap_columns, GEOM_FOURCC('L', 'R', 'E', 'F'), 4);
 	lvtx = geom_column(&lightmap_columns, GEOM_FOURCC('L', 'V', 'T', 'X'), 4);
+	luv2 = geom_column(&lightmap_columns, GEOM_FOURCC('L', 'U', 'V', '2'), 4);
 	/* (every op known, and the columns' counts what the ops say) */
 	for (index = 0; index < geom_column_count(vops); index++)
 	{
@@ -337,7 +380,7 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 	if (geom_column_count(vpos) != 3 * lit || geom_column_count(vref) != refs || geom_column_count(vkey) != refm ||
 		geom_column_count(vnrm) != 3 * attributed || geom_column_count(vtex) != 2 * textured)
 		goto done;
-	for (index = 0; index < geom_column_count(lops); index++)
+	for (index = 0; !own && index < geom_column_count(lops); index++)
 	{
 		uint32_t op = lops->bytes[index];
 
@@ -349,8 +392,9 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 		lightmap_refs += op == OP_REF;
 		lightmap_lit += op == OP_LIT;
 	}
-	if (geom_column_count(lops) != geom_column_count(vops) || geom_column_count(lref) != lightmap_refs ||
-		geom_column_count(lvtx) != 2 * lightmap_lit)
+	if (own ? geom_column_count(luv2) != geom_column_count(vops) :
+		(geom_column_count(lops) != geom_column_count(vops) || geom_column_count(lref) != lightmap_refs ||
+		geom_column_count(lvtx) != 2 * lightmap_lit))
 	{
 		result = PRISM_GEOM_ERROR_LIGHTMAP;
 		goto done;
@@ -400,10 +444,30 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 		}
 		else
 			goto done;
-		if (geom_u32(lmuv + LMUV_HEADER_SIZE + 4 * (size_t)index) != part->vertex_count)
+		if (geom_u32(lmuv + part_table + part_stride * (size_t)index) != part->vertex_count)
 		{
 			result = PRISM_GEOM_ERROR_LIGHTMAP;
 			goto done;
+		}
+		if (own)
+		{
+			uint32_t k;
+
+			part->page = geom_u32(lmuv + part_table + part_stride * (size_t)index + 4);
+			if (part->page >= page_count)
+			{
+				result = PRISM_GEOM_ERROR_LIGHTMAP;
+				goto done;
+			}
+			/* (a material's parts on one page: the renderer gives a
+			material's draws one page, prism_deferred.c) */
+			for (k = 0; k < index; k++)
+				if (parts[k].lightmap_index == part->lightmap_index &&
+					parts[k].material_index == part->material_index && parts[k].page != part->page)
+				{
+					result = PRISM_GEOM_ERROR_LIGHTMAP;
+					goto done;
+				}
 		}
 		part->first_vertex = vertex_total;
 		part->first_corner = corner_total;
@@ -461,6 +525,9 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 			geom_pad4((uint64_t)part->vertex_count * LIGHTMAP_UNCOMPRESSED) + geom_pad4((uint64_t)triangles * 6) +
 			(far ? (uint64_t)part->surface_count * 24 : 0);
 	}
+	/* (v2: the image's page table after the parts, flags bit 1) */
+	if (own)
+		size += 8 + 8 * (uint64_t)page_count;
 	if (size > (uint64_t)0x7FFFFFFF)
 		goto done;
 	out = (unsigned char *)calloc((size_t)size, 1);
@@ -472,7 +539,7 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 	memcpy(out, "PWG1", 4);
 	geom_put_u32(out + 4, PRISM_GEOM_PWG_VERSION);
 	geom_put_u32(out + 8, written);
-	geom_put_u32(out + 12, far ? 1u : 0u);
+	geom_put_u32(out + 12, (far ? 1u : 0u) | (own ? 2u : 0u));
 	if (name)
 	{
 		size_t length = strlen(name);
@@ -546,6 +613,8 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 			geom_put_u32(record + 36, part->surface_count);
 			geom_put_u32(record + 40, part->near_count);
 			geom_put_u32(record + 44, far ? part->far_bits : 0u);
+			/* (v2: its page in the image's own pages, + 1; 0 the stock one) */
+			geom_put_u32(record + 48, own ? part->page + 1 : 0u);
 			at = offset;
 		}
 		else
@@ -570,7 +639,7 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 			uint32_t base = op & ~OP_STOCK_TEX;
 			unsigned char *v = vertices ? vertices + (size_t)vertex * ENVIRONMENT_UNCOMPRESSED : NULL;
 			unsigned char *l = lightmaps ? lightmaps + (size_t)vertex * LIGHTMAP_UNCOMPRESSED : NULL;
-			uint32_t lightmap_op = lops->bytes[part->first_vertex + vertex];
+			uint32_t lightmap_op = own ? OP_LIT : lops->bytes[part->first_vertex + vertex];
 			const unsigned char *source = NULL;
 			uint32_t reference = 0, bits[3];
 
@@ -664,8 +733,22 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 					}
 				}
 			}
-			/* its lightmap vertex */
-			if (lightmap_op == OP_REF)
+			/* its lightmap vertex: v2's coordinates on its page, its incident
+			radiosity its own normal (Enhanced and Path Traced light it from the
+			bake, not from CE's lightmap pass); v1's, a REF or ours */
+			if (own)
+			{
+				unsigned char compressed[8];
+
+				geom_put_u32(compressed, 0u);
+				geom_put_u32(compressed + 4, luv2->words[part->first_vertex + vertex]);
+				if (l)
+				{
+					prsx_decode_lightmap_vertex(compressed, l);
+					memcpy(l, v + 12, 12);
+				}
+			}
+			else if (lightmap_op == OP_REF)
 			{
 				uint32_t stock_index = lref->words[lightmap_ref++];
 
@@ -712,6 +795,19 @@ enum prism_geom_result prism_geom_decode(const unsigned char *geom, size_t geom_
 			report->triangles += triangles;
 	}
 	(void)lightmap_vertex;
+	if (own)
+	{
+		uint32_t k;
+
+		memcpy(out + at, "PAGE", 4);
+		geom_put_u32(out + at + 4, page_count);
+		for (k = 0; k < page_count; k++)
+		{
+			geom_put_u32(out + at + 8 + 8 * (uint64_t)k, geom_u32(lmuv + LMUV_OWN_HEADER_SIZE + 8 * (size_t)k));
+			geom_put_u32(out + at + 12 + 8 * (uint64_t)k, geom_u32(lmuv + LMUV_OWN_HEADER_SIZE + 8 * (size_t)k + 4));
+		}
+		at += 8 + 8 * (uint64_t)page_count;
+	}
 	if (at != size)
 		goto done;
 	*image = out;

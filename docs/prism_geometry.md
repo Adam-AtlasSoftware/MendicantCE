@@ -16,7 +16,8 @@ smaller one, and a 32 MB keep region; it follows a lighting change at the next m
 
 The enhanced world geometry ships as a sidecar of our own beside the player's retail map,
 `<data root>/maps_enhanced/<map>.prsx` (`port/linux/game/prism_prsx.h`): per BSP a GEOM section (the remodel's
-vertices, triangles, runs per stock surface and far levels) and an LMUV section (its lightmap vertices). The retail
+vertices, triangles, runs per stock surface and far levels) and an LMUV section (its lightmap coordinates on our own
+pages, v2 below). The retail
 map opens from `maps/` unchanged. At each BSP's load `prism_world_source.c` reads and verifies (SHA-256) the BSP's two
 sections and `prism_geom.c` decodes them into the image `prism_world_geometry.c` has always drawn, resolving every REF
 op from the map's own tags with the exact integer decode (`prism_ref_decode.c`); the resolver's near/far choice, the
@@ -37,10 +38,46 @@ Which world a map gets is decided once, at its first BSP's load, and latched for
 Classic lighting never opens a sidecar and never draws the enhanced geometry (its lightmaps on the remodel are the
 rock bug); switching to Classic in a map draws the map's own geometry at once. A World Geometry change applies at the
 next map load. Each BSP's enhanced `world_id` (`prism_identity.h`) is computed from the opened sidecar's GEOM and LMUV
-sections and sent with the bake's control (`xgpu_stream_prism_bake.world_id`); the baker mixes it into the key's
-geometry hash, so an enhanced bake is used only for the geometry it was made from. `debug.world_unbaked`
+sections and sent with the bake's control (`xgpu_stream_prism_bake.world_id`); the baker keys the bake to it (its key's
+world_id, `docs/prism_bake.md`, "The frozen bake"), so an enhanced bake is used only for the geometry it was made from.
+The classic world's bakes are keyed alike, to the classic world_id of the map's `classic_world_id` (the farm's hash of
+the map version's bake inputs, `tools/geopatch/classic_world.py`), which the game looks up by the player's map's
+`base_id` in the shipped manifests (`world <map> <base_id> <classic_world_id>`, until M7's signed manifest); a
+sidecar whose header names another `classic_world_id` than the map's is refused (rung 2). `debug.world_unbaked`
 (`HALO_WORLD_UNBAKED=1`) takes rung 1 without the packs: the farm's (to bake them) and the developers', never a
 player's.
+
+### The enhanced world's own lightmap layout (LMUV v2, geopatch M4)
+
+M2's LMUV (v1) carried each remodel vertex's CE lightmap coordinates, so the enhanced bake was laid out through CE's
+charts: retail-derived data, with no room for an overhang, a cliff's underside or a trunk. v2 is our own layout,
+made on the farm from the remodel's own triangles (`tools/geopatch/lmuv.py`, written by `encode.py` by default):
+
+- Each near triangle faces the way its stock surface's remodel faces on the whole (the nearest of 26 directions to its
+  near triangles' area-weighted normal; a facet turned more than about 72 degrees from that way takes its own), and the
+  near triangles of a part that share a direction and a 32-world-unit cell of its plane and touch (a shared corner
+  position: the remodel's vertices are split along CE's old seams) are one chart, laid flat along the direction. A far
+  triangle takes the chart of the nearest near triangle of its own surface facing its way, so a surface's near and far
+  levels read the same texels and its level switch changes no light. b30: 28,809 and 27,723 charts, area-weighted
+  stretch 1.03 and 1.02, 0.3% and 0.007% of the area stretched past 2.
+- A vertex used by triangles of several charts is copied (a seam), and vertices equal in all their drawn attributes
+  are one within a chart; a part past 65,535 vertices is cut along its surfaces (its far ranges kept with them).
+- The charts are packed on pages of 1024 texels a side at one texel a world unit, two texels apart, each material's
+  charts on one page (b30: 3 and 2 pages; the last page's height cut to what it uses). The bake's atlas measures each
+  chart and scales it to its quality's density (MAX's tier 0: 16 texels a world unit, a virtual page of 16384, its
+  largest).
+- The incident radiosity a lightmap vertex carries (CE's lightmap pass's bump term) is not stored: each vertex takes
+  its own normal. Enhanced and Path Traced light the enhanced world from its bake.
+
+The game (`prism_geom.c`) decodes v2 into the image with flags bit 1: each part's page (+ 1) in its record's bytes 48
+to 51 and a page table after the parts. A material's parts share a page (the decoder refuses otherwise). The own pages
+follow the BSP's own lightmap pages: SCENE_STATIC sends their sizes after the BSP's (`pages_send`) and gives a
+remodelled triangle page (bitmap count + own page) (`page_of`), and the G-buffer's page for a remodelled material's
+draws is the same (`prism_world_geometry_chunk` sets it through `prism_deferred_page_override` before the material's
+draws, and puts the lightmap pass's own page back for the next stock material), so the bake's atlas, Raster's chart
+maps and Path Traced's lookups all see one layout. A material whose shape check fell back to stock surfaces (whose stock
+corners carry CE's coordinates) stays stock whole under v2 (b30: none). The G-buffer's page is 7 bits: the BSP's pages
+and the own pages together stay under 127 (b30: 26 + 3 and 29 + 2). The sidecar shrank from 89 to 80 MB.
 
 ## Objects (`display.prism_models`)
 

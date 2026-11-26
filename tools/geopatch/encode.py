@@ -9,11 +9,12 @@ columns are byte-plane shuffled, sections compressed.
     encode.py --map <retail map> --classic-world-id <64 hex> --pwg 0=b30a.pwg --pwg 1=b30b.pwg -o b30.prsx
               [--codec zlib|zstd|stored] [--level N] [--lmuv] [--report report.json]
 
-Each GEOM comes with its LMUV (geom.py): every remodel vertex's lightmap vertex in the game's compressed form, a
-REF to the stock lightmap vertex where it is that one bit for bit, until the farm's own lightmap layout (M4)
-replaces it. The packed vectors and lightmap vertices are rounded as the game's own compressor rounds them
-(rasterizer_geometry_compress_vertices), so the game draws exactly what the .pwg drew; only the positions move,
-onto the 1/1024 world unit grid. --lmuv is accepted and changes nothing (the section is always written). zstd uses
+Each GEOM comes with its LMUV: by default v2, our own lightmap layout (lmuv.py: charts of the remodel's own
+triangles packed into our own pages; a vertex on a chart seam is copied, and a part past 65535 vertices is cut by
+its surfaces), which carries nothing of the retail map; --lmuv-version 1 writes M2's stand-in (geom.py: each
+vertex's CE lightmap vertex, a REF where it is the stock one). The packed vectors are rounded as the game's own
+compressor rounds them (rasterizer_geometry_compress_vertices), so the game draws exactly what the .pwg drew; only
+the positions move, onto the 1/1024 world unit grid. --lmuv is accepted and changes nothing. zstd uses
 the system's zstd program and is for measuring only: the game reads stored and zlib sections (prism_prsx.c) until a
 zstd decoder is vendored.
 
@@ -29,7 +30,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from geopatch import geom, prsx, retail  # noqa: E402
+from geopatch import geom, lmuv, prsx, retail  # noqa: E402
 from geopatch.geom import LIT, REF, REFC, REFM, REFMT, REFP, REFPT  # noqa: E402
 
 PWG_MAGIC = b"PWG1"
@@ -361,6 +362,8 @@ def main(argv=None):
     parser.add_argument("--codec", choices=["zlib", "zstd", "stored"], default="zlib")
     parser.add_argument("--level", type=int)
     parser.add_argument("--lmuv", action="store_true")
+    parser.add_argument("--lmuv-version", type=int, choices=(1, 2), default=2,
+                        help="2 (default): our own lightmap layout (lmuv.py); 1: M2's stand-in (CE's coordinates)")
     parser.add_argument("--report")
     parser.add_argument("--native-dir")
     args = parser.parse_args(argv)
@@ -383,6 +386,9 @@ def main(argv=None):
         index, _, path = spec.partition("=")
         index = int(index)
         pwg_parts = read_pwg(path)
+        lmuv_report = None
+        if args.lmuv_version == 2:
+            pwg_parts, pages, lmuv_report = lmuv.layout(pwg_parts)
         encoded, totals = [], {}
         for p in pwg_parts:
             material = bsps[index].materials.get((p.lightmap_index, p.material_index)) if index in bsps else None
@@ -393,9 +399,11 @@ def main(argv=None):
         data = encode_geom_arrays(encoded)
         sections.append(prsx.Section("GEOM", index, data, codec=codec, level=level))
         entry = {"pwg_bytes": Path(path).stat().st_size, "geom_decoded": len(data), **totals}
-        lm = encode_lmuv_arrays(encoded)
+        lm = lmuv.encode(pwg_parts, pages) if args.lmuv_version == 2 else encode_lmuv_arrays(encoded)
         sections.append(prsx.Section("LMUV", index, lm, codec=codec, level=level))
         entry["lmuv_decoded"] = len(lm)
+        if lmuv_report is not None:
+            entry["lmuv"] = {k: v for k, v in lmuv_report.items()}
         report["bsps"][index] = entry
     blob = prsx.write(cwid, sections)
     Path(args.out).write_bytes(blob)

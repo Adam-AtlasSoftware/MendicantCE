@@ -483,13 +483,16 @@ static boolean set_count(
 	return scene_static.total > 0;
 }
 
-/* the BSP's lightmap pages' sizes sent (a bitmap missing: 0 by 0) */
+/* the BSP's lightmap pages' sizes sent (a bitmap missing: 0 by 0), and
+after them, where the remodel drawn has them, the enhanced world's own pages
+(v4 geopatch M4, LMUV v2: page_of) */
 static void pages_send(
 	struct structure_bsp *bsp)
 {
 	static unsigned long sizes[PAGES_MOST * 2];
+	static unsigned long own[64][2];
 	struct bitmap_group *group;
-	long count, index;
+	long count, index, own_count;
 
 	if (bsp->lightmap_group.index == NONE || !(group = tag_get('bitm', bsp->lightmap_group.index)))
 	{
@@ -502,6 +505,13 @@ static void pages_send(
 
 		sizes[index * 2] = bitmap ? (unsigned long)MAX(bitmap->width, 0) : 0;
 		sizes[index * 2 + 1] = bitmap ? (unsigned long)MAX(bitmap->height, 0) : 0;
+	}
+	own_count = scene_static.remodel ? prism_world_geometry_own_pages(own, 64) : 0;
+	for (index = 0; index < own_count && count < PAGES_MOST && count + 1 <= 127; index++)
+	{
+		sizes[count * 2] = own[index][0];
+		sizes[count * 2 + 1] = own[index][1];
+		count++;
 	}
 	if (count > 0)
 	{
@@ -563,6 +573,24 @@ static boolean triangle_indoor(
 		return TAG_BLOCK_GET_ELEMENT(&bsp->clusters, cluster, struct structure_cluster)->sky_index == NONE;
 	}
 	return FALSE;
+}
+
+/* a remodelled surface's lightmap page: its material's own page, after the
+BSP's pages (pages_send), or the stock lightmap's */
+static short page_of(
+	struct structure_bsp *bsp,
+	short lightmap_index,
+	short material_index,
+	short stock_page)
+{
+	struct bitmap_group *group;
+	short own = prism_world_geometry_material_page(lightmap_index, material_index);
+
+	if (own == NONE || bsp->lightmap_group.index == NONE || !(group = tag_get('bitm', bsp->lightmap_group.index)))
+	{
+		return stock_page;
+	}
+	return (short)(group->bitmaps.count + own);
 }
 
 /* a triangle's attributes */
@@ -699,7 +727,9 @@ static long slice_make(
 						{
 							attributes_write(scene_static.attributes + (made + index) * ATTRIBUTE_WORDS, id,
 								material->first_surface_index + surface, kind,
-								!far_count ? LEVEL_BOTH : level ? LEVEL_FAR : LEVEL_NEAR, lightmap->bitmap_index,
+								!far_count ? LEVEL_BOTH : level ? LEVEL_FAR : LEVEL_NEAR,
+								page_of(bsp, (short)cursor->lightmap_index, (short)cursor->material_index,
+								lightmap->bitmap_index),
 								scene_static.lightmap + (made + index) * 6, scene_static.base + (made + index) * 6, traced,
 								triangle_indoor(bsp, scene_static.positions + (made + index) * 9));
 						}

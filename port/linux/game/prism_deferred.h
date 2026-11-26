@@ -71,6 +71,11 @@ bitmap of the BSP's lightmap bitmaps; NULL none), which their G-buffer
 twins write with their lightmap coordinates
 (rasterizer_xbox_environment.c's lightmap pass's begin) */
 void prism_deferred_lightmap(void const *lightmap_bitmap);
+/* (v4 geopatch M4) the draws that follow (a remodelled material's, until the
+next material) lit from the enhanced world's own lightmap page own_page
+(prism_world_geometry_own_pages: the BSP's lightmap bitmap count +
+own_page), or, NONE, from the lightmap pass's own page again */
+void prism_deferred_page_override(long own_page);
 /* a shader's material id in the map's table (0 none; the table made
 where it is not: SCENE_STATIC's, prism_scene_static.c) */
 unsigned long prism_deferred_material_id(void const *shader);

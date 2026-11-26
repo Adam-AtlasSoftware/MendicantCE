@@ -98,4 +98,14 @@ void prism_world_geometry_map_unloaded(void);
 skips no surface for facing away) */
 int prism_world_geometry_drawn(void);
 
+/* (v4 geopatch M4) the enhanced world's own lightmap pages (LMUV v2, our
+layout): how many the loaded remodel has (0: none, its lightmap coordinates
+are CE's), each one's width and height written to sizes (at most most).
+They follow the BSP's own lightmap pages: own page k is page (the BSP's
+lightmap bitmap count + k) in SCENE_STATIC's pages and the G-buffer's */
+long prism_world_geometry_own_pages(unsigned long (*sizes)[2], long most);
+/* a remodelled material's own page (its index among the own pages), or
+NONE: it is not drawn from the remodel, or its coordinates are CE's */
+short prism_world_geometry_material_page(short lightmap_index, short material_index);
+
 #endif /* __PRISM_WORLD_GEOMETRY_H */

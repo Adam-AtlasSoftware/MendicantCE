@@ -22,8 +22,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from geopatch import geom, prsx, retail  # noqa: E402
 
-LAYOUTS = {"GEOM": geom.decode_geom, "COLL": geom.decode_coll, "LMUV": geom.decode_lmuv}
-# types whose layout is not final yet (none: LMUV v1 is the game's until M4's own lightmap layout, a new version)
+def decode_lmuv(data):
+    """LMUV v1 (M2's stand-in, geom.py) or v2 (our own layout, lmuv.py: no REF, nothing of the retail map)"""
+    if len(data) >= 8 and struct.unpack_from("<I", data, 4)[0] == 2:
+        from geopatch import lmuv
+        try:
+            return lmuv.decode(data)
+        except lmuv.LayoutError as error:
+            raise geom.LayoutError(str(error))
+    return geom.decode_lmuv(data)
+
+
+LAYOUTS = {"GEOM": geom.decode_geom, "COLL": geom.decode_coll, "LMUV": decode_lmuv}
+# types whose layout is not final yet (none: LMUV v2, our own layout, is the game's since M4)
 PROVISIONAL = {}
 # the encoder's nudge (encode.encode_pwg_part) moves a vertex up one grid step at a time; b30's whole remodel
 # nudged 5 vertices, none next to another

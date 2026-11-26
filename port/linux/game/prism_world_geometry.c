@@ -178,6 +178,12 @@ extern D3DDevice *global_d3d_device;
 #define PWG_MAGIC "PWG1"
 #define PWG_VERSION 2
 #define PWG_FLAG_FAR 1
+/* (v4 geopatch M4) the enhanced world's own lightmap pages (LMUV v2,
+prism_geom.c): each record's bytes 48 to 51 its page + 1 (0: the stock
+one), and after the last record "PAGE", a count and each page's width and
+height (32 bits each) */
+#define PWG_FLAG_OWN_PAGES 2
+#define OWN_PAGES_MOST 64
 #define PWG_HEADER_SIZE 64
 #define PWG_MATERIAL_SIZE 64
 
@@ -258,6 +264,9 @@ struct world_material
 	unsigned long *far_triangles;
 	float *bounds;
 	float far_distance;
+	/* its own lightmap page (the enhanced world's layout, LMUV v2), or NONE:
+	its stock lightmap's page (and CE's coordinates) */
+	short page;
 	/* each surface's cones of facings (its near triangles', then its far
 	ones'; NULL none: never skipped for facing away), and its choices for
 	the camera (_surface_choice_*) with the camera's stamp they are of */
@@ -292,6 +301,11 @@ struct prism_world_geometry_globals
 
 	struct world_material *materials;
 	long material_count;
+	/* the enhanced world's own lightmap pages (LMUV v2): how many, and each
+	one's width and height in texels; 0 where the remodel's lightmap
+	coordinates are CE's (v1, or a .pwg) */
+	long own_page_count;
+	unsigned long own_pages[OWN_PAGES_MOST][2];
 	/* lightmap index -> its first entry in lookup; lookup -> the material
 	of the remodel or NONE */
 	long *lightmap_first;
@@ -619,6 +633,8 @@ struct pwg_material_view
 	float far_distance;
 	byte const *far_triangles;
 	byte const *bounds;
+	/* its own lightmap page (PWG_FLAG_OWN_PAGES), or NONE: the stock one */
+	long page;
 	struct structure_material *material;
 	boolean usable;
 	/* the part's surfaces drawn as their stock triangles (the shape's
@@ -642,8 +658,9 @@ static boolean pwg_parse(
 	unsigned long offset;
 	unsigned long index;
 	unsigned long version;
-	boolean far;
+	boolean far, own;
 
+	world_geometry.own_page_count = 0;
 	if (size < PWG_HEADER_SIZE || memcmp(bytes, PWG_MAGIC, 4) ||
 		(version = read_u32(bytes + 4)) < 1 || version > PWG_VERSION)
 	{
@@ -651,6 +668,7 @@ static boolean pwg_parse(
 		return FALSE;
 	}
 	far = version >= 2 && (read_u32(bytes + 12) & PWG_FLAG_FAR);
+	own = version >= 2 && (read_u32(bytes + 12) & PWG_FLAG_OWN_PAGES);
 	material_count = read_u32(bytes + 8);
 	if (!material_count || material_count > 4096)
 	{
@@ -690,6 +708,11 @@ static boolean pwg_parse(
 		{
 			view->far_distance = 0.0f;
 		}
+		view->page = own && read_u32(record + 48) ? (long)read_u32(record + 48) - 1 : NONE;
+		if (own && (view->page < 0 || view->page >= OWN_PAGES_MOST))
+		{
+			goto truncated;
+		}
 		offset += PWG_MATERIAL_SIZE;
 		if (view->surface_count > 0x100000 || view->vertex_count > 0xFFFF || view->triangle_count > 0x400000 ||
 			view->part_first_surface > view->surface_count ||
@@ -723,6 +746,29 @@ static boolean pwg_parse(
 			view->bounds = bytes + offset;
 			offset += view->part_surface_count * 16;
 		}
+	}
+	if (own)
+	{
+		unsigned long count;
+
+		if (size - offset < 8 || memcmp(bytes + offset, "PAGE", 4) || (count = read_u32(bytes + offset + 4)) == 0 ||
+			count > OWN_PAGES_MOST || size - offset - 8 < count * 8)
+		{
+			goto truncated;
+		}
+		for (index = 0; index < count; index++)
+		{
+			world_geometry.own_pages[index][0] = read_u32(bytes + offset + 8 + 8 * index);
+			world_geometry.own_pages[index][1] = read_u32(bytes + offset + 12 + 8 * index);
+		}
+		for (index = 0; index < material_count; index++)
+		{
+			if (views[index].page >= (long)count)
+			{
+				goto truncated;
+			}
+		}
+		world_geometry.own_page_count = (long)count;
 	}
 	*views_out = views;
 	*view_count_out = (long)material_count;
@@ -2001,6 +2047,7 @@ static boolean world_geometry_make(
 		}
 		made->lightmap_index = view->lightmap_index;
 		made->material_index = view->material_index;
+		made->page = (short)view->page;
 		made->first_surface_index = view->material->first_surface_index;
 		made->part_first_surface = (long)view->part_first_surface;
 		made->surface_count = (long)view->part_surface_count;
@@ -2186,6 +2233,43 @@ static boolean world_geometry_make(
 }
 
 /* the remodel of the BSP whose tag is tag_index, when there is one */
+/* (own lightmap pages) a material whose shape check gave any part stock
+fallback surfaces stays stock whole: those surfaces' stock corners carry
+CE's lightmap coordinates, which mean nothing on the material's own page */
+static void own_pages_fallbacks(
+	struct pwg_material_view *views,
+	long view_count,
+	char const *path)
+{
+	long index, other, dropped = 0;
+
+	if (!world_geometry.own_page_count)
+	{
+		return;
+	}
+	for (index = 0; index < view_count; index++)
+	{
+		if (!views[index].usable || !views[index].fallback_count)
+		{
+			continue;
+		}
+		for (other = 0; other < view_count; other++)
+		{
+			if (views[other].lightmap_index == views[index].lightmap_index &&
+				views[other].material_index == views[index].material_index && views[other].usable)
+			{
+				views[other].usable = FALSE;
+				dropped++;
+			}
+		}
+	}
+	if (dropped)
+	{
+		platform_log("prism world geometry: %s: %ld parts left stock (their materials' shape checks fell back to "
+			"stock surfaces, which have no place on the enhanced world's own lightmap pages)", path, dropped);
+	}
+}
+
 static void world_geometry_load(
 	struct structure_bsp *bsp,
 	long tag_index)
@@ -2217,6 +2301,7 @@ static void world_geometry_load(
 			pwg_material_check(bsp, &views[index], path);
 		}
 		shape_check(bsp, views, view_count, path);
+		own_pages_fallbacks(views, view_count, path);
 		if (world_geometry_make(bsp, views, view_count, path))
 		{
 			world_geometry.loaded_tag_index = tag_index;
@@ -2492,6 +2577,9 @@ struct vertex_buffer const *prism_world_geometry_chunk(
 	boolean facing;
 
 	world_geometry.current = NULL;
+	/* (the G-buffer's page: the stock lightmap's, unless the remodel drawn
+	has its own, below) */
+	prism_deferred_page_override(NONE);
 	if (!world_geometry.enabled || !world_geometry.loaded_bsp || !world_geometry.lookup ||
 		lightmap_index < 0 || lightmap_index >= world_geometry.lightmap_count || surface_count <= 0 ||
 		surface_count > MAXIMUM_CHUNK_SURFACES)
@@ -2594,6 +2682,12 @@ struct vertex_buffer const *prism_world_geometry_chunk(
 	}
 	world_geometry.current = made;
 	world_geometry.stock_triangles += (unsigned long)surface_count;
+	/* (its own page: the enhanced world's layout, which its coordinates
+	are on) */
+	if (made->page != NONE)
+	{
+		prism_deferred_page_override(made->page);
+	}
 
 	return made->buffers;
 }
@@ -3020,6 +3114,44 @@ int prism_world_geometry_surface_level(
 	}
 
 	return TEST_FLAG(surface_choice(made, local), _surface_choice_far_bit) ? 1 : 0;
+}
+
+long prism_world_geometry_own_pages(
+	unsigned long (*sizes)[2],
+	long most)
+{
+	long index;
+
+	if (!world_geometry.enabled || !world_geometry.loaded_bsp || !world_geometry.own_page_count)
+	{
+		return 0;
+	}
+	for (index = 0; sizes && index < world_geometry.own_page_count && index < most; index++)
+	{
+		sizes[index][0] = world_geometry.own_pages[index][0];
+		sizes[index][1] = world_geometry.own_pages[index][1];
+	}
+	return world_geometry.own_page_count;
+}
+
+short prism_world_geometry_material_page(
+	short lightmap_index,
+	short material_index)
+{
+	long entry;
+
+	if (!world_geometry.enabled || !world_geometry.loaded_bsp || !world_geometry.lookup ||
+		!world_geometry.own_page_count || lightmap_index < 0 || lightmap_index >= world_geometry.lightmap_count)
+	{
+		return NONE;
+	}
+	entry = world_geometry.lightmap_first[lightmap_index] + material_index;
+	if (material_index < 0 || entry >= world_geometry.lightmap_first[lightmap_index + 1] ||
+		world_geometry.lookup[entry] == NONE)
+	{
+		return NONE;
+	}
+	return world_geometry.materials[world_geometry.lookup[entry]].page;
 }
 
 int prism_world_geometry_drawn(

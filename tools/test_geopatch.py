@@ -338,7 +338,7 @@ def test_encode_lint_scan(tool, synth, tmp_path, monkeypatch):
         _write_pwg(tmp_path / ("bsp%d.pwg" % bsp.index), parts)
     out = tmp_path / "synth.prsx"
     report = tmp_path / "report.json"
-    assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(),
+    assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--lmuv-version", "1",
                         "--pwg", "0=%s" % (tmp_path / "bsp0.pwg"), "--pwg", "1=%s" % (tmp_path / "bsp1.pwg"),
                         "-o", str(out), "--report", str(report)]) == 0
     stats = json.loads(report.read_text())
@@ -351,6 +351,19 @@ def test_encode_lint_scan(tool, synth, tmp_path, monkeypatch):
     assert verdict["result"] == "ok" and all(e["read"] == "ok" for e in verdict["entries"])
     assert lint_patch.main([str(out), "--map", str(synth), "--native", "--native-dir", str(tool.exe.parent)]) == 0
     assert scan_original.main([str(out), "--map", str(synth), "--native-dir", str(tool.exe.parent)]) == 0
+    # our own layout (LMUV v2, the default): a stock vertex on a chart seam is copied, each copy still a REF
+    own = tmp_path / "own.prsx"
+    assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(),
+                        "--pwg", "0=%s" % (tmp_path / "bsp0.pwg"), "--pwg", "1=%s" % (tmp_path / "bsp1.pwg"),
+                        "-o", str(own), "--report", str(report)]) == 0
+    stats = json.loads(report.read_text())
+    for bsp in bsps:
+        s = stats["bsps"][str(bsp.index)]
+        assert s["ref"] >= sum(m.vertex_count for m in bsp.materials.values()) and s["refp"] == 0
+        assert s["lmuv"]["pages"] >= 1
+    assert tool.open(own)["result"] == "ok"
+    assert lint_patch.main([str(own), "--map", str(synth), "--native", "--native-dir", str(tool.exe.parent)]) == 0
+    assert scan_original.main([str(own), "--map", str(synth), "--native-dir", str(tool.exe.parent)]) == 0
     # without the map every vertex is LIT, and the lint refuses the stock ones
     raw = tmp_path / "raw.prsx"
     encode.main(["--classic-world-id", CWID.hex(), "--pwg", "0=%s" % (tmp_path / "bsp0.pwg"), "-o", str(raw)])
@@ -462,9 +475,10 @@ def test_encoder_packs_as_the_game_compresses():
                                                    & 0xFFFF for x in c]
 
 
-def _synth_remodel(tool, synth, tmp_path):
+def _synth_remodel(tool, synth, tmp_path, lmuv_version=1):
     """the synthetic map's remodel (scan_original.remodel_part, with lightmap vertices: the stock ones decoded at
-    the stock corners, ours at the centroids) as .pwg files and its encoded sidecar"""
+    the stock corners, ours at the centroids) as .pwg files and its encoded sidecar (LMUV v1, M2's stand-in, unless
+    asked for v2, M4's own layout)"""
     np = _numpy()
     from geopatch import encode, scan_original
     _, _, bsps = retail.read_map(synth)
@@ -482,6 +496,7 @@ def _synth_remodel(tool, synth, tmp_path):
         _write_pwg(pwgs[bsp.index], parts)
     out = tmp_path / "synth.prsx"
     assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--native-dir", str(tool.exe.parent),
+                        "--lmuv-version", str(lmuv_version),
                         *[a for b in sorted(pwgs) for a in ("--pwg", "%d=%s" % (b, pwgs[b]))], "-o", str(out)]) == 0
     return bsps, pwgs, out
 
@@ -565,6 +580,156 @@ def test_game_refuses_a_broken_or_foreign_sidecar(tool, synth, tmp_path, monkeyp
     broken[0][0] = (REF, 10 ** 6)
     image, report = verdict(g, geom.encode_lmuv(broken))
     assert image is None and "names no stock value" in report
+
+
+# ---------- the enhanced world's own lightmap layout (LMUV v2, geopatch M4: tools/geopatch/lmuv.py)
+
+def _laid_texels(np, lmuv, part, pages):
+    """each triangle's corners in its page's texels"""
+    w, h = pages[part.page]
+    u = lmuv.decode_coordinates(part.luv & 0xFFFF) * w
+    v = lmuv.decode_coordinates(part.luv >> 16) * h
+    return np.stack([u[part.triangles], v[part.triangles]], axis=2)
+
+
+def test_lmuv_v2_layout(tool, synth):
+    """our own layout of the synthetic remodel: every triangle on its page, its charts apart by the gutter (no
+    texel of one chart's triangles inside another's box), a material's parts on one page, the near and far levels
+    of a surface on the same chart's texels, at most 65535 vertices a part; v2's bytes round-trip"""
+    np = _numpy()
+    from geopatch import lmuv, scan_original
+    _, _, bsps = retail.read_map(synth)
+    for bsp in bsps:
+        parts = []
+        for m in bsp.materials.values():
+            part = scan_original.remodel_part(m, tool)
+            part.lightmap = np.zeros((len(part.vertices), 5), np.float32)
+            parts.append(part)
+        laid, pages, report = lmuv.layout(parts)
+        assert report["pages"] == len(pages) >= 1 and report["charts"] >= len(parts)
+        pages_of = {}
+        for p in laid:
+            assert len(p.vertices) <= 0xFFFF
+            pages_of.setdefault((p.lightmap_index, p.material_index), set()).add(p.page)
+            corners = _laid_texels(np, lmuv, p, pages)
+            w, h = pages[p.page]
+            assert corners.min() >= 0.0 and corners[..., 0].max() <= w and corners[..., 1].max() <= h
+        assert all(len(v) == 1 for v in pages_of.values())
+        # (the charts' boxes on a page never overlap: the gutter keeps them apart)
+        boxes = {}
+        for index, p in enumerate(laid):
+            corners = _laid_texels(np, lmuv, p, pages)
+            chart = p.chart_local[p.triangles[:, 0]]
+            for c in np.unique(chart):
+                pts = corners[chart == c].reshape(-1, 2)
+                boxes.setdefault(p.page, []).append((pts.min(axis=0), pts.max(axis=0)))
+        for page, items in boxes.items():
+            for a in range(len(items)):
+                for b in range(a + 1, len(items)):
+                    (a0, a1), (b0, b1) = items[a], items[b]
+                    apart = (a1 < b0).any() or (b1 < a0).any()
+                    assert apart, (page, items[a], items[b])
+        data = lmuv.encode(laid, pages)
+        got_pages, got = lmuv.decode(data)
+        assert got_pages == pages and all(q == p.page and np.array_equal(w, p.luv) for (q, w), p in zip(got, laid))
+        for damage in (lambda d: d[:-3], lambda d: d[:4] + struct.pack("<I", 7) + d[8:],
+                       lambda d: d[:16] + struct.pack("<I", 1 << 20) + d[20:]):
+            with pytest.raises(lmuv.LayoutError):
+                lmuv.decode(damage(data))
+
+
+def test_lmuv_v2_splits_a_part_by_its_surfaces():
+    """a part whose copies pass 65535 vertices is cut into parts along its surfaces, each surface's near and far
+    triangles kept together, the runs and far ranges renumbered"""
+    np = _numpy()
+    from geopatch import lmuv
+
+    class Part:
+        pass
+    p = Part()
+    # 300 surfaces of 200 quads each (a strip folded every surface so each is its own chart): 120,000 triangles
+    surfaces, quads = 300, 200
+    verts, tris, sft, far_pairs = [], [], [0], []
+    for s in range(surfaces):
+        base = len(verts)
+        tilt = 1.0 if s % 2 else -1.0
+        for k in range(quads + 1):
+            for y in (0.0, 1.0):
+                verts.append([s * 10.0 + k * 0.01, y, tilt * k * 0.01] + [0, 0, 1, 1, 0, 0, 0, 1, 0, 0.0, 0.0])
+        for k in range(quads):
+            a = base + 2 * k
+            tris += [[a, a + 1, a + 2], [a + 1, a + 3, a + 2]]
+        sft.append(len(tris))
+    near = len(tris)
+    for s in range(surfaces):
+        base = sft[s]
+        a = tris[base][0]
+        far_pairs.append((len(tris), 1))
+        tris.append([a, a + 1, a + 2 * quads])
+    p.vertices = np.array(verts, np.float32)
+    p.lightmap = np.zeros((len(verts), 5), np.float32)
+    p.triangles = np.array(tris, np.int64)
+    p.sft = np.array(sft, np.uint32)
+    p.far_pairs = np.array(far_pairs, np.uint32)
+    p.spheres = np.zeros((surfaces, 4), np.uint32)
+    p.near_triangle_count = near
+    for name, value in (("lightmap_index", 0), ("material_index", 0), ("stock_surface_count", surfaces),
+                        ("stock_vertex_count", 0), ("topology_check", 0), ("position_check", 0.0),
+                        ("first_surface", 0), ("surface_count", surfaces), ("far_distance", 50.0)):
+        setattr(p, name, value)
+    laid, pages, report = lmuv.layout([p])
+    assert len(laid) >= 2 and all(len(q.vertices) <= 0xFFFF for q in laid)
+    assert sum(q.surface_count for q in laid) == surfaces and laid[0].first_surface == 0
+    assert all(laid[k + 1].first_surface == laid[k].first_surface + laid[k].surface_count for k in range(len(laid) - 1))
+    for q in laid:
+        assert q.sft[0] == 0 and q.sft[-1] == q.near_triangle_count
+        for first, n in q.far_pairs.tolist():
+            assert n == 1 and q.near_triangle_count <= first < len(q.triangles)
+    assert sum(len(q.triangles) for q in laid) == len(tris)
+
+
+def test_game_decodes_lmuv_v2(tool, synth, tmp_path, monkeypatch):
+    """prism_geom.c's decode of a sidecar with our own layout: the image says so (flags bit 1), each part names its
+    page (+ 1, record bytes 48 to 51) and the page table follows the parts; each vertex's lightmap coordinates are
+    LMUV v2's exactly and its incident radiosity is its own normal, so nothing of CE's lightmap is drawn"""
+    np = _numpy()
+    from geopatch import encode, lmuv
+    monkeypatch.setenv("GEOPATCH_NATIVE_DIR", str(tool.exe.parent))
+    bsps, pwgs, out = _synth_remodel(tool, synth, tmp_path, lmuv_version=2)
+    sidecar = prsx.Sidecar(out.read_bytes())
+    sections = {(e.kind, e.bsp): sidecar.section(i) for i, e in enumerate(sidecar.entries)}
+    for bsp in bsps:
+        stock = tmp_path / ("stock%d.bin" % bsp.index)
+        native.write_stock(stock, bsp)
+        image, report = tool.geom(stock, out, bsp.index)
+        assert image is not None, report
+        flags = struct.unpack_from("<I", image, 12)[0]
+        assert flags & 2
+        pages, laid = lmuv.decode(sections[("LMUV", bsp.index)])
+        (tmp_path / "image.pwg").write_bytes(image)
+        got = encode.read_pwg(tmp_path / "image.pwg")
+        assert len(got) == len(laid)
+        at = 64
+        for g, (page, words) in zip(got, laid):
+            assert struct.unpack_from("<I", image, at + 48)[0] == page + 1
+            at += 64 + 4 * ((4 * (g.surface_count + 1) + 3) // 4) + ((56 * len(g.vertices) + 3) // 4) * 4 + \
+                ((20 * len(g.vertices) + 3) // 4) * 4 + ((6 * len(g.triangles) + 3) // 4) * 4 + 24 * g.surface_count
+            u = lmuv.decode_coordinates(words & 0xFFFF).astype(np.float32)
+            v = lmuv.decode_coordinates(words >> 16).astype(np.float32)
+            assert np.allclose(g.lightmap[:, 3], u, atol=1e-7) and np.allclose(g.lightmap[:, 4], v, atol=1e-7)
+            assert np.array_equal(g.lightmap[:, 0:3].view("<u4"), g.vertices[:, 3:6].view("<u4"))
+        assert image[at:at + 4] == b"PAGE" and struct.unpack_from("<I", image, at + 4)[0] == len(pages)
+        assert [struct.unpack_from("<II", image, at + 8 + 8 * k) for k in range(len(pages))] == pages
+    # a part's page past the page table, and two parts of one material on two pages: refused
+    data = bytearray(sections[("LMUV", 0)])
+    count = struct.unpack_from("<I", data, 16)[0]
+    struct.pack_into("<I", data, 20 + 8 * count + 4, count)
+    path = tmp_path / "bad.prsx"
+    path.write_bytes(prsx.write(CWID, [prsx.Section("GEOM", 0, sections[("GEOM", 0)]),
+                                       prsx.Section("LMUV", 0, bytes(data))]))
+    stock = tmp_path / "stock0.bin"
+    image, report = tool.geom(stock, path, 0)
+    assert image is None and "lightmap" in report
 
 
 def test_negative_controls(tool, synth):

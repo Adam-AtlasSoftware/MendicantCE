@@ -37,6 +37,19 @@ LMUV v1 (little endian):
               part's own material
     LVTX u32  per LIT vertex, two words: the packed incident radiosity, and
               the lightmap u (low 16 bits) and v (high 16 bits)
+
+LMUV v2 (geopatch M4: the enhanced world's own lightmap layout, made on the
+farm by tools/geopatch/lmuv.py, which has the layout; nothing of it is the
+retail map's):
+  "LMU1", u32 version (2), u32 part count, u32 column count, u32 page count
+  per page: u32 width, u32 height (texels, 1 to 4096; at most 64 pages)
+  per part: u32 vertex count, u32 page
+  columns: LUV2 u32 per vertex: u | v << 16 on its part's page (the game's
+           compressed coordinates)
+A material's parts are on one page. The image then has flags bit 1, each
+written part's page + 1 in its record's bytes 48 to 51, and after the parts
+"PAGE", the page count and each page's width and height; each lightmap
+vertex's incident radiosity is its vertex's own normal.
 */
 
 #ifndef PRISM_GEOM_H

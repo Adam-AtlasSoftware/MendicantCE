@@ -211,6 +211,9 @@ static struct
 	/* the G-buffer pass's draws' instance and flags now, and the record sent
 	last (its material, instance and flags; none at the pass's start) */
 	unsigned long instance, draw_flags, lightmap;
+	/* (the lightmap pass's own page, which prism_deferred_page_override
+	puts back) */
+	unsigned long lightmap_stock;
 	unsigned long sent_material, sent_instance, sent_flags, sent_lightmap;
 	boolean sent;
 	/* SCENE_INSTANCE: the G-buffer passes counted; each object's (by its
@@ -700,6 +703,7 @@ void prism_deferred_object(
 	prism_deferred.draw_flags = (absolute && prism_deferred.raster && prism_deferred.raster_object_shadows &&
 		prism_bake_object_static(object_index) ? DRAW_STATIC_SCENERY : 0) | prism_deferred.body_flags;
 	prism_deferred.lightmap = 0;
+	prism_deferred.lightmap_stock = 0;
 	/* (SCENE_INSTANCE: the object's nodes, before its draws) */
 	if (absolute)
 	{
@@ -719,6 +723,7 @@ void prism_deferred_first_person(
 	prism_deferred.instance = drawing ? INSTANCE_FIRST_PERSON : 0;
 	prism_deferred.draw_flags = drawing ? DRAW_FIRST_PERSON : 0;
 	prism_deferred.lightmap = 0;
+	prism_deferred.lightmap_stock = 0;
 
 	return;
 }
@@ -857,6 +862,7 @@ void prism_deferred_lightmap(
 	}
 	/* (its page: its index among the BSP's lightmap bitmaps, + 1) */
 	prism_deferred.lightmap = 0;
+	prism_deferred.lightmap_stock = 0;
 	bsp = global_structure_bsp_index_get() != NONE ? global_structure_bsp_get() : NULL;
 	if (!lightmap_bitmap || !bsp || bsp->lightmap_group.index == NONE ||
 		!(group = (struct bitmap_group *)tag_get('bitm', bsp->lightmap_group.index)) || !group->bitmaps.address)
@@ -870,6 +876,38 @@ void prism_deferred_lightmap(
 	{
 		prism_deferred.lightmap = (unsigned long)(((char const *)lightmap_bitmap - first) /
 			(long)sizeof(struct bitmap_data)) + 1;
+	}
+	prism_deferred.lightmap_stock = prism_deferred.lightmap;
+
+	return;
+}
+
+void prism_deferred_page_override(
+	long own_page)
+{
+	struct structure_bsp *bsp;
+	struct bitmap_group *group;
+
+	if (!render_gbuffer_pass)
+	{
+		return;
+	}
+	prism_deferred.lightmap = prism_deferred.lightmap_stock;
+	if (own_page == NONE || !prism_deferred.lightmap_stock)
+	{
+		return;
+	}
+	bsp = global_structure_bsp_index_get() != NONE ? global_structure_bsp_get() : NULL;
+	if (!bsp || bsp->lightmap_group.index == NONE ||
+		!(group = (struct bitmap_group *)tag_get('bitm', bsp->lightmap_group.index)))
+	{
+		return;
+	}
+	/* (the G-buffer's page: 7 bits, the page + 1; prism_scene_static.c sends
+	the own pages after the BSP's) */
+	if (own_page >= 0 && group->bitmaps.count + own_page + 1 <= 127)
+	{
+		prism_deferred.lightmap = (unsigned long)(group->bitmaps.count + own_page) + 1;
 	}
 
 	return;
