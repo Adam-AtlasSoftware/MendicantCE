@@ -424,6 +424,8 @@ the two strategies keep the estimate unbiased; both sides compute these the
 same way at a pixel: lamp_direct_total, the bake's direct light here, set by
 the light pass; 0 (no texel, the flag off) the old weight) */
 const uint FLAG_LAMP_MIS = 256u;
+/* (a diagnosis, HALO_PT_SHORT_CAP=0: no neighbours' cap on a short history's samples) */
+const uint FLAG_NO_SHORT_CAP = 512u;
 /* the lamp ray's roughness at most (job.frame.w, in hundredths:
 HALO_PT_LAMP_RAY; 0 none) and its reach */
 float lamp_ray_roughness() { return float(job.frame.w) / 100.0; }
@@ -3249,7 +3251,7 @@ void main()
         cap_s = max(hms.z + 8.0 * sigma, 1.0e-4);
     }
     bool short_d = !history || length_d < 16.0, short_s = !history || hs.a < 16.0;
-    if (short_d || short_s)
+    if ((short_d || short_s) && (job.frame.y & FLAG_NO_SHORT_CAP) == 0u)
     {
         uint here = imageLoad(guide_now, pixel).x;
         float most_d = 0.0, most_s = 0.0;

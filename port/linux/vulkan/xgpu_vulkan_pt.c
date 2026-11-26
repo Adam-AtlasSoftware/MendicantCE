@@ -1986,6 +1986,13 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->denoise[0] = (float)(still ? history_still : history_moving);
 	job->denoise[1] = 4.0f;
 	job->denoise[3] = 2.0f;
+	/* (diagnoses: HALO_PT_FAST_GAMMA the fast history's hold in standard
+	deviations; HALO_PT_SHORT_CAP=0 no neighbours' cap while the history is
+	short) */
+	if (getenv("HALO_PT_FAST_GAMMA"))
+		job->denoise[3] = (float)atof(getenv("HALO_PT_FAST_GAMMA"));
+	if (getenv("HALO_PT_SHORT_CAP") && atoi(getenv("HALO_PT_SHORT_CAP")) == 0)
+		job->frame[1] |= 512u;
 	/* (ReSTIR GI's reservoirs' confidence at most 20 frames, the quality
 	profile's bounce reused; HALO_PT_RESTIR_GI=0: none, each frame's own) */
 	{
