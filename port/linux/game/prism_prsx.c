@@ -188,7 +188,12 @@ static int prsx_entry_compare(const void *a, const void *b)
 	const struct prsx_entry *x = *(const struct prsx_entry *const *)a;
 	const struct prsx_entry *y = *(const struct prsx_entry *const *)b;
 
-	return x->offset < y->offset ? -1 : x->offset > y->offset ? 1 : 0;
+	/* (an empty section may share its offset with the next: shorter first,
+	so the order, and the overlap check after it, do not hang on how stable
+	the C library's qsort is) */
+	if (x->offset != y->offset)
+		return x->offset < y->offset ? -1 : 1;
+	return x->csize < y->csize ? -1 : x->csize > y->csize ? 1 : 0;
 }
 
 enum prsx_result prsx_open(struct prsx *prsx, const struct prsx_source *source)
