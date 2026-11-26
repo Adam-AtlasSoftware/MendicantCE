@@ -82,7 +82,7 @@ and the own pages together stay under 127 (b30: 26 + 3 and 29 + 2). The sidecar 
 CE's own lightmap pass still draws the enhanced world, but under v2 it reads the BSP's stock page at our coordinates
 with each vertex's normal as its bump term: its light there is no light at all (b30's beach comes out orange, red and
 yellow). Enhanced lighting therefore never falls back to it on a texel the bake has a chart for but no texel: such a
-pixel (every one of the 646,021 tiles of b30's first BSP is not loaded until about 25 s after the map opens on a 3090,
+pixel (the whole of b30's first BSP's 646,021 tiles is not loaded until 25 s after its bake starts on a 3090,
 the shipped pack streaming in 2,048 tiles a frame) is lit as an object is, by the bake's volume, or, while the volume is
 not loaded either, by the open sky's light (the rig's sky, by the share of the sky its normal faces), with the sun
 traced (`raster_source`'s `unbaked`). Stock geometry takes the same fallback for such texels.

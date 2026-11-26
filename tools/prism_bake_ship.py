@@ -299,7 +299,7 @@ def manifest_load(shipped: Path) -> dict:
 
 def manifest_save(shipped: Path, manifest: dict) -> None:
     manifest["bsps"].sort(key=lambda e: (e["world"], e["map"], e["bsp"]))
-    (shipped / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", "utf-8")
+    (shipped / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n", "utf-8", newline="\n")
     lines = ["prism_bake_shipped 1"]
     levels: dict[tuple, list[str]] = {}
     worlds = manifest.get("worlds", {})
@@ -309,13 +309,14 @@ def manifest_save(shipped: Path, manifest: dict) -> None:
         levels.setdefault((entry["world"], entry["map"]), []).append(line)
     for name, info in sorted(worlds.items()):
         lines.append(f"world {name} {info['base_id']} {info['classic_world_id']}")
-    (shipped / "manifest.txt").write_text("\n".join(lines) + "\n", "utf-8")
+    (shipped / "manifest.txt").write_text("\n".join(lines) + "\n", "utf-8", newline="\n")
     # (each level's own: the game's ladder and its Lightmap Downloads rows read <world>/<map>/manifest.txt)
     for (world, name), level_lines in sorted(levels.items()):
         folder = shipped / world / name
         folder.mkdir(parents=True, exist_ok=True)
         extra = [f"world {name} {worlds[name]['base_id']} {worlds[name]['classic_world_id']}"] if name in worlds else []
-        (folder / "manifest.txt").write_text("\n".join(["prism_bake_shipped 1"] + level_lines + extra) + "\n", "utf-8")
+        (folder / "manifest.txt").write_text("\n".join(["prism_bake_shipped 1"] + level_lines + extra) + "\n", "utf-8",
+                                             newline="\n")
 
 
 def world_id_classic(classic_world_id: str, bsp: int) -> str:

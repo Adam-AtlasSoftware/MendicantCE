@@ -145,7 +145,7 @@ def main(argv=None):
         print("%s %s base %s cwid %s (%d BSPs, %d tags, %d bitmaps)" % (Path(path).stem, report["build"],
               report["base_id"][:16], cwid, report["bsps"], report["tags"], report["bitmaps"]))
     if args.json:
-        Path(args.json).write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
+        Path(args.json).write_text(json.dumps(out, indent=1, sort_keys=True) + "\n", "utf-8", newline="\n")
     return 0
 
 

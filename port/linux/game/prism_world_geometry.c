@@ -709,7 +709,7 @@ static boolean pwg_parse(
 			view->far_distance = 0.0f;
 		}
 		view->page = own && read_u32(record + 48) ? (long)read_u32(record + 48) - 1 : NONE;
-		if (own && (view->page < 0 || view->page >= OWN_PAGES_MOST))
+		if (own && view->page != NONE && (view->page < 0 || view->page >= OWN_PAGES_MOST))
 		{
 			goto truncated;
 		}
@@ -2232,7 +2232,6 @@ static boolean world_geometry_make(
 	return TRUE;
 }
 
-/* the remodel of the BSP whose tag is tag_index, when there is one */
 /* (own lightmap pages) a material whose shape check gave any part stock
 fallback surfaces stays stock whole: those surfaces' stock corners carry
 CE's lightmap coordinates, which mean nothing on the material's own page */
@@ -2270,6 +2269,7 @@ static void own_pages_fallbacks(
 	}
 }
 
+/* the remodel of the BSP whose tag is tag_index, when there is one */
 static void world_geometry_load(
 	struct structure_bsp *bsp,
 	long tag_index)
