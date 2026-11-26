@@ -71,6 +71,7 @@ top level.
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_scene.h"
 #include "xgpu_vulkan_terrain.h"
+#include "xgpu_vulkan_upscale.h"
 #include "host.h"
 #include "prism_bake_atlas.h"
 #include "prism_bake_batch.h"
@@ -7275,6 +7276,14 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	job.probes = b->probes.address;
 	memcpy(job.camera, view->now, sizeof(job.camera));
 	memcpy(job.corners, view->corners, sizeof(job.corners));
+	/* (the jittered draw's rays under an upscaler: xgpu_vulkan_upscale_
+	jittered_camera) */
+	{
+		float jitter[2];
+
+		(void)xgpu_vulkan_upscale_jitter(jitter);
+		xgpu_vulkan_upscale_jittered_camera(job.camera, job.corners, jitter);
+	}
 	job.volume[0] = PROBE_SPACING;
 	job.volume[1] = COARSE_SPACING;
 	job.counts[0] = b->probes.buffer && b->volume.done ? b->brick_entries : 0;

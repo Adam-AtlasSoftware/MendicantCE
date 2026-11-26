@@ -26,6 +26,14 @@ draw is read only where the G-buffer has no surface (the sky).
 Until the bake's scene is made (the plan, a few seconds after a BSP is first drawn) there is nothing to trace: the frame
 is CE's until then (logged once).
 
+**Under an upscaler** the G-buffer is drawn jittered, so every pass that finds a pixel's point again from its
+distance takes the jittered draw's rays: the path tracer's cameras (`pt_camera_jitter`, in "The denoiser"
+below), and Rebaked's light pass and the terrain's HQ layers (`xgpu_vulkan_upscale_jittered_camera`, the same turn of
+SCENE_VIEW's axis). Before, at Ultra Performance (0.33) b30's hills went dark in one frame of three and lit in the
+next with the jitter's sequence, whatever the bake (`work/openh1_eval/v4_groundflash_runs`: the hill's frames' mean
+luma 44 to 164 frame to frame, steady at 138 after; the beach's small periodic flashes, +6 every ninth frame, gone
+too).
+
 ## Which light each term carries
 
 The bake's unit is a white surface's radiance (the irradiance over pi). At an opaque pixel, its diffuse light `D` (the

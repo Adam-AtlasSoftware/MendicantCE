@@ -64,6 +64,13 @@ down), 1 while its draws are jittered; 0 and none outside such a view: the
 passes that find a pixel's point again from its distance (the path tracer)
 find it along the jittered pixel's ray, where the G-buffer drew it */
 int xgpu_vulkan_upscale_jitter(float jitter[2]);
+/* a view's camera (SCENE_VIEW's: the eye, the axis a unit along it, its change
+a unit of the screen's x and y, the corners) made the jittered draws' (the axis
+moved by the jitter), so that the passes that find a pixel's point from its
+distance (Rebaked's light pass, the terrain's layers) find the point the
+G-buffer drew there, not one beside it off the surface; the path tracer turns
+its cameras the same way (xgpu_vulkan_pt.c's pt_camera_jitter) */
+void xgpu_vulkan_upscale_jittered_camera(float camera[4][4], const int32_t corners[4], const float jitter[2]);
 void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view);
 void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view,
 	struct xgpu_vulkan_image *view_depth, struct xgpu_vulkan_image *output, struct xgpu_vulkan_image *output_depth,
