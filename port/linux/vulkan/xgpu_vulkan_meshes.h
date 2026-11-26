@@ -111,5 +111,8 @@ void xgpu_vulkan_meshes_note_traced(int variant, uint32_t lod);
 /* the part drawn now is one the remodel draws (its instance's mesh in, the
 part's region and permutation in the mesh) */
 int xgpu_vulkan_meshes_part_remodelled(void);
+/* the part drawn now drawn as its remodel (1) or stock after all (0: its
+skinning could not be had), noted for the view or the shadow */
+void xgpu_vulkan_meshes_note_drawn(int remodel);
 
 #endif

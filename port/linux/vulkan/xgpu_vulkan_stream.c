@@ -3556,7 +3556,10 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP &&
 			!xgpu_vulkan_meshes_prepare((const float (*)[4])stream.constants, CONSTANTS_RANGE / 16, mesh_wide) &&
 			serial == xgpu_vulkan_serial())
+		{
 			mesh_verdict = XGPU_VULKAN_MESHES_STOCK;
+			xgpu_vulkan_meshes_note_drawn(0);
+		}
 		preparation_end(2, traced);
 		if (serial == xgpu_vulkan_serial())
 			break;

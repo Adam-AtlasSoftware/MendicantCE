@@ -486,10 +486,12 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	drawn = meshes.legacy ? instance_legacy(record, instance) : instance_resolved(record, instance, matrices);
 	if (drawn && instance->view.node_count > instance->node_count)
 		drawn = 0;
-	if (meshes.geometry)
+	/* (what the pass drew noted: stock here where the mesh is not in; a
+	remodel's as its draws are made, or stock where one cannot be,
+	xgpu_vulkan_meshes_note_drawn) */
+	if (meshes.geometry && !drawn)
 		xgpu_geometry_note(meshes.geometry, record->object, record->mesh,
-			shadow ? XGPU_GEOMETRY_SHADOW : XGPU_GEOMETRY_VIEW, drawn ? XGPU_GEOMETRY_REMODEL : XGPU_GEOMETRY_STOCK,
-			drawn ? instance->view.lod : 0u);
+			shadow ? XGPU_GEOMETRY_SHADOW : XGPU_GEOMETRY_VIEW, XGPU_GEOMETRY_STOCK, 0u);
 	if (!drawn)
 		return;
 	instance->hash = bytes_hash(matrices, record->node_count * sizeof(matrices[0]), 2166136261u ^ instance->view.lod);
@@ -737,6 +739,7 @@ int xgpu_vulkan_meshes_piece(uint32_t index, struct xgpu_vulkan_draw *draw)
 	view = &instance->view;
 	if (index == 0)
 	{
+		xgpu_vulkan_meshes_note_drawn(1);
 		meshes.swaps++;
 		meshes.wide_swaps += meshes.piece_wide ? 1 : 0;
 		meshes.drawn_since_state = 1;
@@ -915,6 +918,17 @@ int xgpu_vulkan_meshes_rt_pieces_coarse(struct xgpu_vulkan_meshes_rt_piece *piec
 		!xgpu_mesh_store_use(meshes.store, instance->mesh, 1.0f, &coarse))
 		return -1;
 	return rt_pieces_level(instance, coarse.lod, pieces, most);
+}
+
+void xgpu_vulkan_meshes_note_drawn(int remodel)
+{
+	const struct instance *instance = meshes.part;
+
+	if (!meshes.geometry || !instance || !instance->id || !instance->drawable)
+		return;
+	xgpu_geometry_note(meshes.geometry, instance->object, instance->mesh,
+		(instance->flags & XGPU_STREAM_MESH_INSTANCE_SHADOW) ? XGPU_GEOMETRY_SHADOW : XGPU_GEOMETRY_VIEW,
+		remodel ? XGPU_GEOMETRY_REMODEL : XGPU_GEOMETRY_STOCK, remodel ? instance->view.lod : 0u);
 }
 
 int xgpu_vulkan_meshes_part_remodelled(void)

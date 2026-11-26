@@ -607,9 +607,11 @@ void xgpu_geometry_note(struct xgpu_geometry *geometry, uint32_t object, uint32_
 		return;
 	entry->seen_frame = geometry->frame;
 	value = (((uint32_t)variant << 8) | (lod & 0xffu)) + 1u;
-	/* (a pass's draws of the frame after its first: the first's kept; the
-	shadow's cascades and the view's chunks draw the one choice) */
-	if (entry->notes[channel].value && entry->notes[channel].frame == geometry->frame)
+	/* (a pass's draws of the frame after its first: the first's kept, the
+	shadow's cascades and the view's chunks drawing the one choice; but a
+	draw of the frame made stock under a remodel is the frame's) */
+	if (entry->notes[channel].value && entry->notes[channel].frame == geometry->frame &&
+		!(variant == XGPU_GEOMETRY_STOCK && ((entry->notes[channel].value - 1u) >> 8) == XGPU_GEOMETRY_REMODEL))
 		return;
 	if (note_change(&entry->notes[channel], value, geometry->frame, &flipped))
 	{
