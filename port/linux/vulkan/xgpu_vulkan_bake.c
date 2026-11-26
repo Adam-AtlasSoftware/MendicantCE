@@ -7278,7 +7278,10 @@ void xgpu_vulkan_bake_record(const struct xgpu_stream_prism_bake *record, const 
 				map[sizeof(bake.control.map_name)] = 0;
 				name_clean(map, name, sizeof(name));
 				snprintf(directory, sizeof(directory), "%s/%s", folder && *folder ? folder : "prism_bake", name);
-				folder_make(directory);
+				/* (the bake lock: a player's run makes no bake folder; its reach
+				is made in memory, its file never written: reach_file_write) */
+				if (bake_farm())
+					folder_make(directory);
 				snprintf(bake.reach_path, sizeof(bake.reach_path), "%s/bsp%d.reach", directory, (int)bake.reach_bsp);
 				if (!bake.control_known || !map[0])
 					bake.reach_path[0] = 0;

@@ -129,5 +129,7 @@ def test_players_never_bake():
     write = write[:write.index("memcpy(head, \"PRCH\", 4);")]
     assert "!bake_farm()" in write
     assert re.search(r"if \(bake_farm\(\)\)\s*\n\s*folder_make\(folder\);", baker)
+    assert re.search(r"if \(bake_farm\(\)\)\s*\n\s*folder_make\(directory\);", baker)
+    assert baker.count("folder_make(") == 3
     import prism_bake_ship as ship
     assert {"MSKF", "VOLF", "FCLS"} <= set(ship.LIGHT_RECORDS.values())
