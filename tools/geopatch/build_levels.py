@@ -15,7 +15,9 @@ BSPs, which have enhanced geometry, the sidecar's size and SHA-256 (file_sha), a
 world_id. It holds no time, host or path, so two builds of the same inputs write the same build.json too.
 
 compare: the two builds' build.json and sidecars side by side; exit 0 only if every sidecar is the same bytes and
-every world_id is equal (the proof of a reproducible build), else a line per difference and exit 1.
+every world_id is equal (the proof of a reproducible build), else a line per difference and exit 1. A build made on
+another machine may be given as its build.json alone (its folder without the sidecars): its recorded SHA-256s,
+computed where it was built, stand for them.
 
 The farm only: it reads retail maps, which never leave the farm, and what it writes is Adam's data until the release
 pipeline (M7): never committed.
@@ -135,7 +137,9 @@ def compare(args):
             rows.append((name, "classic only", "", ""))
             continue
         fa, fb = (Path(f) / sx["file"] for f in (args.a, args.b))
-        ha, hb = _sha256_file(fa), _sha256_file(fb)
+        # (a build on another machine whose sidecars stay there: its build.json's SHA-256, read where it was built)
+        ha = _sha256_file(fa) if fa.exists() else sx["file_sha"]
+        hb = _sha256_file(fb) if fb.exists() else sy["file_sha"]
         if ha != sx["file_sha"] or hb != sy["file_sha"]:
             problems.append("%s: a sidecar is not the one its build.json records" % name)
         if ha != hb:
