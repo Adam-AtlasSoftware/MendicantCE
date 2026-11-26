@@ -3589,6 +3589,83 @@ void preblur(ivec2 pixel)
     imageStore(diff_b, pixel, vec4(sum_d, luma(sum_d)));
     imageStore(spec_b, pixel, vec4(sum_s, luma(sum_s)));
 }
+/* the histories' anti-firefly (ReLAX's history clamping's, from its
+published descriptions): the slow histories as the temporal pass left them,
+each luminance held to the mean and k standard deviations of its
+neighbours' on the same surface (a 5 x 5 at a stride of 2, itself left
+out), and the held value written back into the history and its moments.
+A bright sample taken while the history was short (a moving eye's, a
+disocclusion's) enters the slow mean at 1 / its length and its moments
+with it, so the fast history's hold, whose width comes from those
+moments, never catches what is left of it (its share falls as 1 / n, the
+width as 1 / sqrt n): one sample of a lamp few rays find stayed a glow
+for a hundred frames after the eye stopped, and the a-trous steps, their
+luminance stops opened by the same moments, spread a few such pixels into
+a splotch as wide as their reach (the clarity round's c40 lab and its
+floors, worse on the light's grid where the reach covers more of the
+screen). A light the neighbours see too (a lamp pool, a sparse lamp that
+every pixel finds now and then) is in their means alike and kept */
+void history_firefly(ivec2 pixel, uvec4 gc, vec3 nc, vec3 pc, float dist, float k, inout vec4 dc, inout vec4 sc)
+{
+    float s1 = 0.0, s2 = 0.0, t1 = 0.0, t2 = 0.0, w = 0.0;
+    for (int y = -2; y <= 2; y++)
+        for (int x = -2; x <= 2; x++)
+        {
+            if (x == 0 && y == 0)
+                continue;
+            ivec2 q = pixel + 2 * ivec2(x, y);
+            if (!inside(q))
+                continue;
+            uvec4 gq = imageLoad(guide_now, q);
+            if (gq.x != gc.x)
+                continue;
+            vec3 nq = unfold(unpackSnorm2x16(gq.y));
+            if (dot(nq, nc) < 0.8)
+                continue;
+            vec3 pq = job.camera[0].xyz + uintBitsToFloat(gq.z) * ray_of(job.camera, job.corners, vec2(q));
+            if (abs(dot(pq - pc, nc)) > 0.05 + 0.01 * dist)
+                continue;
+            float ld = luma(imageLoad(diff_a, q).rgb), ls = luma(imageLoad(spec_a, q).rgb);
+            s1 += ld;
+            s2 += ld * ld;
+            t1 += ls;
+            t2 += ls * ls;
+            w += 1.0;
+        }
+    /* (too few neighbours on this surface to judge: a thin or small thing) */
+    if (w < 6.0)
+        return;
+    s1 /= w;
+    s2 /= w;
+    t1 /= w;
+    t2 /= w;
+    float var_d = max(s2 - s1 * s1, 0.0), var_s = max(t2 - t1 * t1, 0.0);
+    float most_d = s1 + k * sqrt(var_d) + 0.05 * s1 + 1.0e-4;
+    float most_s = t1 + k * sqrt(var_s) + 0.05 * t1 + 1.0e-4;
+    float ld = luma(dc.rgb), ls = luma(sc.rgb);
+    if (ld > most_d)
+    {
+        float f = most_d / ld;
+        dc.rgb *= f;
+        /* (the variance the a-trous steps stop by: the neighbours') */
+        dc.a = dc.a < 0.0 ? dc.a : min(dc.a, var_d);
+        vec4 h = imageLoad(diff_now, pixel);
+        imageStore(diff_now, pixel, vec4(h.rgb * f, h.a));
+        vec4 m = imageLoad(moments_now, pixel);
+        float m1 = min(m.x, most_d), fast = min(m.z, most_d);
+        imageStore(moments_now, pixel, vec4(m1, min(m.y, m1 * m1 + var_d), fast, min(m.w, fast * fast + var_d)));
+    }
+    if (ls > most_s)
+    {
+        float f = most_s / ls;
+        sc.rgb *= f;
+        vec4 h = imageLoad(spec_now, pixel);
+        imageStore(spec_now, pixel, vec4(h.rgb * f, h.a));
+        vec4 m = imageLoad(spec_moments_now, pixel);
+        float fast = min(m.x, most_s), m1 = min(m.z, most_s);
+        imageStore(spec_moments_now, pixel, vec4(fast, min(m.y, fast * fast + var_s), m1, min(m.w, m1 * m1 + var_s)));
+    }
+}
 void main()
 {
     s = Scene(push.scene);
@@ -3624,6 +3701,10 @@ void main()
     vec3 nc = unfold(unpackSnorm2x16(gc.y));
     float dist = uintBitsToFloat(gc.z);
     vec3 pc = job.camera[0].xyz + dist * ray_of(job.camera, job.corners, vec2(pixel));
+    /* (the histories' anti-firefly, push.parameters.y the bound in quarters
+    of the neighbours' standard deviation, 0 none: HIST_FIREFLY below) */
+    if (push.parameters.y != 0u)
+        history_firefly(pixel, gc, nc, pc, dist, float(push.parameters.y) * 0.25, dc, sc);
     float n_d = hist.a;
     float n_s = sc.a;
     bool fix_d = n_d < 4.0, fix_s = n_s < 4.0, fix_v = hist_v.w < 4.0 && vc.w > 0.5;

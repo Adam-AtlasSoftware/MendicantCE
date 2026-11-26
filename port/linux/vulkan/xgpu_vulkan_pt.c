@@ -124,6 +124,18 @@ reservoirs' confidence at most for a still eye (HALO_PT_RESTIR_M_STILL) */
 /* whether the temporal pass holds a moving eye's glossy specular history to
 this frame's 3 x 3 by default (HALO_PT_SPEC_HOLD) */
 #define SPEC_HOLD_DEFAULT 1
+/* the histories' anti-firefly's bound by default, in standard deviations of
+the neighbours' (HALO_PT_HIST_FIREFLY; 0 none): over the 240 moving frames
+of c40's lab the bright pixels the native frame has not fell 1.8 times
+(DLSS 0.33), 2.8 times (DLSS 0.67 with the light at 0.33 of the screen) and
+7.7 times (DLAA with the light at 0.5), and the glows that stayed 8 frames
+and more in one place to none; against the supersampled
+references every pose's FLIP and edge SSIM are better, its ghosting less
+(a10's corridor native: FLIP 0.087 to 0.069, ghosting 17.5 to 11.2), b30's
+beach unchanged. 1 measured a little better again and 2 or 3 a little
+worse; 1.5 keeps more of a small bright feature's peak than 1
+(work/openh1_eval/v4_pt_clarity_runs/r3) */
+#define HIST_FIREFLY_DEFAULT 1.5f
 /* ReSTIR DI by default: the spatial neighbours a pixel
 (HALO_PT_RESTIR_SPATIAL), the initial candidates where they are reused
 (HALO_PT_CANDIDATES; 8 without them), their disc's radius in pixels
@@ -1448,6 +1460,23 @@ static uint32_t spec_hold(void)
 	return (uint32_t)hold;
 }
 
+/* the histories' anti-firefly in the fix pass (xgpu_vulkan_pt.glsl's
+history_firefly): the bound in quarters of the neighbours' standard
+deviation (HALO_PT_HIST_FIREFLY, in standard deviations; 0 none) */
+static uint32_t hist_firefly(void)
+{
+	static int quarters = -1;
+
+	if (quarters < 0)
+	{
+		const char *v = getenv("HALO_PT_HIST_FIREFLY");
+		float k = v ? (float)atof(v) : HIST_FIREFLY_DEFAULT;
+
+		quarters = k <= 0.0f ? 0 : k > 63.0f ? 252 : (int)(k * 4.0f + 0.5f);
+	}
+	return (uint32_t)quarters;
+}
+
 /* the temporal stabilisation after the filter: its history's frames at most
 (HALO_PT_STABILIZE; 0 none) */
 static int stabilize_on(void)
@@ -2456,7 +2485,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 				low_groups_y);
 			stamp(commands, time_slot, 2);
 			barrier(commands);
-			dispatch(commands, PASS_FIX, scene, light_job, 0, 0, 0, 0, low_groups_x, low_groups_y);
+			dispatch(commands, PASS_FIX, scene, light_job, 0, hist_firefly(), 0, 0, low_groups_x, low_groups_y);
 			stamp(commands, time_slot, 3);
 			barrier(commands);
 			/* (the fix wrote b: the steps from b to a and back; the specular's
