@@ -345,6 +345,11 @@ struct prism_world_geometry_globals
 	int geometry_log;
 	unsigned long geometry_frame;
 	unsigned long near_far_switches, near_far_flips;
+	/* the camera at the frame's first window, and the last frame it moved
+	more than GEOMETRY_CUT_UNITS in a frame (a cut: a switch before it undone
+	after is no flip), and such cuts */
+	real_point3d geometry_camera;
+	unsigned long cut_frame, cuts;
 };
 
 /* ---------- globals */
@@ -2293,6 +2298,9 @@ camera (the passes of a frame, the frames of a still camera ask again) */
 /* (port: HALO_GEOMETRY_LOG's flip window, as the objects' resolver's,
 xgpu_geometry.h's XGPU_GEOMETRY_FLIP_FRAMES) */
 #define GEOMETRY_FLIP_FRAMES 90UL
+/* (a camera moved more than this in a frame: a cut, a teleport, a path's
+start, not a flip's cause) */
+#define GEOMETRY_CUT_UNITS 5.0f
 
 static byte surface_choice(
 	struct world_material *of,
@@ -2345,7 +2353,7 @@ static byte surface_choice(
 				a flip: the resolver's measure of the objects', for the
 				world's levels) */
 				world_geometry.near_far_switches++;
-				if (of->far_switched && of->far_switched[local] &&
+				if (of->far_switched && of->far_switched[local] && of->far_switched[local] > world_geometry.cut_frame &&
 					world_geometry.geometry_frame - of->far_switched[local] <= GEOMETRY_FLIP_FRAMES)
 				{
 					world_geometry.near_far_flips++;
@@ -2435,12 +2443,22 @@ void prism_world_geometry_frame(
 		}
 		if (world_geometry.geometry_frame != (unsigned long)render.frame_index)
 		{
+			float dx = render.camera.position.x - world_geometry.geometry_camera.x;
+			float dy = render.camera.position.y - world_geometry.geometry_camera.y;
+			float dz = render.camera.position.z - world_geometry.geometry_camera.z;
+
 			world_geometry.geometry_frame = (unsigned long)render.frame_index;
+			if (dx * dx + dy * dy + dz * dz > GEOMETRY_CUT_UNITS * GEOMETRY_CUT_UNITS)
+			{
+				world_geometry.cut_frame = world_geometry.geometry_frame;
+				world_geometry.cuts++;
+			}
+			world_geometry.geometry_camera = render.camera.position;
 			if (world_geometry.geometry_log >= 1 && world_geometry.geometry_frame % 600UL == 0)
 			{
-				platform_log("geometry: world: frame %lu: %s; near/far switches %lu, flips %lu",
+				platform_log("geometry: world: frame %lu: %s; near/far switches %lu, flips %lu; camera cuts %lu",
 					world_geometry.geometry_frame, world_geometry.enabled && world_geometry.loaded_bsp ? "remodel" : "stock",
-					world_geometry.near_far_switches, world_geometry.near_far_flips);
+					world_geometry.near_far_switches, world_geometry.near_far_flips, world_geometry.cuts);
 			}
 		}
 	}
