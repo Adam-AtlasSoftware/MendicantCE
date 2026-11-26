@@ -664,8 +664,11 @@ static int instance_skin(struct instance *instance, int wide)
 	beach's rocks stock each frame) */
 	if (!view->rig && !meshes.legacy)
 	{
+		/* (the wide stream's a key of its own: a narrow skinning kept, which
+		the shadows read every frame, is never one a submission in flight
+		does not read, so it could not be made wide in its place) */
 		uint64_t key = ((uint64_t)instance->hash << 32 | instance->mesh) ^ ((uint64_t)view->lod << 20) ^
-			((uint64_t)view->vertex_first * 0x9e3779b97f4a7c15ull);
+			((uint64_t)view->vertex_first * 0x9e3779b97f4a7c15ull) ^ (wide ? 0x8000000000000000ull : 0u);
 		uint32_t slot = (uint32_t)(key % SEEN_SKINS);
 		int make = meshes.seen[slot].key == key && meshes.seen[slot].frame < meshes.frame;
 
