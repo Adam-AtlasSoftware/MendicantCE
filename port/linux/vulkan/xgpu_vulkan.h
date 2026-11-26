@@ -508,22 +508,40 @@ compressed model layout), read by that submission's draws; and with wide
 draws read instead (32 bytes each: as the stock layout to byte 24, then uv0
 over the base map scale as two floats, unclamped, in place of the int16
 coordinates, nodes and weight); 0 where
-they cannot be (the skin ring full: drawn stock in Classic; port: the
-resolver's ring is waited for instead, xgpu_vulkan_mesh_skin_mode) */
+they cannot be (the skin ring full, never waited for: drawn stock in
+Classic; port: a coarser level in the resolver's frames, the caller's,
+xgpu_vulkan_mesh_skin_budget) */
 int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
 	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
 	struct xgpu_vulkan_range *wide);
 void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, uint64_t *ring_full);
 /* port: the skin buffer's mode from the next mesh made where no mesh reads
-the buffer (a map's record: its meshes let go of): the resolver's (1: a
-256 MB ring, a full one waited for, and a 160 MB keep region) or Classic's
-(0: the 128 MB ring as before, nothing kept, a full one drawn stock); and
-the times the resolver's full ring was waited for */
+the buffer (a map's record: its meshes let go of): the resolver's (1: its
+ring and keep region, SKIN_RING_SIZE and SKIN_KEEP_SIZE) or Classic's (0:
+the 128 MB ring as before, nothing kept, a full one drawn stock) */
 void xgpu_vulkan_mesh_skin_mode(int resolved);
-/* port: a full ring waited for (the resolver's frames, 1) or the draw drawn
-stock (Classic's, 0), whatever the buffer's size */
-void xgpu_vulkan_mesh_skin_wait(int wait);
-uint64_t xgpu_vulkan_mesh_skin_waits(void);
+/* port: the resolver's frames (1): each frame's skinning counted against
+its share of the ring (a frame past it cuts the resolver's budget), the
+room for a share made at the frame's start, never within it, a full ring
+never waited for; Classic's (0) as before */
+void xgpu_vulkan_mesh_skin_budget(int budgeted);
+/* port: a frame's end (xgpu_vulkan_meshes_frame): the frames counted and
+the next frame's share of the resolver's ring made free, any wait for it
+logged with its frame and time */
+void xgpu_vulkan_mesh_skin_frame(void);
+/* port: the resolver's ring: its size, the keep region's, a frame's share;
+the frames past the share and the skinnings past it, the ring found full,
+the waits at a frame's start (and their seconds); the most a frame took, of
+the ring in use and of the keep region; the upload ring's submissions
+mid-frame */
+struct xgpu_vulkan_mesh_skin_budget
+{
+	uint64_t ring_size, keep_size, frame_cap;
+	uint64_t over_frames, over_drawn, ring_full, frame_waits;
+	double frame_wait_seconds;
+	uint64_t frame_most, in_use_most, keep_most, upload_flushes, submissions_most;
+};
+void xgpu_vulkan_mesh_skin_budget_statistics(struct xgpu_vulkan_mesh_skin_budget *budget);
 /* port: a still object's skinning kept (key: its mesh, level and bones'
 matrices) in the skin buffer's keep region, read frame after frame: 1 and
 its ranges where kept (made now where make and room can be had: the least

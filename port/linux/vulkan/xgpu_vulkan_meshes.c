@@ -519,7 +519,7 @@ void xgpu_vulkan_meshes_instance(void *context, const struct xgpu_stream_mesh_in
 	choices else) */
 	meshes.map_resolved = (record->flags & XGPU_STREAM_MESH_INSTANCE_RESOLVED) != 0;
 	geometry_get();
-	xgpu_vulkan_mesh_skin_wait(!meshes.legacy);
+	xgpu_vulkan_mesh_skin_budget(!meshes.legacy);
 	memset(instance, 0, offsetof(struct instance, matrices));
 	instance->hash = 0;
 	memset(&instance->skinned, 0, sizeof(instance->skinned));
@@ -1079,6 +1079,9 @@ void xgpu_vulkan_meshes_note_traced(int variant, uint32_t lod)
 void xgpu_vulkan_meshes_frame(void)
 {
 	meshes.frame++;
+	/* (port: the next frame's share of the skin ring made free now, at the
+	frame's end, never within a frame) */
+	xgpu_vulkan_mesh_skin_frame();
 	/* (the resolver's frame: the eye the traced scene was last built from,
 	the traced triangles' budget, the hysteresis the map's record gave) */
 	if (geometry_get())
@@ -1090,12 +1093,14 @@ void xgpu_vulkan_meshes_frame(void)
 		settings.hysteresis = (float)(meshes.hysteresis_percent > 50u ? 50u : meshes.hysteresis_percent) / 100.0f;
 		settings.traced_budget = xgpu_vulkan_rt_replacement_budget(&settings.coarse_reach);
 		{
-			uint64_t dispatches, vertices, ring_full;
+			struct xgpu_vulkan_mesh_skin_budget budget;
+			uint64_t ring_full;
 
-			/* (the ring filled since the last frame: the budget cut by a
-			sixth, to a quarter at least; else grown back a tenth of a
-			percent a frame) */
-			xgpu_vulkan_mesh_skin_statistics(&dispatches, &vertices, &ring_full);
+			/* (the ring filled since the last frame, or a frame past its
+			share of it: the budget cut by a sixth, to a quarter at least;
+			else grown back a tenth of a percent a frame) */
+			xgpu_vulkan_mesh_skin_budget_statistics(&budget);
+			ring_full = budget.ring_full + budget.over_frames;
 			if (meshes.skinned_scale <= 0.0f)
 				meshes.skinned_scale = 1.0f;
 			if (ring_full != meshes.ring_full_seen)
@@ -1127,12 +1132,29 @@ void xgpu_vulkan_meshes_frame(void)
 				(unsigned long long)ring_full, (unsigned long long)dispatches, (unsigned long long)vertices,
 				(unsigned long long)meshes.rt_skin_failed, (unsigned long long)meshes.rt_no_piece,
 				(unsigned long long)meshes.coarser_skins);
-			host_logf(HOST_LOG_INFO, "meshstore: %llu frames: %s; ring waited for %llu; lost parts %llu, traced left out %llu; "
-				"remodels drawn paired %llu frames, %llu agreed, %llu disagreed", (unsigned long long)meshes.frame,
-				meshes.legacy ? "legacy choices" : "resolved", (unsigned long long)xgpu_vulkan_mesh_skin_waits(),
-				(unsigned long long)meshes.parts_lost,
-				(unsigned long long)meshes.rt_left_out, (unsigned long long)meshes.pairs,
-				(unsigned long long)meshes.pairs_agreed, (unsigned long long)meshes.pairs_disagreed);
+			{
+				struct xgpu_vulkan_mesh_skin_budget budget;
+
+				xgpu_vulkan_mesh_skin_budget_statistics(&budget);
+				host_logf(HOST_LOG_INFO, "meshstore: %llu frames: the skin ring %llu MB (%llu MB kept), %llu MB a frame; "
+					"the most a frame took %.1f MB, in use %.1f MB, kept %.1f MB; %llu frames past their share (the "
+					"budget cut), %llu skinnings past it, the ring full %llu times, waited for at a "
+					"frame's start %llu times (%.1f ms); the upload ring submitted mid-frame %llu times; at most %llu submissions a frame; budget scale %.3f",
+					(unsigned long long)meshes.frame, (unsigned long long)(budget.ring_size >> 20),
+					(unsigned long long)(budget.keep_size >> 20), (unsigned long long)(budget.frame_cap >> 20),
+					(double)budget.frame_most / 1048576.0, (double)budget.in_use_most / 1048576.0,
+					(double)budget.keep_most / 1048576.0, (unsigned long long)budget.over_frames,
+					(unsigned long long)budget.over_drawn, (unsigned long long)budget.ring_full,
+					(unsigned long long)budget.frame_waits, budget.frame_wait_seconds * 1000.0,
+					(unsigned long long)budget.upload_flushes, (unsigned long long)budget.submissions_most,
+					(double)meshes.skinned_scale);
+				host_logf(HOST_LOG_INFO, "meshstore: %llu frames: %s; ring waited for %llu; lost parts %llu, traced left "
+					"out %llu; remodels drawn paired %llu frames, %llu agreed, %llu disagreed", (unsigned long long)meshes.frame,
+					meshes.legacy ? "legacy choices" : "resolved", (unsigned long long)budget.frame_waits,
+					(unsigned long long)meshes.parts_lost,
+					(unsigned long long)meshes.rt_left_out, (unsigned long long)meshes.pairs,
+					(unsigned long long)meshes.pairs_agreed, (unsigned long long)meshes.pairs_disagreed);
+			}
 		}
 	}
 	if (meshes.store)
