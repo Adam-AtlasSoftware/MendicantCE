@@ -165,7 +165,7 @@ static void choose(void)
 	snprintf(world_source.map, sizeof(world_source.map), "%s", map);
 	memset(world_source.world_ids, 0, sizeof(world_source.world_ids));
 	memset(world_source.labels, 0, sizeof(world_source.labels));
-	scenario = global_scenario_get();
+	scenario = global_scenario_try_and_get();
 	world_source.bsp_count = scenario ? scenario->structure_bsp_references.count : 0;
 	if (world_source.bsp_count > MAXIMUM_BSPS)
 		world_source.bsp_count = MAXIMUM_BSPS;
