@@ -52,8 +52,10 @@ def build(folder=None):
     zdefs = ["-DZ_PREFIX", "-Dz_errmsg=z_port_errmsg"]
     # (zlib's own sources are taken as they are, not held to our warnings)
     objects = []
+    partial = "%s.%d.partial" % (exe, os.getpid())
     for name in ZLIB_SOURCES:
-        obj = folder / ("%s-%s.o" % (exe.stem, name))
+        # (this process's own objects and output: several workers may build the same command at once)
+        obj = folder / ("%s-%d-%s.o" % (exe.stem, os.getpid(), name))
         result = subprocess.run([cc, *flags, "-O2", *zdefs, "-I", str(ZLIB), "-c", str(ZLIB / name), "-o", str(obj)],
                                 capture_output=True, text=True)
         if result.returncode != 0:
@@ -62,13 +64,13 @@ def build(folder=None):
     # (ours strict, as the game's units: C89 with GNU extensions, every warning an error; the decode has no
     # floating point, so no float flags matter)
     result = subprocess.run([cc, *flags, "-std=gnu89", "-O2", "-Wall", "-Wextra", "-Werror", *zdefs, "-I", str(GAME),
-                             "-I", str(ZLIB), *map(str, SOURCES), *objects, "-o", str(exe) + ".partial"],
+                             "-I", str(ZLIB), *map(str, SOURCES), *objects, "-o", partial],
                             capture_output=True, text=True)
     if result.returncode != 0:
         raise NativeError(result.stderr)
     for obj in objects:
         os.remove(obj)
-    os.replace(str(exe) + ".partial", exe)
+    os.replace(partial, exe)
     return exe
 
 
