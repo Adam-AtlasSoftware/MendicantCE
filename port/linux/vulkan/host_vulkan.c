@@ -913,7 +913,11 @@ int host_vulkan_window_open(uint32_t window, uint32_t debug, uint32_t shader_fol
 		plugin's own choice: the lighting the game started with decides) */
 		if (!strcmp(plugin_lighting, "pathtraced") && !getenv("PRISM_DLSS_SR_PRESET"))
 		{
+#ifdef _WIN32
+			_putenv_s("PRISM_DLSS_SR_PRESET", "K");
+#else
 			setenv("PRISM_DLSS_SR_PRESET", "K", 0);
+#endif
 			host_logf(HOST_LOG_INFO, "prism plugins: DLSS SR's preset K under Path Traced");
 		}
 		xgpu_vulkan_upscale_plugins_create();

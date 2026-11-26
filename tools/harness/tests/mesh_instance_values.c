@@ -114,6 +114,13 @@ static void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mes
 	sent.functions = functions;
 }
 
+/* (prism_deferred.c's: whether the frame is PRISM's deferred raster, which
+marks the instance resolved; the instance's values do not depend on it) */
+static boolean prism_deferred_raster(void)
+{
+	return FALSE;
+}
+
 static long game_time_get(void)
 {
 	return 100;

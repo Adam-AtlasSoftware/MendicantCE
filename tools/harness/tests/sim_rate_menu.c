@@ -245,9 +245,9 @@ int main(int argc, char **argv)
 		return 0;
 	}
 
-	/* Defaults by lighting mode: a row the mode shown hides (Classic's ray
-	tracer, op_prism_rt, under PRISM Path Traced) keeps its value; shown
-	(Classic), Defaults sets it; the SIMULATION row, of every mode, takes
+	/* Defaults by lighting mode: a row the mode shown hides (Enhanced's ray
+	tracing, op_prism_ray_tracing, under Path Traced) keeps its value; shown
+	(Enhanced), Defaults sets it; the SIMULATION row, of every mode, takes
 	its default in any */
 	if (!strcmp(case_name, "lighting-mode"))
 	{
@@ -260,13 +260,13 @@ int main(int argc, char **argv)
 		memset(&rt_setting, 0, sizeof(rt_setting));
 		/* (setting_text gives a setting not game.sim_rate "": its default,
 		values[0]) */
-		rt_setting.setting = "display.prism_rt";
+		rt_setting.setting = "display.prism_ray_tracing";
 		rt_setting.value_count = 2;
 		rt_setting.values[0] = "";
-		rt_setting.values[1] = "on";
-		other_row.name = "op_prism_rt";
+		rt_setting.values[1] = "off";
+		other_row.name = "op_prism_ray_tracing";
 		other_row.child = &rt_spinner;
-		rt_spinner = (struct widget_instance){ .name = "prism_rt_spinner", .alpha_modifier = 1.0f, .parent = &other_row };
+		rt_spinner = (struct widget_instance){ .name = "prism_ray_tracing_spinner", .alpha_modifier = 1.0f, .parent = &other_row };
 		rt_spinner.parameters.list.selected_index = 1;
 		lighting_value = "pathtraced";
 		setting_default_show(&rt_spinner, &rt_setting);
@@ -275,9 +275,9 @@ int main(int argc, char **argv)
 		setting_default_show(&spinner, &sim_rate_setting);
 		CHECK(spinner.parameters.list.selected_index == 1, "Path Traced: SIMULATION's default not shown: %d",
 			spinner.parameters.list.selected_index);
-		lighting_value = "ce";
+		lighting_value = "enhanced";
 		setting_default_show(&rt_spinner, &rt_setting);
-		CHECK(rt_spinner.parameters.list.selected_index == 0, "Defaults left a row Classic shows: %d",
+		CHECK(rt_spinner.parameters.list.selected_index == 0, "Defaults left a row Enhanced shows: %d",
 			rt_spinner.parameters.list.selected_index);
 		return 0;
 	}

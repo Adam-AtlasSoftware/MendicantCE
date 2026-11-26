@@ -26,7 +26,8 @@ def generated(fault=None):
     meshes = read("port/linux/game/mod_meshes.c")
     interpolation = read("port/linux/game/render_interpolation.c")
     config = enum_with(meshes, "_render_model_shadow_bit") + "\n"
-    for name in ("MESH_INSTANCE_SHADOW", "MESH_INSTANCE_FIRST_PERSON", "MESH_INSTANCE_NO_SECONDARY"):
+    for name in ("MESH_INSTANCE_SHADOW", "MESH_INSTANCE_FIRST_PERSON", "MESH_INSTANCE_NO_SECONDARY",
+                 "MESH_INSTANCE_RESOLVED"):
         config += re.search(r"^#define " + name + r" \w+$", meshes, re.M).group(0) + "\n"
     config += structure(meshes, "mesh_model") + "\n"
     config += structure(interpolation, "interpolated_object") + "\n"

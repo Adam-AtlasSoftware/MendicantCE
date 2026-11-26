@@ -207,7 +207,7 @@ def test_path_traced_fallback():
     assert f'"{marker}"' in fallback
     assert "!report_crash.fresh" in fallback
     assert 'strcmp(config_string("display.lighting"), "pathtraced")' in fallback
-    assert 'config_write("display.lighting", "raster")' in fallback
+    assert 'config_write("display.lighting", "enhanced")' in fallback
     start = function(report, "report_session_start")
     fresh = start.index("report_crash.fresh = 1;")
     assert start.rindex("if (file)", 0, fresh) < fresh < start.index("else\n\t\tremove(record);")
