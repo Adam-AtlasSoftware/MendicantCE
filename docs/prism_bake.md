@@ -410,7 +410,9 @@ a bake of the settings chosen, before they are played, as other games compile th
   clock (`game_speed 0`), bakes each BSP in turn in the foreground at 40 ms of GPU time a frame (`scenario_switch_
   structure_bsp` between frames, once the BSP before is `DONE`), writes its progress to the bake folder's
   `menu_worker.txt` every half second (its BSP, of how many, the share and the seconds left, the baker's estimate),
-  and quits. A BSP that fails is passed over and the rest are baked; the worker then quits with 3. With
+  and quits. A BSP that fails is passed over and the rest are baked; the worker then quits with 3. A BSP with no lightmapped
+  surface (d40's tenth, a cinematic's) has nothing to bake: the scene says so (`prism_scene_static_empty`), the note
+  counts it baked and the worker goes on. With
   `debug.bake_bsp` it bakes that BSP alone and quits (a farm's job a BSP). One worker at a time; the main menu's frames are held to 30 a second while it bakes, so the GPU is the
   bake's, and the bake goes on with the window out of focus.
 - **The order.** The level WAIT chose (below), the one played last (the bake folder's `last_played.txt`), the saved
