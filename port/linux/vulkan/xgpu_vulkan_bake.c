@@ -1904,7 +1904,7 @@ static int bake_traceable(const struct bake_state *b)
 /* the bake's inputs taken (the render thread's: the scene, the materials,
 the rig, the reach), its key made and its plan begun on its thread: NULL
 where they are not all here yet */
-static struct bake_state *bake_begin(int in_play, int *held)
+static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_key *drawn, int *held)
 {
 	const struct xgpu_scene_static_set *set = xgpu_vulkan_scene_static_set();
 	const struct xgpu_stream_rt_frame *frame;
@@ -2207,6 +2207,16 @@ static struct bake_state *bake_begin(int in_play, int *held)
 		enum prism_bake_cache_status status;
 		int whole;
 
+		/* (the bake drawn is of this key already, the setting changed back:
+		kept as it is, nothing loaded again) */
+		if (drawn && !prism_bake_key_compare(drawn, &b->key))
+		{
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) is the bake drawn's "
+				"geometry: kept as it is", b->map, (int)b->bsp, b->generation);
+			bake_free(b);
+			*held = 2;
+			return NULL;
+		}
 		memset(&probe, 0, sizeof(probe));
 		status = prism_bake_cache_open(&probe, b->path, &b->key, 0);
 		whole = status == PRISM_BAKE_CACHE_CURRENT && probe.done;
@@ -5447,7 +5457,14 @@ static void bake_frame(void)
 
 		if (bake.held_generation == bake.control.generation + 1u)
 			goto keep;
-		next = bake_begin(1, &held);
+		next = bake_begin(1, &b->key, &held);
+		/* (the bake drawn is of the set's geometry: it takes the set's number) */
+		if (held == 2)
+		{
+			b->generation = bake.control.generation;
+			bake.held_generation = 0;
+			goto keep;
+		}
 		if (held)
 		{
 			bake.held_generation = bake.control.generation + 1u;
@@ -5491,7 +5508,7 @@ static void bake_frame(void)
 			status_write(NULL);
 			return;
 		}
-		b = bake.bake = bake_begin(in_play, &held);
+		b = bake.bake = bake_begin(in_play, NULL, &held);
 		if (held)
 			bake.held_generation = bake.control.generation + 1u;
 		if (!b)
