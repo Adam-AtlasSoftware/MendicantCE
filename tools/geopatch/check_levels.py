@@ -119,8 +119,9 @@ def _check(task):
     out = {"lint": findings, "bsps": {}}
     report = json.loads((build / "reports" / (name + ".report.json")).read_text("utf-8"))
     sidecar = prsx.Sidecar(data)
-    work = build / "checks_tmp"
-    work.mkdir(exist_ok=True)
+    # (this level's own scratch folder: the levels run in parallel)
+    work = build / "checks_tmp" / name
+    work.mkdir(parents=True, exist_ok=True)
     for entry_index, entry in enumerate(sidecar.entries):
         if entry.kind != "GEOM":
             continue
@@ -156,8 +157,9 @@ def _check(task):
             tmp.unlink()
             row["deviation"] = deviation(parts_image, by_index[b], native, tolerance)
         out["bsps"][b] = row
+    work.rmdir()
     try:
-        work.rmdir()
+        work.parent.rmdir()
     except OSError:
         pass
     return name, out
