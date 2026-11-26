@@ -702,7 +702,7 @@ def test_manifest_rules_and_signature(tmp_path):
     good = _manifest(name, blob)
     assert manifest.check(good, tmp_path) == []
     path = tmp_path / "prism_release.json"
-    path.write_text(manifest.dumps(good))
+    path.write_bytes(manifest.dumps(good).encode())
     assert manifest.main(["check", str(path), "--sidecars", str(tmp_path)]) == 0
     seed = bytes(range(32))
     key = tmp_path / "seed"
@@ -713,7 +713,7 @@ def test_manifest_rules_and_signature(tmp_path):
     public = ed25519_ref.public_key(seed).hex()
     assert manifest.main(["verify", str(path), "--public-key", public]) == 0
     assert manifest.main(["verify", str(path)]) == 1, "a test key is not the release key"
-    path.write_text(manifest.dumps(good).replace("b10", "b11"))
+    path.write_bytes(manifest.dumps(good).replace("b10", "b11").encode())
     assert manifest.main(["verify", str(path), "--public-key", public]) == 1, "a changed byte breaks the signature"
 
     def broken(change):
