@@ -1986,12 +1986,18 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	job->denoise[0] = (float)(still ? history_still : history_moving);
 	job->denoise[1] = 4.0f;
 	job->denoise[3] = 2.0f;
-	/* (diagnoses: HALO_PT_FAST_GAMMA the fast history's hold in standard
-	deviations; HALO_PT_SHORT_CAP=0 no neighbours' cap while the history is
-	short) */
+	/* (a diagnosis: HALO_PT_FAST_GAMMA the fast history's hold in standard
+	deviations) */
 	if (getenv("HALO_PT_FAST_GAMMA"))
 		job->denoise[3] = (float)atof(getenv("HALO_PT_FAST_GAMMA"));
-	if (getenv("HALO_PT_SHORT_CAP") && atoi(getenv("HALO_PT_SHORT_CAP")) == 0)
+	/* no neighbours' cap on a short history's samples: it took the light a
+	moving eye's new pixels found brighter than their neighbours' (c40's lab
+	about 5% dark in turns and strafes, over 90 frames to come back once
+	still; without it FLIP against R moving 0.085 to 0.077, still frames
+	alike, no new fireflies: the firefly clamp and the fast history's hold
+	stay; work/openh1_eval/v4_pt_clarity_runs). HALO_PT_SHORT_CAP=1, a
+	diagnosis, puts it back */
+	if (!(getenv("HALO_PT_SHORT_CAP") && atoi(getenv("HALO_PT_SHORT_CAP")) != 0))
 		job->frame[1] |= 512u;
 	/* (ReSTIR GI's reservoirs' confidence at most 20 frames, the quality
 	profile's bounce reused; HALO_PT_RESTIR_GI=0: none, each frame's own) */
