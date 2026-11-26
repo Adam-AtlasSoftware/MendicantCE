@@ -3,7 +3,7 @@
 computed over the map's own tags, so that two map versions whose bake inputs are equal share it (and so share their
 packs and sidecars), and a version whose level, lighting, shaders, bitmaps or static scenery differ does not.
 
-    classic_world.py <map>... [--json out.json] [--versions versions.json]
+    classic_world.py <map>... [--json out.json]
 
 It hashes, under SHA-256 with the label "PRISM-CWID" and CWID_VERSION:
 - each structure BSP as the map holds it (its bytes from the scenario's BSP reference: the render geometry, the
@@ -23,7 +23,8 @@ decision A7.
 The game never computes it: the signed manifest (M7; until then the shipped bake's manifest.txt "world" lines,
 tools/prism_bake_ship.py) maps each supported base_id to it, and the sidecar's header carries it. The farm runs
 this once per map version, before encoding sidecars (encode.py --classic-world-id) and before baking (the bake's
-HALO_CLASSIC_WORLD_ID). Retail maps never leave the farm; only hashes come out.
+HALO_CLASSIC_WORLD_ID), and records it in versions.json beside the version's base_id. Retail maps never leave the
+farm; only hashes come out.
 """
 import argparse
 import hashlib
