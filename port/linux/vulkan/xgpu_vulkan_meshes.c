@@ -58,6 +58,9 @@ without a material and its shadow share that skinning.
 #define VIEW_LEVELS 256u
 /* meshes skinned with their wide stream (a draw with a material read it) */
 #define WIDE_MESHES 64u
+/* the still objects' skinnings seen (direct-mapped): a skinning seen again
+on a later frame is kept (xgpu_vulkan_mesh_skin_kept) */
+#define SEEN_SKINS 4096u
 /* (rasterizer_xbox.c's node matrices' first vertex constant register: c60,
 D3D's -36) */
 #define NODE_MATRIX_REGISTER 60u
@@ -145,10 +148,18 @@ static struct
 	float largest_pixels;
 	/* an object's level switched from one frame to the next */
 	uint64_t level_switches;
+	/* (HALO_GEOMETRY_LOG) a part named whose instance's slot another
+	instance had taken since (drawn stock), and the traced captures of a
+	remodelled part that failed: its skinning, no piece */
+	uint64_t parts_lost, rt_skin_failed, rt_no_piece;
 	/* the resolver (xgpu_geometry.h); legacy: the choices before it */
 	struct xgpu_geometry *geometry;
 	int legacy, settings_known;
 	uint32_t hysteresis_percent;
+	struct
+	{
+		uint64_t key, frame;
+	} seen[SEEN_SKINS];
 } meshes;
 
 static void geometry_log(void *context, const char *line)
@@ -283,6 +294,8 @@ void xgpu_vulkan_meshes_map(void *context, const struct xgpu_stream_mesh_store_m
 	memset(meshes.shared, 0, sizeof(meshes.shared));
 	memset(meshes.views, 0, sizeof(meshes.views));
 	memset(meshes.wide_meshes, 0, sizeof(meshes.wide_meshes));
+	memset(meshes.seen, 0, sizeof(meshes.seen));
+	xgpu_vulkan_mesh_skin_kept_clear();
 	meshes.part = NULL;
 	if (!count && !meshes.store)
 		return;
@@ -491,6 +504,8 @@ void xgpu_vulkan_meshes_draw_part(void *context, const struct xgpu_stream_mesh_d
 
 	(void)context;
 	meshes.part = record->instance && instance->id == record->instance ? instance : NULL;
+	if (record->instance && instance->id != record->instance)
+		meshes.parts_lost++;
 	meshes.key = *record;
 	meshes.drawn_since_state = 0;
 }
@@ -641,10 +656,32 @@ static int instance_skin(struct instance *instance, int wide)
 			memcpy(meshes.bones[index], instance->matrices[node], sizeof(meshes.bones[0]));
 		}
 	}
+	/* (port: a still object, its bones its nodes' matrices, as it was a
+	frame before: its skinning kept and read frame after frame, not skinned
+	again into the ring each submission, whose filling had drawn a few of a
+	beach's rocks stock each frame) */
+	if (!view->rig && !meshes.legacy)
+	{
+		uint64_t key = ((uint64_t)instance->hash << 32 | instance->mesh) ^ ((uint64_t)view->lod << 20) ^
+			((uint64_t)view->vertex_first * 0x9e3779b97f4a7c15ull);
+		uint32_t slot = (uint32_t)(key % SEEN_SKINS);
+		int make = meshes.seen[slot].key == key && meshes.seen[slot].frame < meshes.frame;
+
+		if (meshes.seen[slot].key != key)
+		{
+			meshes.seen[slot].key = key;
+			meshes.seen[slot].frame = meshes.frame;
+		}
+		if (xgpu_vulkan_mesh_skin_kept(key, make, view->rest, view->vertex_first, view->vertex_count,
+			(const float (*)[4])meshes.bones, view->bone_count, view->inverse_scale, &instance->skinned,
+			wide ? &instance->wide : NULL))
+			goto skinned;
+	}
 	if (!xgpu_vulkan_mesh_skin(view->rest, view->vertex_first, view->vertex_count,
 		(const float (*)[4])meshes.bones, view->bone_count, view->inverse_scale, &instance->skinned,
 		wide ? &instance->wide : NULL))
 		return 0;
+skinned:
 	instance->skinned_wide = wide;
 	instance->skinned_serial = xgpu_vulkan_serial();
 	index = meshes.shared_next++ % SHARED_SKINS;
@@ -803,7 +840,10 @@ the traced triangles' budget, the farthest first) */
 		}
 	}
 	if (!instance_skin(instance, 0))
+	{
+		meshes.rt_skin_failed++;
 		return -1;
+	}
 	view = &instance->view;
 	/* (its bones' matrices and level, and a rig's clock: its springs move
 	whatever the matrices) */
@@ -812,6 +852,8 @@ the traced triangles' budget, the farthest first) */
 	{
 		int count = rt_pieces_fill(instance, region, permutation, pose, pieces, most);
 
+		if (count < 0)
+			meshes.rt_no_piece++;
 		if (count > 0 && !meshes.legacy)
 			xgpu_vulkan_meshes_note_traced(XGPU_GEOMETRY_REMODEL, view->lod);
 		return count;
@@ -907,6 +949,26 @@ void xgpu_vulkan_meshes_frame(void)
 		settings.traced_budget = xgpu_vulkan_rt_replacement_budget(&settings.coarse_reach);
 		xgpu_geometry_settings_set(meshes.geometry, &settings);
 		xgpu_geometry_frame(meshes.geometry, xgpu_vulkan_rt_eye(eye) ? eye : NULL);
+		if (getenv("HALO_GEOMETRY_LOG") && meshes.frame % 600u == 0)
+		{
+			uint64_t dispatches, vertices, ring_full;
+
+			uint64_t kept_hits, kept_made, kept_evicted, kept_refused;
+
+			xgpu_vulkan_mesh_skin_statistics(&dispatches, &vertices, &ring_full);
+			xgpu_vulkan_mesh_skin_kept_statistics(&kept_hits, &kept_made, &kept_evicted, &kept_refused);
+			host_logf(HOST_LOG_INFO, "meshstore: kept skinnings: %llu read, %llu made, %llu let go of, %llu refused",
+				(unsigned long long)kept_hits, (unsigned long long)kept_made, (unsigned long long)kept_evicted,
+				(unsigned long long)kept_refused);
+			host_logf(HOST_LOG_INFO, "meshstore: %llu frames: %llu instances (%llu drawable), %llu swaps, %llu parts named "
+				"after their instance's slot was taken (drawn stock), %llu skinnings failed (drawn stock; the skin ring "
+				"full %llu times, %llu dispatches, %llu vertices), traced captures failed: %llu skinnings, %llu without a "
+				"piece", (unsigned long long)meshes.frame, (unsigned long long)meshes.instances_seen,
+				(unsigned long long)meshes.instances_drawable, (unsigned long long)meshes.swaps,
+				(unsigned long long)meshes.parts_lost, (unsigned long long)meshes.prepare_failures,
+				(unsigned long long)ring_full, (unsigned long long)dispatches, (unsigned long long)vertices,
+				(unsigned long long)meshes.rt_skin_failed, (unsigned long long)meshes.rt_no_piece);
+		}
 	}
 	if (meshes.store)
 		xgpu_mesh_store_frame(meshes.store);

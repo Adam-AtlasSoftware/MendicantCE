@@ -8535,6 +8535,13 @@ mesh's vertex buffer: its vertices, the upload ring and the skin ring, whole
 (the bones' and the skinned vertices' places are push constants). */
 
 #define SKIN_RING_SIZE (128ull << 20)
+/* port: the kept skinnings' region after the ring (xgpu_vulkan_mesh_skin_
+kept): a still object's vertices skinned once and drawn from there frame
+after frame, not skinned again into the ring each submission; its entries
+and their hash's slots */
+#define SKIN_KEEP_SIZE (160ull << 20)
+#define SKIN_KEEPS 4096u
+#define SKIN_KEEP_SLOTS 8192u
 #define SKIN_SPANS 64
 #define SKIN_DEAD_SETS 256
 
@@ -8574,6 +8581,17 @@ static struct
 	uint64_t dispatches, vertices, ring_full;
 	/* vertices given the wide stream too */
 	uint64_t wide_vertices;
+	/* the kept skinnings: their key, place in the keep region, size, wide
+	stream, and the submissions that made and last read them; the hash's
+	slots (entry + 1, 0 empty, -1 gone); counts */
+	struct
+	{
+		uint64_t key, offset, size, made_serial, used_serial;
+		int wide, live;
+	} keeps[SKIN_KEEPS];
+	int32_t keep_slots[SKIN_KEEP_SLOTS];
+	uint32_t keep_gone;
+	uint64_t keep_hits, keep_made, keep_evicted, keep_refused;
 } skin;
 
 static int skin_make(void)
@@ -8640,13 +8658,13 @@ static int skin_make(void)
 	if (!check(vkCreateDescriptorPool(vk.device, &pool_info, NULL, &skin.pool), "vkCreateDescriptorPool"))
 		return 0;
 	memset(&skin.ring_memory, 0, sizeof(skin.ring_memory));
-	if (!buffer_make(SKIN_RING_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-		BUFFER_DEVICE, &skin.ring, &skin.ring_memory, NULL))
+	if (!buffer_make(SKIN_RING_SIZE + SKIN_KEEP_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, BUFFER_DEVICE, &skin.ring, &skin.ring_memory, NULL))
 		return 0;
 	skin.failed = 0;
 	skin.made = 1;
-	host_logf(HOST_LOG_INFO, "meshstore: skinning made: a %llu MB ring of skinned vertices",
-		(unsigned long long)(SKIN_RING_SIZE >> 20));
+	host_logf(HOST_LOG_INFO, "meshstore: skinning made: a %llu MB ring of skinned vertices, %llu MB kept",
+		(unsigned long long)(SKIN_RING_SIZE >> 20), (unsigned long long)(SKIN_KEEP_SIZE >> 20));
 	return 1;
 }
 
@@ -8830,20 +8848,53 @@ static int skin_ring_take(uint64_t size, VkDeviceSize *offset)
 	return 1;
 }
 
-int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
-	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
-	struct xgpu_vulkan_range *wide)
+/* the skinning's dispatch into the skin buffer at output (and wide_output
+where wide): 0 where the bones' upload cannot be had */
+static int skin_dispatch(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
+	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], VkDeviceSize output, int wide,
+	struct xgpu_vulkan_range *bone_range)
 {
-	struct xgpu_vulkan_range bone_range;
 	VkCommandBuffer commands;
-	VkDeviceSize output, wide_output = 0;
-	float *to;
+	VkDeviceSize wide_output = output + (uint64_t)count * 32;
 	struct
 	{
 		uint32_t first, count;
 		float inverse_scale[2];
 		uint32_t bone_base, out_base, wide_base;
 	} push;
+
+	commands = early_commands();
+	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.pipeline);
+	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.layout, 0, 1, &rest->set, 0, NULL);
+	push.first = first;
+	push.count = count;
+	push.inverse_scale[0] = inverse_scale[0];
+	push.inverse_scale[1] = inverse_scale[1];
+	push.bone_base = (uint32_t)(bone_range->offset / 16);
+	push.out_base = (uint32_t)(output / 4);
+	push.wide_base = wide ? (uint32_t)(wide_output / 4) : 0xffffffffu;
+	vkCmdPushConstants(commands, skin.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
+	vkCmdDispatch(commands, (count + 63) / 64, 1, 1);
+	barrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+		VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
+	skin.dispatches++;
+	skin.vertices += count;
+	if (wide)
+		skin.wide_vertices += count;
+	(void)bones;
+	(void)bone_count;
+	return 1;
+}
+
+int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
+	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
+	struct xgpu_vulkan_range *wide)
+{
+	struct xgpu_vulkan_range bone_range;
+	VkDeviceSize output;
+	float *to;
 
 	if (!rest || !rest->set || !count || !bone_count || !skin.made ||
 		(uint64_t)(first + count) * 48 > rest->size || first + count < first)
@@ -8860,35 +8911,226 @@ int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, 
 		skin.ring_full++;
 		return 0;
 	}
-	if (wide)
-		wide_output = output + (uint64_t)count * 32;
-	commands = early_commands();
-	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
-	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.pipeline);
-	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.layout, 0, 1, &rest->set, 0, NULL);
-	push.first = first;
-	push.count = count;
-	push.inverse_scale[0] = inverse_scale[0];
-	push.inverse_scale[1] = inverse_scale[1];
-	push.bone_base = (uint32_t)(bone_range.offset / 16);
-	push.out_base = (uint32_t)(output / 4);
-	push.wide_base = wide ? (uint32_t)(wide_output / 4) : 0xffffffffu;
-	vkCmdPushConstants(commands, skin.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
-	vkCmdDispatch(commands, (count + 63) / 64, 1, 1);
-	barrier(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
-		VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
-	skin.dispatches++;
-	skin.vertices += count;
+	skin_dispatch(rest, first, count, bones, bone_count, inverse_scale, output, wide != NULL, &bone_range);
 	skinned->buffer = skin.ring;
 	skinned->offset = output;
 	if (wide)
 	{
 		wide->buffer = skin.ring;
-		wide->offset = wide_output;
-		skin.wide_vertices += count;
+		wide->offset = output + (uint64_t)count * 32;
 	}
 	return 1;
+}
+
+/* ---------- kept skinnings */
+
+static uint32_t keep_hash(uint64_t key)
+{
+	key ^= key >> 31;
+	key *= 0x9e3779b97f4a7c15ull;
+	return (uint32_t)(key >> 32) & (SKIN_KEEP_SLOTS - 1u);
+}
+
+static int keep_find(uint64_t key)
+{
+	uint32_t slot = keep_hash(key), probes;
+
+	for (probes = 0; probes < SKIN_KEEP_SLOTS; probes++, slot = (slot + 1u) & (SKIN_KEEP_SLOTS - 1u))
+	{
+		int32_t entry = skin.keep_slots[slot];
+
+		if (!entry)
+			return -1;
+		if (entry > 0 && skin.keeps[entry - 1].live && skin.keeps[entry - 1].key == key)
+			return entry - 1;
+	}
+	return -1;
+}
+
+/* the hash's slots made again (the gone ones dropped) */
+static void keep_rehash(void)
+{
+	uint32_t index;
+
+	memset(skin.keep_slots, 0, sizeof(skin.keep_slots));
+	skin.keep_gone = 0;
+	for (index = 0; index < SKIN_KEEPS; index++)
+	{
+		uint32_t slot;
+
+		if (!skin.keeps[index].live)
+			continue;
+		for (slot = keep_hash(skin.keeps[index].key); skin.keep_slots[slot]; slot = (slot + 1u) & (SKIN_KEEP_SLOTS - 1u))
+		{
+		}
+		skin.keep_slots[slot] = (int32_t)index + 1;
+	}
+}
+
+static void keep_drop(uint32_t index)
+{
+	uint32_t slot = keep_hash(skin.keeps[index].key), probes;
+
+	for (probes = 0; probes < SKIN_KEEP_SLOTS; probes++, slot = (slot + 1u) & (SKIN_KEEP_SLOTS - 1u))
+	{
+		if (skin.keep_slots[slot] == (int32_t)index + 1)
+		{
+			skin.keep_slots[slot] = -1;
+			skin.keep_gone++;
+			break;
+		}
+	}
+	skin.keeps[index].live = 0;
+	if (skin.keep_gone > SKIN_KEEP_SLOTS / 4)
+		keep_rehash();
+}
+
+/* a place of size bytes in the keep region (first fit among the live
+entries), the least recently read entries no submission in flight reads
+let go of for it; 0 where none can be had */
+static int keep_place(uint64_t size, uint64_t *offset, uint32_t *free_entry)
+{
+	uint64_t done = completed_serial();
+
+	for (;;)
+	{
+		uint64_t at = 0, best = 0;
+		uint32_t index, entry = SKIN_KEEPS, oldest = SKIN_KEEPS;
+		int fits = 0;
+
+		/* (the gaps: from each place, the nearest entry after it) */
+		for (;;)
+		{
+			uint64_t next = SKIN_KEEP_SIZE;
+
+			for (index = 0; index < SKIN_KEEPS; index++)
+			{
+				if (skin.keeps[index].live && skin.keeps[index].offset + skin.keeps[index].size > at &&
+					skin.keeps[index].offset < next)
+					next = skin.keeps[index].offset < at ? at : skin.keeps[index].offset;
+			}
+			if (next >= at + size)
+			{
+				best = at;
+				fits = 1;
+				break;
+			}
+			/* (past the entry at next) */
+			for (index = 0; index < SKIN_KEEPS; index++)
+			{
+				if (skin.keeps[index].live && skin.keeps[index].offset <= next &&
+					skin.keeps[index].offset + skin.keeps[index].size > next)
+					next = skin.keeps[index].offset + skin.keeps[index].size;
+			}
+			at = (next + 255) & ~(uint64_t)255;
+			if (at + size > SKIN_KEEP_SIZE)
+				break;
+		}
+		for (index = 0; index < SKIN_KEEPS; index++)
+		{
+			if (!skin.keeps[index].live)
+			{
+				if (entry == SKIN_KEEPS)
+					entry = index;
+			}
+			else if (skin.keeps[index].used_serial <= done &&
+				(oldest == SKIN_KEEPS || skin.keeps[index].used_serial < skin.keeps[oldest].used_serial))
+				oldest = index;
+		}
+		if (fits && entry < SKIN_KEEPS)
+		{
+			*offset = best;
+			*free_entry = entry;
+			return 1;
+		}
+		if (oldest == SKIN_KEEPS)
+			return 0;
+		keep_drop(oldest);
+		skin.keep_evicted++;
+	}
+}
+
+int xgpu_vulkan_mesh_skin_kept(uint64_t key, int make, struct xgpu_vulkan_mesh_buffer *rest, uint32_t first,
+	uint32_t count, const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2],
+	struct xgpu_vulkan_range *skinned, struct xgpu_vulkan_range *wide)
+{
+	struct xgpu_vulkan_range bone_range;
+	uint64_t size = (uint64_t)count * (wide ? 64 : 32), offset;
+	uint32_t entry, slot;
+	int found;
+	float *to;
+
+	if (!skin.made || !rest || !rest->set || !count || !bone_count ||
+		(uint64_t)(first + count) * 48 > rest->size || first + count < first)
+		return 0;
+	found = keep_find(key);
+	if (found >= 0 && (!wide || skin.keeps[found].wide))
+	{
+		skin.keeps[found].used_serial = vk.serial;
+		skinned->buffer = skin.ring;
+		skinned->offset = SKIN_RING_SIZE + skin.keeps[found].offset;
+		if (wide)
+		{
+			wide->buffer = skin.ring;
+			wide->offset = skinned->offset + (uint64_t)count * 32;
+		}
+		skin.keep_hits++;
+		return 1;
+	}
+	if (!make)
+		return 0;
+	/* (a narrow one asked wide: made again, wide) */
+	if (found >= 0 && skin.keeps[found].used_serial <= completed_serial())
+		keep_drop((uint32_t)found);
+	else if (found >= 0)
+		return 0;
+	if (size > SKIN_KEEP_SIZE / 8 || !keep_place(size, &offset, &entry))
+	{
+		skin.keep_refused++;
+		return 0;
+	}
+	to = xgpu_vulkan_upload(bone_count * 48, 256, &bone_range);
+	if (!to || bone_range.buffer != vk.ring)
+		return 0;
+	memcpy(to, bones, (size_t)bone_count * 48);
+	skin_dispatch(rest, first, count, bones, bone_count, inverse_scale, SKIN_RING_SIZE + offset, wide != NULL,
+		&bone_range);
+	skin.keeps[entry].key = key;
+	skin.keeps[entry].offset = offset;
+	skin.keeps[entry].size = size;
+	skin.keeps[entry].made_serial = skin.keeps[entry].used_serial = vk.serial;
+	skin.keeps[entry].wide = wide != NULL;
+	skin.keeps[entry].live = 1;
+	for (slot = keep_hash(key); skin.keep_slots[slot] > 0; slot = (slot + 1u) & (SKIN_KEEP_SLOTS - 1u))
+	{
+	}
+	skin.keep_slots[slot] = (int32_t)entry + 1;
+	skin.keep_made++;
+	skinned->buffer = skin.ring;
+	skinned->offset = SKIN_RING_SIZE + offset;
+	if (wide)
+	{
+		wide->buffer = skin.ring;
+		wide->offset = skinned->offset + (uint64_t)count * 32;
+	}
+	return 1;
+}
+
+/* every kept skinning let go of (a new set of meshes: their buffers are
+others); the region's memory is the skin buffer's, kept */
+void xgpu_vulkan_mesh_skin_kept_clear(void)
+{
+	memset(skin.keeps, 0, sizeof(skin.keeps));
+	memset(skin.keep_slots, 0, sizeof(skin.keep_slots));
+	skin.keep_gone = 0;
+}
+
+void xgpu_vulkan_mesh_skin_kept_statistics(uint64_t *hits, uint64_t *made, uint64_t *evicted, uint64_t *refused)
+{
+	*hits = skin.keep_hits;
+	*made = skin.keep_made;
+	*evicted = skin.keep_evicted;
+	*refused = skin.keep_refused;
 }
 
 void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, uint64_t *ring_full)
