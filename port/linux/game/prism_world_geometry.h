@@ -15,6 +15,10 @@ struct vertex_buffer;
 (structure_render_preprocess): reads the setting, and takes up the
 remodel of the BSP the frame draws when it is on */
 void prism_world_geometry_frame(void);
+/* port: the BSP's remodel taken up or let go of for this frame (by the
+frame's first reader, SCENE_STATIC's, before the structure is drawn); TRUE
+where display.prism_world_geometry asks for it */
+boolean prism_world_geometry_prepare(void);
 
 /* the vertices a material's chunk of visible surfaces is drawn from
 (structure_render_pass): `stock`, the material's own, or the remodel's,

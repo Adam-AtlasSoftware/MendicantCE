@@ -89,14 +89,18 @@ units) rather than made linear */
 int prism_rt_albedo_stored(void);
 void xgpu_backend_prism_bake(const struct xgpu_stream_prism_bake *bake, const void *data, unsigned long size);
 unsigned long prism_scene_static_generation(void);
+boolean prism_scene_static_in_play(void);
 int prism_scene_static_ended(void);
 /* render_enumerate.c's (the window drawn is a map's first frame's, unseen) */
 extern unsigned char render_enumerating;
 /* ui_widget.c's, game.c's */
 boolean main_menu_is_active(void);
 boolean game_in_progress(void);
-/* mod_meshes.c's: a model drawn by a mod's mesh (mods.h) */
-boolean mod_meshes_model_replaced(long model_index);
+/* mod_meshes.c's: a model a mod has a mesh for, whether remodels are drawn
+now, and the set's number (mods.h) */
+boolean mod_meshes_model_candidate(long model_index);
+boolean mod_meshes_remodels_drawn(void);
+unsigned long mod_meshes_generation(void);
 
 /* ---------- constants */
 
@@ -599,14 +603,20 @@ base map's mean colour, linear) and coverage (an alpha-tested model shader's
 share of its base map's texels drawn: its leaves' cards; 1 opaque; a
 transparent shader's triangles left out).
 
-A placement whose model a mod's mesh draws (display.prism_models,
-mod_meshes_model_replaced) is sent as the others are, so that the bake's
-light and its geometry's hash are the stock scenery's whatever the remodels
-(a bake travels without them), and its triangles' run is named after the
-fixtures: the scene the frame traces (Rebaked's object pixels' sun, every
-ray of Path Traced) leaves those runs out, and the object is traced as it
-is drawn, its mesh's level as the frame's other objects are
-(prism_bake_object_static answers FALSE for it). Before, the stock rock
+A placement whose model a mod's mesh may draw (a mesh in any tier of the
+mods played, mod_meshes_model_candidate, whatever display.prism_models says)
+is sent as the others are, so that the bake's light and its geometry's hash
+are the stock scenery's whatever the remodels (a bake travels without them),
+and its triangles' run is named after the fixtures. While remodels are drawn
+(mod_meshes_remodels_drawn; the host's own store, xgpu_vulkan_bake.c's
+scene_runtime_address, on the same frame) the scene the frame traces
+(Rebaked's object pixels' sun, every ray of Path Traced) leaves those runs
+out, and the object is traced as it is drawn, its mesh's level as the
+resolver chose it (port/linux/vulkan/xgpu_geometry.h), or its stock model
+until its mesh is in (prism_bake_object_static answers FALSE for it); with
+prism_models "stock" the frame traces them as the bake does. The runs do
+not depend on the setting, so a change of it switches the traced scene on
+the frame it switches the drawn one, not at the next BSP. Before, the stock rock
 stayed in the traced scene around the mesh drawn in its place: a shell of
 CE's facets just outside or inside the rounded remodel that shadowed it in
 patches, and flickered with each frame's jitter and sun sample. */
@@ -1237,7 +1247,7 @@ static boolean scenery_copy(
 					}
 				}
 			}
-			if (input->scenery_count > first && mod_meshes_model_replaced(model_index) &&
+			if (input->scenery_count > first && mod_meshes_model_candidate(model_index) &&
 				!scenery_replaced_add(input, model_index, first, input->scenery_count - first))
 			{
 				return FALSE;
@@ -1579,7 +1589,8 @@ static void control_fill(
 	bake->flags = (prism_bake.foreground ? XGPU_BAKE_FLAG_FOREGROUND : 0) |
 		(prism_bake_menus_up() ? XGPU_BAKE_FLAG_MENU : 0) |
 		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0) |
-		(prism_bake.remodel ? XGPU_BAKE_FLAG_REMODEL : 0);
+		(prism_bake.remodel ? XGPU_BAKE_FLAG_REMODEL : 0) |
+		(prism_scene_static_in_play() ? XGPU_BAKE_FLAG_IN_PLAY : 0);
 	bake->map_checksum = (uint32_t)cache_files_get_checksum();
 	bake->bsp_index = global_structure_bsp_index_get();
 	bake->folder = (uint32_t)(unsigned long)prism_bake.folder;
@@ -1783,7 +1794,8 @@ boolean prism_bake_object_static(
 	static long kept_index[OBJECT_STATIC_KEPT];
 	static char kept_answer[OBJECT_STATIC_KEPT];
 	static void const *kept_scenario;
-	static unsigned long kept_generation;
+	static unsigned long kept_generation, kept_meshes;
+	static boolean kept_drawn;
 	struct scenario *scenario = global_scenario_get();
 	struct object_datum *object = object_try_and_get_and_verify_type(object_index, _object_mask_all);
 	struct tag_block const *placements, *palette;
@@ -1794,11 +1806,14 @@ boolean prism_bake_object_static(
 	{
 		return FALSE;
 	}
-	if (kept_scenario != scenario || kept_generation != prism_bake.replaced_generation)
+	if (kept_scenario != scenario || kept_generation != prism_bake.replaced_generation ||
+		kept_meshes != mod_meshes_generation() || kept_drawn != mod_meshes_remodels_drawn())
 	{
 		memset(kept_index, 0xff, sizeof(kept_index));
 		kept_scenario = scenario;
 		kept_generation = prism_bake.replaced_generation;
+		kept_meshes = mod_meshes_generation();
+		kept_drawn = mod_meshes_remodels_drawn();
 	}
 	slot = DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) % OBJECT_STATIC_KEPT;
 	if (kept_index[slot] == object_index)
@@ -1848,7 +1863,7 @@ boolean prism_bake_object_static(
 			found = TRUE;
 		}
 	}
-	if (found)
+	if (found && kept_drawn)
 	{
 		long model_index = object_definition_get(object->definition_index)->object.model.index;
 

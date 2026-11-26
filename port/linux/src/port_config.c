@@ -784,7 +784,10 @@ static const struct config_setting config_settings[] =
 		"maps are drawn from. \"far\": every surface's far level (the relief's\n"
 		"shadows at a fraction of the cost); \"remodel\": as the surfaces are\n"
 		"drawn, near and far; \"stock\": the map's own triangles (cheapest).\n"
-		"Read each frame (prism_set \"world_geometry_shadows stock\")." },
+		"Classic lighting's; PRISM Rebaked and Path Traced draw the geometry\n"
+		"drawn whatever it says (\"far\" and \"stock\" there only with\n"
+		"debug.geometry_overrides). Read each frame\n"
+		"(prism_set \"world_geometry_shadows stock\")." },
 	{ "display.prism_world_geometry_occlusion", _config_string, "\"remodel\"", "HALO_PRISM_WORLD_GEOMETRY_OCCLUSION",
 		_environment_value, _platform_desktop,
 		"PRISM v2, with display.prism_world_geometry \"remodel\" and\n"
@@ -794,7 +797,8 @@ static const struct config_setting config_settings[] =
 		"pixel reads its own surface's occlusion; \"far\": every surface's far\n"
 		"level; \"stock\": the map's own triangles (cheapest, but a remodelled\n"
 		"surface then reads the occlusion of CE's shape about it, which\n"
-		"shimmers as the camera moves). Read each frame\n"
+		"shimmers as the camera moves). In PRISM Rebaked and Path Traced \"far\"\n"
+		"and \"stock\" only with debug.geometry_overrides. Read each frame\n"
 		"(prism_set \"world_geometry_occlusion far\")." },
 	{ "display.prism_world_geometry_facing", _config_boolean, "true", "HALO_PRISM_WORLD_GEOMETRY_FACING",
 		_environment_value, _platform_desktop,
@@ -4196,6 +4200,14 @@ static const struct config_setting config_settings[] =
 	{ "debug.screenshot_until", _config_real, "0.0", "HALO_SCREENSHOT_UNTIL", _environment_value, _platform_all,
 		"With screenshot_every, save until this many seconds of the scenario's\n"
 		"simulation; 0 to the last frame." },
+	{ "debug.geometry_overrides", _config_boolean, "false", "HALO_GEOMETRY_OVERRIDES", _environment_value,
+		_platform_desktop,
+		"PRISM Rebaked and Path Traced: let display.prism_world_geometry_shadows\n"
+		"and _occlusion draw another shape of the level than the one drawn\n"
+		"(\"far\", \"stock\"), for diagnosis; off, every pass draws the geometry\n"
+		"drawn (one geometry per surface and object:\n"
+		"port/linux/vulkan/xgpu_geometry.h). Classic lighting draws those\n"
+		"settings as it always did." },
 	{ "debug.camera_path", _config_string, "\"\"", "HALO_CAMERA_PATH", _environment_value, _platform_all,
 		"A file of the camera's poses at frames (port/linux/game/camera_pose.c:\n"
 		"start, cmd and key lines) it is moved along once the map is in, the\n"

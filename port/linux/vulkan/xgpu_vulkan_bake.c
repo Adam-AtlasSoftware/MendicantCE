@@ -66,6 +66,7 @@ top level.
 
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_bake.h"
+#include "xgpu_vulkan_meshes.h"
 #include "xgpu_vulkan_bake_shaders.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_scene.h"
@@ -654,6 +655,11 @@ static struct
 
 	uint32_t status_serial;
 	double last_status;
+	/* port: a set begun again in play (XGPU_BAKE_FLAG_IN_PLAY) with no whole
+	bake of its key: its generation + 1 (0 none), the bake drawn kept for it
+	until the next load; such holds and the swaps to a whole bake, counted */
+	uint32_t held_generation;
+	uint32_t holds, swaps;
 } bake;
 
 /* ---------- time */
@@ -2209,7 +2215,7 @@ static void file_choose(struct bake_state *b);
 /* the bake's inputs taken (the render thread's: the scene, the materials,
 the rig, the reach), its key made and its plan begun on its thread: NULL
 where they are not all here yet */
-static struct bake_state *bake_begin(void)
+static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_key *drawn, int *held)
 {
 	const struct xgpu_scene_static_set *set = xgpu_vulkan_scene_static_set();
 	const struct xgpu_stream_rt_frame *frame;
@@ -2218,6 +2224,7 @@ static struct bake_state *bake_begin(void)
 	uint32_t generation, material_count, alpha_words, index, kept = 0, lamps = 0, indoor = 0;
 	struct bake_state *b;
 	uint64_t hash;
+	struct prism_bake_cache_key asked;
 	float power = 0.0f;
 	char name[XGPU_BAKE_NAME];
 	int alpha_traced;
@@ -2500,6 +2507,7 @@ static struct bake_state *bake_begin(void)
 	name_clean(b->map, name, sizeof(name));
 	snprintf(b->path, sizeof(b->path), "%s/%s/bsp%d.pbk", b->folder, name, (int)b->bsp);
 	snprintf(b->new_path, sizeof(b->new_path), "%s.new", b->path);
+	asked = b->key;
 	{
 		char folder[XGPU_BAKE_PATH + 160];
 
@@ -2509,6 +2517,35 @@ static struct bake_state *bake_begin(void)
 	/* (a whole bake of this BSP: the shipped one, or this machine's; the
 	plan at its quality) */
 	file_choose(b);
+	/* (port: a set begun again in play, XGPU_BAKE_FLAG_IN_PLAY: never baked;
+	begun only where a whole bake of its key is there to load (the shipped
+	one or this machine's, as file_choose found it), else the caller keeps the
+	bake drawn until the next load) */
+	if (in_play)
+	{
+		/* (the bake drawn is of this key already, the setting changed back:
+		kept as it is, nothing loaded again; the key asked, or the better
+		quality's file_choose took) */
+		if (drawn && (!prism_bake_key_compare(drawn, &asked) || (b->chosen && !prism_bake_key_compare(drawn, &b->key))))
+		{
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) is the bake drawn's "
+				"geometry: kept as it is", b->map, (int)b->bsp, b->generation);
+			bake_free(b);
+			*held = 2;
+			return NULL;
+		}
+		if (!b->chosen)
+		{
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) has no whole bake here "
+				"(%s): nothing baked in play; the bake drawn is kept until the next load", b->map, (int)b->bsp,
+				b->generation, b->path);
+			bake_free(b);
+			*held = 1;
+			return NULL;
+		}
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u): its whole bake loaded "
+			"(%s)", b->map, (int)b->bsp, b->generation, b->path);
+	}
 	/* the materials and alpha maps copied for the GPU (the set's may go) */
 	b->started = now_seconds();
 	b->step = STEP_PLAN;
@@ -2721,10 +2758,12 @@ static int scene_block_upload(VkCommandBuffer commands, struct bake_state *b)
 }
 
 /* the scene block the frame traces: the bake's, or its own where the static
-scenery a mod's mesh draws is left out */
+scenery a mod's mesh may draw is left out (port: while remodels are drawn,
+xgpu_vulkan_meshes_drawn, as the game's prism_bake_object_static has it on
+the same frame: display.prism_models "stock" traces the bake's whole) */
 static VkDeviceAddress scene_runtime_address(const struct bake_state *b)
 {
-	return b->scene_runtime.buffer ? b->scene_runtime.address : b->scene.address;
+	return b->scene_runtime.buffer && xgpu_vulkan_meshes_drawn() ? b->scene_runtime.address : b->scene.address;
 }
 
 /* the scene put on the GPU (the plan done): the triangles traced (the
@@ -6244,11 +6283,46 @@ static void bake_frame(void)
 {
 	struct bake_state *b = bake.bake;
 	VkCommandBuffer commands;
-	int wanted;
+	int wanted, in_play;
 
 	garbage_collect();
 	timing_collect();
-	wanted = bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0;
+	/* (port: nothing baked for a set begun again in play: a setting changed,
+	XGPU_BAKE_FLAG_IN_PLAY) */
+	in_play = (bake.control.flags & XGPU_BAKE_FLAG_IN_PLAY) != 0;
+	wanted = (bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0) && !in_play;
+	/* (port: such a set of the BSP drawn: its whole bake loaded where there
+	is one, else the bake drawn kept, its generation remembered, until the
+	next load; never a bake begun in play) */
+	if (b && in_play && b->generation != bake.control.generation && b->bsp == bake.control.bsp_index &&
+		b->request == bake.control.request && !strncmp(b->map, bake.control.map_name, sizeof(b->map) - 1))
+	{
+		int held = 0;
+		struct bake_state *next;
+
+		if (bake.held_generation == bake.control.generation + 1u)
+			goto keep;
+		next = bake_begin(1, &b->key, &held);
+		/* (the bake drawn is of the set's geometry: it takes the set's number) */
+		if (held == 2)
+		{
+			b->generation = bake.control.generation;
+			bake.held_generation = 0;
+			goto keep;
+		}
+		if (held)
+		{
+			bake.held_generation = bake.control.generation + 1u;
+			bake.holds++;
+			goto keep;
+		}
+		/* (its inputs not all in yet: the bake drawn kept meanwhile) */
+		if (!next)
+			goto keep;
+		bake_free(b);
+		bake.bake = b = next;
+		bake.swaps++;
+	}
 	/* (a bake of another BSP, scene or quality, a rebake asked, or one
 	opened while none was wanted that now is: let go) */
 	if (b && (b->generation != bake.control.generation || b->bsp != bake.control.bsp_index ||
@@ -6270,13 +6344,25 @@ static void bake_frame(void)
 	}
 	if (!b)
 	{
-		b = bake.bake = bake_begin();
+		int held = 0;
+
+		/* (port: a set begun again in play with no bake drawn before it: its
+		whole bake loaded, or nothing, never baked) */
+		if (in_play && bake.held_generation == bake.control.generation + 1u)
+		{
+			status_write(NULL);
+			return;
+		}
+		b = bake.bake = bake_begin(in_play, NULL, &held);
+		if (held)
+			bake.held_generation = bake.control.generation + 1u;
 		if (!b)
 		{
 			status_write(NULL);
 			return;
 		}
 	}
+keep:
 	commands = xgpu_vulkan_compute_commands();
 	/* (the layered bake's weights, and what is drawn recombined when they
 	change) */

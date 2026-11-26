@@ -436,6 +436,21 @@ int main(int argc, char **argv)
 	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 90.0f, -1, &view) && view.lod == 1);
 	xgpu_mesh_store_options(store, 0, 0);
 	CHECK(xgpu_mesh_store_use_from(store, answers[0].id, 90.0f, 0, &view) && view.lod == 1);
+	/* ---- the resolver's reads (xgpu_geometry.h): the ladder, a level
+	chosen by the caller; nothing for a mesh not in or a level it has not */
+	{
+		uint32_t lod_count = 0, triangles[XGPU_PMESH_LODS_MAXIMUM];
+		float cutoffs[XGPU_PMESH_LODS_MAXIMUM];
+
+		CHECK(xgpu_mesh_store_ladder(store, answers[0].id, &lod_count, triangles, cutoffs));
+		CHECK(lod_count == 2 && triangles[0] == 2 * TRIANGLES && triangles[1] == 1 && cutoffs[0] == 100.0f &&
+			cutoffs[1] == 0.0f);
+		CHECK(xgpu_mesh_store_use_lod(store, answers[0].id, 1, &view) && view.lod == 1 && view.vertex_count == 3);
+		CHECK(xgpu_mesh_store_use_lod(store, answers[0].id, 0, &view) && view.lod == 0);
+		CHECK(!xgpu_mesh_store_use_lod(store, answers[0].id, 2, &view));
+		CHECK(!xgpu_mesh_store_ladder(store, answers[10].id, &lod_count, triangles, cutoffs));
+		CHECK(!xgpu_mesh_store_use_lod(store, answers[10].id, 0, &view));
+	}
 	/* ---- the read's checks: each drawn stock for good */
 	for (index = 10; index < 13; index++)
 	{
@@ -475,6 +490,23 @@ int main(int argc, char **argv)
 		CHECK(!xgpu_mesh_store_use(store, answers[14].id, 500.0f, &view));
 		xgpu_mesh_store_statistics(store, &statistics);
 		CHECK(statistics.refused_budget >= 1 && statistics.resident == 1);
+		/* (pinned, a remodel drawn: never let go of, the second stock for
+		good meanwhile; then unpinned by a new map, below) */
+		xgpu_mesh_store_pin(store, answers[0].id);
+		for (frame = 0; frame < (int)XGPU_MESH_STORE_RETRY_FRAMES + 2; frame++)
+			xgpu_mesh_store_frame(store);
+		CHECK(!xgpu_mesh_store_use(store, answers[14].id, 500.0f, &view));
+		settle(store, threads);
+		CHECK(!xgpu_mesh_store_use(store, answers[14].id, 500.0f, &view));
+		CHECK(xgpu_mesh_store_use(store, answers[0].id, 500.0f, &view));
+		xgpu_mesh_store_statistics(store, &statistics);
+		CHECK(statistics.evictions == 0 && statistics.resident == 1);
+		xgpu_mesh_store_map(store, 0x1238, 0, 15, queries, answers);
+		CHECK(!xgpu_mesh_store_use(store, answers[0].id, 500.0f, &view));
+		settle(store, threads);
+		CHECK(xgpu_mesh_store_use(store, answers[0].id, 500.0f, &view));
+		CHECK(!xgpu_mesh_store_use(store, answers[14].id, 500.0f, &view));
+		settle(store, threads);
 		/* (the first not drawn for a while: let go of for the second, once
 		its retry comes) */
 		for (frame = 0; frame < (int)XGPU_MESH_STORE_RETRY_FRAMES + 2; frame++)

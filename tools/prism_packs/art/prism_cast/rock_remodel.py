@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """PRISM: a scenery rock or boulder remodelled for the mesh store (display.prism_models "max"), numpy only.
 
-    python3 rock_remodel.py <model dump.json> <base map.png> <out.pmesh> [--seed N] [--levels 4,2,1]
-        [--cutoffs 200,70,0] [--relief 1.0] [--report out.json]
+    python3 rock_remodel.py <model dump.json> <base map.png> <out.pmesh> [--seed N] [--levels auto|4,3,2]
+        [--cutoffs auto|200,100,0] [--target-triangles 12000] [--relief 1.0] [--report out.json]
 
 From the model as the game draws it (debug.prism_mesh_dump), each permutation's pieces:
   1. split into four at the edges' midpoints, the level's number of times, each midpoint set on the PN curve of its
@@ -15,6 +15,12 @@ From the model as the game draws it (debug.prism_mesh_dump), each permutation's 
      is the same rock at its own detail and a level switch changes only the finest grain;
   4. never more than 0.6 % of its size outside CE's surface, nor 3 % inside it (collision is CE's); normals per
      corner, smooth up to 60 degrees; tangents from the uvs.
+The levels (--levels auto): as many subdivisions as keep level 0 within --target-triangles, then one fewer a level,
+each a quarter of the one before, down to one subdivision: never the bare cage (CE's own facets, or fewer triangles
+than CE's rock), which drawn far off read as the remodel flipping back to CE's shape; at most --most-levels. The
+cutoffs (auto): 200 px for level 0, half for each level after, so that a level's triangles keep their size on the
+screen. The renderer draws no level of fewer than an eighth of the triangles of the level before it
+(port/linux/vulkan/xgpu_geometry.h): the old ladders' 16x steps (1,984 / 124 / 31) were drawn at level 0 alone.
 Every displacement is a function of the position and the base map's coordinates (a seam's two sides move together:
 welded). The last level is the smooth mass once subdivided (not CE's own geometry, whose flat facets would show as a
 different shell when it switches in). Collision, physics and markers are the stock model's (the game's): nothing here
@@ -212,14 +218,26 @@ def build_level(dump, blob, part_groups, subdivisions, size, rng_seed, relief, o
     return pieces
 
 
+def auto_levels(cage, target, most):
+    """subdivisions per level: level 0 the most within target (at least one), one fewer each level after (each a
+    quarter of the one before), never 0 (the cage); at most `most` levels"""
+    top = 1
+    while cage * 4 ** (top + 1) <= target:
+        top += 1
+    return list(range(top, 0, -1))[:max(1, most)]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dump")
     ap.add_argument("base_map")
     ap.add_argument("out")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--levels", default="4,2,1")
-    ap.add_argument("--cutoffs", default="200,70,0")
+    ap.add_argument("--levels", default="auto",
+                    help="subdivisions per level (4,3,2), or auto: within --target-triangles, a quarter a step")
+    ap.add_argument("--cutoffs", default="auto", help="pixels from which each level is drawn, or auto")
+    ap.add_argument("--target-triangles", type=int, default=12000)
+    ap.add_argument("--most-levels", type=int, default=4)
     ap.add_argument("--phong", type=float, default=0.75)
     ap.add_argument("--taubin", type=int, default=6)
     ap.add_argument("--relief", type=float, default=1.0, help="the relief's scale (1: the amplitudes below)")
@@ -251,8 +269,11 @@ def main():
                 groups.setdefault((ri, pi, part["shader"]), []).append(part)
     allp = np.concatenate([pfd.part_arrays(dump, blob, p)[0][:, 0:3] for ps in groups.values() for p in ps])
     size = float((allp.max(0) - allp.min(0)).max())
-    subs = [int(x) for x in o.levels.split(",")]
-    cut = [float(x) for x in o.cutoffs.split(",")]
+    cage = sum(len(pfd.part_arrays(dump, blob, p)[1]) for ps in groups.values() for p in ps)
+    subs = auto_levels(cage, o.target_triangles, o.most_levels) if o.levels == "auto" else \
+        [int(x) for x in o.levels.split(",")]
+    cut = [200.0 / (2 ** i) for i in range(len(subs) - 1)] + [0.0] if o.cutoffs == "auto" else \
+        [float(x) for x in o.cutoffs.split(",")]
     vertices, indices, pieces, levels = [], [], [], []
     vat = iat = 0
     report = {"tag": dump["tag"], "size_wu": size, "levels": []}

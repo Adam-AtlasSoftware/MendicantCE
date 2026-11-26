@@ -62,6 +62,7 @@ its swapchain.
 #include "xgpu_vulkan_stream.h"
 #include "xgpu_vulkan_textures.h"
 #include "xgpu_vulkan_store.h"
+#include "xgpu_geometry.h"
 #include "xgpu_vulkan_meshes.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_bake.h"
@@ -3555,7 +3556,10 @@ static int draw_pipeline(const struct draw_input *input, int apart)
 		if (mesh_verdict == XGPU_VULKAN_MESHES_SWAP &&
 			!xgpu_vulkan_meshes_prepare((const float (*)[4])stream.constants, CONSTANTS_RANGE / 16, mesh_wide) &&
 			serial == xgpu_vulkan_serial())
+		{
 			mesh_verdict = XGPU_VULKAN_MESHES_STOCK;
+			xgpu_vulkan_meshes_note_drawn(0);
+		}
 		preparation_end(2, traced);
 		if (serial == xgpu_vulkan_serial())
 			break;
@@ -4773,8 +4777,10 @@ then, drawn opaque) */
 	draw.owner = (int)floorf(stream.uniforms.world_ao[0] + 0.5f);
 	/* (a part a replacement mesh draws, display.prism_models: its pieces as
 	the mesh store skinned them, in the world; a part its carrier stands
-	for, nothing) */
-	if (!xgpu_vulkan_rt_stock_models())
+	for, nothing; port: with the resolver, display.prism_rt_objects
+	"low_lod" too, at each mesh's most coarse level it may trace, never the
+	game's model under the remodel drawn) */
+	if (!xgpu_vulkan_rt_stock_models() || xgpu_vulkan_meshes_resolved())
 	{
 		struct xgpu_vulkan_meshes_rt_piece pieces[XGPU_VULKAN_MESHES_RT_PIECES];
 		int count = xgpu_vulkan_meshes_rt_pieces(window, pieces, XGPU_VULKAN_MESHES_RT_PIECES), piece;
@@ -4788,7 +4794,11 @@ then, drawn opaque) */
 		origin[0] = stream.constants[60][3];
 		origin[1] = stream.constants[61][3];
 		origin[2] = stream.constants[62][3];
-		if (count > 0 && !xgpu_vulkan_rt_replacement_traced(pieces[0].origin, triangles))
+		/* (port: the resolver's traced level, xgpu_geometry.h: shared out
+		within the share before the frame's draws, never stock, never left
+		out; the rules below are the choices before it, legacy) */
+		if (!xgpu_vulkan_meshes_resolved() && count > 0 &&
+			!xgpu_vulkan_rt_replacement_traced(pieces[0].origin, triangles))
 		{
 			/* (port: the mesh's least detailed level in the drawn one's place:
 			the mesh store draws no stock part in a carrier's place, so the
@@ -4802,8 +4812,14 @@ then, drawn opaque) */
 			if (count > 0 && !xgpu_vulkan_rt_replacement_traced(pieces[0].origin, triangles))
 				count = -1;
 		}
-		else if (count == 0 && !xgpu_vulkan_rt_replacement_traced(origin, 0))
+		else if (!xgpu_vulkan_meshes_resolved() && count == 0 && !xgpu_vulkan_rt_replacement_traced(origin, 0))
 			count = -1;
+		/* (what the traced scene took of the object, for the resolver's
+		statistics: the resolved notes theirs in xgpu_vulkan_meshes_rt_pieces) */
+		if (!xgpu_vulkan_meshes_resolved() && count > 0)
+			xgpu_vulkan_meshes_note_traced(XGPU_GEOMETRY_REMODEL, (uint32_t)(pieces[0].identity[1] >> 32));
+		else if (count < 0 && xgpu_vulkan_meshes_part_remodelled())
+			xgpu_vulkan_meshes_note_traced(XGPU_GEOMETRY_STOCK, 0);
 		if (count == 0)
 			return;
 		for (piece = 0; piece < count; piece++)

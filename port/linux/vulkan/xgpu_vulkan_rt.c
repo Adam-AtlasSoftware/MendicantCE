@@ -44,6 +44,7 @@ more), each reused once its submission is done. GPU time: HALO_VULKAN_STATS
 
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_rt.h"
+#include "xgpu_vulkan_meshes.h"
 #include "xgpu_vulkan_rt_shaders.h"
 #include "xgpu_vulkan_scene.h"
 #include "xgpu_vulkan_upscale.h"
@@ -1046,6 +1047,10 @@ static void fixtures_update(void)
 
 void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 {
+	/* (port: the game's remodels-drawn signal of the frame, paired with the
+	mesh store's on the same frame: xgpu_vulkan_meshes_pair) */
+	xgpu_vulkan_meshes_pair(record->frame, (record->flags & XGPU_RT_FLAG_REMODELS_DRAWN) != 0,
+		record->spare[3] >= 0.0f && record->spare[3] < 16777216.0f ? (uint32_t)record->spare[3] : 0u);
 	if (!make())
 		return;
 	reference_collect();
@@ -1100,6 +1105,26 @@ int xgpu_vulkan_rt_alpha_traced(void)
 int xgpu_vulkan_rt_stock_models(void)
 {
 	return (rt.frame.flags & XGPU_RT_FLAG_STOCK_MODELS) != 0;
+}
+
+uint32_t xgpu_vulkan_rt_replacement_budget(float *coarse_reach)
+{
+	*coarse_reach = RT_REPLACEMENT_REACH;
+	if (rt.frame.flags & XGPU_RT_FLAG_STOCK_MODELS)
+		return 1u;
+	if (rt.frame.objects == 1)
+		return 0u;
+	return (uint32_t)(RT_REPLACEMENT_SHARE * (float)RT_OBJECT_TRIANGLES);
+}
+
+int xgpu_vulkan_rt_eye(float eye[3])
+{
+	if (!rt.eye_known)
+		return 0;
+	eye[0] = rt.eye[0];
+	eye[1] = rt.eye[1];
+	eye[2] = rt.eye[2];
+	return 1;
 }
 
 /* port: whether a replacement mesh's pieces (triangles of them, its node 0
@@ -2317,7 +2342,11 @@ void xgpu_vulkan_rt_capture(const struct xgpu_vulkan_rt_draw *draw)
 	left out, so that the near ones, drawn later, still find room: the mods'
 	models, in 10,000-triangle runs, had filled the window two frames in
 	three, and which objects were left out changed from frame to frame) */
+	/* (the resolver's replacement meshes, identity 'mesh', never: their
+	traced levels were shared out within the share before the frame's
+	draws, xgpu_geometry.h) */
 	if (rt.frame.objects != 1 && rt.eye_known &&
+		!(draw->identity[2] == 0x6d657368ull && xgpu_vulkan_meshes_resolved()) &&
 		(float)(capture->triangle_count + triangles) > RT_REPLACEMENT_SHARE * (float)RT_OBJECT_TRIANGLES)
 	{
 		float d[3];

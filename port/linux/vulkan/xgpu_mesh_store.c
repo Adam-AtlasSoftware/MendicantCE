@@ -79,6 +79,10 @@ struct entry
 	uint64_t bytes;
 	uint64_t used_frame;
 	uint64_t retry_frame;
+	/* drawn as the remodel once (xgpu_mesh_store_pin): never let go of for
+	the budget while the map lasts, so that no object drawn as its remodel
+	is drawn stock again (xgpu_geometry.h) */
+	int pinned;
 	/* queued by xgpu_mesh_store_options' prefetch */
 	int prefetched;
 };
@@ -748,7 +752,8 @@ static int budget_room(struct xgpu_mesh_store *store, uint64_t bytes)
 		{
 			struct entry *entry = &store->entries[index];
 
-			if (entry->state == _entry_resident && entry->used_frame + XGPU_MESH_STORE_KEEP_FRAMES < store->frame &&
+			if (entry->state == _entry_resident && !entry->pinned &&
+				entry->used_frame + XGPU_MESH_STORE_KEEP_FRAMES < store->frame &&
 				(!oldest || entry->used_frame < oldest->used_frame))
 				oldest = entry;
 		}
@@ -983,6 +988,105 @@ void xgpu_mesh_store_options(struct xgpu_mesh_store *store, int prefetch, uint32
 	}
 }
 
+/* a resident entry's level as a draw reads it */
+static void view_fill(const struct entry *entry, uint32_t lod, struct xgpu_mesh_store_view *view)
+{
+	memset(view, 0, sizeof(*view));
+	view->rest = entry->rest;
+	view->indices = entry->indices;
+	view->lod = lod;
+	view->vertex_first = entry->lods[lod].vertex_first;
+	view->vertex_count = entry->lods[lod].vertex_count;
+	view->pieces = entry->pieces + entry->lods[lod].piece_first;
+	view->piece_count = entry->lods[lod].piece_count;
+	view->bone_count = entry->bone_count;
+	view->bone_nodes = entry->bone_nodes;
+	view->rig = entry->rig;
+	view->node_count = entry->node_count;
+	view->inverse_scale[0] = entry->inverse_scale[0];
+	view->inverse_scale[1] = entry->inverse_scale[1];
+	view->present = entry->present;
+}
+
+/* an id's entry if the id is this generation's, else NULL (counted stale) */
+static struct entry *entry_of(struct xgpu_mesh_store *store, uint32_t id)
+{
+	uint32_t index = (id & 0xfffffu) - 1u;
+
+	if (!store || !id)
+		return NULL;
+	if ((id >> 20) != (store->generation & 0xfffu) || index >= store->entry_count)
+		return NULL;
+	return &store->entries[index];
+}
+
+int xgpu_mesh_store_ladder(struct xgpu_mesh_store *store, uint32_t id, uint32_t *lod_count, uint32_t *triangles,
+	float *cutoffs)
+{
+	struct entry *entry = entry_of(store, id);
+	uint32_t lod;
+	int state;
+
+	if (!entry)
+		return 0;
+	lock(store);
+	state = entry->state;
+	unlock(store);
+	if (state != _entry_resident)
+		return 0;
+	*lod_count = entry->lod_count;
+	for (lod = 0; lod < entry->lod_count; lod++)
+	{
+		triangles[lod] = entry->lods[lod].index_count / 3u;
+		cutoffs[lod] = lod + 1u < entry->lod_count ? entry->lods[lod].cutoff : 0.0f;
+	}
+	return 1;
+}
+
+int xgpu_mesh_store_ladder_vertices(struct xgpu_mesh_store *store, uint32_t id, uint32_t *vertices, int *rigged)
+{
+	struct entry *entry = entry_of(store, id);
+	uint32_t lod;
+	int state;
+
+	if (!entry)
+		return 0;
+	lock(store);
+	state = entry->state;
+	unlock(store);
+	if (state != _entry_resident)
+		return 0;
+	for (lod = 0; lod < entry->lod_count; lod++)
+		vertices[lod] = entry->lods[lod].vertex_count;
+	*rigged = entry->rig != NULL;
+	return 1;
+}
+
+int xgpu_mesh_store_use_lod(struct xgpu_mesh_store *store, uint32_t id, uint32_t lod, struct xgpu_mesh_store_view *view)
+{
+	struct entry *entry = entry_of(store, id);
+	int state;
+
+	if (!entry)
+		return 0;
+	lock(store);
+	state = entry->state;
+	unlock(store);
+	if (state != _entry_resident || lod >= entry->lod_count)
+		return 0;
+	entry->used_frame = store->frame;
+	view_fill(entry, lod, view);
+	return 1;
+}
+
+void xgpu_mesh_store_pin(struct xgpu_mesh_store *store, uint32_t id)
+{
+	struct entry *entry = entry_of(store, id);
+
+	if (entry)
+		entry->pinned = 1;
+}
+
 int xgpu_mesh_store_use(struct xgpu_mesh_store *store, uint32_t id, float lod_pixels,
 	struct xgpu_mesh_store_view *view)
 {
@@ -1029,21 +1133,7 @@ int xgpu_mesh_store_use_from(struct xgpu_mesh_store *store, uint32_t id, float l
 		if (lod_pixels >= cutoff)
 			break;
 	}
-	memset(view, 0, sizeof(*view));
-	view->rest = entry->rest;
-	view->indices = entry->indices;
-	view->lod = lod;
-	view->vertex_first = entry->lods[lod].vertex_first;
-	view->vertex_count = entry->lods[lod].vertex_count;
-	view->pieces = entry->pieces + entry->lods[lod].piece_first;
-	view->piece_count = entry->lods[lod].piece_count;
-	view->bone_count = entry->bone_count;
-	view->bone_nodes = entry->bone_nodes;
-	view->rig = entry->rig;
-	view->node_count = entry->node_count;
-	view->inverse_scale[0] = entry->inverse_scale[0];
-	view->inverse_scale[1] = entry->inverse_scale[1];
-	view->present = entry->present;
+	view_fill(entry, lod, view);
 	return 1;
 }
 

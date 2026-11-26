@@ -1163,10 +1163,11 @@ def step_rocks(ctx):
                     break
             ctx.python("prism_cast/rock_remodel.py", j, base, out, "--report",
                        mod / "reports" / f"{folder}.json", what=f"{folder}")
-    write_mod(mod, "prism_v3_rocks", "PRISM v3: rocks and boulders (meshes, local)", "0.4.0",
+    write_mod(mod, "prism_v3_rocks", "PRISM v3: rocks and boulders (meshes, local)", "0.5.0",
               "The scenery rocks and boulders of the campaign remodelled for the mesh store (display.prism_models "
               "\\\"max\\\"): CE's mass rounded and smoothed, CE's painted cracks and grain set in as the level's "
-              "own rock has them, the same rock at every level of detail; CE's collision. Built on this computer from "
+              "own rock has them, the same rock at every level of detail, a quarter of the triangles a level and "
+              "never CE's bare facets; CE's collision. Built on this computer from "
               "your own maps: never shared or shipped.")
 
 

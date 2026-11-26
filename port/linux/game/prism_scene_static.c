@@ -132,6 +132,11 @@ static struct
 	unsigned long generation;
 	short bsp_index;
 	struct structure_bsp *bsp;
+	/* port: the BSP the last set was of, kept across a release (a lighting
+	change), until the map goes; and whether the set is of it again (a
+	setting changed in play: prism_scene_static_in_play) */
+	struct structure_bsp *played_bsp;
+	boolean in_play;
 	boolean remodel;
 	int traced;
 	long total, surfaces;
@@ -738,6 +743,14 @@ void prism_scene_static_frame(
 	}
 	bsp_index = global_structure_bsp_index_get();
 	bsp = bsp_index != NONE ? global_structure_bsp_get() : NULL;
+	/* (port: the BSP's remodel taken up first, so that a new BSP's first set
+	is the remodel's where it is drawn, not the stock one begun again a
+	frame later, with the bake's key it opened; in PRISM Rebaked and Path
+	Traced, Classic's ray tracing as it was) */
+	if (prism_deferred_raster())
+	{
+		prism_world_geometry_prepare();
+	}
 	remodel = prism_world_geometry_drawn() != 0;
 	/* (the traced materials: none, or the level's, with its alpha-tested
 	surfaces or not) */
@@ -752,6 +765,10 @@ void prism_scene_static_frame(
 	{
 		set_free();
 		scene_static.generation++;
+		/* (port: a set of the BSP the last one was of: begun again in play,
+		by a setting; the bake then is never made, prism_bake.c) */
+		scene_static.in_play = bsp == scene_static.played_bsp;
+		scene_static.played_bsp = bsp;
 		scene_static.bsp_index = bsp_index;
 		scene_static.bsp = bsp;
 		scene_static.remodel = remodel;
@@ -872,6 +889,14 @@ void prism_scene_static_map_unloaded(
 	void)
 {
 	release();
+	scene_static.played_bsp = NULL;
+	scene_static.in_play = FALSE;
+}
+
+boolean prism_scene_static_in_play(
+	void)
+{
+	return scene_static.begun && scene_static.in_play;
 }
 
 unsigned long prism_scene_static_generation(
