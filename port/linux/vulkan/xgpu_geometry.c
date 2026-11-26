@@ -48,8 +48,10 @@ struct entry
 	uint32_t budget_lod;
 	/* the frames the budgets last made its drawn and traced levels coarser */
 	uint64_t budget_frame, traced_frame;
-	/* the frame its drawn level last changed (by its size or a budget) */
+	/* the frame its drawn level last changed (by its size or a budget), and
+	which way (1 coarser, -1 finer, 0 none yet) */
 	uint64_t level_frame;
+	int level_direction;
 	/* skinned each frame (a rig, or moving: its skinning not kept), and the
 	frames its skinning has been kept in a row */
 	int per_frame;
@@ -501,7 +503,9 @@ static void skinned_share(struct xgpu_geometry *geometry)
 		order_sort(geometry, geometry->order, count, 1);
 		/* (the objects whose level has not changed lately first, so that a
 		level just made finer by its size is not undone at once: a flip;
-		then any) */
+		then any but those made finer lately: port, b30's battle pan flipped
+		25 objects in one frame so when a frame past the skin ring's share
+		cut the budget; the total left over the budget is counted) */
 		for (settled = 1; settled >= 0 && total > budget; settled--)
 		for (pass = 0, changed = 1; changed && total > budget && pass < XGPU_GEOMETRY_LODS; pass++)
 		{
@@ -511,9 +515,11 @@ static void skinned_share(struct xgpu_geometry *geometry)
 				struct entry *entry = &geometry->entries[geometry->order[index]];
 
 				if (entry->lod >= entry->drawable_last ||
-					(settled && entry->level_frame + XGPU_GEOMETRY_FLIP_FRAMES >= geometry->frame))
+					(entry->level_frame + XGPU_GEOMETRY_FLIP_FRAMES >= geometry->frame &&
+					(settled || entry->level_direction < 0)))
 					continue;
 				entry->level_frame = geometry->frame;
+				entry->level_direction = 1;
 				total -= entry->vertices[entry->lod];
 				entry->lod++;
 				entry->budget_lod = entry->lod;
@@ -549,6 +555,7 @@ static void skinned_share(struct xgpu_geometry *geometry)
 			total = finer;
 			entry->budget_lod--;
 			entry->level_frame = geometry->frame;
+			entry->level_direction = -1;
 		}
 	}
 	for (index = 0; index < count; index++)
@@ -789,7 +796,10 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 				(unsigned long long)geometry->frame, object, mesh, entry->lod, lod, (double)pixels,
 				shadow ? " estimated" : "", (double)distance);
 		if (entry->lod_known && lod != entry->lod)
+		{
 			entry->level_frame = geometry->frame;
+			entry->level_direction = lod > entry->lod ? 1 : -1;
+		}
 		entry->lod = lod;
 		entry->lod_known = 1;
 		entry->decided_frame = geometry->frame;

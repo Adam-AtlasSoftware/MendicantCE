@@ -342,6 +342,66 @@ static void test_skinned_budget(void)
 	xgpu_geometry_destroy(geometry);
 }
 
+
+/* port: a level just made finer by its size is not made coarser again by
+the skinned budget cut on a later frame (a flip), even past the settled
+objects; the total left over is counted (b30's pan flipped 25 objects in
+one frame so) */
+static void test_budget_no_reversal(void)
+{
+	struct xgpu_geometry *geometry = xgpu_geometry_create();
+	struct xgpu_geometry_settings settings;
+	struct xgpu_geometry_ladder rig = ladder_of(60000, 18000, 5000, 300.0f, 100.0f);
+	struct xgpu_geometry_choice choice;
+	struct xgpu_geometry_statistics statistics;
+	int frame;
+
+	rig.vertices[0] = 50000;
+	rig.vertices[1] = 17000;
+	rig.vertices[2] = 5000;
+	rig.per_frame = 1;
+	memset(&settings, 0, sizeof(settings));
+	settings.hysteresis = 0.3f;
+	settings.coarse_reach = 40.0f;
+	settings.skinned_budget = 500000u;
+	xgpu_geometry_settings_set(geometry, &settings);
+	for (frame = 0; frame < 120; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		choice = draw(geometry, 1, 0, &rig, 50.0f, 60.0f);
+	}
+	CHECK(choice.lod == 2);
+	/* (near now: finer by its size) */
+	for (frame = 0; frame < 3; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		choice = draw(geometry, 1, 0, &rig, 400.0f, 60.0f);
+	}
+	CHECK(choice.lod == 0);
+	/* (the budget cut below it, within the flip window: held) */
+	settings.skinned_budget = 20000u;
+	xgpu_geometry_settings_set(geometry, &settings);
+	for (frame = 0; frame < 30; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		choice = draw(geometry, 1, 0, &rig, 400.0f, 60.0f);
+		CHECK(choice.lod == 0);
+	}
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.flips[XGPU_GEOMETRY_VIEW] == 0);
+	CHECK(statistics.skinned_over_budget > 0);
+	/* (past the window: the budget may take it) */
+	for (frame = 0; frame < 120; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		choice = draw(geometry, 1, 0, &rig, 400.0f, 60.0f);
+	}
+	CHECK(choice.lod > 0);
+	xgpu_geometry_statistics(geometry, &statistics);
+	CHECK(statistics.flips[XGPU_GEOMETRY_VIEW] == 0);
+	xgpu_geometry_destroy(geometry);
+}
+
 /* stock until the mesh is in, then the remodel, once; a new map (the tier
 or the meshes changed) forgets every choice */
 static void test_variant_and_map(void)
@@ -559,6 +619,7 @@ int main(void)
 	test_floor();
 	test_budget();
 	test_skinned_budget();
+	test_budget_no_reversal();
 	test_variant_and_map();
 	test_notes();
 	test_shadow_back();
