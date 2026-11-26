@@ -9120,9 +9120,11 @@ int xgpu_vulkan_mesh_skin_kept(uint64_t key, int make, struct xgpu_vulkan_mesh_b
 others); the region's memory is the skin buffer's, kept */
 uint32_t xgpu_vulkan_mesh_skin_budget_vertices(void)
 {
-	/* (the ring holds the submissions of about three frames in flight; a
-	vertex takes 64 bytes with its wide stream) */
-	return (uint32_t)(SKIN_RING_SIZE / 64u / 3u);
+	/* (the ring holds the submissions of the frames in flight, three, and
+	room for the frame's draws skinned in more than one submission; a vertex
+	takes 64 bytes with its wide stream: b30's remodelled world on the RTX
+	2060 still filled it 2,215 times in 1,200 frames at a third) */
+	return (uint32_t)(SKIN_RING_SIZE / 64u / 4u);
 }
 
 void xgpu_vulkan_mesh_skin_kept_clear(void)
