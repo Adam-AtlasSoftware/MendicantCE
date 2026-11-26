@@ -72,6 +72,11 @@ G-buffer drew there, not one beside it off the surface; the path tracer turns
 its cameras the same way (xgpu_vulkan_pt.c's pt_camera_jitter) */
 void xgpu_vulkan_upscale_jittered_camera(float camera[4][4], const int32_t corners[4], const float jitter[2]);
 void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view);
+/* the view kept at OPAQUE again before the tone map's passes (its curve,
+grade, bloom and tone map), where an upscaler takes it: the reactive mask
+is the change between the two, the transparent surfaces' and effects'
+alone; 1 where it was copied (the stream's targets to be bound again) */
+int xgpu_vulkan_upscale_before_post(struct xgpu_vulkan_image *view);
 void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view,
 	struct xgpu_vulkan_image *view_depth, struct xgpu_vulkan_image *output, struct xgpu_vulkan_image *output_depth,
 	struct xgpu_vulkan_image *gbuffer_extras, struct xgpu_vulkan_image *gbuffer_words,

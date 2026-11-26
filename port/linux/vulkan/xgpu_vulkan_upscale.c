@@ -127,7 +127,7 @@ static const VkFormat guide_formats[GUIDE_COUNT] =
 };
 
 /* the input pass's bindings (its GLSL's; FINISH's within them) */
-#define INPUT_BINDINGS 26
+#define INPUT_BINDINGS 27
 /* the input pass's flags (its GLSL's) */
 #define INPUT_GBUFFER_MOTION 1u
 #define INPUT_HISTORY 2u
@@ -135,6 +135,7 @@ static const VkFormat guide_formats[GUIDE_COUNT] =
 #define INPUT_GBUFFER_GUIDES 8u
 #define INPUT_HDR 16u
 #define INPUT_PT_NOISY 32u
+#define INPUT_BEFORE_POST 64u
 
 static struct
 {
@@ -200,6 +201,10 @@ static struct
 	for the G-buffer's second target */
 	struct xgpu_vulkan_image *output, *opaque, *extras_stand_in;
 	int opaque_kept;
+	/* the view kept at OPAQUE (the image), and its colour again before the
+	tone map's passes (xgpu_vulkan_upscale_before_post) */
+	struct xgpu_vulkan_image *opaque_view, *before_post;
+	int before_post_kept;
 	/* BEGIN's: the view's target and its jitter; the sequence's index */
 	int jittering;
 	float jitter[2];
@@ -571,6 +576,8 @@ static int make(void)
 		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		/* (the diffuse hit distance and the reflected objects' motion written) */
 		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+		/* (the view before its post passes) */
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 	};
 	VkDescriptorSetLayoutBinding bindings[INPUT_BINDINGS];
 	VkDescriptorSetLayoutCreateInfo set_info;
@@ -996,6 +1003,7 @@ void xgpu_vulkan_upscale_begin(const struct xgpu_stream_upscale *record, struct 
 	uint32_t render_width, output_width, phases;
 
 	up.opaque_kept = 0;
+	up.before_post_kept = 0;
 	up.jittering = 0;
 	pt_frame_clear();
 	up.denoiser = record->denoiser;
@@ -1054,21 +1062,21 @@ void xgpu_vulkan_upscale_jittered_camera(float camera[4][4], const int32_t corne
 		camera[1][axis] += sx * camera[2][axis] + sy * camera[3][axis];
 }
 
-void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view)
+/* the view copied into a kept image of its size and format (made again
+where those changed) */
+static int view_keep(struct xgpu_vulkan_image *view, struct xgpu_vulkan_image **kept)
 {
 	const struct xgpu_vulkan_image_description *description, *had;
 	struct xgpu_vulkan_image_description made;
 	int32_t whole[4];
 
-	if (!view || !up.jittering)
-		return;
 	description = xgpu_vulkan_image_description(view);
-	had = up.opaque ? xgpu_vulkan_image_description(up.opaque) : NULL;
+	had = *kept ? xgpu_vulkan_image_description(*kept) : NULL;
 	if (!had || had->width != description->width || had->height != description->height ||
 		had->format != description->format)
 	{
-		if (up.opaque)
-			xgpu_vulkan_image_destroy(up.opaque);
+		if (*kept)
+			xgpu_vulkan_image_destroy(*kept);
 		memset(&made, 0, sizeof(made));
 		made.type = XGPU_VULKAN_IMAGE_2D;
 		made.format = description->format;
@@ -1077,15 +1085,41 @@ void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct
 		made.height = description->height;
 		made.depth_or_layers = 1;
 		made.levels = 1;
-		up.opaque = xgpu_vulkan_image_create(&made);
-		if (!up.opaque)
-			return;
+		*kept = xgpu_vulkan_image_create(&made);
+		if (!*kept)
+			return 0;
 	}
 	whole[0] = whole[1] = 0;
 	whole[2] = (int32_t)description->width;
 	whole[3] = (int32_t)description->height;
-	xgpu_vulkan_image_copy_rectangle(view, 0, up.opaque, whole);
-	up.opaque_kept = 1;
+	xgpu_vulkan_image_copy_rectangle(view, 0, *kept, whole);
+	return 1;
+}
+
+void xgpu_vulkan_upscale_opaque(const struct xgpu_stream_upscale *record, struct xgpu_vulkan_image *view)
+{
+	(void)record;
+	if (!view || !up.jittering)
+		return;
+	up.opaque_kept = view_keep(view, &up.opaque);
+	up.opaque_view = view;
+}
+
+/* the view as the transparent surfaces and effects left it, before the tone
+map's passes change the whole frame (display.prism_tone_curve's curve,
+display.prism_tone's grade, display.prism_bloom, the tone map): the reactive
+mask is the change from OPAQUE to this, the transparent surfaces' alone.
+Taken from the view at END, the bloom's glow and the grade's change counted
+as reactive (b30's beach: most of the sunlit sand and every light's halo
+past the threshold), and the upscalers took the current frame there
+(DLSS's bias to the current colour, FSR's reactivity): flicker and the
+frame's aliasing kept */
+int xgpu_vulkan_upscale_before_post(struct xgpu_vulkan_image *view)
+{
+	if (!view || !up.jittering || !up.opaque_kept || !up.opaque || view != up.opaque_view)
+		return 0;
+	up.before_post_kept = view_keep(view, &up.before_post);
+	return 1;
 }
 
 /* the input pass: the view's colour, depth, motion and reactive mask at the
@@ -1146,6 +1180,8 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 		flags |= INPUT_HISTORY;
 	if (up.opaque_kept && up.opaque)
 		flags |= INPUT_OPAQUE;
+	if ((flags & INPUT_OPAQUE) && up.before_post_kept && up.before_post)
+		flags |= INPUT_BEFORE_POST;
 	if (words && base)
 		flags |= INPUT_GBUFFER_GUIDES;
 	/* (the colour linear HDR by the path tracer's exposure; its noisy light
@@ -1171,6 +1207,10 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 	block->last_rect[3] = (float)height;
 	block->reactive[0] = REACTIVE_THRESHOLD;
 	block->reactive[1] = REACTIVE_VALUE;
+	/* (a diagnosis: HALO_UPSCALE_REACTIVE scales the reactive mask's value, 0
+	none) */
+	if (getenv("HALO_UPSCALE_REACTIVE"))
+		block->reactive[1] = REACTIVE_VALUE * (float)atof(getenv("HALO_UPSCALE_REACTIVE"));
 	block->reactive[2] = REACTIVE_SCALE;
 	memset(&allocate, 0, sizeof(allocate));
 	allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1211,6 +1251,8 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 	images[23].imageView = xgpu_vulkan_image_view(up.output);
 	images[24].imageView = up.guides[GUIDE_DIFFUSE_HIT].view;
 	images[25].imageView = up.guides[GUIDE_MOTION_REFLECTIONS].view;
+	images[26].imageView = xgpu_vulkan_image_view((flags & INPUT_BEFORE_POST) ? up.before_post : view);
+	images[26].sampler = up.nearest;
 	for (index = 0; index < INPUT_BINDINGS; index++)
 		images[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 	memset(writes, 0, sizeof(writes));
@@ -1220,7 +1262,8 @@ static int inputs_record(VkCommandBuffer commands, const struct xgpu_stream_upsc
 		writes[index].dstSet = set;
 		writes[index].dstBinding = index;
 		writes[index].descriptorCount = 1;
-		writes[index].descriptorType = index < 5 || index == 10 || index == 11 || (index >= 15 && index < 21) ?
+		writes[index].descriptorType = index < 5 || index == 10 || index == 11 || (index >= 15 && index < 21) ||
+			index == 26 ?
 			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : index == 9 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER :
 			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		if (index != 9)
@@ -1477,6 +1520,8 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 	xgpu_vulkan_image_compute_use(view_depth, 0);
 	if (up.opaque_kept)
 		xgpu_vulkan_image_compute_use(up.opaque, 0);
+	if (up.opaque_kept && up.before_post_kept)
+		xgpu_vulkan_image_compute_use(up.before_post, 0);
 	if (gbuffer_extras)
 		xgpu_vulkan_image_compute_use(gbuffer_extras, 0);
 	if (denoise_upscale && gbuffer_words && gbuffer_base)
