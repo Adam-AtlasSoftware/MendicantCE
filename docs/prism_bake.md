@@ -235,7 +235,7 @@ sphere for a probe), and the error is the batches' means' (8 batches at least): 
 overstate a stratified estimate's noise;
 a texel whose mean is under 1/1000 of middle grey after 4096 samples is black; and no single sample may move the mean by
 more than 1% (`prism_bake_converge.h`'s rule: a texel that has just met its first firefly is not stopped by a variance
-that has not yet seen the tail). At `max` a texel (or probe) stops at 65,536 samples at most (below). The quicker
+that has not yet seen the tail). At `max` a texel (or probe) stops at 32,768 samples at most (below). The quicker
 tiers stop at 64 (`draft`), 512 (`high`) and 2048 (`ultra`) samples whatever the noise.
 
 **`max`'s noise floor (D4 amended, 2026-11-17).** At `max` the error is measured against the larger of the texel's own
@@ -248,8 +248,11 @@ stopped (converged with their light below it).
 
 **`max`'s cap (2026-11-25).** With no budget, `max` never finished: a handful of near-black texels lit by rare paths
 never met the rule (a50's first BSP held 5 texels through 13 half-hour slices, one of them at 242,944 samples), and
-each slice began them again. A texel or probe now closes at its running mean once it has 65,536 samples
-(`MAX_SAMPLES_CAP`, 32 times `ultra`'s); the robust mean and the filter take what noise it has left. It counts samples,
+each slice began them again. A texel or probe now closes at its running mean once it has 32,768 samples
+(`MAX_SAMPLES_CAP`, 16 times `ultra`'s); the robust mean and the filter take what noise it has left. 32,768 was chosen
+against a 262,144-sample bake of a10's first BSP (2026-11-26): 65,536 came no closer to it (mean difference 1.24 against
+1.35 levels, with as many bright texels, which differ from bake to bake), at 1.8 times the time; 16,384 has clearly
+more and larger bright blobs. It counts samples,
 not seconds, so a bake is the same on every card; it is in the bake's key, and the log counts the texels capped. The
 shipped bakes are made at `max` this way.
 
@@ -703,7 +706,7 @@ come takes the same meter (`meter_add`) and step.
 See `docs/prism_gates.md`, "M2 as measured": the bake against R, Raster against R, the frame times, the bake's time
 and size per map, and Classic's byte identity. In short: `ultra` bakes a BSP in one to thirty minutes (b30's first in
 161 seconds on an RTX 3070 Ti, 1 GB); `max` as D4 defined it did not finish (b30's first BSP 99.6% done after 5.7
-hours), its time going to the darkest texels, until its cap of 65,536 samples a texel (above); Raster costs 2.3 ms a frame at 1440p on the RTX 3070 Ti.
+hours), its time going to the darkest texels, until its cap of 32,768 samples a texel (above); Raster costs 2.3 ms a frame at 1440p on the RTX 3070 Ti.
 
 ## What remains
 

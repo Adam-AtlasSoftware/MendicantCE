@@ -202,8 +202,10 @@ noise floor finishes almost every texel far below it (c10's most about
 (a50's first BSP: 5 texels still running after 13 half-hour slices, one at
 242,944 samples). A texel stopped by the cap closes at its running mean; the
 robust mean and the filter take its residual noise. Counted in the log
-("capped"). Samples, not seconds, so the bake stays the same on every card */
-#define MAX_SAMPLES_CAP 65536.0f
+("capped"). Samples, not seconds, so the bake stays the same on every card.
+32,768, not 65,536: on a10's first BSP both match a 262,144-sample bake
+equally (65,536 is no closer), at 56% of the time */
+#define MAX_SAMPLES_CAP 32768.0f
 
 #define BAKE_FUNCTIONS(F) \
 	F(vkCreateBuffer) F(vkDestroyBuffer) F(vkGetBufferMemoryRequirements) F(vkAllocateMemory) F(vkFreeMemory) \
