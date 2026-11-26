@@ -154,6 +154,10 @@ static struct
 	uint64_t parts_lost, rt_skin_failed, rt_no_piece;
 	/* draws skinned at a coarser level of the remodel, the ring full */
 	uint64_t coarser_skins;
+	/* the skinned budget's share of its most (cut where the ring filled in
+	the frame before, grown back slowly), and the ring's fills then */
+	float skinned_scale;
+	uint64_t ring_full_seen;
 	/* the resolver (xgpu_geometry.h); legacy: the choices before it */
 	struct xgpu_geometry *geometry;
 	int legacy, settings_known;
@@ -999,7 +1003,22 @@ void xgpu_vulkan_meshes_frame(void)
 		memset(&settings, 0, sizeof(settings));
 		settings.hysteresis = (float)(meshes.hysteresis_percent > 50u ? 50u : meshes.hysteresis_percent) / 100.0f;
 		settings.traced_budget = xgpu_vulkan_rt_replacement_budget(&settings.coarse_reach);
-		settings.skinned_budget = xgpu_vulkan_mesh_skin_budget_vertices();
+		{
+			uint64_t dispatches, vertices, ring_full;
+
+			/* (the ring filled since the last frame: the budget cut by a
+			sixth, to a quarter at least; else grown back a tenth of a
+			percent a frame) */
+			xgpu_vulkan_mesh_skin_statistics(&dispatches, &vertices, &ring_full);
+			if (meshes.skinned_scale <= 0.0f)
+				meshes.skinned_scale = 1.0f;
+			if (ring_full != meshes.ring_full_seen)
+				meshes.skinned_scale = meshes.skinned_scale * 0.85f < 0.25f ? 0.25f : meshes.skinned_scale * 0.85f;
+			else if (meshes.skinned_scale < 1.0f)
+				meshes.skinned_scale = meshes.skinned_scale * 1.001f > 1.0f ? 1.0f : meshes.skinned_scale * 1.001f;
+			meshes.ring_full_seen = ring_full;
+			settings.skinned_budget = (uint32_t)((float)xgpu_vulkan_mesh_skin_budget_vertices() * meshes.skinned_scale);
+		}
 		xgpu_geometry_settings_set(meshes.geometry, &settings);
 		xgpu_geometry_frame(meshes.geometry, xgpu_vulkan_rt_eye(eye) ? eye : NULL);
 		if (getenv("HALO_GEOMETRY_LOG") && meshes.frame % 600u == 0)
