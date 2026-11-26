@@ -1043,6 +1043,20 @@ static void reference_noise_collect(void)
 /* this frame's request (RT_FRAME's, prism_rt.c's reference_frame): 1 if the
 frame is the reference's, its sums made at the size and its count the
 frame's number in the sum (held once it is stopped) */
+/* whether this frame asks for debug.pt_reference (RT_FRAME's request), read
+before the frame's images are sized: the reference traces and sums every
+pixel of the G-buffer, so the light grid is the G-buffer's own while it runs */
+static int reference_requested(void)
+{
+	uint32_t generation_unused, materials_count, alpha_words;
+	const float *materials;
+	const uint32_t *alpha;
+	const struct xgpu_stream_rt_frame *frame = NULL;
+
+	(void)xgpu_vulkan_rt_scene(&generation_unused, &materials, &materials_count, &alpha, &alpha_words, &frame);
+	return frame && (frame->flags & XGPU_RT_FLAG_REFERENCE) && frame->spare[0] >= 1.0f;
+}
+
 static int reference_take(const struct xgpu_stream_scene_view *view, uint64_t scene, uint32_t width, uint32_t height)
 {
 	uint32_t generation_unused, materials_count;
@@ -1718,7 +1732,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	scene = lookup.scene;
 	description = xgpu_vulkan_image_description(light);
 	denoiser_off = (phase & XGPU_GBUFFER_PHASE_PT_DENOISER_OFF) != 0;
-	light_scale = denoiser_off || xgpu_vulkan_upscale_pt_raw() ? 0.0f : light_scale_of(phase);
+	/* (no light grid without the denoiser, under Ray Reconstruction or while
+	a reference runs: each traces at the G-buffer's pixels) */
+	light_scale = denoiser_off || xgpu_vulkan_upscale_pt_raw() || reference_requested() ? 0.0f :
+		light_scale_of(phase);
 	low_width = description->width;
 	low_height = description->height;
 	if (light_scale > 0.0f)
