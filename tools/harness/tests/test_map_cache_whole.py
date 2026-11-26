@@ -15,7 +15,7 @@ FUNCTIONS = ["names_match", "cache_slot_source_path", "cache_slot_source_stat", 
              "cache_slot_source_write", "cache_slot_source_forget", "cache_slot_source_record",
              "cache_slot_source_played", "cache_slot_source_matches"]
 CASES = ["whole_copy", "failed_copy", "version_before", "torn_source", "another_map", "copy_of_another",
-         "map_replaced"]
+         "map_replaced", "base_id_kept"]
 
 
 def generated(fault=None):
@@ -49,6 +49,10 @@ def test_map_cache_whole(case):
     (("source->checksum == checksum &&", ""), "another_map"),
     # the map file's own size and time not checked
     (("now.size_low == source->size_low &&", ""), "map_replaced"),
+    # the base_id read and dropped
+    (("\t\t\t\t\tsource->base_known = TRUE;\n", ""), "base_id_kept"),
+    # ... or never written
+    (("source->name, base) >= 0;", "source->name, \"\") >= 0;"), "base_id_kept"),
 ])
 def test_negative_control(fault, case):
     status, output = run(build("map_cache_whole", generated(fault)), case)

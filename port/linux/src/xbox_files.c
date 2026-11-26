@@ -35,6 +35,7 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include "steam_workshop.h"
 #include "mcc_local_package.h"
 #include "map_sources.h"
+#include "../game/prism_identity.h"
 
 #ifdef HALO_MACOS
 #include <SDL3/SDL.h>
@@ -1520,6 +1521,12 @@ struct cache_slot_source
 	/* the copy's: its header's name, checksum and length */
 	char name[32];
 	unsigned long checksum, file_length;
+	/* ... and its base_id (port/linux/game/prism_identity.h: the SHA-256 of
+	the map's inflated body), once known: kept as the record's last word, which
+	the versions before never read, so it needs no version of its own; the
+	same map file (path, size and time) is the same copy, so the same id */
+	BOOL base_known;
+	unsigned char base_id[32];
 };
 
 static struct cache_slot_source cache_slot_sources[MAXIMUM_CACHE_SLOT_SOURCES];
@@ -1626,6 +1633,29 @@ void cache_slot_source_load(short slot)
 		source->checksum = checksum;
 		source->file_length = file_length;
 		snprintf(source->name, sizeof(source->name), "%s", name);
+		{
+			char base[72];
+			int digit;
+
+			if (fscanf(file, "%71s", base) == 1 && strlen(base) == 64)
+			{
+				for (digit = 0; digit < 64 && isxdigit((unsigned char)base[digit]); digit++)
+					;
+				if (digit == 64)
+				{
+					for (digit = 0; digit < 32; digit++)
+					{
+						char pair[3];
+
+						pair[0] = base[2 * digit];
+						pair[1] = base[2 * digit + 1];
+						pair[2] = 0;
+						source->base_id[digit] = (unsigned char)strtoul(pair, NULL, 16);
+					}
+					source->base_known = TRUE;
+				}
+			}
+		}
 	}
 	fclose(file);
 }
@@ -1635,18 +1665,27 @@ was not */
 static BOOL cache_slot_source_write(short slot)
 {
 	const struct cache_slot_source *source = &cache_slot_sources[slot];
-	char path[1024];
+	char path[1024], base[66];
 	BOOL written;
 	FILE *file;
+	int digit;
 
+	/* (the base_id, when known, as a last word: " <64 hex digits>") */
+	base[0] = 0;
+	if (source->base_known)
+	{
+		base[0] = ' ';
+		for (digit = 0; digit < 32; digit++)
+			snprintf(base + 1 + 2 * digit, 3, "%02x", source->base_id[digit]);
+	}
 	cache_slot_source_path(slot, path, sizeof(path));
 	file = fopen(path, "wb");
 	if (!file)
 		return FALSE;
-	written = fprintf(file, "openh1-cache-source %d %lu %lu %lu %lu %lu %lu %lu %s\n", CACHE_SLOT_SOURCE_VERSION,
+	written = fprintf(file, "openh1-cache-source %d %lu %lu %lu %lu %lu %lu %lu %s%s\n", CACHE_SLOT_SOURCE_VERSION,
 		(unsigned long)source->size_low, (unsigned long)source->size_high, (unsigned long)source->seconds,
 		(unsigned long)source->nanoseconds, source->played, source->checksum, source->file_length,
-		source->name) >= 0;
+		source->name, base) >= 0;
 	if (fflush(file) != 0 || fsync(fileno(file)) != 0)
 		written = FALSE;
 	if (fclose(file) != 0)
@@ -1692,6 +1731,35 @@ void cache_slot_source_played(short slot)
 	cache_slot_sources[slot].played = (unsigned long)time(NULL);
 	if (!cache_slot_source_write(slot))
 		cache_slot_sources[slot].known = FALSE;
+}
+
+int cache_slot_source_base_id(short slot, unsigned char id[32])
+{
+	struct cache_slot_source *source;
+	char xbox_path[64], path[1024];
+	FILE *file;
+	int whole;
+
+	if (slot < 0 || slot >= MAXIMUM_CACHE_SLOT_SOURCES || !cache_slot_sources[slot].known)
+		return FALSE;
+	source = &cache_slot_sources[slot];
+	if (!source->base_known)
+	{
+		/* (from the slot's own copy, read once: 0.1-1.5 s for a stock map) */
+		snprintf(xbox_path, sizeof(xbox_path), "%scache%03d.map", cache_slot_folder(), slot);
+		platform_translate_path(xbox_path, path, sizeof(path));
+		file = path[0] ? fopen(path, "rb") : NULL;
+		whole = file && prism_base_id_of_file(file, source->base_id);
+		if (file)
+			fclose(file);
+		if (!whole)
+			return FALSE;
+		source->base_known = TRUE;
+		/* (kept in memory even if the record cannot be rewritten) */
+		cache_slot_source_write(slot);
+	}
+	memcpy(id, source->base_id, 32);
+	return TRUE;
 }
 
 unsigned long cache_slot_source_played_time(short slot)

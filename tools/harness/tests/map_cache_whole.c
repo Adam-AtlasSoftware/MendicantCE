@@ -177,6 +177,39 @@ int main(int argc, char **argv)
 		utimes(path, times);
 		CHECK(!playable(), "a replaced map file's copy played");
 	}
+	else CASE("base_id_kept")
+	{
+		/* the copy's base_id (port/linux/game/prism_identity.h) as the
+		record's last word: read back, kept when the record is written
+		again, a malformed one taken for none, and the line still the nine
+		words the versions before read */
+		char path[512], line[256], name[32];
+		unsigned long words[7];
+		int version = 0;
+		FILE *file;
+
+		copied("a10", 0x1234, TRUE);
+		CHECK(playable() && !cache_slot_sources[0].base_known, "a fresh copy came with a base_id");
+		cache_slot_sources[0].base_known = TRUE;
+		memset(cache_slot_sources[0].base_id, 0xAB, 32);
+		cache_slot_source_played(0);
+		memset(&cache_slot_sources[0], 0, sizeof(cache_slot_sources[0]));
+		cache_slot_source_load(0);
+		CHECK(playable() && cache_slot_sources[0].base_known && cache_slot_sources[0].base_id[0] == 0xAB &&
+			cache_slot_sources[0].base_id[31] == 0xAB, "the base_id not kept");
+		snprintf(path, sizeof(path), "%s/cache000.source", folder);
+		file = fopen(path, "rb");
+		CHECK(file && fgets(line, sizeof(line), file), "no source file");
+		fclose(file);
+		CHECK(sscanf(line, "openh1-cache-source %d %lu %lu %lu %lu %lu %lu %lu %31s", &version, &words[0], &words[1],
+			&words[2], &words[3], &words[4], &words[5], &words[6], name) == 9 && version == 3 &&
+			strstr(line, " abababab"), "the line is not the versions before's with the base_id last");
+		*strstr(line, " abababab") = 0;
+		strcat(line, " abababzz\n");
+		write_text("cache000.source", line);
+		cache_slot_source_load(0);
+		CHECK(playable() && !cache_slot_sources[0].base_known, "a malformed base_id taken");
+	}
 	else return 2;
 	return 0;
 }
