@@ -105,6 +105,11 @@ it accepted): the frame's traced scene then leaves out the bake's static
 scenery a mesh may draw (xgpu_vulkan_bake.c), as the game's
 prism_bake_object_static does on the same frame */
 int xgpu_vulkan_meshes_drawn(void);
+/* port: RT_FRAME's game signals of the frame (XGPU_RT_FLAG_REMODELS_DRAWN,
+its set's number) paired with the store's own on the same frame of the
+stream: counted, and logged (HALO_GEOMETRY_LOG: 2 each frame, 1 where they
+disagree) */
+void xgpu_vulkan_meshes_pair(uint32_t frame, int game_drawn, uint32_t game_generation);
 /* the part drawn now traced as (XGPU_GEOMETRY_* variant, level): noted for
 the resolver's statistics and log */
 void xgpu_vulkan_meshes_note_traced(int variant, uint32_t lod);

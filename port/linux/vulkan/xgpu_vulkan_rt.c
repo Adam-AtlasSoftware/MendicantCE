@@ -1047,6 +1047,10 @@ static void fixtures_update(void)
 
 void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 {
+	/* (port: the game's remodels-drawn signal of the frame, paired with the
+	mesh store's on the same frame: xgpu_vulkan_meshes_pair) */
+	xgpu_vulkan_meshes_pair(record->frame, (record->flags & XGPU_RT_FLAG_REMODELS_DRAWN) != 0,
+		record->spare[3] >= 0.0f && record->spare[3] < 16777216.0f ? (uint32_t)record->spare[3] : 0u);
 	if (!make())
 		return;
 	reference_collect();

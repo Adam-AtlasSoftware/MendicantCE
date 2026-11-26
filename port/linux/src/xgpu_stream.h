@@ -1294,6 +1294,11 @@ struct xgpu_stream_mesh_store_map
 /* display.prism_prefetch: the map's files read as it loads, within the
 budget, not each when first drawn */
 #define XGPU_STREAM_MESH_STORE_PREFETCH 2u
+/* port: XGPU_STREAM_MESH_STORE_RESOLVED: display.lighting PRISM Rebaked or
+Path Traced: the objects' levels are the resolver's (xgpu_geometry.h); its
+absence (Classic) draws them as Classic always did. The game sends the set
+again when the lighting changes between the two */
+#define XGPU_STREAM_MESH_STORE_RESOLVED 4u
 /* display.prism_lod_hysteresis: the percent a level's size is passed by
 before it is switched to or from (bits 8 to 15; 0 at its cutoff) */
 #define XGPU_STREAM_MESH_STORE_HYSTERESIS_SHIFT 8
@@ -1371,6 +1376,10 @@ struct xgpu_stream_mesh_instance
 /* display.prism_secondary_motion off: springs and driven helpers follow
 their parents */
 #define XGPU_STREAM_MESH_INSTANCE_NO_SECONDARY 4u
+/* port: display.lighting PRISM Rebaked or Path Traced: the object's level
+is the resolver's (xgpu_geometry.h), one for its view, shadows and traced
+shape; without it (Classic) chosen as Classic always did */
+#define XGPU_STREAM_MESH_INSTANCE_RESOLVED 8u
 /* the most nodes an instance has (model_definitions.h's MAXIMUM_NODES_PER_MODEL) */
 #define XGPU_STREAM_MESH_NODES_MAXIMUM 64u
 
@@ -2351,6 +2360,13 @@ enum
 	objects' sun shadows against it (32 here; prism-v4-raster-int had 16,
 	which M3's objects took first: XGPU_STREAM_VERSION 37) */
 	XGPU_RT_FLAG_RASTER_OBJECTS = 32,
+	/* port: the game draws remodels this frame (display.prism_models: the
+	mesh store answered a mesh of the set sent last), so its static scenery
+	a mesh may draw is traced as drawn, not as the bake's placement
+	(prism_bake_object_static); spare[3] the set's number (its 24 low bits),
+	which the host pairs with its store's on the same frame
+	(xgpu_vulkan_meshes_pair, HALO_GEOMETRY_LOG) */
+	XGPU_RT_FLAG_REMODELS_DRAWN = 64,
 };
 #define XGPU_RT_REFERENCE_BOUNCES 32
 /* the reference file's path: a NUL-terminated UTF-8 string of at most this
@@ -2373,7 +2389,8 @@ struct xgpu_stream_rt_frame
 	float sky[4];
 	/* spare[0] and [1]: XGPU_RT_FLAG_REFERENCE's; spare[2]: the sun's
 	angular diameter the baker takes (display.prism_sun_size "auto"'s, the
-	tag's or the real sun's, whatever the setting: xgpu_vulkan_bake.c) */
+	tag's or the real sun's, whatever the setting: xgpu_vulkan_bake.c);
+	spare[3]: XGPU_RT_FLAG_REMODELS_DRAWN's set number (port) */
 	float spare[4];
 	/* the light rig (XGPU_RT_RIG_*) */
 	float rig[XGPU_STREAM_RT_RIG_FLOATS];

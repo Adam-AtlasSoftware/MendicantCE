@@ -508,11 +508,22 @@ compressed model layout), read by that submission's draws; and with wide
 draws read instead (32 bytes each: as the stock layout to byte 24, then uv0
 over the base map scale as two floats, unclamped, in place of the int16
 coordinates, nodes and weight); 0 where
-they cannot be (the skin ring full: drawn stock) */
+they cannot be (the skin ring full: drawn stock in Classic; port: the
+resolver's ring is waited for instead, xgpu_vulkan_mesh_skin_mode) */
 int xgpu_vulkan_mesh_skin(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, uint32_t count,
 	const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2], struct xgpu_vulkan_range *skinned,
 	struct xgpu_vulkan_range *wide);
 void xgpu_vulkan_mesh_skin_statistics(uint64_t *dispatches, uint64_t *vertices, uint64_t *ring_full);
+/* port: the skin buffer's mode from the next mesh made where no mesh reads
+the buffer (a map's record: its meshes let go of): the resolver's (1: a
+256 MB ring, a full one waited for, and a 160 MB keep region) or Classic's
+(0: the 128 MB ring as before, nothing kept, a full one drawn stock); and
+the times the resolver's full ring was waited for */
+void xgpu_vulkan_mesh_skin_mode(int resolved);
+/* port: a full ring waited for (the resolver's frames, 1) or the draw drawn
+stock (Classic's, 0), whatever the buffer's size */
+void xgpu_vulkan_mesh_skin_wait(int wait);
+uint64_t xgpu_vulkan_mesh_skin_waits(void);
 /* port: a still object's skinning kept (key: its mesh, level and bones'
 matrices) in the skin buffer's keep region, read frame after frame: 1 and
 its ranges where kept (made now where make and room can be had: the least

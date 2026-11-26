@@ -78,6 +78,9 @@ extern unsigned char render_enumerating;
 /* prism_deferred.c's: display.lighting "raster" (or "pathtraced"), and
 "pathtraced" alone */
 boolean prism_deferred_raster(void);
+/* mod_meshes.c's (mods.h): remodels drawn, and their set's number */
+boolean mod_meshes_remodels_drawn(void);
+unsigned long mod_meshes_generation(void);
 boolean prism_deferred_pathtraced(void);
 boolean prism_deferred_raster_object_shadows(void);
 /* render_sky.c's (the sky's sun, as PRISM's cascaded shadows find it, and
@@ -156,6 +159,9 @@ enum
 	PRISM_RT_FLAG_REFERENCE = 8,
 	PRISM_RT_FLAG_OBJECTS = 16,
 	PRISM_RT_FLAG_RASTER_OBJECTS = 32,
+	/* port: remodels drawn this frame (mods.h's mod_meshes_remodels_drawn),
+	spare[3] the set's number: the host pairs them with its store's */
+	PRISM_RT_FLAG_REMODELS_DRAWN = 64,
 	/* debug.pt_reference: its frames at most, its path's bytes
 	(XGPU_RT_REFERENCE_PATH) */
 	PRISM_RT_REFERENCE_FRAMES_MOST = 1 << 20,
@@ -344,8 +350,6 @@ static struct
 	/* port: display.prism_rt's mode turned off under display.lighting
 	"raster", logged (once while it lasts) */
 	int raster_off_logged;
-	/* port: display.prism_rt_world's override said (debug.geometry_overrides) */
-	int world_override_told;
 } prism_rt;
 
 int prism_rt_mode(void);
@@ -432,20 +436,6 @@ static void settings_read(void)
 	prism_rt.world = word_index(config_string("display.prism_rt_world"), worlds, 4);
 	if (prism_rt.world == 4)
 		prism_rt.world = PRISM_RT_WORLD_DRAWN;
-	/* (port: the level traced is the level drawn, one geometry for every
-	pass; another is a debug override, debug.geometry_overrides: before,
-	"remodel" traced the near level whole under a far level drawn, the
-	sand's black patches, and "stock" CE's triangles under the remodel) */
-	if (prism_rt.world != PRISM_RT_WORLD_DRAWN && !config_boolean("debug.geometry_overrides"))
-	{
-		if (!prism_rt.world_override_told)
-			platform_log("prism rt: display.prism_rt_world \"%s\" is a debug override (debug.geometry_overrides): the "
-				"level traced is the level drawn", worlds[prism_rt.world]);
-		prism_rt.world_override_told = TRUE;
-		prism_rt.world = PRISM_RT_WORLD_DRAWN;
-	}
-	else if (prism_rt.world == PRISM_RT_WORLD_DRAWN)
-		prism_rt.world_override_told = FALSE;
 	/* (display.lighting "raster" with ray tracing off: the level as drawn
 	is the scene the baker traces, whatever the setting) */
 	if (prism_rt.mode == PRISM_RT_OFF && prism_deferred_raster())
@@ -1834,7 +1824,11 @@ void prism_rt_frame_begin(void)
 		/* (port: display.lighting "pathtraced": the moving objects traced,
 		the G-buffer pass's draws of them; "raster": their sun shadows) */
 		(raster_scene() && prism_deferred_pathtraced() ? PRISM_RT_FLAG_OBJECTS : 0) |
-		(raster_scene() && prism_deferred_raster_object_shadows() ? PRISM_RT_FLAG_RASTER_OBJECTS : 0);
+		(raster_scene() && prism_deferred_raster_object_shadows() ? PRISM_RT_FLAG_RASTER_OBJECTS : 0) |
+		(mod_meshes_remodels_drawn() ? PRISM_RT_FLAG_REMODELS_DRAWN : 0);
+	/* (spare[3]: the remodels' set's number, 24 bits, for the host's
+	pairing of what the game and the host have as drawn this frame) */
+	frame.spare[3] = (float)(mod_meshes_generation() & 0xffffffUL);
 	reference_frame(&frame);
 	frame.settings[0] = PRISM_RT_SUN_STRENGTH;
 	frame.settings[1] = PRISM_RT_MODEL_STRENGTH;

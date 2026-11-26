@@ -92,8 +92,13 @@ loading, display.prism_prefetch, display.prism_lod_hysteresis's percent
 from bit 8 */
 #define STORE_LOADING 1ul
 #define STORE_PREFETCH 2ul
+/* (port: PRISM Rebaked or Path Traced as the set is sent: the host's skin
+ring sized for the resolver; Classic's as it was) */
+#define STORE_RESOLVED 4ul
 #define STORE_HYSTERESIS_SHIFT 8
 int xgpu_backend_mesh_store_available(void);
+/* prism_deferred.c's: display.lighting "raster" or "pathtraced" */
+boolean prism_deferred_raster(void);
 void xgpu_backend_mesh_instance(unsigned long instance, unsigned long mesh, unsigned long object, float lod_pixels,
 	unsigned long flags, float const (*matrices)[3][4], unsigned long node_count, unsigned long game_ticks,
 	float game_fraction, float const *functions);
@@ -137,6 +142,9 @@ enum
 #define MESH_INSTANCE_SHADOW 1u
 #define MESH_INSTANCE_FIRST_PERSON 2u
 #define MESH_INSTANCE_NO_SECONDARY 4u
+/* (port: PRISM Rebaked or Path Traced: the host's resolver chooses the
+object's level; Classic's own choices without it) */
+#define MESH_INSTANCE_RESOLVED 8u
 #define MESH_DRAW_CARRIER 1u
 #define MAXIMUM_QUERIES 4096
 /* a model's table's entries (regions, permutations and shaders its parts
@@ -220,6 +228,9 @@ static struct
 	struct mesh_model *models;
 	long model_count;
 	long accepted;
+	/* port: the meshes the host answered in the set sent last (its store's
+	entries: mod_meshes_remodels_drawn, which the host pairs with its own) */
+	long answered;
 	/* the model being drawn (NULL none) and its instance, and a part
 	named (a MESH_DRAW of it sent) */
 	struct mesh_model const *drawing;
@@ -515,6 +526,7 @@ static void models_clear(
 	mod_meshes_globals.models = NULL;
 	mod_meshes_globals.model_count = 0;
 	mod_meshes_globals.accepted = 0;
+	mod_meshes_globals.answered = 0;
 
 	return;
 }
@@ -553,6 +565,7 @@ static void store_close(
 		xgpu_backend_mesh_store_map(++mod_meshes_globals.generation, 0, 0, FALSE, NULL, 0, NULL);
 	}
 	mod_meshes_globals.open = FALSE;
+	mod_meshes_globals.answered = 0;
 
 	return;
 }
@@ -685,7 +698,7 @@ static void meshes_send(
 	answers = memory_zeroed((size_t)count * sizeof(*answers));
 	if (!answers || !xgpu_backend_mesh_store_map(++mod_meshes_globals.generation,
 		(unsigned long)mod_meshes_globals.tier, (unsigned long)mod_meshes_globals.budget,
-		(at_load ? STORE_LOADING : 0) | mod_meshes_globals.options, queries,
+		(at_load ? STORE_LOADING : 0) | mod_meshes_globals.options | (prism_deferred_raster() ? STORE_RESOLVED : 0), queries,
 		(unsigned long)count, answers))
 	{
 		memory_release(answers);
@@ -701,6 +714,10 @@ static void meshes_send(
 		long absolute = (long)DATUM_INDEX_TO_ABSOLUTE_INDEX(query_tag[index]);
 		struct mesh_model *mesh = &mod_meshes_globals.models[absolute];
 
+		if (answers[index].id)
+		{
+			mod_meshes_globals.answered++;
+		}
 		if (!answers[index].id)
 		{
 			refused++;
@@ -1181,7 +1198,8 @@ void mod_meshes_model_begin(
 		(float)level_of_detail_pixels,
 		(TEST_FLAG(flags, _render_model_shadow_bit) ? MESH_INSTANCE_SHADOW : 0) |
 		(TEST_FLAG(flags, _render_model_first_person_bit) ? MESH_INSTANCE_FIRST_PERSON : 0) |
-		(mod_meshes_globals.secondary_motion ? 0 : MESH_INSTANCE_NO_SECONDARY),
+		(mod_meshes_globals.secondary_motion ? 0 : MESH_INSTANCE_NO_SECONDARY) |
+		(prism_deferred_raster() ? MESH_INSTANCE_RESOLVED : 0),
 		(float const (*)[3][4])matrices, (unsigned long)node_count, (unsigned long)game_time_get(),
 		(float)render_interpolation_fraction(), (float const *)functions);
 	mod_meshes_globals.drawing = mesh;
@@ -1345,7 +1363,8 @@ boolean mod_meshes_model_candidate(
 boolean mod_meshes_remodels_drawn(
 	void)
 {
-	return mod_meshes_globals.accepted > 0;
+	/* (the host's store's own test: a mesh of the set answered) */
+	return mod_meshes_globals.answered > 0;
 }
 
 unsigned long mod_meshes_generation(
