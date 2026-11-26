@@ -37,6 +37,7 @@ from mathutils import Vector, geometry
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import wg_common as wg  # noqa: E402
 
 T0 = time.time()
 SPACING = float(os.environ.get("WG_FAR_SPACING", "1.2"))
@@ -97,11 +98,11 @@ def write(path, header, parts):
         struct.pack_into("<If", rec, 40, p["ntc"], p["dist"])
         out += rec
         arr(p["sft"].astype("<u4"))
-        arr(p["verts"].astype("<f4"))
-        arr(p["lm"].astype("<f4"))
+        arr(wg.snap_vertices(p["verts"]).astype("<f4"))
+        arr(wg.snap_lightmap(p["lm"]).astype("<f4"))
         arr(p["tri"].astype("<u2"))
         out += p["pairs"].astype("<u4").tobytes()
-        out += p["bounds"].astype("<f4").tobytes()
+        out += wg.snap_bounds(p["bounds"]).astype("<f4").tobytes()
     tmp = path + ".part"
     with open(tmp, "wb") as f:
         f.write(out)

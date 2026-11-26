@@ -101,6 +101,12 @@ These are long builds, all on your computer. Nothing runs on a server.
   at four times its size, at 1024 samples a texel. On a graphics card that takes a sitting; on a processor alone
   it can run through a night per level. `--lightmap-samples 256` makes a noisier bake in a fraction of the time.
 - A **level's remodel** is moderate on a graphics card. It needs a lot of memory on the big outdoor levels.
+  It builds to the same geometry on every machine (a shipped light bake of the remodel is valid only where the
+  player's build is the farm's): every step runs in Blender's Python, with numpy's kernels pinned to its baseline and
+  one BLAS thread; bmesh's face order is made canonical; corners are welded by their geometry, never by Cycles'
+  light; positions and coordinates are snapped to fixed grids as they are written. `art/world_geo/wg_determinism.py`
+  builds a BSP several times and compares the files (`art/world_geo/wg_pwg_hash.py`: the whole file's digest, the
+  geometry's, and the drawn fields'). Run it on each platform the remodel is built on before shipping a bake of it.
 - The game is started hidden, silent and offline a few times (for the models it draws, and for probes). Nothing
   appears on the screen.
 
