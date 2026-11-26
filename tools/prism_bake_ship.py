@@ -5,15 +5,23 @@ remodel), lighting only, which the game uses wherever its key is the
 player's own BSP's and bakes nothing.
 
     export <bake folder> <stock|remodel> <shipped folder> [--maps b30,a30]
-           [--quality max] [--archives <folder>]
+           [--quality max] [--bsps d40:10,...] [--maps-folder <maps>]
+           [--empty d40:9,...] [--archives <folder>]
         copies each finished BSP bake (<map>/bsp<n>.pbk) of the bake folder
         into <shipped>/<world>/<map>/, after checking that it is whole (a
         DONE record), of the quality asked or better, of this baker's file
-        version, and lighting only (no record of a kind that is not light:
-        see LIGHT_RECORDS); writes manifest.txt (the game's: each BSP's
-        settings key, prism_bake_menu.c's) and manifest.json (the files'
-        sizes and sha256, each BSP's per-BSP input hashes) and, with
-        --archives, a release asset per level and world
+        version, lighting only (no record of a kind that is not light: see
+        LIGHT_RECORDS) and of the world named (its LYRB record's). A level
+        ships whole or not at all (players never bake): its BSP count is
+        the map's (--maps-folder), the worker's note's (baked.txt "bsps N")
+        or --bsps, which must agree, and every BSP must have its file, but
+        for one --empty names (a BSP with no lightmapped surface, which has
+        nothing to bake: d40's BSP 9). The rig is always the units rig (the
+        shipped one: a note that says otherwise is refused). Writes
+        manifest.txt (the game's: each BSP's settings key,
+        prism_bake_menu.c's) and manifest.json (the files' sizes and
+        sha256, each BSP's per-BSP input hashes) and, with --archives, a
+        release asset per level and world
         (prism_bake_<map>_<world>_v<baker>.ppk: an uncompressed tar of that
         level's files and its manifest lines; the records are packed
         already), each under GitHub's 2 GiB asset limit.
@@ -72,6 +80,9 @@ def fourcc(text: str) -> int:
 LIGHT_RECORDS = {fourcc(name): name for name in (
     "PLAN", "DONE", "ATLS", "ATLF", "ATLY", "MASK", "VOLB", "VOLY", "PROB", "IMPG", "REAC", "FOOT", "LYRB")}
 GEOMETRY_RECORDS = {fourcc(name): name for name in ("ATLX", "CKPT")}
+# the rig every shipped bake is made with (docs/prism_bake.md: the rig is
+# pinned to its shipped default on the farm and in the game)
+RIG = "units"
 
 
 class BakeError(Exception):
@@ -162,19 +173,91 @@ def sha256_of(path: Path) -> str:
     return digest.hexdigest()
 
 
-def noted_tags(bake_folder: Path, map_name: str) -> dict[int, str]:
-    """each BSP's tag as the main menu's note (baked.txt) has it, where it does"""
-    tags = {}
-    note = bake_folder / map_name / "baked.txt"
-    if note.is_file():
-        for line in note.read_text("utf-8", "replace").splitlines():
+def read_note(bake_folder: Path, map_name: str) -> dict:
+    """the main menu's note (baked.txt), where there is one: the map's BSP
+    count ("bsps N", None where it has none), each BSP's tag and rig class
+    (the key's third word: "v19 max units cutouts geo:...")"""
+    note = {"bsps": None, "tags": {}, "rigs": {}}
+    path = bake_folder / map_name / "baked.txt"
+    if path.is_file():
+        for line in path.read_text("utf-8", "replace").splitlines():
+            match = re.match(r"bsps (\d+)$", line.strip())
+            if match:
+                note["bsps"] = int(match.group(1))
+                continue
+            match = re.match(r"bsp(\d+) (\S+) (\S+) (\S+) ", line)
+            if match:
+                note["rigs"][int(match.group(1))] = match.group(4)
             match = re.match(r"bsp(\d+) .* geo:(?:stock|pwg):(.*)$", line)
             if match:
                 tag = match.group(2)
                 if " geo:pwg:" in line:
                     tag = tag.split(":", 1)[0]
-                tags[int(match.group(1))] = tag
-    return tags
+                note["tags"][int(match.group(1))] = tag
+    return note
+
+
+def noted_tags(bake_folder: Path, map_name: str) -> dict[int, str]:
+    """each BSP's tag as the main menu's note (baked.txt) has it, where it does"""
+    return read_note(bake_folder, map_name)["tags"]
+
+
+def map_bsp_count(maps_folder: Path, map_name: str) -> int:
+    """the map's own BSP count (its scenario's structure BSPs), read from the
+    retail map as the game reads it (tools/prism_bake/ce_map.py)"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "prism_bake"))
+    try:
+        import ce_map
+    finally:
+        sys.path.pop(0)
+    path = maps_folder / f"{map_name}.map"
+    if not path.is_file():
+        raise BakeError(f"{path}: no such map (--maps-folder)")
+    try:
+        return ce_map.Map(str(path)).bsp_count()
+    except ce_map.MapError as error:
+        raise BakeError(f"{path}: {error}") from error
+
+
+def per_map(text: str, option: str, single: list[str] | None) -> dict[str, list[int]]:
+    """'d40:10,a10:1' as {map: [numbers]}; a bare number is the one map's
+    (--maps naming exactly one)"""
+    result: dict[str, list[int]] = {}
+    for item in (t.strip() for t in (text or "").split(",")):
+        if not item:
+            continue
+        name, _, number = item.rpartition(":")
+        if not name:
+            if not single or len(single) != 1:
+                raise BakeError(f"{option} {item}: name the map (map:number) unless --maps names one map")
+            name = single[0]
+        if not number.isdigit():
+            raise BakeError(f"{option} {item}: not map:number")
+        result.setdefault(name, []).append(int(number))
+    return result
+
+
+def level_bsp_count(map_name: str, note: dict, bsps: dict[str, list[int]], maps_folder: Path | None) -> int:
+    """the level's real BSP count, from every source given, which must agree"""
+    counts = {}
+    if map_name in bsps:
+        if len(bsps[map_name]) != 1:
+            raise BakeError(f"--bsps names {map_name} more than once")
+        counts["--bsps"] = bsps[map_name][0]
+    if note["bsps"] is not None:
+        counts["baked.txt"] = note["bsps"]
+    if maps_folder is not None:
+        counts["the map"] = map_bsp_count(maps_folder, map_name)
+    if not counts:
+        raise BakeError(f"{map_name}: its BSP count is unknown (no baked.txt \"bsps N\"; give --bsps or "
+                        "--maps-folder): a level ships whole or not at all")
+    if len(set(counts.values())) != 1:
+        raise BakeError(f"{map_name}: its BSP counts disagree ("
+                        + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) + ")")
+    count = next(iter(counts.values()))
+    if count <= 0:
+        raise BakeError(f"{map_name}: a BSP count of {count}")
+    return count
 
 
 def manifest_key(header: dict, rig: str, stock: bool, tag: str | None) -> str:
@@ -202,40 +285,92 @@ def manifest_save(shipped: Path, manifest: dict) -> None:
     (shipped / "manifest.txt").write_text("\n".join(lines) + "\n", "utf-8")
 
 
-def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None, quality: str, rig: str,
-           archives: Path | None) -> list[dict]:
+def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None, quality: str,
+           archives: Path | None, bsps: str = "", maps_folder: Path | None = None, empty: str = "") -> list[dict]:
+    """every level's BSPs checked first, then copied: a level with a BSP
+    missing, of the wrong world or not a whole light bake is refused and
+    nothing of the export is written"""
     if world not in ("stock", "remodel"):
         raise BakeError("the world is stock or remodel")
+    bsps_given = per_map(bsps, "--bsps", maps)
+    empty_given = per_map(empty, "--empty", maps)
+    folders = sorted(p for p in bake_folder.iterdir() if p.is_dir() and (not maps or p.name in maps))
+    for name in maps or []:
+        if not (bake_folder / name).is_dir():
+            raise BakeError(f"{name}: no folder in {bake_folder}")
+    for name in set(bsps_given) | set(empty_given):
+        if not (bake_folder / name).is_dir() or (maps and name not in maps):
+            raise BakeError(f"{name}: named by --bsps or --empty but not exported")
+    levels = []
+    for folder in folders:
+        files = {int(f.stem[3:]): f for f in folder.glob("bsp*.pbk") if re.fullmatch(r"bsp\d+\.pbk", f.name)}
+        if not files and not (maps and folder.name in maps) and folder.name not in empty_given:
+            continue
+        note = read_note(bake_folder, folder.name)
+        count = level_bsp_count(folder.name, note, bsps_given, maps_folder)
+        empties = set(empty_given.get(folder.name, []))
+        beyond = sorted(i for i in set(files) | empties if i >= count)
+        if beyond:
+            raise BakeError(f"{folder.name}: BSP {beyond[0]} past its {count} BSPs")
+        both = sorted(empties & set(files))
+        if both:
+            raise BakeError(f"{folder.name}: BSP {both[0]} is named --empty but has a bake")
+        missing = [i for i in range(count) if i not in files and i not in empties]
+        if missing:
+            raise BakeError(f"{folder.name}: BSP " + ", ".join(str(i) for i in missing) + f" of {count} not baked "
+                            "(bsp<n>.pbk missing): a level ships whole or not at all")
+        entries = []
+        for index in range(count):
+            rig = note["rigs"].get(index, RIG)
+            if rig != RIG:
+                raise BakeError(f"{folder.name}: BSP {index} was baked with the {rig} rig (baked.txt): only the "
+                                f"{RIG} rig ships")
+            if index in empties:
+                # (nothing to bake: listed so that the level is whole, with no file)
+                entries.append({"world": world, "map": folder.name, "bsp": index, "of": count, "file": None,
+                                "empty": True, "key": ""})
+                continue
+            file = files[index]
+            data = file.read_bytes()
+            try:
+                header, records, stock = check_bake(data, quality)
+            except BakeError as error:
+                raise BakeError(f"{file}: {error}") from error
+            if header["bsp_index"] != index:
+                raise BakeError(f"{file}: its header is BSP {header['bsp_index']}'s")
+            if stock is None:
+                raise BakeError(f"{file}: no LYRB record says which world it was baked from")
+            if world == "stock" and not stock:
+                raise BakeError(f"{file}: a bake of the remodel, exported as the stock world's")
+            if world == "remodel" and stock:
+                raise BakeError(f"{file}: a bake of the stock world (its LYRB record), exported as the remodel's")
+            entries.append({
+                "world": world, "map": folder.name, "bsp": index, "of": count, "source": file, "data": data,
+                "file": f"{world}/{folder.name}/{file.name}", "size": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(), "header": header, "records": len(records),
+                "key": manifest_key(header, RIG, stock, note["tags"].get(index)),
+            })
+        # (an empty BSP's key: the level's own settings, its geometry by kind)
+        baked = [e for e in entries if not e.get("empty")]
+        if not baked:
+            raise BakeError(f"{folder.name}: every BSP is --empty: nothing to ship")
+        for entry in entries:
+            if entry.get("empty"):
+                head = baked[0]["key"].split(" geo:")[0]
+                entry["key"] = f"{head} geo:{'stock' if world == 'stock' else 'pwg'}"
+        levels.append((folder.name, entries))
     shipped.mkdir(parents=True, exist_ok=True)
     manifest = manifest_load(shipped)
     exported = []
-    folders = sorted(p for p in bake_folder.iterdir() if p.is_dir() and (not maps or p.name in maps))
-    for folder in folders:
-        files = sorted(folder.glob("bsp*.pbk"), key=lambda p: int(re.sub(r"\D", "", p.stem) or 0))
-        files = [f for f in files if re.fullmatch(r"bsp\d+\.pbk", f.name)]
-        if not files:
-            continue
-        tags = noted_tags(bake_folder, folder.name)
-        entries = []
-        for file in files:
-            data = file.read_bytes()
-            header, records, stock = check_bake(data, quality)
-            if world == "stock" and stock is False:
-                raise BakeError(f"{file}: a bake of the remodel, exported as the stock world's")
-            index = int(file.stem[3:])
-            target = shipped / world / folder.name / file.name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(file, target)
-            entries.append({
-                "world": world, "map": folder.name, "bsp": index, "file": f"{world}/{folder.name}/{file.name}",
-                "size": len(data), "sha256": hashlib.sha256(data).hexdigest(), "header": header,
-                "records": len(records),
-                "key": manifest_key(header, rig, stock if stock is not None else world == "stock", tags.get(index)),
-            })
-        of = max(e["bsp"] for e in entries) + 1
+    for name, entries in levels:
         for entry in entries:
-            entry["of"] = of
-        manifest["bsps"] = [e for e in manifest["bsps"] if not (e["world"] == world and e["map"] == folder.name)]
+            if entry.get("empty"):
+                continue
+            target = shipped / entry["file"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(entry.pop("data"))
+            entry.pop("source")
+        manifest["bsps"] = [e for e in manifest["bsps"] if not (e["world"] == world and e["map"] == name)]
         manifest["bsps"].extend(entries)
         exported.extend(entries)
     manifest_save(shipped, manifest)
@@ -249,12 +384,16 @@ def write_archives(shipped: Path, manifest: dict, archives: Path, levels: set) -
     written = []
     for world, map_name in sorted(levels):
         entries = [e for e in manifest["bsps"] if e["world"] == world and e["map"] == map_name]
-        version = entries[0]["header"]["baker_version"]
+        version = next(e for e in entries if not e.get("empty"))["header"]["baker_version"]
         groups = [entries]
-        if sum(e["size"] for e in entries) > ASSET_LIMIT:
-            groups = [[e] for e in entries]
+        if sum(e.get("size", 0) for e in entries) > ASSET_LIMIT:
+            # (one archive a BSP; the empty ones ride with the first)
+            baked = [e for e in entries if not e.get("empty")]
+            groups = [[e] for e in baked]
+            groups[0] = [e for e in entries if e.get("empty")] + groups[0]
         for group in groups:
-            suffix = "" if len(groups) == 1 else f"_bsp{group[0]['bsp']}"
+            first = next(e for e in group if not e.get("empty"))
+            suffix = "" if len(groups) == 1 else f"_bsp{first['bsp']}"
             path = archives / f"prism_bake_{map_name}_{world}_v{version}{suffix}.ppk"
             with tarfile.open(path, "w", format=tarfile.PAX_FORMAT) as tar:
                 part = json.dumps({"format": 1, "kind": "prism_bake_shipped", "bsps": group}, indent=1,
@@ -264,6 +403,8 @@ def write_archives(shipped: Path, manifest: dict, archives: Path, levels: set) -
                 info.mtime = 0
                 tar.addfile(info, io.BytesIO(part))
                 for entry in group:
+                    if entry.get("empty"):
+                        continue
                     info = tar.gettarinfo(str(shipped / entry["file"]), arcname=entry["file"])
                     info.mtime = 0
                     info.uid = info.gid = 0
@@ -279,7 +420,19 @@ def write_archives(shipped: Path, manifest: dict, archives: Path, levels: set) -
 def verify(shipped: Path) -> list[str]:
     manifest = manifest_load(shipped)
     problems = []
+    levels: dict[tuple, list[dict]] = {}
     for entry in manifest["bsps"]:
+        levels.setdefault((entry["world"], entry["map"]), []).append(entry)
+    for (world, map_name), entries in sorted(levels.items()):
+        counts = {e["of"] for e in entries}
+        indices = sorted(e["bsp"] for e in entries)
+        if len(counts) != 1 or indices != list(range(next(iter(counts)))):
+            problems.append(f"{world}/{map_name}: not whole (BSPs {indices} of {sorted(counts)})")
+    for entry in manifest["bsps"]:
+        if entry.get("empty"):
+            if entry.get("file"):
+                problems.append(f"{entry['world']}/{entry['map']} BSP {entry['bsp']}: empty but names a file")
+            continue
         path = shipped / entry["file"]
         if not path.is_file():
             problems.append(f"{entry['file']}: missing")
@@ -321,8 +474,8 @@ def install(shipped: Path, archives: list[Path]) -> list[str]:
                     shutil.copyfileobj(source, out)
             if not part:
                 raise BakeError(f"{archive}: no manifest.part.json")
-            files = {e["file"] for e in part["bsps"]}
-            manifest["bsps"] = [e for e in manifest["bsps"] if e["file"] not in files]
+            names = {(e["world"], e["map"], e["bsp"]) for e in part["bsps"]}
+            manifest["bsps"] = [e for e in manifest["bsps"] if (e["world"], e["map"], e["bsp"]) not in names]
             manifest["bsps"].extend(part["bsps"])
     manifest_save(shipped, manifest)
     return verify(shipped)
@@ -348,7 +501,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--maps", default="")
     p.add_argument("--quality", default="max", choices=QUALITIES,
                    help="the least quality shipped (a release's is max; a test pack's may be draft)")
-    p.add_argument("--rig", default="units", choices=("units", "fitted"))
+    p.add_argument("--bsps", default="", help="each level's BSP count, map:N[,map:N] (a bare N with one --maps)")
+    p.add_argument("--maps-folder", type=Path, help="the retail maps, each level's BSP count read from its map")
+    p.add_argument("--empty", default="", help="BSPs with nothing to bake (no lightmapped surface), map:index[,...]")
     p.add_argument("--archives", type=Path)
     p = commands.add_parser("verify")
     p.add_argument("shipped", type=Path)
@@ -361,9 +516,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "export":
             entries = export(args.bake_folder, args.world, args.shipped,
-                             [m for m in args.maps.split(",") if m] or None, args.quality, args.rig, args.archives)
+                             [m for m in args.maps.split(",") if m] or None, args.quality, args.archives,
+                             args.bsps, args.maps_folder, args.empty)
             for entry in entries:
-                print(f"{entry['file']}: {entry['size']} bytes, {entry['header']['quality']}, {entry['key']}")
+                if entry.get("empty"):
+                    print(f"{entry['world']}/{entry['map']} BSP {entry['bsp']}: nothing to bake, {entry['key']}")
+                else:
+                    print(f"{entry['file']}: {entry['size']} bytes, {entry['header']['quality']}, {entry['key']}")
             problems = verify(args.shipped)
         elif args.command == "verify":
             problems = verify(args.shipped)

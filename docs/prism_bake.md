@@ -381,7 +381,13 @@ its own remodel) and checks the key before it uses the light.
 
 **The tool** (`tools/prism_bake_ship.py`): `export <bake folder> <stock|remodel> <shipped folder>` copies each finished
 BSP bake after checking it is whole (DONE), of the quality asked (`--quality`, max for a release) or better, of this
-file version and lighting only (a record of a kind not known to be light refuses the file), and writes both manifests;
+file version and lighting only (a record of a kind not known to be light refuses the file), of the world named (its
+`LYRB` record's: a stock bake is never exported as the remodel's, nor the reverse, and a file with no `LYRB` is
+refused), and writes both manifests. A level ships whole or not at all, since players never bake: its BSP count is the
+map's (`--maps-folder`), the worker's note's (`baked.txt`'s `bsps N`) or `--bsps map:N`, which must agree, and a level
+with any BSP's file missing is refused, nothing of the export written. A BSP with nothing to bake (no lightmapped
+surface: d40's BSP 9) is named `--empty map:index` and listed in the manifests with no file. The rig is always the units
+rig (no `--rig`: a note that says a BSP was baked with the fitted rig is refused).
 `--archives` writes a release asset a level and world (`prism_bake_<map>_<world>_v<baker>.ppk`, an uncompressed tar:
 the records are packed already), each under GitHub's 2 GiB asset limit (a level past it splits by BSP). `install`
 unpacks a release's archives into a shipped folder (nothing outside it) and `verify` checks one (sizes, sha256, every

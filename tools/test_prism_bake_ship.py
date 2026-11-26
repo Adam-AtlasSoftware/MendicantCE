@@ -1,9 +1,11 @@
 """tools/prism_bake_ship.py: a shipped bake's export, archives, install and
 checks, on bake files made here in prism_bake_cache.h's format"""
 
+import os
 import struct
 import tarfile
 import zlib
+from pathlib import Path
 
 import pytest
 
@@ -39,14 +41,15 @@ def _bake(kinds=("PLAN", "LYRB", "ATLS", "ATLY", "MASK", "VOLB", "VOLY", "PROB",
     return data
 
 
-def _folder(tmp_path, maps=("b30", "a30"), **bake):
+def _folder(tmp_path, maps=("b30", "a30"), bsps=2, baked=None, note=True, rig="units", **bake):
     folder = tmp_path / "prism_bake"
     for map_name in maps:
         (folder / map_name).mkdir(parents=True)
-        for bsp in range(2):
+        for bsp in (range(bsps) if baked is None else baked):
             (folder / map_name / f"bsp{bsp}.pbk").write_bytes(_bake(map_name=map_name, bsp=bsp, **bake))
-        (folder / map_name / "baked.txt").write_text(
-            f"bsps 2\nbsp0 v19 ultra units cutouts geo:stock:levels/{map_name}/{map_name}\n")
+        if note:
+            (folder / map_name / "baked.txt").write_text(
+                f"bsps {bsps}\nbsp0 v19 ultra {rig} cutouts geo:stock:levels/{map_name}/{map_name}\n")
         (folder / map_name / f"bsp0.reach").write_bytes(b"walk")
     return folder
 
@@ -54,7 +57,7 @@ def _folder(tmp_path, maps=("b30", "a30"), **bake):
 def test_export_writes_lighting_only_files_and_manifests(tmp_path):
     folder = _folder(tmp_path)
     shipped = tmp_path / "shipped"
-    entries = ship.export(folder, "stock", shipped, None, "max", "units", None)
+    entries = ship.export(folder, "stock", shipped, None, "max", None)
     assert sorted(e["file"] for e in entries) == ["stock/a30/bsp0.pbk", "stock/a30/bsp1.pbk", "stock/b30/bsp0.pbk",
                                                   "stock/b30/bsp1.pbk"]
     # (the reach's walk and the note stay behind: only the bakes ship)
@@ -77,13 +80,13 @@ def test_export_refuses_what_is_not_a_whole_light_bake(tmp_path):
         ship.check_bake(_bake(quality=2), "max")
     folder = _folder(tmp_path, maps=("b30",), stock=False)
     with pytest.raises(ship.BakeError, match="remodel"):
-        ship.export(folder, "stock", tmp_path / "shipped", None, "draft", "units", None)
+        ship.export(folder, "stock", tmp_path / "shipped", None, "draft", None)
 
 
 def test_remodel_set_keys_its_geometry_by_kind(tmp_path):
     folder = _folder(tmp_path, maps=("b30",), stock=False, quality=0)
     shipped = tmp_path / "shipped"
-    ship.export(folder, "remodel", shipped, None, "draft", "units", None)
+    ship.export(folder, "remodel", shipped, None, "draft", None)
     lines = (shipped / "manifest.txt").read_text().splitlines()
     assert "bsp remodel b30 1 2 v19 draft units cutouts geo:pwg" in lines
 
@@ -92,7 +95,7 @@ def test_archives_install_and_verify(tmp_path):
     folder = _folder(tmp_path)
     shipped = tmp_path / "shipped"
     archives = tmp_path / "release"
-    ship.export(folder, "stock", shipped, ["b30"], "max", "units", archives)
+    ship.export(folder, "stock", shipped, ["b30"], "max", archives)
     paths = sorted(archives.iterdir())
     assert [p.name for p in paths] == ["prism_bake_b30_stock_v19.ppk"]
     installed = tmp_path / "player" / "prism_bake_shipped"
@@ -113,3 +116,97 @@ def test_install_refuses_paths_outside_the_folder(tmp_path):
     with pytest.raises(ship.BakeError, match="not a shipped"):
         ship.install(tmp_path / "shipped", [evil])
     assert not (tmp_path.parent / "outside.pbk").exists()
+
+
+def test_export_refuses_a_level_with_a_bsp_missing(tmp_path):
+    """players never bake: a level whose last BSP has no bake is refused, and nothing is written"""
+    folder = _folder(tmp_path, maps=("d40",), bsps=3, baked=(0, 1))
+    shipped = tmp_path / "shipped"
+    with pytest.raises(ship.BakeError, match=r"BSP 2 of 3 not baked"):
+        ship.export(folder, "stock", shipped, None, "max", None)
+    assert not shipped.exists()
+    # (the count from --bsps alone, with no note: still refused)
+    folder = _folder(tmp_path / "b", maps=("d40",), bsps=3, baked=(0, 1), note=False)
+    with pytest.raises(ship.BakeError, match=r"BSP 2 of 3 not baked"):
+        ship.export(folder, "stock", shipped, None, "max", None, bsps="d40:3")
+    # (no count known at all: refused, not guessed from the files)
+    with pytest.raises(ship.BakeError, match="BSP count is unknown"):
+        ship.export(folder, "stock", shipped, None, "max", None)
+    # (counts that disagree: refused)
+    with pytest.raises(ship.BakeError, match="disagree"):
+        ship.export(_folder(tmp_path / "c", maps=("d40",), bsps=2), "stock", shipped, None, "max", None,
+                    bsps="d40:3")
+    # (a bare --bsps number with --maps naming one map)
+    with pytest.raises(ship.BakeError, match=r"BSP 2 of 3 not baked"):
+        ship.export(folder, "stock", shipped, ["d40"], "max", None, bsps="3")
+    assert not shipped.exists()
+
+
+def test_export_lists_an_empty_bsp_so_the_level_is_whole(tmp_path):
+    """a BSP with nothing to bake (d40's BSP 9) is named --empty: listed with no file, the level whole"""
+    folder = _folder(tmp_path, maps=("d40",), bsps=3, baked=(0, 1))
+    shipped = tmp_path / "shipped"
+    entries = ship.export(folder, "stock", shipped, None, "max", None, empty="d40:2")
+    assert [(e["bsp"], e["of"], bool(e.get("empty"))) for e in entries] == [(0, 3, False), (1, 3, False),
+                                                                            (2, 3, True)]
+    lines = (shipped / "manifest.txt").read_text().splitlines()
+    assert "bsp stock d40 2 3 v19 max units cutouts geo:stock" in lines
+    assert not (shipped / "stock/d40/bsp2.pbk").exists()
+    assert ship.verify(shipped) == []
+    archives = tmp_path / "release"
+    ship.write_archives(shipped, ship.manifest_load(shipped), archives, {("stock", "d40")})
+    installed = tmp_path / "player"
+    assert ship.install(installed, sorted(archives.iterdir())) == []
+    # (a BSP named empty that has a bake is a mistake)
+    with pytest.raises(ship.BakeError, match="named --empty but has a bake"):
+        ship.export(folder, "stock", tmp_path / "s2", None, "max", None, empty="d40:1")
+
+
+def test_verify_finds_a_level_not_whole(tmp_path):
+    folder = _folder(tmp_path, maps=("b30",))
+    shipped = tmp_path / "shipped"
+    ship.export(folder, "stock", shipped, None, "max", None)
+    manifest = ship.manifest_load(shipped)
+    manifest["bsps"] = [e for e in manifest["bsps"] if e["bsp"] != 1]
+    ship.manifest_save(shipped, manifest)
+    assert any("not whole" in p for p in ship.verify(shipped))
+
+
+def test_export_refuses_a_stock_bake_as_the_remodel(tmp_path):
+    """the LYRB record says which world a bake is of: a stock one is never shipped as the remodel's"""
+    folder = _folder(tmp_path, maps=("b30",), stock=True)
+    with pytest.raises(ship.BakeError, match="stock world .*exported as the remodel"):
+        ship.export(folder, "remodel", tmp_path / "shipped", None, "max", None)
+    # (and a bake with no LYRB record is of no known world)
+    folder = _folder(tmp_path / "b", maps=("b30",), kinds=("PLAN", "ATLS", "DONE"))
+    with pytest.raises(ship.BakeError, match="no LYRB"):
+        ship.export(folder, "stock", tmp_path / "shipped", None, "max", None)
+    assert not (tmp_path / "shipped").exists()
+
+
+def test_rig_is_always_units(tmp_path):
+    """no --rig: every key says units, and a note of a bake made with the fitted rig is refused"""
+    folder = _folder(tmp_path, maps=("b30",))
+    shipped = tmp_path / "shipped"
+    entries = ship.export(folder, "stock", shipped, None, "max", None)
+    assert all(" units cutouts " in e["key"] + " " for e in entries)
+    with pytest.raises(SystemExit):
+        ship.main(["export", str(folder), "stock", str(tmp_path / "s2"), "--rig", "fitted"])
+    folder = _folder(tmp_path / "b", maps=("b30",), rig="fitted")
+    with pytest.raises(ship.BakeError, match="fitted rig"):
+        ship.export(folder, "stock", tmp_path / "s3", None, "max", None)
+
+
+@pytest.mark.skipif(not os.environ.get("HALO_DATA_ROOT"), reason="needs the player's maps (HALO_DATA_ROOT)")
+def test_bsp_count_from_the_map(tmp_path):
+    """the level's BSP count read from the player's own d40 (ten BSPs, the last a cinematic's with nothing to bake):
+    its last BSP missing is refused, named --empty it ships whole"""
+    maps = Path(os.environ["HALO_DATA_ROOT"]) / "maps"
+    if not (maps / "d40.map").is_file():
+        pytest.skip("no d40.map")
+    assert ship.map_bsp_count(maps, "d40") == 10
+    folder = _folder(tmp_path, maps=("d40",), bsps=10, baked=range(9), note=False)
+    with pytest.raises(ship.BakeError, match=r"BSP 9 of 10 not baked"):
+        ship.export(folder, "stock", tmp_path / "shipped", None, "max", None, maps_folder=maps)
+    entries = ship.export(folder, "stock", tmp_path / "shipped", None, "max", None, maps_folder=maps, empty="d40:9")
+    assert len(entries) == 10 and entries[-1]["empty"]
