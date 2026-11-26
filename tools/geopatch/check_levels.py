@@ -157,11 +157,9 @@ def _check(task):
             tmp.unlink()
             row["deviation"] = deviation(parts_image, by_index[b], native, tolerance)
         out["bsps"][b] = row
+    # (only this level's folder: checks_tmp itself is removed by main once every worker is done, never by a worker,
+    # which could take it from under another worker's mkdir)
     work.rmdir()
-    try:
-        work.parent.rmdir()
-    except OSError:
-        pass
     return name, out
 
 
@@ -198,6 +196,10 @@ def main(argv=None):
             dirty += bool(bad)
             print("%s %s" % (name, "clean" if not bad else "; ".join(bad[:6]) + (" ..." if len(bad) > 6 else "")),
                   flush=True)
+    try:
+        (Path(args.build) / "checks_tmp").rmdir()
+    except OSError:
+        pass
     text = json.dumps({"tolerance": args.tolerance, "ground_z": GROUND_Z, "levels": results}, indent=1,
                       sort_keys=True) + "\n"
     if args.out:
