@@ -69,6 +69,7 @@ loaded) and the walk made.
 #include "../src/xgpu_manifest.h"
 #include "render_enumerate.h"
 #include "render_prepared.h"
+#include "prism_world_source.h"
 #include "../src/prepared_shipped.h"
 
 #include <stdint.h>
@@ -369,6 +370,19 @@ static boolean prepared_choose(boolean mirrors)
 	/* (the structure the map starts in: a saved game's may be another) */
 	hash = prepared_key_models(prepared_key(prepared_key_settings(scenario), mirrors,
 		global_structure_bsp_index_get()));
+	/* (v4 geopatch M2: a map drawn with its enhanced world geometry keys its
+	records by the checksum and the BSP's enhanced world_id, as the render
+	caches built from that geometry are: prism_world_source.c) */
+	{
+		unsigned char id[32];
+		uint64_t world = 0;
+		int k;
+
+		prism_world_source_world_id(global_structure_bsp_index_get(), id);
+		for (k = 0; k < 8; k++)
+			world |= (uint64_t)id[k] << (8 * k);
+		hash ^= world;
+	}
 	prepared.checksum = cache_files_get_checksum();
 	/* (prepared again in play: from its record, whatever structure it is in) */
 	prepared.again = prepared.played.known && prepared.played.checksum == prepared.checksum &&

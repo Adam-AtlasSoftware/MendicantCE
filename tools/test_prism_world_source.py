@@ -91,3 +91,14 @@ def test_the_bake_is_keyed_to_the_world_id():
     # (the shipped bake's manifest names the enhanced world's BSPs by that id, and the ladder looks for it)
     assert '"geo:prsx:%s:%s"' in _source("prism_bake_menu.c")
     assert '"geo:prsx:%s"' in _source("prism_world_source.c")
+
+
+def test_prepared_records_keyed_to_the_world_id():
+    """the prepared draws' records (render_prepared.c) of a map drawn with its enhanced geometry are keyed by the
+    checksum and the BSP's enhanced world_id (PLAN_FINAL section 3.4: render caches on checksum ^ world_id), the
+    classic world's as before (its id all zeros)"""
+    prepared = re.sub(r"/\*.*?\*/", "", _source("render_prepared.c"), flags=re.S)
+    choose = prepared[prepared.index("static boolean prepared_choose(boolean mirrors)"):]
+    choose = choose[:choose.index("\n}\n")]
+    assert "prism_world_source_world_id(global_structure_bsp_index_get(), id);" in choose
+    assert choose.index("hash ^= world;") < choose.index("prepared.key = hash;")
