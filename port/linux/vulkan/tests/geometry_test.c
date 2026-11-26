@@ -246,6 +246,78 @@ static void test_budget(void)
 	xgpu_geometry_destroy(geometry);
 }
 
+/* the skinned vertices' budget: the rigged objects drawn the farthest
+coarser first within it, the still ones not counted, never stock, no
+hunting; let go once room comes back */
+static void test_skinned_budget(void)
+{
+	struct xgpu_geometry *geometry = xgpu_geometry_create();
+	struct xgpu_geometry_settings settings;
+	struct xgpu_geometry_ladder rig = ladder_of(60000, 18000, 5000, 300.0f, 100.0f);
+	struct xgpu_geometry_ladder rock = ladder_of(20000, 5000, 1250, 140.0f, 45.0f);
+	struct xgpu_geometry_choice choices[20], rock_choice;
+	struct xgpu_geometry_statistics statistics;
+	uint64_t total;
+	uint32_t object;
+	int frame;
+
+	rig.vertices[0] = 50000;
+	rig.vertices[1] = 17000;
+	rig.vertices[2] = 5000;
+	rig.per_frame = 1;
+	rock.vertices[0] = 30000;
+	rock.vertices[1] = 8000;
+	rock.vertices[2] = 2000;
+	memset(&settings, 0, sizeof(settings));
+	settings.hysteresis = 0.3f;
+	settings.coarse_reach = 40.0f;
+	settings.skinned_budget = 500000u;
+	xgpu_geometry_settings_set(geometry, &settings);
+	for (frame = 0; frame < 4; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		for (object = 0; object < 20; object++)
+			choices[object] = draw(geometry, object + 1, 0, &rig, 400.0f, 2.0f + (float)object);
+		rock_choice = draw(geometry, 100, 0, &rock, 400.0f, 1.0f);
+	}
+	for (object = 0, total = 0; object < 20; object++)
+	{
+		CHECK(choices[object].variant == XGPU_GEOMETRY_REMODEL);
+		total += rig.vertices[choices[object].lod];
+	}
+	CHECK(total <= 500000u);
+	CHECK(choices[0].lod == 0);
+	CHECK(choices[19].lod > 0);
+	for (object = 1; object < 20; object++)
+		CHECK(choices[object].lod >= choices[object - 1].lod);
+	CHECK(rock_choice.lod == 0);
+	/* (still: no hunting) */
+	xgpu_geometry_statistics(geometry, &statistics);
+	{
+		uint64_t switches = statistics.switches[XGPU_GEOMETRY_VIEW];
+
+		for (frame = 0; frame < 60; frame++)
+		{
+			xgpu_geometry_frame(geometry, eye);
+			for (object = 0; object < 20; object++)
+				draw(geometry, object + 1, 0, &rig, 400.0f, 2.0f + (float)object);
+		}
+		xgpu_geometry_statistics(geometry, &statistics);
+		CHECK(statistics.switches[XGPU_GEOMETRY_VIEW] == switches);
+		CHECK(statistics.skinned_over_budget == 0);
+	}
+	/* (half of them gone: the others drawn finer again, over frames) */
+	for (frame = 0; frame < 30; frame++)
+	{
+		xgpu_geometry_frame(geometry, eye);
+		for (object = 0; object < 8; object++)
+			choices[object] = draw(geometry, object + 1, 0, &rig, 400.0f, 2.0f + (float)object);
+	}
+	for (object = 0; object < 8; object++)
+		CHECK(choices[object].lod == 0);
+	xgpu_geometry_destroy(geometry);
+}
+
 /* stock until the mesh is in, then the remodel, once; a new map (the tier
 or the meshes changed) forgets every choice */
 static void test_variant_and_map(void)
@@ -354,6 +426,7 @@ int main(void)
 	test_shadow_first();
 	test_floor();
 	test_budget();
+	test_skinned_budget();
 	test_variant_and_map();
 	test_notes();
 	test_ageing();

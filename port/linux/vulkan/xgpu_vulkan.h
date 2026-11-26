@@ -523,6 +523,9 @@ int xgpu_vulkan_mesh_skin_kept(uint64_t key, int make, struct xgpu_vulkan_mesh_b
 	uint32_t count, const float (*bones)[4], uint32_t bone_count, const float inverse_scale[2],
 	struct xgpu_vulkan_range *skinned, struct xgpu_vulkan_range *wide);
 void xgpu_vulkan_mesh_skin_kept_clear(void);
+/* the vertices skinned into the ring a frame may take (the resolver's
+skinned budget, xgpu_geometry.h) */
+uint32_t xgpu_vulkan_mesh_skin_budget_vertices(void);
 void xgpu_vulkan_mesh_skin_kept_statistics(uint64_t *hits, uint64_t *made, uint64_t *evicted, uint64_t *refused);
 /* the vertices skinned with their wide stream, all told */
 uint64_t xgpu_vulkan_mesh_skin_wide_vertices(void);

@@ -32,6 +32,10 @@ struct entry
 	/* the decision */
 	int variant, lod_known;
 	uint32_t lod, traced_lod, drawable_last, lod_count;
+	/* the level the skinned vertices' budget holds it to at least */
+	uint32_t budget_lod;
+	int per_frame;
+	uint32_t vertices[XGPU_GEOMETRY_LODS];
 	uint32_t triangles[XGPU_GEOMETRY_LODS];
 	float cutoff[XGPU_GEOMETRY_LODS];
 	uint64_t seen_frame, decided_frame, view_frame;
@@ -401,6 +405,92 @@ static void budget_share(struct xgpu_geometry *geometry)
 	geometry->statistics.traced_triangles_last = total;
 }
 
+/* the drawn levels of the objects skinned each frame (drawn the frame
+before) held within the skinned vertices' budget: the farthest held to a
+coarser level of their drawable ladder first, the nearest let go first
+while the total stays within the band; never stock */
+static void skinned_share(struct xgpu_geometry *geometry)
+{
+	uint64_t total = 0, budget = geometry->settings.skinned_budget, band;
+	uint32_t index, count = 0, pass;
+	int changed;
+
+	if (geometry->order_capacity < geometry->capacity)
+	{
+		uint32_t *grown = realloc(geometry->order, geometry->capacity * sizeof(*grown));
+
+		if (!grown)
+			return;
+		geometry->order = grown;
+		geometry->order_capacity = geometry->capacity;
+	}
+	for (index = 0; index < geometry->capacity; index++)
+	{
+		struct entry *entry = &geometry->entries[index];
+
+		if (entry->key == EMPTY_KEY || entry->variant != XGPU_GEOMETRY_REMODEL || !entry->per_frame ||
+			!entry->lod_count || entry->seen_frame + 1u < geometry->frame)
+			continue;
+		if (!budget)
+			entry->budget_lod = 0;
+		total += entry->vertices[entry->lod];
+		geometry->order[count++] = index;
+	}
+	geometry->statistics.skinned_vertices_last = total;
+	if (!budget || !count)
+		return;
+	band = (uint64_t)((float)budget * BUDGET_BAND);
+	if (total > budget)
+	{
+		order_sort(geometry, geometry->order, count, 1);
+		for (pass = 0, changed = 1; changed && total > budget && pass < XGPU_GEOMETRY_LODS; pass++)
+		{
+			changed = 0;
+			for (index = 0; index < count && total > budget; index++)
+			{
+				struct entry *entry = &geometry->entries[geometry->order[index]];
+
+				if (entry->lod >= entry->drawable_last)
+					continue;
+				total -= entry->vertices[entry->lod];
+				entry->lod++;
+				entry->budget_lod = entry->lod;
+				total += entry->vertices[entry->lod];
+				changed = 1;
+			}
+		}
+		if (total > budget)
+			geometry->statistics.skinned_over_budget++;
+	}
+	else if (total < band)
+	{
+		order_sort(geometry, geometry->order, count, 0);
+		for (index = 0; index < count; index++)
+		{
+			struct entry *entry = &geometry->entries[geometry->order[index]];
+			uint64_t finer;
+
+			if (!entry->budget_lod)
+				continue;
+			/* (held at its budget's level: one level finer where the total
+			stays in the band; held coarser by its own size: let go) */
+			if (entry->lod > entry->budget_lod)
+			{
+				entry->budget_lod = 0;
+				continue;
+			}
+			finer = total - entry->vertices[entry->lod] + entry->vertices[entry->lod - 1u];
+			if (finer > band)
+				continue;
+			total = finer;
+			entry->budget_lod--;
+		}
+	}
+	for (index = 0; index < count; index++)
+		if (geometry->entries[geometry->order[index]].budget_lod)
+			geometry->statistics.drawn_degraded++;
+}
+
 /* last frame's notes compared: the shadows' and the traced shape against
 the view's */
 static void notes_compare(struct xgpu_geometry *geometry, struct entry *entry)
@@ -453,6 +543,7 @@ void xgpu_geometry_frame(struct xgpu_geometry *geometry, const float eye[3])
 		if (geometry->entries[index].key != EMPTY_KEY)
 			notes_compare(geometry, &geometry->entries[index]);
 	}
+	skinned_share(geometry);
 	budget_share(geometry);
 	geometry->statistics.entries = geometry->count;
 	if (geometry->log_level >= 1 && geometry->frame % 600u == 0)
@@ -462,14 +553,17 @@ void xgpu_geometry_frame(struct xgpu_geometry *geometry, const float eye[3])
 		say(geometry, 1, "geometry: %llu frames, %u objects; switches view %llu shadow %llu traced %llu; flips view %llu "
 			"shadow %llu traced %llu; stock to remodel %llu, remodel to stock %llu; shadow not the view's %llu, traced "
 			"stock under a remodel %llu, traced another level near %llu; traced levels made coarser %llu, frames over "
-			"budget %llu, levels the floor held %llu; traced triangles %llu",
+			"budget %llu, levels the floor held %llu; traced triangles %llu; drawn levels made coarser for the skinned vertices "
+			"%llu, frames over %llu, skinned vertices %llu",
 			(unsigned long long)s->frames, s->entries, (unsigned long long)s->switches[0],
 			(unsigned long long)s->switches[1], (unsigned long long)s->switches[2], (unsigned long long)s->flips[0],
 			(unsigned long long)s->flips[1], (unsigned long long)s->flips[2], (unsigned long long)s->to_remodel,
 			(unsigned long long)s->to_stock, (unsigned long long)s->shadow_mismatch,
 			(unsigned long long)s->traced_stock, (unsigned long long)s->traced_mismatch,
 			(unsigned long long)s->traced_degraded, (unsigned long long)s->over_budget,
-			(unsigned long long)s->floor_held, (unsigned long long)s->traced_triangles_last);
+			(unsigned long long)s->floor_held, (unsigned long long)s->traced_triangles_last,
+			(unsigned long long)s->drawn_degraded, (unsigned long long)s->skinned_over_budget,
+			(unsigned long long)s->skinned_vertices_last);
 	}
 }
 
@@ -549,6 +643,9 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 		entry->lod_count = ladder->lod_count < XGPU_GEOMETRY_LODS ? ladder->lod_count : XGPU_GEOMETRY_LODS;
 		memcpy(entry->triangles, ladder->triangles, sizeof(entry->triangles));
 		memcpy(entry->cutoff, ladder->cutoff, sizeof(entry->cutoff));
+		memcpy(entry->vertices, ladder->vertices, sizeof(entry->vertices));
+		entry->per_frame = ladder->per_frame;
+		entry->budget_lod = 0;
 		entry->drawable_last = xgpu_geometry_drawable_last(ladder);
 		entry->lod_known = 0;
 	}
@@ -569,6 +666,8 @@ void xgpu_geometry_resolve(struct xgpu_geometry *geometry, uint32_t object, uint
 		else
 			pixels = lod_pixels;
 		lod = level_for(geometry, entry, pixels);
+		if (lod < entry->budget_lod)
+			lod = entry->budget_lod;
 		if (lod > entry->drawable_last)
 		{
 			geometry->statistics.floor_held++;

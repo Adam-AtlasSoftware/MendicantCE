@@ -21,6 +21,9 @@ direct-mapped table) the resolver keeps:
   with a band so that the choice does not hunt (never stock, never left
   out). Levels past the ladder's drawable floor are traced only beyond the
   coarse reach.
+Under the skinned vertices' budget (the objects skinned again each frame,
+the rigs': a full skin ring drew them stock), the farthest of them are drawn
+at a coarser level of their ladder, with the same band.
 The ladder's drawable floor: a level of fewer than an eighth of the
 triangles of the level before it is not drawn (a ladder that drops 16x in a
 step, the old rocks' 1984 / 124 / 31, reads as the remodel flipping to CE's
@@ -71,6 +74,10 @@ struct xgpu_geometry_ladder
 	uint32_t lod_count;
 	uint32_t triangles[XGPU_GEOMETRY_LODS];
 	float cutoff[XGPU_GEOMETRY_LODS];
+	/* each level's vertices, and whether the object is skinned again each
+	frame (a rig's: a still object's skinning is kept) */
+	uint32_t vertices[XGPU_GEOMETRY_LODS];
+	int per_frame;
 };
 
 struct xgpu_geometry_settings
@@ -81,6 +88,10 @@ struct xgpu_geometry_settings
 	uint32_t traced_budget;
 	/* beyond it a level past the drawable floor may be traced (world units) */
 	float coarse_reach;
+	/* the vertices the objects skinned each frame may take a frame (the skin
+	ring's share; 0 no budget): past it the farthest are drawn at a coarser
+	level of their ladder, never stock */
+	uint32_t skinned_budget;
 };
 
 struct xgpu_geometry_choice
@@ -106,6 +117,9 @@ struct xgpu_geometry_statistics
 	/* traced levels made coarser for the budget (object-frames), frames
 	still over it, levels the ladder's floor held back */
 	uint64_t traced_degraded, over_budget, floor_held;
+	/* drawn levels made coarser for the skinned vertices' budget
+	(object-frames), the frames still over it, the vertices last frame */
+	uint64_t drawn_degraded, skinned_over_budget, skinned_vertices_last;
 	uint64_t traced_triangles_last;
 	uint32_t entries;
 };

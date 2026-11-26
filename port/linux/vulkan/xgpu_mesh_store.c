@@ -1043,6 +1043,25 @@ int xgpu_mesh_store_ladder(struct xgpu_mesh_store *store, uint32_t id, uint32_t 
 	return 1;
 }
 
+int xgpu_mesh_store_ladder_vertices(struct xgpu_mesh_store *store, uint32_t id, uint32_t *vertices, int *rigged)
+{
+	struct entry *entry = entry_of(store, id);
+	uint32_t lod;
+	int state;
+
+	if (!entry)
+		return 0;
+	lock(store);
+	state = entry->state;
+	unlock(store);
+	if (state != _entry_resident)
+		return 0;
+	for (lod = 0; lod < entry->lod_count; lod++)
+		vertices[lod] = entry->lods[lod].vertex_count;
+	*rigged = entry->rig != NULL;
+	return 1;
+}
+
 int xgpu_mesh_store_use_lod(struct xgpu_mesh_store *store, uint32_t id, uint32_t lod, struct xgpu_mesh_store_view *view)
 {
 	struct entry *entry = entry_of(store, id);

@@ -231,6 +231,9 @@ their count, triangles and cutoffs in pixels (the last's 0); 0 where the
 mesh is not in (nothing written) */
 int xgpu_mesh_store_ladder(struct xgpu_mesh_store *store, uint32_t id, uint32_t *lod_count, uint32_t *triangles,
 	float *cutoffs);
+/* a resident id's levels' vertices and whether it has a rig (its helper
+bones move on their own: skinned again each frame); 0 where not in */
+int xgpu_mesh_store_ladder_vertices(struct xgpu_mesh_store *store, uint32_t id, uint32_t *vertices, int *rigged);
 /* a resident id's view at a level the caller chose (the reading not begun:
 xgpu_mesh_store_use_from first); 0 where it is not in or has no such level */
 int xgpu_mesh_store_use_lod(struct xgpu_mesh_store *store, uint32_t id, uint32_t lod, struct xgpu_mesh_store_view *view);

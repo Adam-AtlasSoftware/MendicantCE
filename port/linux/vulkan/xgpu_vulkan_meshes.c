@@ -152,6 +152,8 @@ static struct
 	instance had taken since (drawn stock), and the traced captures of a
 	remodelled part that failed: its skinning, no piece */
 	uint64_t parts_lost, rt_skin_failed, rt_no_piece;
+	/* draws skinned at a coarser level of the remodel, the ring full */
+	uint64_t coarser_skins;
 	/* the resolver (xgpu_geometry.h); legacy: the choices before it */
 	struct xgpu_geometry *geometry;
 	int legacy, settings_known;
@@ -434,7 +436,8 @@ static int instance_resolved(const struct xgpu_stream_mesh_instance *record, str
 	{
 		memset(&ladder, 0, sizeof(ladder));
 		resident = xgpu_mesh_store_ladder(meshes.store, record->mesh, &ladder.lod_count, ladder.triangles,
-			ladder.cutoff);
+			ladder.cutoff) && xgpu_mesh_store_ladder_vertices(meshes.store, record->mesh, ladder.vertices,
+			&ladder.per_frame);
 		if (ladder.lod_count > XGPU_GEOMETRY_LODS)
 			ladder.lod_count = XGPU_GEOMETRY_LODS;
 	}
@@ -712,8 +715,30 @@ int xgpu_vulkan_meshes_prepare(const float (*constants)[4], uint32_t constant_co
 		return 0;
 	if (!instance_skin(instance, wide))
 	{
-		meshes.prepare_failures++;
-		return 0;
+		/* (port: the skin ring full: a coarser level of the remodel, which
+		takes less of it, never CE's part; the frame's other draws of the
+		object keep the level drawn here) */
+		struct xgpu_mesh_store_view coarser;
+		uint32_t lod = instance->view.lod + 1u;
+		int skinned = 0;
+
+		while (!meshes.legacy && !skinned && meshes.store &&
+			xgpu_mesh_store_use_lod(meshes.store, instance->mesh, lod, &coarser) &&
+			coarser.node_count <= instance->node_count)
+		{
+			instance->view = coarser;
+			instance->hash = bytes_hash(instance->matrices, instance->node_count * sizeof(instance->matrices[0]),
+				2166136261u ^ coarser.lod);
+			instance->skinned_serial = 0;
+			skinned = instance_skin(instance, wide);
+			meshes.coarser_skins++;
+			lod++;
+		}
+		if (!skinned)
+		{
+			meshes.prepare_failures++;
+			return 0;
+		}
 	}
 	serial = xgpu_vulkan_serial();
 	to = xgpu_vulkan_upload(constant_count * 16, 256, &meshes.constants);
@@ -964,6 +989,7 @@ void xgpu_vulkan_meshes_frame(void)
 		memset(&settings, 0, sizeof(settings));
 		settings.hysteresis = (float)(meshes.hysteresis_percent > 50u ? 50u : meshes.hysteresis_percent) / 100.0f;
 		settings.traced_budget = xgpu_vulkan_rt_replacement_budget(&settings.coarse_reach);
+		settings.skinned_budget = xgpu_vulkan_mesh_skin_budget_vertices();
 		xgpu_geometry_settings_set(meshes.geometry, &settings);
 		xgpu_geometry_frame(meshes.geometry, xgpu_vulkan_rt_eye(eye) ? eye : NULL);
 		if (getenv("HALO_GEOMETRY_LOG") && meshes.frame % 600u == 0)
@@ -980,11 +1006,12 @@ void xgpu_vulkan_meshes_frame(void)
 			host_logf(HOST_LOG_INFO, "meshstore: %llu frames: %llu instances (%llu drawable), %llu swaps, %llu parts named "
 				"after their instance's slot was taken (drawn stock), %llu skinnings failed (drawn stock; the skin ring "
 				"full %llu times, %llu dispatches, %llu vertices), traced captures failed: %llu skinnings, %llu without a "
-				"piece", (unsigned long long)meshes.frame, (unsigned long long)meshes.instances_seen,
+				"piece; %llu drawn a level coarser for the ring", (unsigned long long)meshes.frame, (unsigned long long)meshes.instances_seen,
 				(unsigned long long)meshes.instances_drawable, (unsigned long long)meshes.swaps,
 				(unsigned long long)meshes.parts_lost, (unsigned long long)meshes.prepare_failures,
 				(unsigned long long)ring_full, (unsigned long long)dispatches, (unsigned long long)vertices,
-				(unsigned long long)meshes.rt_skin_failed, (unsigned long long)meshes.rt_no_piece);
+				(unsigned long long)meshes.rt_skin_failed, (unsigned long long)meshes.rt_no_piece,
+				(unsigned long long)meshes.coarser_skins);
 		}
 	}
 	if (meshes.store)
