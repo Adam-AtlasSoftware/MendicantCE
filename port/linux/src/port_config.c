@@ -938,6 +938,13 @@ static const struct config_setting config_settings[] =
 		"every pixel (the bake ending it) beside the direct light; \"performance\"\n"
 		"reads the bounced light from the bake where the level has it and\n"
 		"traces a bounce only for the objects. Read each frame." },
+	{ "display.pt_light_scale", _config_real, "0.0", "HALO_PT_LIGHT_SCALE", _environment_value, _platform_desktop,
+		"With display.lighting \"pathtraced\": the traced light's upscaling. The\n"
+		"light is traced and denoised at this share of the 3D view's pixels each\n"
+		"way (0.25 to 1; 0 or 1 off: at every pixel), then brought up to every\n"
+		"pixel guided by the view's depth and normals and lit with every pixel's\n"
+		"own colour, so that the edges and textures stay at the view's size;\n"
+		"best with display.upscaler at 1.0 (DLAA) or 0.67. Read each frame." },
 	{ "display.denoiser", _config_string, "\"prism\"", "HALO_DENOISER", _environment_value, _platform_desktop,
 		"With display.lighting \"pathtraced\": \"prism\" the in-tree denoiser\n"
 		"(its diffuse and specular light and the sun's shadows); \"dlss_rr\"\n"
@@ -4621,7 +4628,8 @@ static const char *const config_display_order[] =
 	"=PRISM Rebaked (\"raster\") alone",
 	"display.prism_raster_composition", "display.prism_raster_objects",
 	"=PRISM Path Traced (\"pathtraced\") alone",
-	"display.pt_profile", "display.denoiser", "display.prism_glow_lights", "display.prism_dynamic_lights",
+	"display.pt_profile", "display.pt_light_scale", "display.denoiser", "display.prism_glow_lights",
+	"display.prism_dynamic_lights",
 	"display.prism_light_saturation",
 	"=Upscaling (PRISM Rebaked and PRISM Path Traced; DLSS Ray Reconstruction under Path Traced alone)",
 	"display.upscaler", "display.upscaler_scale", "display.upscaler_sharpness",
@@ -4698,6 +4706,7 @@ static const struct
 	{ "display.prism_raster_objects", "PRISM Rebaked (display.lighting \"raster\") alone" },
 	{ "display.prism_raster_object_shadows", "PRISM Rebaked (display.lighting \"raster\") alone" },
 	{ "display.pt_profile", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
+	{ "display.pt_light_scale", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
 	{ "display.denoiser", "PRISM Path Traced (display.lighting \"pathtraced\") alone" },
 	{ "display.upscaler", "every mode's 3D view (Settings offers it under PRISM Rebaked and PRISM Path Traced)" },
 	{ "display.upscaler_scale", "every mode's 3D view, with display.upscaler on" },

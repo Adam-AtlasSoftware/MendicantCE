@@ -724,6 +724,7 @@ scene changes.
 | --- | --- | --- |
 | `display.lighting` | `"pathtraced"` | Every CE light off, the path tracer's light |
 | `display.pt_profile` | `"quality"`, `"performance"` | The indirect light: a bounce at every pixel, or the bake's where the level has it |
+| `display.pt_light_scale` | `0`, `0.25` to `1` | The traced light's upscaling: the light pass and the denoiser at that share of the G-buffer's pixels each way, the denoised light brought to the G-buffer's pixels by its depth and normals (the pass `upsample`), each pixel lit with its own albedo, normal and emission; `0` every pixel. With `display.upscaler` at 1.0 or 0.67 |
 | `display.denoiser` | `"prism"`, `"dlss_rr"`, `"off"` | The in-tree denoiser; NVIDIA DLSS Ray Reconstruction (the plugin `dlss`, built by the player: `docs/prism_plugin.md`, "PRISM Path Traced and a plugin"), which takes the traced light raw with the tracer's guides and replaces the denoiser and the upscaler; or the light as traced |
 | `debug.gbuffer_view` | `"pt_diffuse"`, `"pt_specular"`, `"pt_sun"`, `"pt_direct"`, `"pt_indirect"`, `"pt_history"`, `"pt_noisy"` | The diffuse light (denoised), the specular, the sun's visibility, the direct or indirect light alone (each denoised), the history's length, the diffuse light as traced |
 | `debug.pt_reference` | frames | The reference, at most that many frames |

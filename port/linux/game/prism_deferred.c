@@ -78,6 +78,7 @@ boolean prism_bake_object_static(long object_index);
 
 /* the platform's (port/linux/src) */
 char const *config_string(char const *name);
+double config_real(char const *name);
 int config_boolean(char const *name);
 unsigned long config_changes(void);
 void xgpu_backend_gbuffer_phase(unsigned long phase);
@@ -109,6 +110,9 @@ its denoiser off (display.denoiser "off") */
 #define PHASE_PATHTRACED 0x10000000ul
 #define PHASE_PT_PROFILE_SHIFT 29
 #define PHASE_PT_DENOISER_OFF 0x80000000ul
+/* (display.pt_light_scale in hundredths: xgpu_stream.h's
+XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_*) */
+#define PHASE_PT_LIGHT_SCALE_SHIFT 20
 /* the views the bake's relight shows (Raster's), the path tracer's */
 #define VIEW_BAKE_FIRST 12ul
 #define VIEW_PT_FIRST 20ul
@@ -184,6 +188,8 @@ static struct
 	boolean wanted, raster, raster_materials, raster_objects_volume, raster_object_shadows, pathtraced;
 	unsigned long pt_profile;
 	boolean pt_denoiser_off;
+	/* display.pt_light_scale in hundredths (0 off) */
+	unsigned long pt_light_scale;
 	/* display.player_shadow, and the draw flags the player's body's draws
 	take now (prism_deferred_body) */
 	boolean body_shadow;
@@ -237,6 +243,13 @@ static void settings_read(
 	prism_deferred.pt_profile = value && !strcmp(value, "performance") ? 0 : 1;
 	value = config_string("display.denoiser");
 	prism_deferred.pt_denoiser_off = value && !strcmp(value, "off");
+	{
+		/* (the traced light's upscaling: 0 off, else 0.25 to 1) */
+		double scale = config_real("display.pt_light_scale");
+
+		prism_deferred.pt_light_scale = scale > 0.0 && scale < 0.995 ?
+			(unsigned long)((scale < 0.25 ? 0.25 : scale) * 100.0 + 0.5) : 0;
+	}
 	/* (display.prism_raster_composition: "ce", the default, CE's shaders
 	compose Raster's light; "materials" Raster's own materials the frame
 	whole, for the materials milestone) */
@@ -876,7 +889,8 @@ void prism_deferred_phase(
 		if (prism_deferred.pathtraced)
 		{
 			value |= PHASE_PATHTRACED | (prism_deferred.pt_profile << PHASE_PT_PROFILE_SHIFT) |
-				(prism_deferred.pt_denoiser_off ? PHASE_PT_DENOISER_OFF : 0);
+				(prism_deferred.pt_denoiser_off ? PHASE_PT_DENOISER_OFF : 0) |
+				(prism_deferred.pt_light_scale << PHASE_PT_LIGHT_SCALE_SHIFT);
 		}
 		else if (prism_deferred.raster)
 		{
