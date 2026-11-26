@@ -141,6 +141,11 @@ finds each lamp (HALO_PT_LAMP_MIS, on by default; 0: by its solid angle alone,
 as before) */
 #define LAMP_RAY_DEFAULT 0.0
 #define FLAG_LAMP_MIS 256u
+/* the short history's cap, times its neighbours' brightest, and the light
+below which it holds nothing, in eighths of the light shown as white
+(xgpu_vulkan_pt_frame) */
+#define SHORT_CAP_DEFAULT 4
+#define SHORT_CAP_FLOOR_DEFAULT 128
 /* the light pass's specialization constants (xgpu_vulkan_pt.glsl's
 SPEC_*); whether half the level's 8 x 8 blocks (1) or half its pixels (2)
 take the bake's indirect light as their bounce by default
@@ -1990,15 +1995,37 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	deviations) */
 	if (getenv("HALO_PT_FAST_GAMMA"))
 		job->denoise[3] = (float)atof(getenv("HALO_PT_FAST_GAMMA"));
-	/* no neighbours' cap on a short history's samples: it took the light a
-	moving eye's new pixels found brighter than their neighbours' (c40's lab
-	about 5% dark in turns and strafes, over 90 frames to come back once
-	still; without it FLIP against R moving 0.085 to 0.077, still frames
-	alike, no new fireflies: the firefly clamp and the fast history's hold
-	stay; work/openh1_eval/v4_pt_clarity_runs). HALO_PT_SHORT_CAP=1, a
-	diagnosis, puts it back */
-	if (!(getenv("HALO_PT_SHORT_CAP") && atoi(getenv("HALO_PT_SHORT_CAP")) != 0))
-		job->frame[1] |= 512u;
+	/* the short history's cap: a moving eye's new pixels held to K times
+	their neighbours' brightest (the specular's 4 K), but never below F
+	times the light the exposure shows as white (SHORT_CAP_DEFAULT,
+	SHORT_CAP_FLOOR_DEFAULT: 4 and 16 times white). The cap alone took the
+	light those pixels found brighter than their neighbours (c40's lab and
+	a10's corridor darker and blurrier turning and strafing, over 90 frames
+	to come back once still); no cap let single samples far past white
+	through, which the denoiser and an upscaler smeared into white blobs
+	(over the 240 moving frames of a10 and c40 at native and DLSS 0.67 to
+	0.33: 42606 pixels past 230 where the cap had none). With the floor the
+	moving frames keep about 90% of what the cap's removal gained (FLIP
+	against the supersampled reference turning and strafing 0.0998 to
+	0.0950, ghosting 27.3 to 24.8) and the blobs are back to the run to run
+	noise (work/openh1_eval/v4_pt_clarity_runs/r2). Diagnoses:
+	HALO_PT_SHORT_CAP=<K> (1 to 255; 0 no cap at all), HALO_PT_SHORT_CAP_FLOOR=<F>
+	in eighths of white (0 to 255; 0 none) */
+	{
+		static int short_cap = -1, short_floor = -1;
+
+		if (short_cap < 0)
+		{
+			short_cap = env_int("HALO_PT_SHORT_CAP", SHORT_CAP_DEFAULT);
+			short_cap = short_cap < 0 ? 0 : short_cap > 255 ? 255 : short_cap;
+			short_floor = env_int("HALO_PT_SHORT_CAP_FLOOR", SHORT_CAP_FLOOR_DEFAULT);
+			short_floor = short_floor < 0 ? 0 : short_floor > 255 ? 255 : short_floor;
+		}
+		if (short_cap == 0)
+			job->frame[1] |= 512u;
+		else
+			job->frame[1] |= (uint32_t)short_cap << 16 | (uint32_t)short_floor << 24;
+	}
 	/* (ReSTIR GI's reservoirs' confidence at most 20 frames, the quality
 	profile's bounce reused; HALO_PT_RESTIR_GI=0: none, each frame's own) */
 	{

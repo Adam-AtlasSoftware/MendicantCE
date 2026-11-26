@@ -424,8 +424,23 @@ the two strategies keep the estimate unbiased; both sides compute these the
 same way at a pixel: lamp_direct_total, the bake's direct light here, set by
 the light pass; 0 (no texel, the flag off) the old weight) */
 const uint FLAG_LAMP_MIS = 256u;
-/* (a diagnosis, HALO_PT_SHORT_CAP=0: no neighbours' cap on a short history's samples) */
+/* (HALO_PT_SHORT_CAP=0, a diagnosis: no neighbours' cap on a short history's samples) */
 const uint FLAG_NO_SHORT_CAP = 512u;
+/* the short history's cap, times the neighbours' brightest (job.frame.y's
+bits 16 to 23; 0: 4, the cap before the clarity rounds); the specular's 4
+times that */
+float short_cap_scale() { uint k = (job.frame.y >> 16) & 255u; return k == 0u ? 4.0 : float(k); }
+/* the light below which the short history's cap holds nothing (job.frame.y's
+bits 24 to 31, in eighths of the light the exposure shows as white; 0 none) */
+float short_cap_floor()
+{
+    uint f = (job.frame.y >> 24) & 255u;
+    if (f == 0u)
+        return 0.0;
+    bool metered = job.exposure.z > 0.5 && job.meter != uvec2(0u);
+    float exposure = metered && job.exposure.x > 0.5 ? exposure_of(job.meter) : 1.0;
+    return float(f) * 0.125 / max(exposure, 1.0e-6);
+}
 /* the lamp ray's roughness at most (job.frame.w, in hundredths:
 HALO_PT_LAMP_RAY; 0 none) and its reach */
 float lamp_ray_roughness() { return float(job.frame.w) / 100.0; }
@@ -3230,7 +3245,10 @@ void main()
     frames, to the history's mean and 8 times its samples' spread (the slow
     moments'); before, while the history is short (the camera moving, a
     disocclusion, the first frames), to 4 times the brightest of its
-    neighbours on the same surface (eight, two pixels away), so that one
+    neighbours on the same surface (eight, two pixels away; short_cap_scale)
+    but never below 16 times the light shown as white (short_cap_floor: the
+    cap alone took the light a moving eye's new pixels found, the clarity
+    round's darker, blurrier turns and strafes in c40 and a10), so that one
     sample of a small bright light (a keypad's glow met by the bounce, a lamp
     one candidate in thousands finds) is not spread by the fix's wide gather
     and the a-trous steps into a blob (round 1's moving frames in a10: green
@@ -3265,15 +3283,16 @@ void main()
             most_s = max(most_s, raw ? imageLoad(noisy_specular, q).a : imageLoad(spec_b, q).a);
             any_ = true;
         }
+        float k_short = short_cap_scale(), floor_short = max(short_cap_floor(), 1.0e-3);
         if (any_ && short_d)
-            cap_d = min(cap_d, max(4.0 * most_d, 1.0e-3));
+            cap_d = min(cap_d, max(k_short * most_d, floor_short));
         /* (the specular's at 16 times: a glossy floor's reflection of a lamp
         strip is a few rays in many that meet it, its neighbours' samples
         dark, and 4 times them took it away wherever a moving eye's history
         was short: round 3's G5, the corridor's floor through the door
         windows without the strips R reflects) */
         if (any_ && short_s)
-            cap_s = min(cap_s, max(16.0 * most_s, 1.0e-3));
+            cap_s = min(cap_s, max(4.0 * k_short * most_s, floor_short));
     }
     vec3 cd = ld > cap_d ? nd.rgb * (cap_d / ld) : nd.rgb;
     vec3 cs = ls > cap_s ? ns.rgb * (cap_s / ls) : ns.rgb;
