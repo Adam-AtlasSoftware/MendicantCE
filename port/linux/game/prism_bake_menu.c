@@ -93,6 +93,7 @@ the Xbox's and put it under the data folder) */
 /* ---------- prototypes */
 
 char const *config_string(char const *name);
+long config_integer(char const *name);
 int config_boolean(char const *name);
 unsigned long config_changes(void);
 void platform_log(const char *format, ...);
@@ -104,6 +105,7 @@ boolean prism_bake_wanted(void);
 unsigned long prism_bake_status(int word);
 float prism_bake_status_real(int word);
 unsigned long prism_scene_static_generation(void);
+int prism_scene_static_empty(void);
 void draw_quad(rectangle2d *rectangle, pixel32 color);
 /* menu_functions.c's: the saved game's level and the one after the last
 finished, player 1's profile's (NONE for none) */
@@ -213,7 +215,11 @@ static struct
 	short target;
 	unsigned long written;
 	unsigned long switch_asked;
-} bake_worker = { (unsigned long)-1 };
+	/* debug.bake_bsp: the one BSP baked (a farm's job a BSP), -1 all; the
+	BSPs that failed, each passed over so that the next is still baked */
+	short only;
+	short failed;
+} bake_worker = { (unsigned long)-1, "", FALSE, 0, 0, 0, -1, 0 };
 
 /* ---------- private code */
 
@@ -1015,17 +1021,37 @@ static void worker_frame(void)
 	if (!game_time_initialized() || !game_in_progress() || main_menu_is_active() || !(scenario = global_scenario_get()))
 		return;
 	/* (the game's clock stopped: nothing plays while it bakes) */
+	count = scenario->structure_bsp_references.count;
 	if (!bake_worker.paused)
 	{
 		bake_worker.paused = TRUE;
 		hs_compile_and_evaluate("game_speed 0");
-		platform_log("prism bake: the main menu's worker bakes %s's %d BSPs", bake_worker.map,
-			(int)scenario->structure_bsp_references.count);
+		if (bake_worker.only >= 0)
+		{
+			platform_log("prism bake: the main menu's worker bakes %s's BSP %d alone (debug.bake_bsp; %d BSPs)",
+				bake_worker.map, (int)bake_worker.only, (int)count);
+			bake_worker.target = bake_worker.only < count ? bake_worker.only : count;
+		}
+		else
+			platform_log("prism bake: the main menu's worker bakes %s's %d BSPs", bake_worker.map, (int)count);
 	}
-	count = scenario->structure_bsp_references.count;
 	bsp = global_structure_bsp_index_get();
-	if (bake_worker.target >= count)
+	if (bake_worker.target >= count || (bake_worker.only >= 0 && bake_worker.target != bake_worker.only))
 	{
+		if (bake_worker.only >= count)
+		{
+			worker_progress_write("failed");
+			platform_log("prism bake: the main menu's worker: %s has no BSP %d (debug.bake_bsp): quitting",
+				bake_worker.map, (int)bake_worker.only);
+			exit(2);
+		}
+		if (bake_worker.failed)
+		{
+			worker_progress_write("failed");
+			platform_log("prism bake: the main menu's worker baked %s but for %d BSPs that failed: quitting",
+				bake_worker.map, (int)bake_worker.failed);
+			exit(3);
+		}
 		worker_progress_write("done");
 		platform_log("prism bake: the main menu's worker baked %s: quitting", bake_worker.map);
 		exit(0);
@@ -1042,6 +1068,15 @@ static void worker_frame(void)
 		return;
 	}
 	bake_worker.switch_asked = 0;
+	if (prism_scene_static_empty())
+	{
+		/* (nothing to bake: noted by prism_bake_note, this frame) */
+		platform_log("prism bake: the main menu's worker: %s's BSP %d has no lightmapped surface: nothing to bake",
+			bake_worker.map, (int)bsp);
+		bake_worker.target++;
+		worker_progress_write("baking");
+		return;
+	}
 	state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 	if ((long)prism_bake_status(XGPU_BAKE_STATUS_BSP) == (long)bsp &&
 		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) == prism_scene_static_generation())
@@ -1055,10 +1090,14 @@ static void worker_frame(void)
 		}
 		if (state == XGPU_BAKE_STATE_FAILED)
 		{
-			worker_progress_write("failed");
-			platform_log("prism bake: the main menu's worker could not bake %s's BSP %d: quitting", bake_worker.map,
+			/* (passed over: the map's other BSPs are still baked, and the
+			worker ends failed once they are) */
+			bake_worker.failed++;
+			bake_worker.target++;
+			worker_progress_write("baking");
+			platform_log("prism bake: the main menu's worker could not bake %s's BSP %d: on to the next", bake_worker.map,
 				(int)bsp);
-			exit(3);
+			return;
 		}
 	}
 	if (system_milliseconds() - bake_worker.written > PROGRESS_MILLISECONDS)
@@ -1126,9 +1165,11 @@ char const *prism_bake_worker_map(void)
 	if (bake_worker.changes != config_changes())
 	{
 		char const *value = config_string("debug.bake_worker");
+		long only = config_integer("debug.bake_bsp");
 
 		bake_worker.changes = config_changes();
 		snprintf(bake_worker.map, sizeof(bake_worker.map), "%s", value ? value : "");
+		bake_worker.only = only >= 0 && only < 32767 ? (short)only : -1;
 	}
 	return bake_worker.map[0] ? bake_worker.map : NULL;
 }
@@ -1157,9 +1198,11 @@ static void prism_bake_note(void)
 		return;
 	}
 	generation = prism_scene_static_generation();
-	if (prism_bake_status(XGPU_BAKE_STATUS_STATE) != XGPU_BAKE_STATE_DONE ||
+	/* (a BSP with no lightmapped surface, a cinematic's, has nothing to
+	bake: noted as baked, so that its level counts whole) */
+	if (!prism_scene_static_empty() && (prism_bake_status(XGPU_BAKE_STATUS_STATE) != XGPU_BAKE_STATE_DONE ||
 		(long)prism_bake_status(XGPU_BAKE_STATUS_BSP) != (long)bsp ||
-		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) != generation)
+		prism_bake_status(XGPU_BAKE_STATUS_GENERATION) != generation))
 	{
 		return;
 	}

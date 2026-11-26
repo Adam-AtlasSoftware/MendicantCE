@@ -1125,6 +1125,10 @@ static const struct config_setting config_settings[] =
 		"named here loaded at once, each of its BSPs baked in turn in the\n"
 		"foreground, its progress written to the bake folder, then the game\n"
 		"quits. Empty: the game as usual." },
+	{ "debug.bake_bsp", _config_integer, "-1", "HALO_BAKE_BSP", _environment_value, _platform_desktop,
+		"With debug.bake_worker: bake only this BSP of its map (0 the first),\n"
+		"then quit, so that a farm runs a map's BSPs side by side, a job each.\n"
+		"-1: every BSP in turn." },
 	{ "display.prism_rt", _config_string, "\"off\"", "HALO_PRISM_RT", _environment_value, _platform_desktop,
 		"PRISM: hardware ray tracing over Classic's light (docs/prism_rt.md;\n"
 		"off under display.lighting \"raster\" and \"pathtraced\", which light the\n"

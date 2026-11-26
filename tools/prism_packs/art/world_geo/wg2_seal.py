@@ -1,6 +1,7 @@
 """PRISM world geometry v2: a written remodel (.pwg) made watertight where its surfaces meet.
 
 usage: python3 art/world_geo/wg2_seal.py <bsp.gltf> <in.pwg> <out.pwg> <report.json>
+       blender -b --factory-startup --python art/world_geo/wg2_seal.py -- <the same> (prism_packs' world step)
 environment: WG_SEAL_TOLERANCE (wu: how far off an edge a neighbour's vertex may lie and still be its, default 0.03),
        WG_SEAL_ROUNDS (default 8)
 
@@ -511,11 +512,11 @@ def write(path, header, parts):
         struct.pack_into("<If", rec, 40, p["ntc"], p["dist"])
         out += rec
         arr(p["sft"].astype("<u4"))
-        arr(p["verts"].astype("<f4"))
-        arr(p["lmv"].astype("<f4"))
+        arr(wg.snap_vertices(p["verts"]).astype("<f4"))
+        arr(wg.snap_lightmap(p["lmv"]).astype("<f4"))
         arr(p["tri"].astype("<u2"))
         out += p["pairs"].astype("<u4").tobytes()
-        out += p["bounds"].astype("<f4").tobytes()
+        out += wg.snap_bounds(p["bounds"]).astype("<f4").tobytes()
     tmp = path + ".part"
     with open(tmp, "wb") as f:
         f.write(out)
@@ -539,7 +540,10 @@ def stock_part(m):
 
 
 def main():
-    gltf, src, dst, report_path = sys.argv[1:5]
+    # (plain Python, or Blender's, whose own arguments come before "--": the remodel's build runs it in Blender's,
+    # whose numpy is the one pinned with Blender, so that every machine seals the same file)
+    argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else sys.argv[1:]
+    gltf, src, dst, report_path = argv[0:4]
     info, mats = wg.load_bsp(gltf)
     header, far, parts = read_pwg(src)
     log("read", src, len(parts), "parts")

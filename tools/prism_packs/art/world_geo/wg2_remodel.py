@@ -229,6 +229,12 @@ def setup_cycles(samples):
         sc.cycles.device = "GPU" if backend else "CPU"
         log("cycles devices", [(d.name, d.type, d.use) for d in prefs.devices])
     sc.cycles.samples = samples
+    # (the same light every run: adaptive sampling checks convergence between passes whose sample counts Cycles'
+    # scheduler sets by the time they took; a fixed seed and count give the same light on one machine. The geometry
+    # does not depend on this light at all: the corners are welded by their geometry alone)
+    sc.cycles.use_adaptive_sampling = False
+    sc.cycles.seed = 0
+    sc.cycles.use_animated_seed = False
     sc.cycles.use_denoising = False
     sc.cycles.max_bounces = 3
     sc.cycles.diffuse_bounces = 2
@@ -359,6 +365,7 @@ def light_ratio(X, T, cornerN, Xref, refN, occ_X, occ_T, sun, r):
 
 def main():
     gltf, extract_root, recipes_path, out_path, report_path = args()
+    log("numpy", np.__version__, "kernels", wg.numpy_kernels())
     info, mats = wg.load_bsp(gltf)
     gltf_json = json.load(open(gltf))
     allrec = json.load(open(recipes_path))
@@ -637,7 +644,16 @@ def main():
     me.edges.foreach_get("vertices", E)
     E = E.reshape(-1, 2).astype(np.int64)
     bpy.data.meshes.remove(me)
-    log("topology", nV, "vertices", len(T), "triangles", rounds, "rounds")
+    # (in a canonical order: bmesh's bevel and triangulate hand their faces and edges back in an order that follows
+    # memory addresses, which differ from run to run, and everything after, Cycles' light too, followed it. Each
+    # triangle turned to begin at its least vertex (its winding kept), the triangles sorted by material, stock surface
+    # and corners, each edge low vertex first and the edges sorted)
+    T = np.take_along_axis(T, (np.argmin(T, axis=1)[:, None] + np.arange(3)[None, :]) % 3, 1)
+    order_ = np.lexsort((T[:, 2], T[:, 1], T[:, 0], tsrc, tmat))
+    T, tsrc, tmat = T[order_], tsrc[order_], tmat[order_]
+    E = np.sort(E, axis=1)
+    E = E[np.lexsort((E[:, 1], E[:, 0]))]
+    log("topology", nV, "vertices", len(T), "triangles", rounds, "rounds", "digest", wg.digest(V, T, tsrc, tmat))
 
     # the natural classes tessellated (wg2_natural.py): each stock face's spacing from the budget above (a bevelled
     # metal face keeps its own: inf)
@@ -666,6 +682,7 @@ def main():
         report["tessellation"] = {"vertices": int(len(V)), "triangles": int(len(T)), "fans": int(fans)}
         nV = len(V)
         E = nat.edges_of(T)
+        log("tessellated digest", wg.digest(V, T))
 
     # metal relief: the texture's own bump map as geometry (wg2_relief.py) in the flat metal triangles near where
     # one walks
@@ -675,6 +692,7 @@ def main():
     if relief_rep:
         report["relief"] = relief_rep
         log("relief", json.dumps(relief_rep))
+    log("relief digest", wg.digest(V, T))
 
     # parent stock triangle of each face
     stock_tri = np.stack([mats[m].triangles[s] + offsets[m] for m, s in zip(tmat, tsrc)])
@@ -810,7 +828,9 @@ def main():
         sel = np.nonzero(vshaped & np.array([tcls[f_] == name for f_ in o]))[0]
         if not len(sel):
             continue
-        pngs = {mats[m].maps.get("base_map", {}).get("png") for m in set(tmat[o[sel]].tolist())}
+        # (in a fixed order: a set of strings iterates by their hashes, which differ from run to run)
+        pngs = sorted({mats[m].maps.get("base_map", {}).get("png") for m in set(tmat[o[sel]].tolist())},
+                      key=lambda p_: (p_ is None, p_ or ""))
         tx = None
         if kind[name] == "rock":
             steep = 1.0 - nat.smoothstep(r.get("floor_cos_lo", 0.55), r.get("floor_cos_hi", 0.85), up[sel])
@@ -962,7 +982,7 @@ def main():
     X = X - plane * groove_depth[:, None]
     # the relief's channels set in along the face's plane normal (relief_h <= 0)
     X = X + plane * relief_h[:, None]
-    log("shaped")
+    log("shaped", "digest", wg.digest(X), "phong", wg.digest(phong, Ns, Nt), "plane", wg.digest(plane))
 
     # ---------- normals per corner (smoothing angle per class, families kept apart)
     def face_normals(XX):
@@ -1017,7 +1037,7 @@ def main():
         bck = barycentric(V[vv], PA, PB, PC)
         stockcorner[:, k] = normalize(sum(bck[:, j:j + 1] * stockN[stock_tri[:, j]] for j in range(3)))
     cornerN = np.where(flat_metal[:, None, None], stockcorner, cornerN)
-    log("normals")
+    log("normals", "digest", wg.digest(cornerN, stockcorner))
 
     # ---------- light on the new shape
     ratio = np.ones(nV)
@@ -1035,6 +1055,8 @@ def main():
             base_ += mats[i].vertex_count
         occ_X = np.concatenate(occ_X) if occ_X else np.zeros((0, 3))
         occ_T = np.concatenate(occ_T) if occ_T else np.zeros((0, 3), np.int64)
+        # (what Cycles is given, as digests: two builds whose light differs show here whether its inputs did)
+        log("light inputs", wg.digest(X, T, cornerN), wg.digest(V, stockcorner), wg.digest(occ_X, occ_T, sun))
         ratio, lit_new, lit_ref = light_ratio(X, T, cornerN, V, stockcorner, occ_X, occ_T, sun, light)
         # one pass of smoothing over the mesh's edges (bake noise)
         for _ in range(int(light.get("smooth_passes", 1))):
@@ -1123,10 +1145,17 @@ def main():
                                               mm.radiosity[st2[:, k]]], 1) for k in range(3)], 1).reshape(-1, 19)
             rows = np.concatenate([rows, extra])
             owner_src = np.concatenate([owner_src, s_])
-        q = np.round(rows / 1e-6).astype(np.int64)
+        # (corners welded by their geometry (position, tangent frame, coordinates), never by their light: the light
+        # ratio is Cycles' and moves a little from machine to machine, and welding by it made the vertex count and
+        # order, and so the geometry's bytes, follow it; a welded vertex takes its corners' mean light)
+        q = np.round(rows[:, :16] / 1e-6).astype(np.int64)
         uq, first_i, inv = np.unique(q, axis=0, return_index=True, return_inverse=True)
-        vrows = rows[first_i]
-        tri = inv.ravel().reshape(-1, 3)
+        inv = inv.ravel()
+        vrows = rows[first_i].copy()
+        rad_sum = np.zeros((len(first_i), 3))
+        np.add.at(rad_sum, inv, rows[:, 16:19])
+        vrows[:, 16:19] = rad_sum / np.bincount(inv, minlength=len(first_i))[:, None]
+        tri = inv.reshape(-1, 3)
         r = wg.Remodel(mm, vrows[:, 0:3], vrows[:, 3:6], vrows[:, 6:9], vrows[:, 9:12], vrows[:, 12:14],
                        vrows[:, 14:16], vrows[:, 16:19], tri, owner_src)
         # the far level of detail: displaced classes only (metal's cuts and bevels stay whole)

@@ -135,6 +135,9 @@ static struct
 	boolean remodel;
 	int traced;
 	long total, surfaces;
+	/* the BSP has no surface to send (a cinematic's BSP: no lightmapped
+	surface), as against a set that could not be made */
+	boolean empty;
 	int phase;
 	struct cursor cursor;
 	long sent;
@@ -761,9 +764,13 @@ void prism_scene_static_frame(
 		scene_static.attributes = malloc(SLICE * ATTRIBUTE_WORDS * sizeof(unsigned long));
 		scene_static.base = malloc(SLICE * 6 * sizeof(float));
 		scene_static.lightmap = malloc(SLICE * 6 * sizeof(float));
+		scene_static.empty = FALSE;
 		if (!scene_static.positions || !scene_static.attributes || !scene_static.base || !scene_static.lightmap ||
 			!set_count(bsp))
 		{
+			boolean empty = scene_static.positions && scene_static.attributes && scene_static.base &&
+				scene_static.lightmap && scene_static.total == 0;
+
 			xgpu_backend_scene_static(PHASE_RELEASE, scene_static.generation, 0, 0, 0, NULL);
 			set_free();
 			/* (begun, with nothing: not tried again until something changes) */
@@ -773,6 +780,12 @@ void prism_scene_static_frame(
 			scene_static.remodel = remodel;
 			scene_static.traced = traced;
 			scene_static.phase = PHASE_END + 1;
+			scene_static.empty = empty;
+			if (empty)
+			{
+				platform_log("prism scene: bsp %d: no surface with a lightmap (nothing to trace or bake)",
+					(int)bsp_index);
+			}
 			return;
 		}
 		platform_log("prism scene: bsp %d: %ld triangles (%s), %ld surfaces of two levels", (int)bsp_index,
@@ -871,4 +884,11 @@ int prism_scene_static_ended(
 	void)
 {
 	return scene_static.begun && scene_static.phase > PHASE_END && scene_static.total > 0;
+}
+
+int prism_scene_static_empty(
+	void)
+{
+	return scene_static.begun && scene_static.empty && scene_static.phase > PHASE_END &&
+		scene_static.bsp_index == global_structure_bsp_index_get();
 }

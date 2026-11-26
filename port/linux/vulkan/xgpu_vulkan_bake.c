@@ -135,6 +135,15 @@ frame writes */
 #define BRICK_PROBES 64u
 #define PROBE_SPACING 0.25f
 #define PROBE_WORDS 8u
+/* the fine cascade's bricks a BSP at most: 12.6 M probes, 403 MB of results
+on the GPU (and 201 MB of their places), so that the volume fits an 8 GB
+card beside the lightmap's working set. Every campaign BSP but one holds
+under 5.3 M probes in all; d40's eighth, its open terrain, would hold 397 M
+(12.7 GB), the reach's floors walked over the whole valley. Past the budget
+the bricks farthest from the level's shapes are left to the coarse cascade
+(Unreal's volumetric lightmap drops "the high-density bricks farthest from
+geometry first"), which the game reads where the fine has no brick */
+#define VOLUME_FINE_BRICKS_MOST 196608u
 /* the staging ring's slots (frames), each's bytes */
 #define STAGING_SLOTS 4u
 #define STAGING_BYTES (24u << 20)
@@ -185,6 +194,14 @@ grid's light work; Windows's limit is 2 s, then the device is lost) */
 #define BOUNCES 32
 /* the black floor: 1/1000 of middle grey (D4, docs/prism_gates.md) */
 #define BLACK_FLOOR (0.18f * 1.0e-3f)
+/* `max`'s hard cap on a texel's or probe's samples: the 1% rule under the
+noise floor finishes almost every texel far below it (c10's most about
+50,000), but a handful of near-black texels lit by rare paths never meet it
+(a50's first BSP: 5 texels still running after 13 half-hour slices, one at
+242,944 samples). A texel stopped by the cap closes at its running mean; the
+robust mean and the filter take its residual noise. Counted in the log
+("capped"). Samples, not seconds, so the bake stays the same on every card */
+#define MAX_SAMPLES_CAP 65536.0f
 
 #define BAKE_FUNCTIONS(F) \
 	F(vkCreateBuffer) F(vkDestroyBuffer) F(vkGetBufferMemoryRequirements) F(vkAllocateMemory) F(vkFreeMemory) \
@@ -361,6 +378,9 @@ struct bake_plan
 	then the coarse one's (COARSE_SPACING apart, over the air the fine
 	cascade does not reach: tree tops, the far side of a canyon) */
 	uint32_t probe_count, fine_count;
+	/* the fine cascade's bricks the budget left to the coarse cascade
+	(VOLUME_FINE_BRICKS_MOST), of fine_wanted */
+	uint32_t fine_dropped, fine_wanted;
 	float *probes;
 	/* the reflection probes: one each REFLECTION_CELL cell of the walk's
 	floors, above them (4 floats each) */
@@ -472,7 +492,7 @@ struct bake_state
 	/* the `max` tier's noise floor (radiance; 0 none) and the texels it
 	stopped (converged with their light below it) */
 	float noise_floor;
-	double texels_floor, texels_converged;
+	double texels_floor, texels_converged, texels_capped;
 	/* the GPU time this run gave the bake (its timestamps') */
 	double gpu_seconds;
 	/* the importance step: the cells weighed so far */
@@ -1178,6 +1198,85 @@ static uint32_t hash32(uint32_t v)
 	return (word >> 22u) ^ word;
 }
 
+/* the volume's budget (VOLUME_FINE_BRICKS_MOST): of the count fine bricks
+listed (the reach's indices, ascending), those nearest the level's shapes
+kept, the rest left to the coarse cascade. A brick's nearness is how many of
+its 17 neighbours beside and above it the reach does not hold (solid: a
+wall, a rock, an overhang, the slope of a hill; the 9 below are its floor on
+open ground too, so they are not counted), then whether it is a floor's
+(walked) rather than the air's; ties keep the reach's order. On open terrain
+the walls, slopes and props keep their fine bricks and the flat ground's
+far from them goes coarse. The same bricks whatever the card: no float, no
+time. 0 out of memory */
+static int volume_budget(struct bake_plan *plan, uint32_t *fine, uint32_t *count)
+{
+	uint32_t capacity = 1024, *all, i, b, score, threshold, most = VOLUME_FINE_BRICKS_MOST, kept = 0, histogram[64];
+	uint8_t *scores;
+
+	while (capacity < plan->brick_count * 2u + 2u)
+		capacity <<= 1;
+	all = (uint32_t *)calloc(capacity, sizeof(uint32_t));
+	scores = (uint8_t *)malloc((size_t)*count + 1);
+	if (!all || !scores)
+	{
+		free(all);
+		free(scores);
+		return 0;
+	}
+	for (b = 0; b < plan->brick_count; b++)
+	{
+		int16_t const *brick = plan->bricks + b * 4;
+		uint32_t key = brick_key(brick[0], brick[1], brick[2]) + 1u, h = hash32(key) & (capacity - 1);
+
+		while (all[h] && all[h] != key)
+			h = (h + 1) & (capacity - 1);
+		all[h] = key;
+	}
+	memset(histogram, 0, sizeof(histogram));
+	for (i = 0; i < *count; i++)
+	{
+		int16_t const *brick = plan->bricks + fine[i] * 4;
+		int dx, dy, dz;
+
+		score = 0;
+		for (dz = 0; dz <= 1; dz++)
+			for (dy = -1; dy <= 1; dy++)
+				for (dx = -1; dx <= 1; dx++)
+				{
+					uint32_t key, h;
+
+					if (!dx && !dy && !dz)
+						continue;
+					key = brick_key(brick[0] + dx, brick[1] + dy, brick[2] + dz) + 1u;
+					h = hash32(key) & (capacity - 1);
+					while (all[h] && all[h] != key)
+						h = (h + 1) & (capacity - 1);
+					score += all[h] != key;
+				}
+		score = score * 2u + ((brick[3] & XGPU_BAKE_BRICK_WALK) ? 1u : 0u);
+		scores[i] = (uint8_t)score;
+		histogram[score]++;
+	}
+	free(all);
+	/* (the lowest score kept whole, and how many of the next lower are
+	kept, in the reach's order) */
+	for (threshold = 63; threshold > 0 && histogram[threshold] <= most; threshold--)
+		most -= histogram[threshold];
+	for (i = 0; i < *count; i++)
+	{
+		if (scores[i] > threshold || (scores[i] == threshold && most))
+		{
+			if (scores[i] == threshold)
+				most--;
+			fine[kept++] = fine[i];
+		}
+	}
+	free(scores);
+	plan->fine_dropped = *count - kept;
+	*count = kept;
+	return 1;
+}
+
 static void *plan_thread(void *context)
 {
 	struct bake_plan *plan = (struct bake_plan *)context;
@@ -1592,15 +1691,16 @@ static void *plan_thread(void *context)
 	air is lit by the bake's lightmap where it meets the level, and the
 	objects in it by CE's light, until the volume's coarser level */
 	{
-		uint32_t b, k, kept_bricks = 0, walk_capacity = 1024, *walk;
+		uint32_t b, k, kept_bricks = 0, walk_capacity = 1024, *walk, *fine, fine_count = 0;
 
 		while (walk_capacity < plan->brick_count * 2u + 2u)
 			walk_capacity <<= 1;
 		walk = (uint32_t *)calloc(walk_capacity, sizeof(uint32_t));
-		plan->probes = (float *)malloc(((size_t)plan->brick_count + 1) * BRICK_PROBES * 4 * sizeof(float));
-		if (!plan->probes || !walk)
+		fine = (uint32_t *)malloc(((size_t)plan->brick_count + 1) * sizeof(uint32_t));
+		if (!fine || !walk)
 		{
 			free(walk);
+			free(fine);
 			goto done;
 		}
 		for (b = 0; b < plan->brick_count; b++)
@@ -1631,6 +1731,28 @@ static void *plan_thread(void *context)
 			}
 			if (!near)
 				continue;
+			fine[fine_count++] = b;
+		}
+		free(walk);
+		plan->fine_wanted = fine_count;
+		plan->fine_dropped = 0;
+		if (fine_count > VOLUME_FINE_BRICKS_MOST && !volume_budget(plan, fine, &fine_count))
+		{
+			free(fine);
+			goto done;
+		}
+		plan->probes = (float *)malloc(((size_t)fine_count + 1) * BRICK_PROBES * 4 * sizeof(float));
+		if (!plan->probes)
+		{
+			free(fine);
+			goto done;
+		}
+		for (kept_bricks = 0; kept_bricks < fine_count; kept_bricks++)
+		{
+			int16_t const *brick;
+
+			b = fine[kept_bricks];
+			brick = plan->bricks + b * 4;
 			for (k = 0; k < BRICK_PROBES; k++)
 			{
 				float *to = plan->probes + ((size_t)kept_bricks * BRICK_PROBES + k) * 4;
@@ -1640,9 +1762,8 @@ static void *plan_thread(void *context)
 				to[2] = (float)brick[2] + ((float)(k >> 4) + 0.5f) * PROBE_SPACING;
 				memcpy(&to[3], &b, 4);
 			}
-			kept_bricks++;
 		}
-		free(walk);
+		free(fine);
 		plan->probe_count = plan->fine_count = kept_bricks * BRICK_PROBES;
 		/* (the coarse cascade: its bricks of COARSE_SPACING x 4 world units,
 		each over the reach's bricks and the air COARSE_HEIGHT above its
@@ -2046,10 +2167,11 @@ static uint64_t light_transport_hash(const float block_rig[16][4], const struct 
 	return hash;
 }
 
-/* the key's settings (the reach's bricks, the `max` tier's noise floor,
-HALO_BAKE_SEED, the noise's steps where a diagnostic changed them) as a
-bake of this quality has them: the bake's own, or a better one's, which is
-good for this bake too (a release's shipped MAX bake for an ultra one) */
+/* the key's settings (the reach's bricks, the `max` tier's noise floor and
+sample cap, HALO_BAKE_SEED, the noise's steps where a diagnostic changed
+them) as a bake of this quality has them: the bake's own, or a better one's,
+which is good for this bake too (a release's shipped MAX bake for an ultra
+one) */
 static uint64_t key_settings_hash(const struct bake_state *b, uint32_t quality)
 {
 	struct prism_bake_filter_parameters standard;
@@ -2059,6 +2181,13 @@ static uint64_t key_settings_hash(const struct bake_state *b, uint32_t quality)
 	int passes;
 
 	hash = prism_bake_hash64(hash, &noise_floor, sizeof(noise_floor));
+	if (quality == PRISM_BAKE_QUALITY_MAX)
+	{
+		/* (`max`'s cap: a bake begun with no cap is not resumed under one) */
+		float cap = MAX_SAMPLES_CAP;
+
+		hash = prism_bake_hash64(hash, &cap, sizeof(cap));
+	}
 	if (b->seed)
 		hash = prism_bake_hash64(hash, &b->seed, sizeof(b->seed));
 	prism_bake_filter_defaults(&standard, (int)quality);
@@ -3426,6 +3555,8 @@ static void tile_finish(VkCommandBuffer commands, struct bake_state *b, uint32_t
 			if (b->noise_floor > 0.0f && a[13] < b->noise_floor)
 				b->texels_floor += 1.0;
 		}
+		if (flags && b->quality == PRISM_BAKE_QUALITY_MAX && (float)count >= MAX_SAMPLES_CAP)
+			b->texels_capped += 1.0;
 		if (!flags || (states[index] != 1 && states[index] != 2))
 			continue;
 		/* (the robust mean: the level the filter compares, the groups'
@@ -4055,7 +4186,7 @@ static VkDeviceAddress gather_cache(struct bake_state *b)
 tiers': section 3.6's counts; `max` none, D4) */
 static float cap_of(struct bake_state *b)
 {
-	static const float caps[NUMBER_OF_PRISM_BAKE_QUALITIES] = { 64.0f, 512.0f, 2048.0f, 0.0f };
+	static const float caps[NUMBER_OF_PRISM_BAKE_QUALITIES] = { 64.0f, 512.0f, 2048.0f, MAX_SAMPLES_CAP };
 
 	return b->quality < NUMBER_OF_PRISM_BAKE_QUALITIES ? caps[b->quality] : 0.0f;
 }
@@ -6095,12 +6226,12 @@ static void bake_log_progress(struct bake_state *b)
 	bake.last_status = t;
 	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: step %d, tiles %u of %u, masks %u of %u, probes %u of %u, "
 		"%.0f s, %u samples a dispatch (%.1f ms of GPU), %u texels running, %.0f MB written; %.0f samples a texel (the "
-		"most %u; %.0f%% by the firefly rule; %.0f%% of those converged by the noise floor), %.1f M samples a second, "
-		"%.1f s of GPU", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
+		"most %u; %.0f%% by the firefly rule; %.0f%% of those converged by the noise floor; %.0f capped), %.1f M samples "
+		"a second, %.1f s of GPU", b->map, (int)b->bsp, b->step, b->tiles_done, b->plan.tile_count, b->masks_done,
 		b->mask_tile_count, b->volume.done, b->plan.probe_count, t - b->started, bake.samples, bake.gpu_milliseconds,
 		b->running_texels, (double)b->file_bytes / 1048576.0, b->texels_baked > 0.0 ? (double)b->rays / b->texels_baked : 0.0,
 		b->samples_most, b->texels_baked > 0.0 ? 100.0 * b->texels_firefly_bound / b->texels_baked : 0.0,
-		b->texels_converged > 0.0 ? 100.0 * b->texels_floor / b->texels_converged : 0.0,
+		b->texels_converged > 0.0 ? 100.0 * b->texels_floor / b->texels_converged : 0.0, b->texels_capped,
 		(double)b->rays / (t - b->started + 1.0e-3) / 1.0e6, b->gpu_seconds);
 }
 
@@ -6196,6 +6327,11 @@ bake still traces) */
 			b->plan.seconds, (uint32_t)b->plan.atlas.chart_count, b->plan.vpage_count, b->plan.tile_count,
 			(double)b->plan.tile_count * TILE_TEXELS / 1.0e6, (uint32_t)b->plan.tile_triangle_count, b->plan.cell_count,
 			b->plan.probe_count, now_seconds());
+		if (b->plan.fine_dropped)
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the volume's budget: %u of the fine cascade's %u bricks "
+				"kept (the nearest the level's shapes), %u left to the coarse cascade; %u coarse bricks", b->map,
+				(int)b->bsp, b->plan.fine_wanted - b->plan.fine_dropped, b->plan.fine_wanted, b->plan.fine_dropped,
+				(b->plan.probe_count - b->plan.fine_count) / BRICK_PROBES);
 		b->step = STEP_UPLOAD;
 		break;
 	case STEP_UPLOAD:

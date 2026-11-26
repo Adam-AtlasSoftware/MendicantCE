@@ -235,8 +235,8 @@ sphere for a probe), and the error is the batches' means' (8 batches at least): 
 overstate a stratified estimate's noise;
 a texel whose mean is under 1/1000 of middle grey after 4096 samples is black; and no single sample may move the mean by
 more than 1% (`prism_bake_converge.h`'s rule: a texel that has just met its first firefly is not stopped by a variance
-that has not yet seen the tail). At `max` there is no sample budget. The quicker tiers stop at 64 (`draft`), 512
-(`high`) and 2048 (`ultra`) samples whatever the noise.
+that has not yet seen the tail). At `max` a texel (or probe) stops at 65,536 samples at most (below). The quicker
+tiers stop at 64 (`draft`), 512 (`high`) and 2048 (`ultra`) samples whatever the noise.
 
 **`max`'s noise floor (D4 amended, 2026-11-17).** At `max` the error is measured against the larger of the texel's own
 mean and a tenth of middle grey (0.018): a texel stops once the standard error of its mean luminance is at most
@@ -245,6 +245,13 @@ The other rules are M0's (at least 64 samples; black below 1/1000 of middle grey
 (0.1) sets the share of middle grey; 0 is the literal rule (`prism_bake_converge.h`'s `error_floor`, which the tests
 keep at 0). The quicker tiers keep the literal rule under their sample caps. The log counts the texels the floor
 stopped (converged with their light below it).
+
+**`max`'s cap (2026-11-25).** With no budget, `max` never finished: a handful of near-black texels lit by rare paths
+never met the rule (a50's first BSP held 5 texels through 13 half-hour slices, one of them at 242,944 samples), and
+each slice began them again. A texel or probe now closes at its running mean once it has 65,536 samples
+(`MAX_SAMPLES_CAP`, 32 times `ultra`'s); the robust mean and the filter take what noise it has left. It counts samples,
+not seconds, so a bake is the same on every card; it is in the bake's key, and the log counts the texels capped. The
+shipped bakes are made at `max` this way.
 
 **The tail.** Once the texels still running are too few to fill the GPU (fewer than 32,768), each one's samples are
 spread over 2 to 16 invocations side by side in a subgroup (`lanes_of`): each lane takes whole batches of 64 of its own
@@ -422,7 +429,7 @@ Each a list of jobs (`prism_bake_cache.h`'s ids), in this order:
 | The importance grid | One job: every cell's candidates weighed (4 points of each lamp from each of the cell's 8 points, shadows traced) | A hashed table of cells, 64 lamps and cumulative weights each |
 | The lightmap | A tile each: a batch of 4096 tiles on the GPU at a time, each texel's samples added between frames until it stops (the running texels packed into whole groups each frame, so that a batch whose texels are mostly done still fills the GPU); a finished tile written, drawn and replaced in the batch by the next | Per texel: the light less the sun's (RGB9E5), the direction (`k`, `a0`: RGBA8), the indirect light alone (RGB9E5, for M3's path tracer), the sun's visibility, the state and samples |
 | The sun mask | A tile each where the tile's texels facing the sun are neither all lit nor all dark: its 64 × 64 points (4 times the texels' density) found on its triangles again, each traced to the sun's disc (16 directions, stratified, up to 256 while they disagree) | A byte a point; a uniform tile is a state alone (dark, lit) |
-| The irradiance volume | Two cascades: 64 probes a brick (a world unit, 0.25 apart) where the player stands (the walk's floors and the two world units of air above them), and 64 a coarse brick (8 world units, 2 apart) over every reachable brick and the 12 world units of air above the floors (tree tops, the far side of a canyon: every object Raster draws has light); a batch of 262144 probes at a time (its count of running probes read back each frame until it is 0, its results then asked for once: while the game draws, two or three of those counts are in flight, `prism_bake_batch.c`) | Per probe: SH L1 of the light from every direction (RGB, half floats), the sun's visibility, whether it is inside the level |
+| The irradiance volume | Two cascades: 64 probes a brick (a world unit, 0.25 apart) where the player stands (the walk's floors and the two world units of air above them), and 64 a coarse brick (8 world units, 2 apart) over every reachable brick and the 12 world units of air above the floors (tree tops, the far side of a canyon: every object Raster draws has light); a batch of 262144 probes at a time (its count of running probes read back each frame until it is 0, its results then asked for once: while the game draws, two or three of those counts are in flight, `prism_bake_batch.c`) | Per probe: SH L1 of the light from every direction (RGB, half floats), the sun's visibility, whether it is inside the level. The fine cascade holds 196,608 bricks a BSP at most (12.6 M probes, 403 MB on the GPU): past that, the bricks with the most solid neighbours beside and above them (walls, rocks, slopes, overhangs) are kept, then floors before air, and the rest are left to the coarse cascade, which the game reads where the fine one has no brick. Only d40's eighth BSP (open terrain: the reach walks the valley, 397 M fine probes) is over it |
 | The reflection probes | One each 8-world-unit cell of the walk's floors, a world unit above them (b30's first BSP: 923; a30's: 2,185; a10's: 25); a batch of 8 at a time | A box (how far each of its six axes reaches, 1 to 64 world units) and a cube of four levels (32, 16, 8 and 4 texels a side), each level GGX-prefiltered at its roughness ((level / 3)^2: each texel the light the bake's estimator sees along the lobe's directions about it, weighed by their cosines; 16, 64 or 256 samples a texel by the quality), RGB9E5 |
 | The footprints | One job: each switchable fixture's tiles within its reach (section 2.4's relight) | The light's id, its tiles |
 
@@ -517,7 +524,10 @@ a bake of the settings chosen, before they are played, as other games compile th
   clock (`game_speed 0`), bakes each BSP in turn in the foreground at 40 ms of GPU time a frame (`scenario_switch_
   structure_bsp` between frames, once the BSP before is `DONE`), writes its progress to the bake folder's
   `menu_worker.txt` every half second (its BSP, of how many, the share and the seconds left, the baker's estimate),
-  and quits. One worker at a time; the main menu's frames are held to 30 a second while it bakes, so the GPU is the
+  and quits. A BSP that fails is passed over and the rest are baked; the worker then quits with 3. A BSP with no lightmapped
+  surface (d40's tenth, a cinematic's) has nothing to bake: the scene says so (`prism_scene_static_empty`), the note
+  counts it baked and the worker goes on. With
+  `debug.bake_bsp` it bakes that BSP alone and quits (a farm's job a BSP). One worker at a time; the main menu's frames are held to 30 a second while it bakes, so the GPU is the
   bake's, and the bake goes on with the window out of focus.
 - **The order.** The level WAIT chose (below), the one played last (the bake folder's `last_played.txt`), the saved
   game's, the one after the last finished (player 1's profile), then the campaign's.
@@ -686,8 +696,8 @@ come takes the same meter (`meter_add`) and step.
 
 See `docs/prism_gates.md`, "M2 as measured": the bake against R, Raster against R, the frame times, the bake's time
 and size per map, and Classic's byte identity. In short: `ultra` bakes a BSP in one to thirty minutes (b30's first in
-161 seconds on an RTX 3070 Ti, 1 GB); `max` as D4 defines it does not finish (b30's first BSP 99.6% done after 5.7
-hours), its time going to the darkest texels; Raster costs 2.3 ms a frame at 1440p on the RTX 3070 Ti.
+161 seconds on an RTX 3070 Ti, 1 GB); `max` as D4 defined it did not finish (b30's first BSP 99.6% done after 5.7
+hours), its time going to the darkest texels, until its cap of 65,536 samples a texel (above); Raster costs 2.3 ms a frame at 1440p on the RTX 3070 Ti.
 
 ## What remains
 
