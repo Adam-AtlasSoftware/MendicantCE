@@ -2366,7 +2366,9 @@ static byte surface_choice(
 					}
 				}
 			}
-			if (of->far_switched && state != now)
+			/* (a switch's frame; a surface's first level, 2 before, is no
+			switch, so a switch after it is no flip) */
+			if (of->far_switched && state != 2 && state != now)
 			{
 				of->far_switched[local] = world_geometry.geometry_frame ? world_geometry.geometry_frame : 1;
 			}
