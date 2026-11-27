@@ -37,9 +37,25 @@ player's own BSP's and bakes nothing.
         nondeterminism (GPU bakes are not bit-identical run to run) never
         matters here: the world_id names the geometry the light is for, and
         the manifest's sha256 names the bytes this export produced.
+        --reach: each BSP's reach (the farm's walk of the BSP's reachable
+        space, <map>/bsp<n>.reach beside its bake) carried in its bake as a
+        REAC record where the bake has none, so that a player's machine
+        takes the farm's walk and walks none (d40's BSP 8's took 696 s at
+        load); --require-reach: a BSP whose bake ends with no REAC record
+        is refused.
     verify <shipped folder>
         every file manifest.json names is there, of its size and sha256, a
-        whole lighting-only bake whose header matches its entry.
+        whole lighting-only bake whose header matches its entry (and its
+        REAC record, where it has one, a whole reach).
+    plancheck <shipped folder> <plans folder> [--world stock|remodel]
+              [--maps b30,a30]
+        each shipped BSP's key, field by field, against the key a player's
+        game made for that BSP without baking (HALO_BAKE_PLAN_ONLY, in play:
+        <plans>/<map>/plan_bsp<n>.txt), its tiles against the plan's, and
+        its REAC record's walk against the player's own walk (its inputs'
+        hash, the bricks' and tiers' counts and CRC-32s): a bake the
+        player's game would refuse, or plan otherwise, never ships. Every
+        shipped BSP needs its plan.
     install <shipped folder> <archive>...
         a release's archives unpacked into the shipped folder (its paths
         checked: nothing outside it), the manifests merged, then verified.
@@ -147,7 +163,8 @@ def read_records(data: bytes) -> list[dict]:
         if start + stored > len(data) or zlib.crc32(data[start:start + stored]) & 0xFFFFFFFF != payload_crc:
             break
         records.append({"type": kind, "job": job, "sequence": sequence, "stored": stored,
-                        "size": unpacked or stored, "packed": unpacked != 0, "offset": start})
+                        "size": unpacked or stored, "packed": unpacked != 0, "offset": start,
+                        "generation": generation})
         at = start + ((stored + 7) & ~7)
     return records
 
@@ -181,6 +198,67 @@ def check_bake(data: bytes, minimum_quality: str = "draft") -> tuple[dict, list[
             version, flag = struct.unpack_from("<II", data, record["offset"])
             stock = bool(flag & 1)
     return header, records, stock
+
+
+# the reach's bytes (xgpu_vulkan_bake.c's reach_bytes: its file bsp<n>.reach
+# and the REAC record are the same): "PRCH", version 1, the inputs' hash, the
+# flight flag, 8 words of summary, the bricks' and tiers' counts, then the
+# bricks (4 int16 each) and the tiers (a byte each)
+REACH_MAGIC = b"PRCH"
+REACH_VERSION = 1
+REACH_HEAD = 60
+# a record's payload at most (prism_bake_cache.h's PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD)
+MAXIMUM_PAYLOAD = 64 << 20
+
+
+def read_reach(data: bytes) -> dict:
+    """a whole reach's summary: its inputs' hash, flight flag, bricks' and
+    tiers' counts and CRC-32s"""
+    if len(data) < REACH_HEAD or data[:4] != REACH_MAGIC:
+        raise BakeError("not a reach (no PRCH head)")
+    version, input_hash, flight = struct.unpack_from("<IQi", data, 4)
+    bricks, tiers = struct.unpack_from("<II", data, 52)
+    if version != REACH_VERSION:
+        raise BakeError(f"reach version {version} (this tool reads {REACH_VERSION})")
+    if len(data) != REACH_HEAD + bricks * 8 + tiers:
+        raise BakeError(f"a reach of {bricks} bricks and {tiers} tiers is {REACH_HEAD + bricks * 8 + tiers} bytes, "
+                        f"not {len(data)}")
+    return {"input": f"{input_hash:016x}", "flight": flight, "bricks": bricks, "tiers": tiers,
+            "bricks_crc": f"{zlib.crc32(data[REACH_HEAD:REACH_HEAD + bricks * 8]) & 0xFFFFFFFF:08x}",
+            "tiers_crc": f"{zlib.crc32(data[REACH_HEAD + bricks * 8:]) & 0xFFFFFFFF:08x}"}
+
+
+def reach_payload(data: bytes, records: list[dict]) -> bytes | None:
+    """the bake's REAC record's payload, or None"""
+    found = [r for r in records if r["type"] == fourcc("REAC")]
+    if not found:
+        return None
+    record = found[-1]
+    if record["packed"]:
+        raise BakeError("its REAC record is packed (a reach is stored as it is)")
+    return data[record["offset"]:record["offset"] + record["stored"]]
+
+
+def with_reach(data: bytes, records: list[dict], reach: bytes) -> bytes:
+    """the bake with the reach appended as a REAC record (the next sequence,
+    the DONE record's generation), as prism_bake_cache.c's writer appends one"""
+    read_reach(reach)
+    if reach_payload(data, records) is not None:
+        raise BakeError("has a REAC record already")
+    if len(reach) > MAXIMUM_PAYLOAD:
+        raise BakeError(f"its reach ({len(reach)} bytes) is past a record's {MAXIMUM_PAYLOAD}")
+    if not records:
+        raise BakeError("no records")
+    last = records[-1]
+    if last["offset"] + ((last["stored"] + 7) & ~7) != len(data):
+        raise BakeError("its log does not end at its last record (torn)")
+    generation = next((r["generation"] for r in reversed(records) if r["type"] == fourcc("DONE")), last["generation"])
+    h = bytearray(RECORD_HEADER_SIZE)
+    h[:4] = RECORD_MAGIC
+    struct.pack_into("<IQIIIII", h, 4, fourcc("REAC"), 0, last["sequence"] + 1, len(reach),
+                     zlib.crc32(reach) & 0xFFFFFFFF, generation, 0)
+    struct.pack_into("<I", h, RECORD_HEADER_SIZE - 4, zlib.crc32(bytes(h[:RECORD_HEADER_SIZE - 4])) & 0xFFFFFFFF)
+    return data + bytes(h) + reach + b"\0" * (-len(reach) % 8)
 
 
 def sha256_of(path: Path) -> str:
@@ -331,7 +409,7 @@ def world_id_classic(classic_world_id: str, bsp: int) -> str:
 
 def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None, quality: str,
            archives: Path | None, bsps: str = "", maps_folder: Path | None = None, empty: str = "",
-           world_ids: dict | None = None) -> list[dict]:
+           world_ids: dict | None = None, reach: bool = False, require_reach: bool = False) -> list[dict]:
     """every level's BSPs checked first, then copied: a level with a BSP
     missing, of the wrong world or not a whole light bake is refused and
     nothing of the export is written"""
@@ -399,12 +477,28 @@ def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None,
                 if header["world_id"] != want:
                     raise BakeError(f"{file}: keyed to world_id {header['world_id'][:16]}..., not this map "
                                     f"version's classic BSP {index} ({want[:16]}...)")
+            # (the farm's walk, carried in the bake: from its file where the bake has no REAC record)
+            try:
+                walk = reach_payload(data, records)
+                walk_file = folder / f"bsp{index}.reach"
+                if walk is None and reach and walk_file.is_file():
+                    data = with_reach(data, records, walk_file.read_bytes())
+                    header, records, stock = check_bake(data, quality)
+                    walk = reach_payload(data, records)
+                walk_summary = read_reach(walk) if walk is not None else None
+            except BakeError as error:
+                raise BakeError(f"{file}: {error}") from error
+            if require_reach and walk_summary is None:
+                raise BakeError(f"{file}: no reach (no REAC record, no {walk_file.name}): a player's machine would "
+                                "walk it at load")
             entries.append({
                 "world": world, "map": folder.name, "bsp": index, "of": count, "source": file, "data": data,
                 "file": f"{world}/{folder.name}/{file.name}", "size": len(data),
                 "sha256": hashlib.sha256(data).hexdigest(), "header": header, "records": len(records),
                 "key": manifest_key(header, RIG, stock, note["tags"].get(index)),
             })
+            if walk_summary is not None:
+                entries[-1]["reach"] = walk_summary
         # (an empty BSP's key: the level's own settings, its geometry by kind)
         baked = [e for e in entries if not e.get("empty")]
         if not baked:
@@ -502,14 +596,99 @@ def verify(shipped: Path) -> list[str]:
             problems.append(f"{entry['file']}: its size or sha256 is not the manifest's")
             continue
         try:
-            header, _, _ = check_bake(data)
+            header, records, _ = check_bake(data)
+            walk = reach_payload(data, records)
+            walk_summary = read_reach(walk) if walk is not None else None
         except BakeError as error:
             problems.append(f"{entry['file']}: {error}")
             continue
         if header != entry["header"]:
             problems.append(f"{entry['file']}: its key is not the manifest's")
+        if "reach" in entry and walk_summary != entry["reach"]:
+            problems.append(f"{entry['file']}: its reach is not the manifest's")
     if not (shipped / "manifest.txt").is_file():
         problems.append("manifest.txt: missing")
+    return problems
+
+
+# the key's fields a plan file names as the header does (plan file name, header name)
+PLAN_KEY_FIELDS = ("map_checksum", "map_name", "bsp_index", "bsp_name", "bsp_hash", "geometry_hash", "material_hash",
+                   "light_hash", "settings_hash", "baker_version", "quality", "convergence_threshold", "world_id",
+                   "scene_version", "variant")
+
+
+def read_plan(path: Path) -> dict:
+    """a plan-only run's file (xgpu_vulkan_bake.c's plan_only_write: "name value" lines), its key as read_header
+    gives a header's"""
+    raw = {}
+    for line in path.read_text("utf-8", "replace").splitlines():
+        name, _, value = line.partition(" ")
+        if name:
+            raw[name] = value.strip()
+    try:
+        quality = int(raw["quality"])
+        key = {
+            "map_checksum": int(raw["map_checksum"], 16), "map_name": raw["map_name"],
+            "bsp_index": int(raw["bsp_index"]), "bsp_name": raw["bsp_name"],
+            "bsp_hash": raw["bsp_hash"], "geometry_hash": raw["geometry_hash"], "material_hash": raw["material_hash"],
+            "light_hash": raw["light_hash"], "settings_hash": raw["settings_hash"],
+            "baker_version": int(raw["baker_version"]),
+            "quality": QUALITIES[quality] if quality < len(QUALITIES) else str(quality),
+            "convergence_threshold": round(struct.unpack("<f", struct.pack("<I", int(raw["threshold"], 16)))[0], 6),
+            "world_id": raw["world_id"], "scene_version": int(raw["scene_version"]), "variant": int(raw["variant"]),
+        }
+        tiles = int(raw["tiles"])
+    except (KeyError, ValueError) as error:
+        raise BakeError(f"{path}: not a plan-only run's file ({error})") from error
+    walk = None
+    if "reach_input" in raw:
+        walk = {"input": raw["reach_input"], "bricks": int(raw["reach_bricks"]),
+                "bricks_crc": raw["reach_bricks_crc"], "tiers": int(raw["reach_tiers"]),
+                "tiers_crc": raw["reach_tiers_crc"], "flight": int(raw.get("reach_flight", "0"))}
+    return {"key": key, "tiles": tiles, "reach": walk, "charts": raw.get("charts")}
+
+
+def plancheck(shipped: Path, plans: Path, world: str | None = None, maps: list[str] | None = None) -> list[str]:
+    """each shipped BSP against a player's plan of it (read_plan): its whole key, its tiles, its REAC walk"""
+    manifest = manifest_load(shipped)
+    problems = []
+    checked = 0
+    for entry in manifest["bsps"]:
+        if entry.get("empty") or (world and entry["world"] != world) or (maps and entry["map"] not in maps):
+            continue
+        name = f"{entry['world']}/{entry['map']} BSP {entry['bsp']}"
+        plan_path = plans / entry["map"] / f"plan_bsp{entry['bsp']}.txt"
+        if not plan_path.is_file():
+            problems.append(f"{name}: no player's plan ({plan_path})")
+            continue
+        try:
+            plan = read_plan(plan_path)
+            data = (shipped / entry["file"]).read_bytes()
+            header, records, _ = check_bake(data)
+            walk = reach_payload(data, records)
+            walk_summary = read_reach(walk) if walk is not None else None
+        except (BakeError, OSError) as error:
+            problems.append(f"{name}: {error}")
+            continue
+        checked += 1
+        differ = [f for f in PLAN_KEY_FIELDS if header[f] != plan["key"][f]]
+        if differ:
+            problems.append(f"{name}: the player's key differs in " + ", ".join(
+                f"{f} (bake {header[f]}, player {plan['key'][f]})" for f in differ))
+        tiles = sum(1 for r in records if r["type"] == fourcc("ATLS"))
+        if tiles != plan["tiles"]:
+            problems.append(f"{name}: {tiles} tiles baked, the player's plan has {plan['tiles']}")
+        if walk_summary is not None:
+            if plan["reach"] is None:
+                problems.append(f"{name}: the bake carries a reach, the player's plan names none to check it by")
+            else:
+                differ = [f for f in ("input", "bricks", "bricks_crc", "tiers", "tiers_crc", "flight")
+                          if walk_summary[f] != plan["reach"][f]]
+                if differ:
+                    problems.append(f"{name}: its reach is not the player's walk (" + ", ".join(
+                        f"{f} {walk_summary[f]} / {plan['reach'][f]}" for f in differ) + ")")
+    if not checked and not problems:
+        problems.append("no shipped BSP checked")
     return problems
 
 
@@ -550,6 +729,9 @@ def show(path: Path) -> None:
     for record in read_records(data):
         counts[type_name(record["type"])] = counts.get(type_name(record["type"]), 0) + 1
     print(json.dumps(counts, indent=1, sort_keys=True))
+    walk = reach_payload(data, read_records(data))
+    if walk is not None:
+        print(json.dumps({"reach": read_reach(walk)}, indent=1, sort_keys=True))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -568,11 +750,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--archives", type=Path)
     p.add_argument("--world-ids", type=Path, help="tools/geopatch/classic_world.py's json: each map's base_id and "
                    "classic_world_id")
+    p.add_argument("--reach", action="store_true", help="each BSP's reach (<map>/bsp<n>.reach) carried in its bake "
+                   "as a REAC record where it has none")
+    p.add_argument("--require-reach", action="store_true", help="refuse a BSP whose bake carries no reach")
     p = commands.add_parser("verify")
     p.add_argument("shipped", type=Path)
     p = commands.add_parser("install")
     p.add_argument("shipped", type=Path)
     p.add_argument("archives", type=Path, nargs="+")
+    p = commands.add_parser("plancheck")
+    p.add_argument("shipped", type=Path)
+    p.add_argument("plans", type=Path, help="the players' plans: <plans>/<map>/plan_bsp<n>.txt (HALO_BAKE_PLAN_ONLY)")
+    p.add_argument("--world", choices=("stock", "remodel"))
+    p.add_argument("--maps", default="")
     p = commands.add_parser("show")
     p.add_argument("file", type=Path)
     args = parser.parse_args(argv)
@@ -581,7 +771,8 @@ def main(argv: list[str] | None = None) -> int:
             entries = export(args.bake_folder, args.world, args.shipped,
                              [m for m in args.maps.split(",") if m] or None, args.quality, args.archives,
                              args.bsps, args.maps_folder, args.empty,
-                             json.loads(args.world_ids.read_text()) if args.world_ids else None)
+                             json.loads(args.world_ids.read_text()) if args.world_ids else None,
+                             args.reach, args.require_reach)
             for entry in entries:
                 if entry.get("empty"):
                     print(f"{entry['world']}/{entry['map']} BSP {entry['bsp']}: nothing to bake, {entry['key']}")
@@ -592,6 +783,10 @@ def main(argv: list[str] | None = None) -> int:
             problems = verify(args.shipped)
         elif args.command == "install":
             problems = install(args.shipped, args.archives)
+        elif args.command == "plancheck":
+            problems = plancheck(args.shipped, args.plans, args.world, [m for m in args.maps.split(",") if m] or None)
+            if not problems:
+                print("prism_bake_ship: every shipped BSP is the player's plan")
         else:
             show(args.file)
             return 0

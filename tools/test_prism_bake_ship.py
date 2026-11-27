@@ -254,3 +254,117 @@ def test_bsp_count_from_the_map(tmp_path):
         ship.export(folder, "stock", tmp_path / "shipped", None, "max", None, maps_folder=maps)
     entries = ship.export(folder, "stock", tmp_path / "shipped", None, "max", None, maps_folder=maps, empty="d40:9")
     assert len(entries) == 10 and entries[-1]["empty"]
+
+
+def _reach(bricks=3, tiers=5, input_hash=0x1122334455667788, flight=0):
+    head = b"PRCH" + struct.pack("<IQi", 1, input_hash, flight) + struct.pack("<8I", *range(8))
+    head += struct.pack("<II", bricks, tiers)
+    return head + bytes((i * 7) & 0xFF for i in range(bricks * 8)) + bytes(i % 3 for i in range(tiers))
+
+
+def _plan(path, header, tiles, reach=None, **changes):
+    """a plan-only run's file (xgpu_vulkan_bake.c's plan_only_write) of the key the header has"""
+    quality = ship.QUALITIES.index(header["quality"])
+    lines = {
+        "map": header["map_name"], "bsp": header["bsp_index"], "map_checksum": f"{header['map_checksum']:08x}",
+        "map_name": header["map_name"], "bsp_index": header["bsp_index"], "bsp_name": header["bsp_name"],
+        "bsp_hash": header["bsp_hash"], "geometry_hash": header["geometry_hash"],
+        "material_hash": header["material_hash"], "light_hash": header["light_hash"],
+        "settings_hash": header["settings_hash"], "baker_version": header["baker_version"], "quality": quality,
+        "threshold": f"{struct.unpack('<I', struct.pack('<f', header['convergence_threshold']))[0]:08x}",
+        "world_id": header["world_id"], "scene_version": header["scene_version"], "variant": header["variant"],
+        "triangles": 9, "bricks": 3, "charts": 4, "virtual_pages": 1, "tiles": tiles, "triangle_entries": 9,
+        "cells": 1, "probes": 2,
+    }
+    if reach:
+        summary = ship.read_reach(reach)
+        lines.update({"reach_input": summary["input"], "reach_bricks": summary["bricks"],
+                      "reach_bricks_crc": summary["bricks_crc"], "reach_tiers": summary["tiers"],
+                      "reach_tiers_crc": summary["tiers_crc"], "reach_flight": summary["flight"]})
+    lines.update(changes)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{k} {v}\n" for k, v in lines.items()))
+
+
+def test_reach_rides_in_the_bake_as_a_reac_record(tmp_path):
+    folder = _folder(tmp_path, maps=("b30",))
+    walk = _reach()
+    for bsp in (0, 1):
+        (folder / "b30" / f"bsp{bsp}.reach").write_bytes(_reach(input_hash=0x100 + bsp))
+    shipped = tmp_path / "shipped"
+    entries = ship.export(folder, "stock", shipped, None, "max", None, reach=True, require_reach=True)
+    for entry in entries:
+        data = (shipped / entry["file"]).read_bytes()
+        header, records, _ = ship.check_bake(data)
+        payload = ship.reach_payload(data, records)
+        assert payload == _reach(input_hash=0x100 + entry["bsp"])
+        # (the next sequence, after DONE: the game's reader takes the log whole)
+        assert [r["sequence"] for r in records] == list(range(len(records)))
+        assert entry["reach"] == ship.read_reach(payload)
+    assert not list(shipped.rglob("*.reach"))
+    assert ship.verify(shipped) == []
+    # (a bake that carries one already is shipped as it is)
+    data = (shipped / entries[0]["file"]).read_bytes()
+    with pytest.raises(ship.BakeError, match="already"):
+        ship.with_reach(data, ship.read_records(data), walk)
+
+
+def test_require_reach_refuses_a_bsp_without_one(tmp_path):
+    folder = _folder(tmp_path, maps=("b30",))
+    (folder / "b30" / "bsp0.reach").write_bytes(_reach())
+    (folder / "b30" / "bsp1.reach").unlink(missing_ok=True)
+    with pytest.raises(ship.BakeError, match="bsp1.pbk: no reach"):
+        ship.export(folder, "stock", tmp_path / "shipped", None, "max", None, reach=True, require_reach=True)
+
+
+def test_a_damaged_reach_is_refused(tmp_path):
+    folder = _folder(tmp_path, maps=("b30",))
+    (folder / "b30" / "bsp0.reach").write_bytes(_reach()[:-1])
+    with pytest.raises(ship.BakeError, match="bytes"):
+        ship.export(folder, "stock", tmp_path / "shipped", None, "max", None, reach=True)
+    (folder / "b30" / "bsp0.reach").write_bytes(b"PRCX" + _reach()[4:])
+    with pytest.raises(ship.BakeError, match="PRCH"):
+        ship.export(folder, "stock", tmp_path / "shipped", None, "max", None, reach=True)
+
+
+def test_verify_finds_a_reach_not_the_manifests(tmp_path):
+    folder = _folder(tmp_path, maps=("b30",))
+    for bsp in (0, 1):
+        (folder / "b30" / f"bsp{bsp}.reach").write_bytes(_reach(input_hash=bsp))
+    shipped = tmp_path / "shipped"
+    ship.export(folder, "stock", shipped, None, "max", None, reach=True)
+    manifest = ship.manifest_load(shipped)
+    manifest["bsps"][0]["reach"]["input"] = "ffffffffffffffff"
+    ship.manifest_save(shipped, manifest)
+    assert any("reach is not the manifest's" in p for p in ship.verify(shipped))
+
+
+def test_plancheck_compares_every_key_field_tiles_and_reach(tmp_path):
+    folder = _folder(tmp_path, maps=("b30",))
+    for bsp in (0, 1):
+        (folder / "b30" / f"bsp{bsp}.reach").write_bytes(_reach(input_hash=bsp))
+    shipped = tmp_path / "shipped"
+    entries = ship.export(folder, "stock", shipped, None, "max", None, reach=True)
+    plans = tmp_path / "plans"
+    for entry in entries:
+        _plan(plans / "b30" / f"plan_bsp{entry['bsp']}.txt", entry["header"], 1, _reach(input_hash=entry["bsp"]))
+    assert ship.plancheck(shipped, plans) == []
+    # (the BSP's hash, as the farm's worker and a player's game made it otherwise)
+    _plan(plans / "b30" / "plan_bsp1.txt", entries[1]["header"], 1, _reach(input_hash=1),
+          bsp_hash="00000000000000ff")
+    problems = ship.plancheck(shipped, plans)
+    assert len(problems) == 1 and "BSP 1" in problems[0] and "bsp_hash" in problems[0]
+    # (a settings field and the quality: as a player's ultra key against the farm's max)
+    _plan(plans / "b30" / "plan_bsp1.txt", entries[1]["header"], 1, _reach(input_hash=1), quality=2,
+          settings_hash="0000000000000001")
+    problems = ship.plancheck(shipped, plans)
+    assert "settings_hash" in problems[0] and "quality" in problems[0]
+    # (another tile count, another walk, no plan at all)
+    _plan(plans / "b30" / "plan_bsp1.txt", entries[1]["header"], 2, _reach(input_hash=1, bricks=4))
+    problems = ship.plancheck(shipped, plans)
+    assert any("tiles" in p for p in problems) and any("reach is not the player's walk" in p for p in problems)
+    (plans / "b30" / "plan_bsp1.txt").unlink()
+    assert any("no player's plan" in p for p in ship.plancheck(shipped, plans))
+    assert ship.main(["plancheck", str(shipped), str(plans)]) == 1
+    _plan(plans / "b30" / "plan_bsp1.txt", entries[1]["header"], 1, _reach(input_hash=1))
+    assert ship.main(["plancheck", str(shipped), str(plans), "--world", "stock", "--maps", "b30"]) == 0
