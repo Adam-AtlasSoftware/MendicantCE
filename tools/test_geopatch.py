@@ -537,8 +537,9 @@ def _synth_remodel(tool, synth, tmp_path, lmuv_version=1):
         pwgs[bsp.index] = tmp_path / ("bsp%d.pwg" % bsp.index)
         _write_pwg(pwgs[bsp.index], parts, bsp.name)
     out = tmp_path / "synth.prsx"
+    # (the remodel as it is: these tests are of the codec; the gameplay clamp has its own, test_clamp_*)
     assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), "--native-dir", str(tool.exe.parent),
-                        "--lmuv-version", str(lmuv_version),
+                        "--lmuv-version", str(lmuv_version), "--no-clamp",
                         *[a for b in sorted(pwgs) for a in ("--pwg", "%d=%s" % (b, pwgs[b]))], "-o", str(out)]) == 0
     return bsps, pwgs, out
 
@@ -944,3 +945,173 @@ def test_manifest_rules_and_signature(tmp_path):
     }
     for label, change in cases.items():
         assert broken(change), label
+
+
+# ---------- the gameplay clamp (clamp.py, geopatch M5b)
+
+def _room():
+    """a stock room: a floor (two triangles, 20 x 20 wu at z 0, material (0, 0)) and its wall at x 20 facing in
+    (material (0, 1)): a low band, z 0 to 1.5, within reach, and a high band, z 4 to 8, out of it"""
+    np = _numpy()
+    from geopatch import clamp
+    tris = [((0, 0, 0), (20, 0, 0), (20, 20, 0)), ((0, 0, 0), (20, 20, 0), (0, 20, 0)),
+            ((20, 0, 0), (20, 20, 0), (20, 20, 1.5)), ((20, 0, 0), (20, 20, 1.5), (20, 0, 1.5)),
+            ((20, 0, 4), (20, 20, 4), (20, 20, 8)), ((20, 0, 4), (20, 20, 8), (20, 0, 8))]
+    t = np.array(tris, np.float64)
+    up, back = (0.0, 0.0, 3.0), (-3.0, 0.0, 0.0)
+    return clamp.Stock(t[:, 0].copy(), t[:, 1].copy(), t[:, 2].copy(), np.array([up, up] + [back] * 4),
+                       {(0, 0): 0, (0, 1): 2})
+
+
+def _part(key, first_surface, runs, positions):
+    """a .pwg part (encode.PwgPart) of the given material: runs is a list per surface of its triangles (index
+    triples into positions)"""
+    np = _numpy()
+    from geopatch import encode
+    p = encode.PwgPart()
+    p.lightmap_index, p.material_index = key
+    p.first_surface, p.surface_count = first_surface, len(runs)
+    triangles = [tri for run in runs for tri in run]
+    p.sft = np.array([0] + list(np.cumsum([len(run) for run in runs])), np.uint32)
+    p.near_triangle_count, p.far_distance = len(triangles), 0.0
+    p.vertices = np.zeros((len(positions), 14), np.float32)
+    p.vertices[:, 0:3] = positions
+    p.vertices[:, 3:6] = (0.0, 0.0, 1.0)
+    p.lightmap = np.zeros((len(positions), 5), np.float32)
+    p.triangles = np.array(triangles, np.int64)
+    p.far_pairs = p.spheres = None
+    return p
+
+
+def _room_remodel():
+    """the room's remodel: the floor's first triangle split at its centroid, lifted 0.5, and at its edge on the
+    wall's foot (M, lifted 0.5 too: a vertex both materials share); the second at its centroid dipped 0.3 and with
+    one sliver of the seams' fill listed under it but lying up on the high wall; the low wall band split at its
+    centroid (pushed 0.6 out, within reach) and through M; the high band at its centroid (pushed 0.6 out)"""
+    a, b, c, d = (0, 0, 0), (20, 0, 0), (20, 20, 0), (0, 20, 0)
+    m, g0, g1 = (20, 10, 0.5), (40 / 3, 20 / 3, 0.5), (20 / 3, 40 / 3, -0.3)
+    s0, s1, s2 = (20, 5, 6), (20, 5.01, 6), (20, 5, 6.01)
+    floor = _part((0, 0), 0, [[(0, 1, 5), (1, 4, 5), (4, 2, 5), (2, 0, 5)], [(0, 2, 6), (2, 3, 6), (3, 0, 6),
+                                                                              (7, 8, 9)]],
+                  [a, b, c, d, m, g0, g1, s0, s1, s2])
+    top, w0 = (20, 20, 1.5), (19.4, 40 / 3, 0.5)
+    h0, h1, h2, h3, w1 = (20, 0, 4), (20, 20, 4), (20, 20, 8), (20, 0, 8), (19.4, 20 / 3, 6.0)
+    wall = _part((0, 1), 0, [[(0, 1, 4), (1, 2, 4), (2, 3, 4), (3, 0, 4)], [], [(5, 6, 9), (6, 7, 9), (7, 5, 9)],
+                             [(5, 7, 8)]],
+                 [b, m, c, top, w0, h0, h1, h2, h3, w1])
+    return [floor, wall]
+
+
+def test_clamp_holds_ground_and_walls_within_reach():
+    """the ground back within its bound of the stock floor, the wall within reach within its bound, the wall out of
+    reach left as the remodel made it; a vertex both materials share moved as one; a sliver of the seams' fill,
+    listed under the floor but lying on the wall, measured against the wall (the M5 tables' 12 to 31 wu walls) and
+    left where it is"""
+    np = _numpy()
+    from geopatch import clamp
+    stock, parts = _room(), _room_remodel()
+    before = clamp.measure(parts, stock)
+    assert before["ground"]["above"] == 0.5 and before["ground"]["below"] == 0.3
+    assert before["reattributed_corners"] == 3 and before["walls"]["most"] == pytest.approx(0.6)
+    assert before["walls_in_reach"]["most"] == pytest.approx(0.6)
+    report = clamp.clamp_bsp(parts, stock)
+    assert report["residual"] == 0 and report["stuck_on_walls"] == 0
+    after = clamp.measure(parts, stock)
+    assert after["ground"]["most"] <= clamp.GROUND_BOUND + 1e-6 and after["ground_over_tolerance"] == 0
+    assert after["walls_in_reach"]["most"] <= clamp.WALL_BOUND + 1e-6
+    floor, wall = parts
+    # (the floor's lifted centroid and edge vertex down to the bound, the dip up to it, x and y kept)
+    assert floor.vertices[5, 2] == pytest.approx(clamp.GROUND_BOUND) and floor.vertices[6, 2] == \
+        pytest.approx(-clamp.GROUND_BOUND)
+    assert floor.vertices[4, 2] == pytest.approx(clamp.GROUND_BOUND) and tuple(floor.vertices[5, 0:2]) == \
+        pytest.approx((40 / 3, 20 / 3))
+    # (M, shared: the same place in both parts, bit for bit)
+    assert np.array_equal(floor.vertices[4, 0:3], wall.vertices[1, 0:3])
+    # (the low wall's bulge back to the bound; the high wall's kept)
+    assert wall.vertices[4, 0] == pytest.approx(20 - clamp.WALL_BOUND)
+    assert wall.vertices[9, 0] == np.float32(19.4)
+    # (the sliver and the stock corners untouched)
+    assert np.array_equal(floor.vertices[7:10, 0:3], np.array([(20, 5, 6), (20, 5.01, 6), (20, 5, 6.01)],
+                                                              np.float32))
+    assert np.array_equal(floor.vertices[0:4, 0:3], np.array([(0, 0, 0), (20, 0, 0), (20, 20, 0), (0, 20, 0)],
+                                                             np.float32))
+
+
+def test_clamp_reach():
+    """a wall is within reach from just below the ground near it to REACH above, within REACH_RADIUS across"""
+    np = _numpy()
+    from geopatch import clamp
+    stock = _room()
+    points = np.array([(20, 10, 0.5), (20, 10, clamp.REACH - 0.01), (20, 10, clamp.REACH + 0.01), (20, 10, 6),
+                       (21.5, 10, 0.5), (20.9, 10, 0.5), (20, 10, -0.4), (20, 10, -0.6)], np.float64)
+    assert list(stock.within_reach(points)) == [True, True, False, False, False, True, True, False]
+    assert list(stock.within_reach(points[[2, 4, 7]], clamp.REACH_MARGIN + 0.5)) == [True, True, True]
+
+
+def test_clamp_is_fixed_arithmetic():
+    """the clamp's result is the same bytes every run and on every machine: its arithmetic is single IEEE double
+    operations in a fixed order (the M5 double build). The room turned and tilted (no axis-aligned normal, nothing
+    exact), clamped, pinned"""
+    np = _numpy()
+    from geopatch import clamp
+    # (turned 0.3 rad about z and tilted 0.2 rad about x: the matrix written out, so no machine's sin, cos or matrix
+    # product enters)
+    turn = np.array([[0.955336489126, -0.289629477626, 0.058710801694],
+                     [0.295520206661, 0.936293363584, -0.189796060979],
+                     [0.0, 0.198669330795, 0.980066577841]])
+
+    def turned(rows):
+        rows = np.asarray(rows, np.float64)
+        return np.stack([(rows[:, 0] * turn[k, 0] + rows[:, 1] * turn[k, 1]) + rows[:, 2] * turn[k, 2]
+                         for k in range(3)], axis=1)
+    digests = []
+    for _ in range(2):
+        room, parts = _room(), _room_remodel()
+        stock = clamp.Stock(turned(room.a), turned(room.b), turned(room.c),
+                            turned(np.array([(0.0, 0.0, 3.0)] * 2 + [(-3.0, 0.0, 0.0)] * 4)), room.offset)
+        for p in parts:
+            p.vertices[:, 0:3] = turned(p.vertices[:, 0:3]).astype(np.float32)
+        report = clamp.clamp_bsp(parts, stock)
+        assert report["positions_moved"] >= 4 and report["residual"] == 0
+        assert clamp.measure(parts, stock)["ground"]["most"] <= clamp.GROUND_BOUND + 1e-6
+        digests.append(hashlib.sha256(b"".join(p.vertices.tobytes() for p in parts)).hexdigest())
+    assert digests[0] == digests[1] == CLAMP_PINNED
+
+
+# test_clamp_is_fixed_arithmetic's clamped room: a change here means the clamp moves vertices differently, and every
+# sidecar's bytes change
+CLAMP_PINNED = "3cb41776e0ac8f64b928431a6219d6505adbc67d6dbab8481963958ec0d0ed9f"
+
+
+def test_encoder_clamps_by_default(tool, synth, tmp_path, monkeypatch):
+    """encode.py holds every BSP's remodel to the rule (the synthetic remodel's centroids are lifted 0.25 wu off
+    their surfaces) and says so in its report; the game's decode of the sidecar passes check_levels.py's measure;
+    --no-clamp leaves the remodel as it is"""
+    np = _numpy()
+    from geopatch import clamp, encode, scan_original
+    monkeypatch.setenv("GEOPATCH_NATIVE_DIR", str(tool.exe.parent))
+    _, _, bsps = retail.read_map(synth)
+    for bsp in bsps:
+        _write_pwg(tmp_path / ("bsp%d.pwg" % bsp.index),
+                   [scan_original.remodel_part(m, tool) for m in bsp.materials.values()], bsp.name)
+    pwg_args = [a for b in bsps for a in ("--pwg", "%d=%s" % (b.index, tmp_path / ("bsp%d.pwg" % b.index)))]
+    for extra, name in (([], "clamped"), (["--no-clamp"], "raw")):
+        assert encode.main(["--map", str(synth), "--classic-world-id", CWID.hex(), *pwg_args, *extra,
+                            "--native-dir", str(tool.exe.parent), "-o", str(tmp_path / (name + ".prsx")),
+                            "--report", str(tmp_path / (name + ".json"))]) == 0
+    report = json.loads((tmp_path / "clamped.json").read_text())
+    assert all("clamp" not in s for s in json.loads((tmp_path / "raw.json").read_text())["bsps"].values())
+    most = {}
+    for bsp in bsps:
+        assert report["bsps"][str(bsp.index)]["clamp"]["residual"] == 0
+        stock_file = tmp_path / "stock.bin"
+        native.write_stock(stock_file, bsp)
+        for name in ("clamped", "raw"):
+            image, line = tool.geom(stock_file, tmp_path / (name + ".prsx"), bsp.index)
+            assert image is not None, line
+            (tmp_path / "image.pwg").write_bytes(image)
+            m = clamp.measure(encode.read_pwg(tmp_path / "image.pwg"), clamp.Stock.of_bsp(bsp, tool))
+            most.setdefault(name, []).append(max(m["ground"]["most"], m["walls_in_reach"]["most"] -
+                                                 (clamp.WALL_TOLERANCE - clamp.TOLERANCE)))
+    assert max(most["clamped"]) <= clamp.TOLERANCE and max(most["raw"]) > clamp.TOLERANCE
+    assert np.isfinite(most["raw"]).all()

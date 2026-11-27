@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The per-level gates of a content build (PLAN_FINAL.md sections 2.2 and 2.6; geopatch M5), run on the farm against
-a build_levels.py build:
+"""The per-level gates of a content build (PLAN_FINAL.md sections 2.2 and 2.6; geopatch M5, M5b), run on the farm
+against a build_levels.py build:
 
     check_levels.py <build folder> --maps <retail maps folder> [--map a10 ...] [--jobs N] [--native-dir DIR]
-                    [--tolerance 0.1] [--out checks.json]
+                    [--tolerance 0.1] [--wall-tolerance 0.25] [--out checks.json]
 
 For each map with a sidecar:
 - lint: lint_patch.py's checks with the map (our sections only, REFs where required, no retail value as a literal,
@@ -11,100 +11,41 @@ For each map with a sidecar:
 - decode: every BSP's GEOM and LMUV decoded by the game's own code (native geom: prism_geom.c against the map's
   stock vertices), which must take every one (a refusal is a finding);
 - deviation (the gameplay rule of PLAN_FINAL.md section 10: the enhanced geometry stays close to the original where
-  gameplay depends on it): every near triangle of the decoded remodel belongs to one stock surface; each of its
-  corners' signed distance to that stock triangle's plane (positive: in front of the surface, toward the player),
-  split into ground (the stock surface faces up: its normal's z at least GROUND_Z, about 45 degrees, where one walks
-  and stands) and the rest (walls, cover, ceilings). The ground's largest move either way is checked against
-  --tolerance (0.1 wu, section 2.2's budget); walls are reported, not gated (their relief is the remodel's look and
-  the plan's tolerance for cover is the collision milestone's, M8);
+  gameplay depends on it), measured as the build holds to it (clamp.py: one definition for both): every corner of a
+  near triangle of the decoded remodel by its signed distance to its stock triangle's plane (positive: in front of
+  the surface, toward the player; a triangle lying outside its listed stock triangle, the remodel's seam slivers,
+  corner by corner against the nearest stock triangle), split into ground (the stock surface faces up: its normal's
+  z at least clamp.GROUND_Z, about 45 degrees, where one walks and stands) and walls (walls, cover, ceilings), the
+  walls past clamp.WALL_SCAN further into those within reach (stock ground within clamp.REACH_RADIUS across, the
+  wall from clamp.REACH_BELOW below it to clamp.REACH above) and those out of reach (cliff faces, high ceilings:
+  the remodel's look, reported). The ground's largest move either way is checked against --tolerance (0.1 wu,
+  section 2.2's budget), the walls within reach against --wall-tolerance (0.25 wu);
 - layout (LMUV v2, our own lightmap layout): pages per BSP (the decoder takes at most LMUV_PAGES_MOST, and the
   renderer's page override needs the BSP's stock lightmap pages plus ours under 127: prism_deferred.c), the largest
   part's vertex count (16-bit indices: at most 65535), charts and stretch (encode.py's report).
 
-Exit 0 when every map is clean (lint, decode, layout, ground within tolerance), else 1. The farm only (it reads the
-retail maps); the JSON holds numbers and positions, nothing of the maps.
+Exit 0 when every map is clean (lint, decode, layout, ground and walls within reach within tolerance), else 1. The
+farm only (it reads the retail maps); the JSON holds numbers and positions, nothing of the maps.
 """
 import argparse
 import json
+import multiprocessing
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
-import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-GROUND_Z = 0.7071
 LMUV_PAGES_MOST = 64         # prism_geom.c
 PAGE_OVERRIDE_MOST = 126     # prism_deferred.c: the stock pages + ours + 1 <= 127
 MOST_VERTICES = 0xFFFF
 
 
-def _summary(values):
-    """largest above, largest below, largest either way, the 99.9th percentile of |d|, count"""
-    if not len(values):
-        return {"count": 0, "above": 0.0, "below": 0.0, "most": 0.0, "p999": 0.0}
-    a = np.abs(values)
-    return {"count": int(len(values)), "above": round(float(max(values.max(), 0.0)), 4),
-            "below": round(float(max(-values.min(), 0.0)), 4), "most": round(float(a.max()), 4),
-            "p999": round(float(np.quantile(a, 0.999)), 4)}
-
-
-def deviation(image_parts, stock_bsp, native, tolerance):
-    """{ground, walls, ground_over, worst_ground_at} of one BSP's decoded remodel against its stock surfaces"""
-    ground, walls = [], []
-    worst = (0.0, None)
-    over = 0
-    decoded = {}
-    for part in image_parts:
-        key = (part.lightmap_index, part.material_index)
-        material = stock_bsp.materials.get(key)
-        if material is None or not len(part.triangles):
-            continue
-        if key not in decoded:
-            env = np.frombuffer(native.environment_vertices(material.vertices), "<f4").reshape(-1, 14)
-            decoded[key] = (env[:, 0:3].astype(np.float64), env[:, 3:6].astype(np.float64),
-                            np.array(material.surfaces, np.int64).reshape(-1, 3))
-        positions, normals, surfaces = decoded[key]
-        near = int(part.near_triangle_count)
-        sft = part.sft.astype(np.int64)
-        counts = np.diff(sft)
-        if not near or not len(counts):
-            continue
-        surface = int(part.first_surface) + np.repeat(np.arange(len(counts)), counts)[:near]
-        tri = surfaces[surface]
-        a, b, c = positions[tri[:, 0]], positions[tri[:, 1]], positions[tri[:, 2]]
-        n = np.cross(b - a, c - a)
-        length = np.sqrt((n[:, 0] * n[:, 0] + n[:, 1] * n[:, 1]) + n[:, 2] * n[:, 2])
-        ok = length > 1e-9
-        n[ok] /= length[ok, None]
-        # (the face's front: the way its vertices' own normals look)
-        vn = normals[tri[:, 0]] + normals[tri[:, 1]] + normals[tri[:, 2]]
-        flip = ((n * vn).sum(axis=1) < 0)
-        n[flip] *= -1.0
-        p = part.vertices[:, 0:3].astype(np.float64)[part.triangles[:near]]  # (near, 3 corners, 3)
-        d = ((p - a[:, None, :]) * n[:, None, :]).sum(axis=2)  # (near, 3)
-        is_ground = ok & (n[:, 2] >= GROUND_Z)
-        is_wall = ok & ~is_ground
-        g = d[is_ground].reshape(-1)
-        ground.append(g)
-        walls.append(d[is_wall].reshape(-1))
-        if len(g):
-            over += int((np.abs(g) > tolerance).sum())
-            k = int(np.argmax(np.abs(g)))
-            if abs(g[k]) > worst[0]:
-                corner = p[is_ground].reshape(-1, 3)[k]
-                worst = (float(abs(g[k])), [round(float(x), 3) for x in corner])
-    g = np.concatenate(ground) if ground else np.zeros(0)
-    w = np.concatenate(walls) if walls else np.zeros(0)
-    return {"ground": _summary(g), "walls": _summary(w), "ground_over_tolerance": over,
-            "ground_share_over": round(over / max(1, len(g)), 6), "worst_ground_at": worst[1]}
-
-
 def _check(task):
-    from geopatch import encode, lint_patch, lmuv, native as native_module, prsx, retail
-    build, name, map_path, native_dir, tolerance = task
+    from geopatch import clamp, encode, lint_patch, lmuv, native as native_module, prsx, retail
+    build, name, map_path, native_dir, tolerance, wall_tolerance = task
     build = Path(build)
     record = json.loads((build / "build.json").read_text("utf-8"))["levels"][name]
     sidecar_path = build / record["sidecar"]["file"]
@@ -155,7 +96,8 @@ def _check(task):
             tmp.write_bytes(image)
             parts_image = encode.read_pwg(tmp)
             tmp.unlink()
-            row["deviation"] = deviation(parts_image, by_index[b], native, tolerance)
+            row["deviation"] = clamp.measure(parts_image, clamp.Stock.of_bsp(by_index[b], native), tolerance,
+                                             wall_tolerance)
         out["bsps"][b] = row
     # (only this level's folder: checks_tmp itself is removed by main once every worker is done, never by a worker,
     # which could take it from under another worker's mkdir)
@@ -171,15 +113,19 @@ def main(argv=None):
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--native-dir")
     parser.add_argument("--tolerance", type=float, default=0.1)
+    parser.add_argument("--wall-tolerance", type=float, default=0.25)
     parser.add_argument("--out")
     args = parser.parse_args(argv)
     levels = json.loads((Path(args.build) / "build.json").read_text("utf-8"))["levels"]
     names = [n for n in sorted(levels) if levels[n]["sidecar"] and (not args.map or n in args.map)]
     from geopatch import native as native_module
     native_module.build(args.native_dir)
-    tasks = [(args.build, n, str(Path(args.maps) / (n + ".map")), args.native_dir, args.tolerance) for n in names]
+    tasks = [(args.build, n, str(Path(args.maps) / (n + ".map")), args.native_dir, args.tolerance, args.wall_tolerance)
+             for n in names]
     results, dirty = {}, 0
-    with ProcessPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+    # (spawned workers: Python 3.14's default, the fork server, binds a socket under TMPDIR, which a deep run folder
+    # makes too long a path; spawn needs none, and is what every platform can do)
+    with ProcessPoolExecutor(max_workers=max(1, args.jobs), mp_context=multiprocessing.get_context("spawn")) as pool:
         for name, out in pool.map(_check, tasks):
             results[name] = out
             bad = list(out["lint"])
@@ -191,6 +137,10 @@ def main(argv=None):
                 if dev and dev["ground"]["most"] > args.tolerance:
                     bad.append("bsp %s ground moves %.3f wu (%d corners past %.2f)" %
                                (b, dev["ground"]["most"], dev["ground_over_tolerance"], args.tolerance))
+                if dev and dev["walls_in_reach"]["most"] > args.wall_tolerance:
+                    bad.append("bsp %s a wall within reach moves %.3f wu (%d corners past %.2f)" %
+                               (b, dev["walls_in_reach"]["most"], dev["walls_in_reach_over_tolerance"],
+                                args.wall_tolerance))
             out["clean"] = not bad
             out["problems"] = bad
             dirty += bool(bad)
@@ -200,8 +150,9 @@ def main(argv=None):
         (Path(args.build) / "checks_tmp").rmdir()
     except OSError:
         pass
-    text = json.dumps({"tolerance": args.tolerance, "ground_z": GROUND_Z, "levels": results}, indent=1,
-                      sort_keys=True) + "\n"
+    from geopatch import clamp
+    text = json.dumps({"tolerance": args.tolerance, "wall_tolerance": args.wall_tolerance, "ground_z": clamp.GROUND_Z,
+                       "reach": clamp.REACH, "levels": results}, indent=1, sort_keys=True) + "\n"
     if args.out:
         Path(args.out).write_text(text, "utf-8", newline="\n")
     return 0 if not dirty else 1
