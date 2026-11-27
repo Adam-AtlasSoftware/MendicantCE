@@ -58,10 +58,14 @@ static struct
 {
 	/* the map's choice made (choose), of a map with a scenario (not the
 	menu's), World Geometry as it loaded, and the rest of it (lit_choose)
-	made: at its first ask under Enhanced or Path Traced */
+	made: at its first ask under Enhanced or Path Traced (under Path
+	Traced alone for a map loaded under Classic, loaded_lit FALSE: Enhanced
+	keeps that map's classic geometry and checksum-keyed bakes, as it always
+	has) */
 	boolean chosen;
 	boolean real;
 	boolean geometry_wanted;
+	boolean loaded_lit;
 	boolean lit_chosen;
 	char map[64];
 	/* what was drawn at the last ask (logged as it changes) */
@@ -265,8 +269,8 @@ static boolean classic_world_id_find(char const *map, unsigned char id[PRISM_ID_
 }
 
 /* the rest of the map's choice, made at its first ask under Enhanced or Path
-Traced lighting (at the load, or at the first change from Classic in the
-map): its classic_world_id, its sidecar opened and verified where World
+Traced lighting (at the load), or, for a map loaded under Classic, at its
+first ask under Path Traced (Enhanced keeps that map classic): its classic_world_id, its sidecar opened and verified where World
 Geometry (as the map loaded) is Enhanced, and its enhanced packs looked for.
 The sidecar is held for the rest of the map whatever the packs: Path Traced
 draws the enhanced geometry from it with or without them, Enhanced only
@@ -347,7 +351,13 @@ static void lit_choose(char const *map)
 	{
 		platform_log("prism world: %s: BSP %d enhanced world_id %s", map, (int)bsp, world_source.labels[bsp]);
 	}
-	if (world_source.packs_ok || world_source.unbaked)
+	if (!world_source.loaded_lit)
+	{
+		platform_log("prism world: %s: enhanced geometry from %s: Path Traced draws it (rung 1), traced as it is; "
+			"Enhanced lighting draws the classic geometry of a map loaded under Classic (rung 2)", map,
+			world_source.path);
+	}
+	else if (world_source.packs_ok || world_source.unbaked)
 	{
 		platform_log("prism world: %s: enhanced geometry from %s (rung 1 under Enhanced and Path Traced%s)", map,
 			world_source.path, world_source.unbaked ? "; debug.world_unbaked: its lightmaps not asked for" : "");
@@ -362,7 +372,7 @@ static void lit_choose(char const *map)
 /* the map's choice: what holds for the whole map (its name, its BSPs,
 World Geometry as it loaded), at its first ask; and the rest of it
 (lit_choose) at its first ask under Enhanced or Path Traced, which a map
-loaded under Classic lighting makes at the first change from Classic */
+loaded under Classic lighting makes at the first change to Path Traced */
 static void choose(void)
 {
 	char const *map = map_name();
@@ -373,6 +383,7 @@ static void choose(void)
 		sidecar_close();
 		world_source.chosen = TRUE;
 		world_source.real = FALSE;
+		world_source.loaded_lit = FALSE;
 		world_source.lit_chosen = FALSE;
 		world_source.sidecar_ok = FALSE;
 		world_source.refused = FALSE;
@@ -405,8 +416,10 @@ static void choose(void)
 				"to Enhanced or Path Traced)", map);
 			return;
 		}
+		world_source.loaded_lit = TRUE;
 	}
-	if (world_source.real && !world_source.lit_chosen && !lighting_classic())
+	if (world_source.real && !world_source.lit_chosen && !lighting_classic() &&
+		(world_source.loaded_lit || prism_deferred_pathtraced()))
 		lit_choose(map);
 }
 
@@ -479,13 +492,18 @@ map draws at once what a load under it would */
 enum prism_world_rung prism_world_rung(void)
 {
 	enum prism_world_rung rung;
+	boolean geometry;
 
 	choose();
 	if (!world_source.chosen)
 		return PRISM_WORLD_RUNG_NONE;
 	if (!world_source.real)
 		return PRISM_WORLD_RUNG_CLASSIC;
-	switch (prism_world_ladder(lighting_classic(), world_source.geometry_wanted,
+	/* (a map loaded under Classic keeps its classic geometry under Enhanced,
+	as it always has; only Path Traced, whose geometry never depends on a
+	bake, draws the enhanced geometry in it) */
+	geometry = world_source.geometry_wanted && (world_source.loaded_lit || prism_deferred_pathtraced());
+	switch (prism_world_ladder(lighting_classic(), geometry,
 		world_source.sidecar_ok && world_source.open && !world_source.refused, world_source.packs_ok,
 		world_source.unbaked, prism_deferred_pathtraced()))
 	{
@@ -595,7 +613,7 @@ void prism_world_source_world_id(short bsp_index, unsigned char id[32])
 	if (prism_world_enhanced() && bsp_has_geometry(bsp_index))
 		memcpy(id, world_source.world_ids[bsp_index], 32);
 	/* (a BSP drawn classic is lit by its classic bake, enhanced geometry chosen or not) */
-	else if (world_source.classic_known && world_source.lit_chosen)
+	else if (world_source.classic_known && world_source.lit_chosen && world_source.loaded_lit)
 		memcpy(id, world_source.classic_ids[bsp_index], 32);
 }
 
@@ -626,6 +644,7 @@ void prism_world_source_map_unloaded(void)
 	world_source.chosen = FALSE;
 	world_source.refused = FALSE;
 	world_source.real = FALSE;
+	world_source.loaded_lit = FALSE;
 	world_source.lit_chosen = FALSE;
 	world_source.sidecar_ok = FALSE;
 	world_source.drawn_known = FALSE;

@@ -21,7 +21,10 @@ the rest of the map whatever the lighting and the packs, and its enhanced
 packs looked for. The ladder (prism_world_ladder) is then asked each frame
 of that state and the frame's lighting, so that every change of lighting in
 the middle of a map, in every direction, draws at once what a load under it
-would:
+would; except that a map loaded under Classic keeps its classic geometry
+(and checksum-keyed bakes) under Enhanced, as it always has: only Path
+Traced draws the enhanced geometry in it, and the rest of its state is
+chosen at its first Path Traced frame:
 
   rung 1  Enhanced geometry (the sidecar): World Geometry Enhanced and the
           sidecar verified, and either the lighting Path Traced, or the
@@ -40,10 +43,10 @@ would:
 
 Classic lighting never draws enhanced geometry (Classic's lightmaps on the
 remodel are the mismatch PLAN_FINAL calls the rock bug), and a map loaded
-under it opens no sidecar until the lighting changes. Geometry and light
-never disagree: a pack is used only for the world_id it was baked from, and
-the world_id is the sidecar's actually opened, never a setting's or a
-manifest's (prism_identity.h).
+under it opens no sidecar until the lighting changes to Path Traced.
+Geometry and light never disagree: a pack is used only for the world_id it
+was baked from, and the world_id is the sidecar's actually opened, never a
+setting's or a manifest's (prism_identity.h).
 
 debug.world_unbaked (HALO_WORLD_UNBAKED) takes rung 1 without the packs:
 the farm's and the developers' (a bake to make, the geometry's checks),

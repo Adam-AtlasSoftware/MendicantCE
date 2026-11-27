@@ -32,7 +32,9 @@ frame. The map's state is chosen once: World Geometry as the map loads (a change
 its first frame under Enhanced or Path Traced (the load, or the first change from Classic in the map), its
 `classic_world_id`, its sidecar opened and verified, held for the rest of the map whatever the lighting and the
 packs, and its enhanced packs looked for. So every change of lighting in a map, in every direction, draws at once
-what a load under that lighting would:
+what a load under that lighting would, with one exception kept from before: a map loaded under Classic and changed to
+Enhanced keeps its classic geometry, its bakes keyed by its checksum (Enhanced and Classic keep their rules); only Path
+Traced draws the enhanced geometry in it, and the rest of its state is chosen at its first Path Traced frame:
 
 | Rung | Geometry | Lighting | When |
 |---|---|---|---|
@@ -60,7 +62,7 @@ geometry. The ladder reads the packs and manifests by their host paths, as the r
 (`prism world: <map>: drawn now: ... geometry, ... lighting (rung n)`).
 
 Classic lighting never draws the enhanced geometry (its lightmaps on the remodel are the rock bug), and a map loaded
-under it opens no sidecar until the lighting changes; switching to Classic in a map draws the map's own geometry at
+under it opens no sidecar until the lighting changes to Path Traced; switching to Classic in a map draws the map's own geometry at
 once. Each BSP's enhanced `world_id` (`prism_identity.h`) is computed from the opened sidecar's GEOM and LMUV
 sections and sent with the bake's control (`xgpu_stream_prism_bake.world_id`); the baker keys the bake to it (its key's
 world_id, `docs/prism_bake.md`, "The frozen bake"), so an enhanced bake is used only for the geometry it was made from.

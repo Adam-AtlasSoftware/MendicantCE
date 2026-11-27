@@ -61,7 +61,8 @@ def test_geometry_comes_from_the_sidecar_alone():
     assert "prsx_open(" in _function(source, "static void lit_choose(char const *map)")
     choose = _function(source, "static void choose(void)")
     assert choose.index("prism_world_ladder(lighting_classic()") < choose.index("lit_choose(map);")
-    assert "if (world_source.real && !world_source.lit_chosen && !lighting_classic())\n\t\tlit_choose(map);" in choose
+    assert "if (world_source.real && !world_source.lit_chosen && !lighting_classic() &&\n\t\t" \
+        "(world_source.loaded_lit || prism_deferred_pathtraced()))\n\t\tlit_choose(map);" in choose
     assert "prism_world_source_map_unloaded();" in code
 
 
@@ -73,7 +74,7 @@ def test_classic_lighting_never_draws_it():
     assert "return prism_world_rung() == PRISM_WORLD_RUNG_ENHANCED;" in body
     rung = _function(source, "enum prism_world_rung prism_world_rung(void)")
     # (and, each frame, its packs, the farm's override or Path Traced: Enhanced without the packs draws classic)
-    assert re.search(r"prism_world_ladder\(lighting_classic\(\), world_source\.geometry_wanted,\s*"
+    assert re.search(r"prism_world_ladder\(lighting_classic\(\), geometry,\s*"
                      r"world_source\.sidecar_ok && world_source\.open && !world_source\.refused, world_source\.packs_ok,"
                      r"\s*world_source\.unbaked, prism_deferred_pathtraced\(\)\)", rung)
     geometry = re.sub(r"/\*.*?\*/", "", _source("prism_world_geometry.c"), flags=re.S)
@@ -350,3 +351,19 @@ def test_path_traced_history_never_crosses_a_new_scene():
     assert "pt.history_kept = (flags & FLAG_HISTORY) != 0;" in pt
     upscale = _code("port/linux/vulkan/xgpu_vulkan_upscale.c")
     assert "plugin_upscale(PLUGIN_DENOISER, commands, record, reset || !xgpu_vulkan_pt_history_kept()," in upscale
+
+
+def test_a_map_loaded_under_classic_keeps_its_enhanced_behaviour():
+    """a map loaded under Classic and changed to Enhanced draws its classic geometry with its bakes keyed by its
+    checksum, as it always has (Enhanced and Classic keep their rules); only Path Traced, whose geometry never depends
+    on a bake, draws the enhanced geometry in it, and the rest of its choice is made at its first Path Traced frame"""
+    source = _code("port/linux/game/prism_world_source.c")
+    choose = _function(source, "static void choose(void)")
+    assert choose.index("world_source.loaded_lit = FALSE;") < choose.index("prism_world_ladder(lighting_classic()")
+    assert choose.index("prism_world_ladder(lighting_classic()") < choose.index("world_source.loaded_lit = TRUE;")
+    rung = _function(source, "enum prism_world_rung prism_world_rung(void)")
+    assert "geometry = world_source.geometry_wanted && (world_source.loaded_lit || prism_deferred_pathtraced());" in rung
+    world_id = _function(source, "void prism_world_source_world_id(")
+    assert "world_source.classic_known && world_source.lit_chosen && world_source.loaded_lit" in world_id
+    unloaded = _function(source, "void prism_world_source_map_unloaded(void)")
+    assert "world_source.loaded_lit = FALSE;" in unloaded
