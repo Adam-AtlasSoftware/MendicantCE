@@ -1449,7 +1449,12 @@ static void blob_put(
 	void const *data,
 	unsigned long size)
 {
-	if (blob->failed)
+	/* (an empty array puts nothing: its pointer may be NULL, as a BSP's
+	fighters, replaced placements and alpha maps are when it has none, and
+	the game's memcpy asserts on a NULL source; so is the blob's own before
+	its first put. A load and each BSP switch under Enhanced lighting failed
+	cseries.c's assert twice) */
+	if (blob->failed || !size)
 	{
 		return;
 	}

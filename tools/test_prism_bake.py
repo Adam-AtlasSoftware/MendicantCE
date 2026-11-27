@@ -148,3 +148,59 @@ def test_key_settings_hash_budgets():
     assert fine < body.index("if (quality == PRISM_BAKE_QUALITY_MAX)")
     assert "b->key.settings_hash = key_settings_hash(b, b->quality);" in source
     assert "better.settings_hash = key_settings_hash(b, better.quality);" in source
+
+
+BLOB_MAIN = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+typedef int boolean;
+#define TRUE 1
+#define FALSE 0
+static int failed;
+/* (the game's memcpy, cseries.c's csmemcpy: its assert counted) */
+static void *checked_memcpy(void *destination, const void *source, unsigned long size)
+{
+	if (!destination || !source)
+		failed++;
+	return destination && source ? memcpy(destination, source, size) : destination;
+}
+#define memcpy(d, s, n) checked_memcpy((d), (s), (n))
+%s
+%s
+int main(void)
+{
+	struct blob blob;
+	float bounds[6] = { 1, 2, 3, 4, 5, 6 };
+
+	memset(&blob, 0, sizeof(blob));
+	/* (an empty array first, before the blob has bytes: a BSP with no fighters) */
+	blob_put(&blob, NULL, 0);
+	blob_put(&blob, "PBSC", 4);
+	blob_put(&blob, NULL, 0);
+	blob_put(&blob, bounds, sizeof(bounds));
+	printf("%%d %%lu %%d\n", failed, blob.size, blob.size == 28 && !memcmp(blob.bytes, "PBSC", 4) &&
+		!memcmp(blob.bytes + 4, bounds, sizeof(bounds)));
+	free(blob.bytes);
+	return 0;
+}
+"""
+
+
+@pytest.mark.skipif(not CC, reason="no C compiler")
+def test_the_reach_blob_puts_an_empty_array_without_a_copy(tmp_path):
+    """reach_serialise puts each of the BSP's arrays, some of them empty and NULL (no fighters, no placements a mod's
+    mesh replaces, no alpha maps), into a blob whose own bytes are NULL until its first put: an empty one copies
+    nothing, so the game's memcpy (cseries.c's, which asserts "destination && source") is never called with NULL. It
+    was, twice at each load and BSP switch under Enhanced lighting. blob_put compiled as prism_bake.c has it"""
+    writer = (ROOT / "port/linux/game/prism_bake.c").read_text()
+    struct = writer[writer.index("struct blob\n{"):]
+    struct = struct[:struct.index("};") + 2]
+    put = writer[writer.index("static void blob_put("):]
+    put = put[:put.index("\n}\n") + 3]
+    assert "if (blob->failed || !size)" in put
+    main = tmp_path / "blob.c"
+    main.write_text(BLOB_MAIN % (struct, put))
+    exe = tmp_path / "blob"
+    subprocess.run([CC, "-std=gnu89", "-O1", "-Wall", "-Werror", "-o", str(exe), str(main)], check=True)
+    assert subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.split() == ["0", "28", "1"]
