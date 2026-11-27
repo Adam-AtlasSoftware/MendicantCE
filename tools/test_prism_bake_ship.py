@@ -312,8 +312,12 @@ def test_reach_rides_in_the_bake_as_a_reac_record(tmp_path):
         header, records, _ = ship.check_bake(data)
         payload = ship.reach_payload(data, records)
         assert payload == _reach(input_hash=0x100 + entry["bsp"])
-        # (the next sequence, after DONE: the game's reader takes the log whole)
+        # (first, sequence 0, every other record after it renumbered: the game's reader takes the log whole and a
+        # player's game reads the walk from the header and one record)
+        assert records[0]["type"] == ship.fourcc("REAC")
         assert [r["sequence"] for r in records] == list(range(len(records)))
+        assert [ship.type_name(r["type"]) for r in records[1:]] == ["PLAN", "LYRB", "ATLS", "ATLY", "MASK", "VOLB",
+                                                                     "VOLY", "PROB", "DONE"]
         assert entry["reach"] == ship.read_reach(payload)
     assert not list(shipped.rglob("*.reach"))
     assert ship.verify(shipped) == []
@@ -382,3 +386,26 @@ def test_plancheck_compares_every_key_field_tiles_and_reach(tmp_path):
     assert ship.main(["plancheck", str(shipped), str(plans)]) == 1
     _plan(plans / "b30" / "plan_bsp1.txt", entries[1]["header"], 1, _reach(input_hash=1))
     assert ship.main(["plancheck", str(shipped), str(plans), "--world", "stock", "--maps", "b30"]) == 0
+
+
+def test_a_bakes_own_reach_is_moved_first(tmp_path):
+    """a bake committed with its REAC record near its end (the baker's) ships with it first, payloads unchanged"""
+    folder = tmp_path / "prism_bake"
+    (folder / "b30").mkdir(parents=True)
+    for bsp in (0, 1):
+        data = _header(map_name="b30", bsp=bsp)
+        kinds = [("PLAN", bytes(range(13))), ("LYRB", struct.pack("<II", 1, 1) + b"\0" * 88),
+                 ("ATLS", bytes(range(40))), ("REAC", _reach(input_hash=bsp)), ("DONE", b"")]
+        for sequence, (kind, payload) in enumerate(kinds):
+            data += _record(kind, payload, sequence)
+        (folder / "b30" / f"bsp{bsp}.pbk").write_bytes(data)
+    (folder / "b30" / "baked.txt").write_text("bsps 2\n")
+    shipped = tmp_path / "shipped"
+    entries = ship.export(folder, "stock", shipped, None, "max", None, reach=True, require_reach=True)
+    for entry in entries:
+        data = (shipped / entry["file"]).read_bytes()
+        records = ship.read_records(data)
+        assert [ship.type_name(r["type"]) for r in records] == ["REAC", "PLAN", "LYRB", "ATLS", "DONE"]
+        assert ship.reach_payload(data, records) == _reach(input_hash=entry["bsp"])
+        assert data[records[3]["offset"]:records[3]["offset"] + 40] == bytes(range(40))
+    assert ship.verify(shipped) == []

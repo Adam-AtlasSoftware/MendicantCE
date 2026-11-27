@@ -239,12 +239,27 @@ def reach_payload(data: bytes, records: list[dict]) -> bytes | None:
     return data[record["offset"]:record["offset"] + record["stored"]]
 
 
-def with_reach(data: bytes, records: list[dict], reach: bytes) -> bytes:
-    """the bake with the reach appended as a REAC record (the next sequence,
-    the DONE record's generation), as prism_bake_cache.c's writer appends one"""
-    read_reach(reach)
-    if reach_payload(data, records) is not None:
+def _record_header(kind: int, job: int, sequence: int, stored: int, payload_crc: int, generation: int,
+                   unpacked: int) -> bytes:
+    h = bytearray(RECORD_HEADER_SIZE)
+    h[:4] = RECORD_MAGIC
+    struct.pack_into("<IQIIIII", h, 4, kind, job, sequence, stored, payload_crc, generation, unpacked)
+    struct.pack_into("<I", h, RECORD_HEADER_SIZE - 4, zlib.crc32(bytes(h[:RECORD_HEADER_SIZE - 4])) & 0xFFFFFFFF)
+    return bytes(h)
+
+
+def with_reach(data: bytes, records: list[dict], reach: bytes | None = None) -> bytes:
+    """the bake with its reach as its FIRST record (REAC, sequence 0, the DONE record's generation; every other record
+    after it as it was, its sequence one more), so that a player's game finds the walk by reading the header and one
+    record, not the whole log (a 1.4 GB bake's records' headers, read cold, took 16 s): the reach given, where the
+    bake has none, or the bake's own REAC record moved first. The records' payloads are unchanged"""
+    walk = reach_payload(data, records)
+    if reach is not None and walk is not None:
         raise BakeError("has a REAC record already")
+    reach = reach if reach is not None else walk
+    if reach is None:
+        raise BakeError("no reach to carry")
+    read_reach(reach)
     if len(reach) > MAXIMUM_PAYLOAD:
         raise BakeError(f"its reach ({len(reach)} bytes) is past a record's {MAXIMUM_PAYLOAD}")
     if not records:
@@ -253,12 +268,24 @@ def with_reach(data: bytes, records: list[dict], reach: bytes) -> bytes:
     if last["offset"] + ((last["stored"] + 7) & ~7) != len(data):
         raise BakeError("its log does not end at its last record (torn)")
     generation = next((r["generation"] for r in reversed(records) if r["type"] == fourcc("DONE")), last["generation"])
-    h = bytearray(RECORD_HEADER_SIZE)
-    h[:4] = RECORD_MAGIC
-    struct.pack_into("<IQIIIII", h, 4, fourcc("REAC"), 0, last["sequence"] + 1, len(reach),
-                     zlib.crc32(reach) & 0xFFFFFFFF, generation, 0)
-    struct.pack_into("<I", h, RECORD_HEADER_SIZE - 4, zlib.crc32(bytes(h[:RECORD_HEADER_SIZE - 4])) & 0xFFFFFFFF)
-    return data + bytes(h) + reach + b"\0" * (-len(reach) % 8)
+    parts = [data[:HEADER_SIZE], _record_header(fourcc("REAC"), 0, 0, len(reach), zlib.crc32(reach) & 0xFFFFFFFF,
+                                                generation, 0), reach, b"\0" * (-len(reach) % 8)]
+    sequence = 1
+    for r in records:
+        if r["type"] == fourcc("REAC"):
+            continue
+        start = r["offset"]
+        payload_crc = struct.unpack_from("<I", data, start - RECORD_HEADER_SIZE + 24)[0]
+        parts.append(_record_header(r["type"], r["job"], sequence, r["stored"], payload_crc, r["generation"],
+                                    r["size"] if r["packed"] else 0))
+        parts.append(data[start:start + ((r["stored"] + 7) & ~7)])
+        sequence += 1
+    return b"".join(parts)
+
+
+def reach_first(data: bytes, records: list[dict]) -> bool:
+    """whether the bake's first record is its REAC record"""
+    return bool(records) and records[0]["type"] == fourcc("REAC")
 
 
 def sha256_of(path: Path) -> str:
@@ -484,8 +511,9 @@ def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None,
             try:
                 walk = reach_payload(data, records)
                 walk_file = folder / f"bsp{index}.reach"
-                if walk is None and reach and walk_file.is_file():
-                    data = with_reach(data, records, walk_file.read_bytes())
+                if reach and ((walk is None and walk_file.is_file()) or (walk is not None and
+                                                                      not reach_first(data, records))):
+                    data = with_reach(data, records, walk_file.read_bytes() if walk is None else None)
                     header, records, stock = check_bake(data, quality)
                     walk = reach_payload(data, records)
                 walk_summary = read_reach(walk) if walk is not None else None

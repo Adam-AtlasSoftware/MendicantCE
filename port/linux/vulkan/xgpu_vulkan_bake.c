@@ -5724,16 +5724,15 @@ static int file_whole(struct bake_state *b, const char *path, uint32_t *differen
 		better = b->key;
 		better.quality = b->cache.key.quality;
 		better.settings_hash = key_settings_hash(b, better.quality);
+		/* (the file open already: its log read once, not again for the
+		better key, a shipped MAX bake's 1.3 million records' headers) */
 		if (prism_bake_key_compare(&better, &b->cache.key) == 0)
 		{
-			prism_bake_cache_close(&b->cache);
-			if (prism_bake_cache_open(&b->cache, path, &better, 0) == PRISM_BAKE_CACHE_CURRENT && b->cache.done)
-			{
-				b->key = better;
-				b->loaded_quality = better.quality;
-				return 1;
-			}
-			*differences = b->cache.differences;
+			b->cache.differences = 0;
+			b->cache.status = PRISM_BAKE_CACHE_CURRENT;
+			b->key = better;
+			b->loaded_quality = better.quality;
+			return 1;
 		}
 	}
 	prism_bake_cache_close(&b->cache);
@@ -7121,6 +7120,51 @@ static void reach_file_write(uint64_t hash)
 		remove(temporary);
 }
 
+/* a bake's first record, where it is its REAC record (prism_bake_cache.c's
+format: the header, then a record's 40-byte header, magic, type, job,
+sequence, stored size, payload CRC, generation, unpacked size, its own CRC,
+then the payload): 1 taken (these inputs' walk), -1 the first record a REAC
+record of other inputs or damaged, 0 none there (the log looked through) */
+static int reach_first_record_read(const char *path, uint64_t hash)
+{
+	FILE *f = fopen(path, "rb");
+	unsigned char head[PRISM_BAKE_CACHE_HEADER_SIZE + PRISM_BAKE_CACHE_RECORD_HEADER_SIZE], *record, *bytes;
+	uint32_t magic, type, stored, payload_crc, unpacked, crc;
+	int taken = 0;
+
+	if (!f)
+		return 0;
+	record = head + PRISM_BAKE_CACHE_HEADER_SIZE;
+	if (fread(head, 1, sizeof(head), f) != sizeof(head) || memcmp(head, "PRISMBAK", 8))
+	{
+		fclose(f);
+		return 0;
+	}
+	memcpy(&magic, record, 4);
+	memcpy(&type, record + 4, 4);
+	memcpy(&stored, record + 20, 4);
+	memcpy(&payload_crc, record + 24, 4);
+	memcpy(&unpacked, record + 32, 4);
+	memcpy(&crc, record + 36, 4);
+	if (magic != PRISM_BAKE_CACHE_FOURCC('P', 'B', 'K', 'R') || type != PRISM_BAKE_RECORD_REACHABLE ||
+		crc != prism_bake_crc32(0, record, 36))
+	{
+		fclose(f);
+		return 0;
+	}
+	taken = -1;
+	if (!unpacked && stored >= REACH_HEAD_BYTES && stored <= PRISM_BAKE_CACHE_MAXIMUM_PAYLOAD &&
+		(bytes = (unsigned char *)malloc(stored)) != NULL)
+	{
+		if (fread(bytes, 1, stored, f) == stored && prism_bake_crc32(0, bytes, stored) == payload_crc &&
+			reach_parse(bytes, stored, hash))
+			taken = 1;
+		free(bytes);
+	}
+	fclose(f);
+	return taken;
+}
+
 /* the shipped pack's walk of these inputs: its bake's REAC record (the
 farm's walk, written as the bake was committed, or added by
 tools/prism_bake_ship.py export from the farm's reach file), taken where it
@@ -7139,6 +7183,11 @@ static int reach_shipped_read(uint64_t hash)
 	if (length < 6 || strcmp(bake.reach_shipped_path + length - 6, ".reach"))
 		return 0;
 	snprintf(path, sizeof(path), "%.*s.pbk", (int)(length - 6), bake.reach_shipped_path);
+	/* (where the pack puts it, its first record: the header and one record
+	read, not the log, whose records' headers a 1.4 GB bake read cold took 16
+	s for; prism_bake_ship.py export puts the walk first) */
+	if ((taken = reach_first_record_read(path, hash)) != 0)
+		return taken > 0;
 	memset(&none, 0, sizeof(none));
 	if (prism_bake_cache_open(&cache, path, &none, 0) == PRISM_BAKE_CACHE_STALE && cache.done &&
 		(record = prism_bake_cache_find(&cache, PRISM_BAKE_RECORD_REACHABLE, PRISM_BAKE_JOB_NONE)) != NULL &&
