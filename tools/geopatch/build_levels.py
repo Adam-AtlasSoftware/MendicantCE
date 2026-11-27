@@ -8,11 +8,12 @@ of section 2.6: "double content build in two clean places: identical bytes"), an
 
 build: for each map (every *.map of --maps but ui, or the --map ones), its classic_world_id (classic_world.py)
 and, where --levels/<map>/ holds remodel .pwg files, its sidecar (encode.py --pwg-dir: each .pwg on the BSP its
-header names) at <out>/maps_enhanced/<map>.prsx with its report, then the game's own reader's verdict on it (native
-open: every section verified, the world_id of each BSP). A map with no remodel, or a BSP of one with none, ships
-classic for that BSP (no section). <out>/build.json records, per map: build string, base_id, classic_world_id, the
-BSPs, which have enhanced geometry, the sidecar's size and SHA-256 (file_sha), and every BSP's classic and enhanced
-world_id. It holds no time, host or path, so two builds of the same inputs write the same build.json too.
+header names, held to the gameplay rule by clamp.py) at <out>/maps_enhanced/<map>.prsx with its report, then the
+game's own reader's verdict on it (native open: every section verified, the world_id of each BSP). A map with no
+remodel, or a BSP of one with none, ships classic for that BSP (no section). <out>/build.json records, per map:
+build string, base_id, classic_world_id, the BSPs, which have enhanced geometry, the sidecar's size and SHA-256
+(file_sha), and every BSP's classic and enhanced world_id. It holds no time, host or path, so two builds of the
+same inputs write the same build.json too.
 
 compare: the two builds' build.json and sidecars side by side; exit 0 only if every sidecar is the same bytes and
 every world_id is equal (the proof of a reproducible build), else a line per difference and exit 1. A build made on
@@ -25,6 +26,7 @@ pipeline (M7): never committed.
 import argparse
 import hashlib
 import json
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -104,7 +106,9 @@ def build(args):
     native.build(args.native_dir)  # (once, before the workers race to build it)
     tasks = [(str(p), args.levels, str(out), args.native_dir) for p in maps]
     records = {}
-    with ProcessPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+    # (spawned workers: Python 3.14's default, the fork server, binds a socket under TMPDIR, which a deep run folder
+    # makes too long a path; spawn needs none, and is what every platform can do)
+    with ProcessPoolExecutor(max_workers=max(1, args.jobs), mp_context=multiprocessing.get_context("spawn")) as pool:
         for name, record in pool.map(_level, tasks):
             records[name] = record
             side = record["sidecar"]

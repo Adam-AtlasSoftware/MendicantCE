@@ -18,6 +18,10 @@ sidecar (it draws classic).
 Sections are deflated by the vendored zlib (port/third_party/zlib, through native.py), so the same inputs give the
 same bytes on every machine; --system-zlib (Python's own zlib) is for measuring only.
 
+Before anything else each BSP's remodel is held to the gameplay rule (clamp.py, PLAN_FINAL.md section 10: the
+ground within 0.09 wu of the stock surface, walls within reach within 0.24 wu; the report's "clamp" says what
+moved); --no-clamp keeps the .pwg's positions, for measuring only.
+
 Each GEOM comes with its LMUV: by default v2, our own lightmap layout (lmuv.py: charts of the remodel's own
 triangles packed into our own pages; a vertex on a chart seam is copied, and a part past 65535 vertices is cut by
 its surfaces), which carries nothing of the retail map; --lmuv-version 1 writes M2's stand-in (geom.py: each
@@ -39,7 +43,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from geopatch import geom, lmuv, prsx, retail  # noqa: E402
+from geopatch import clamp, geom, lmuv, prsx, retail  # noqa: E402
 from geopatch.geom import LIT, REF, REFC, REFM, REFMT, REFP, REFPT  # noqa: E402
 
 PWG_MAGIC = b"PWG1"
@@ -404,6 +408,9 @@ def main(argv=None):
                         help="2 (default): our own lightmap layout (lmuv.py); 1: M2's stand-in (CE's coordinates)")
     parser.add_argument("--report")
     parser.add_argument("--native-dir")
+    parser.add_argument("--no-clamp", action="store_true",
+                        help="the remodel's positions as they are, not held to the gameplay rule (clamp.py): for "
+                             "measuring only")
     args = parser.parse_args(argv)
     cwid = bytes.fromhex(args.classic_world_id)
     codec = {"zlib": prsx.ZLIB, "zstd": prsx.ZSTD, "stored": prsx.STORED}[args.codec]
@@ -437,6 +444,9 @@ def main(argv=None):
         avoid |= set(_bsp_lookup(b))
     for index, path in sorted(specs):
         pwg_parts = read_pwg(path)
+        clamp_report = None
+        if not args.no_clamp and index in bsps:
+            clamp_report = clamp.clamp_bsp(pwg_parts, clamp.Stock.of_bsp(bsps[index], native))
         lmuv_report = None
         if args.lmuv_version == 2:
             pwg_parts, pages, lmuv_report = lmuv.layout(pwg_parts)
@@ -455,6 +465,8 @@ def main(argv=None):
         entry["lmuv_decoded"] = len(lm)
         if lmuv_report is not None:
             entry["lmuv"] = {k: v for k, v in lmuv_report.items()}
+        if clamp_report is not None:
+            entry["clamp"] = clamp_report
         report["bsps"][index] = entry
     blob = prsx.write(cwid, sections)
     Path(args.out).write_bytes(blob)
