@@ -405,8 +405,9 @@ the records are packed already), each under GitHub's 2 GiB asset limit (a level 
 unpacks a release's archives into a shipped folder (nothing outside it) and `verify` checks one (sizes, sha256, every
 file a whole lighting-only bake of its manifest's key).
 `--reach` carries each BSP's reach (the farm's walk, `<map>/bsp<n>.reach` beside its bake) in its bake as a `REAC`
-record where the bake has none (a bake committed by this baker writes its own), and `--require-reach` refuses a BSP
-without one: a player's machine then walks no reach (below). `plancheck <shipped folder> <plans folder>` checks every
+record where the bake has none (a bake committed by this baker writes its own), always as the bake's first record
+(sequence 0, every other record after it renumbered, payloads unchanged), and `--require-reach` refuses a BSP without
+one: a player's machine then walks no reach and finds the walk from the header and one record (below). `plancheck <shipped folder> <plans folder>` checks every
 shipped BSP against a player's plan of it (`<plans>/<map>/plan_bsp<n>.txt`, `HALO_BAKE_PLAN_ONLY`'s): the whole key,
 field by field, the tiles, and the `REAC` record's walk against the player's own (its inputs' hash, the bricks' and
 tiers' counts and CRC-32s). A BSP with no plan or any difference fails it: the farm's packaging runs it before anything
@@ -584,8 +585,9 @@ the first traced window) and the beach stayed CE's light 16 s coming out.
 Only the farm writes the file; a player's machine takes the shipped bake's `REAC` record instead (the same bytes:
 `PRCH`, its version, the inputs' hash, the flight flag, the summary, the bricks, the tiers; read whole, refused if cut
 short or grown) where its inputs' hash is the BSP's own, so a BSP's shipped light is used as soon as its bake loads
-(d40's eighth BSP's walk is 696 s on an RTX 2060 desktop's CPU, 1206 s on the farm's). Where the shipped bake is
-refused all the same, the reach is walked here and the key made again from it.
+(d40's eighth BSP's walk is 696 s on an RTX 2060 desktop's CPU, 1206 s on the farm's: its light now in use 5 to 6 s
+after the BSP's load, a30's first BSP's 8 s against 52). Where the shipped bake is refused all the same, the reach is
+walked here and the key made again from it.
 
 ## The settings
 
