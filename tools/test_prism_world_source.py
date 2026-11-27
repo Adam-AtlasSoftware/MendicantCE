@@ -313,33 +313,39 @@ def test_the_ladder_is_asked_each_frame_of_a_state_chosen_once():
     assert "world_source.classic_known && world_source.lit_chosen" in world_id
 
 
-def test_path_traced_never_traces_another_geometrys_bake():
-    """a set begun again in play (the geometry swapped by a change of lighting) under Path Traced with no whole bake
-    of its key makes its own scene, nothing baked, never keeps the bake drawn before it (another geometry's scene,
-    which the path tracer would trace under the new geometry); a hold made under another lighting is let go; under
-    Enhanced, as it was"""
+def test_no_lighting_draws_another_sets_bake():
+    """a set begun again in play (the geometry swapped by a change of lighting) with no whole bake of its key makes
+    its own scene, nothing baked, under every lighting (what a load of the map with no bake gives that geometry), and
+    never keeps the bake drawn before it, another set's (after Path Traced -> Enhanced on a map loaded under Classic
+    with the enhanced packs, the enhanced world's light on the classic geometry); the bake drawn is kept only where it
+    is of the new set's key already; neither Path Traced's lookup nor Enhanced's Raster draws a bake of another set
+    than the game's now (the one kept while the new set's inputs come in)"""
     stream = (ROOT / "port/linux/src/xgpu_stream.h").read_text()
-    assert "XGPU_BAKE_FLAG_PATH_TRACED = 32," in stream
+    assert "XGPU_BAKE_FLAG_PATH_TRACED" not in stream
     bake = _code("port/linux/game/prism_bake.c")
     fill = _function(bake, "static void control_fill(")
-    assert "(prism_deferred_pathtraced() ? XGPU_BAKE_FLAG_PATH_TRACED : 0)" in fill
+    assert "XGPU_BAKE_FLAG_PATH_TRACED" not in fill
+    assert "(prism_scene_static_in_play() ? XGPU_BAKE_FLAG_IN_PLAY : 0);" in fill
     baker = _code("port/linux/vulkan/xgpu_vulkan_bake.c")
+    assert "held_generation" not in baker and "XGPU_BAKE_FLAG_PATH_TRACED" not in baker
     begin = _function(baker, "static struct bake_state *bake_begin(")
     branch = begin[begin.index("if (in_play)"):begin.index("b->started = now_seconds();")]
-    assert branch.index("if (!b->chosen && (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED))") < \
-        branch.index("else if (!b->chosen)") < branch.index("*held = 1;")
-    pt_part = branch[branch.index("XGPU_BAKE_FLAG_PATH_TRACED"):branch.index("else if (!b->chosen)")]
-    assert "return NULL" not in pt_part and "bake_free" not in pt_part
+    # (the one way out of the branch before the plan: the bake drawn already of this key)
+    assert branch.count("return NULL;") == 1 and branch.count("*held = 1;") == 1
+    kept = branch[:branch.index("return NULL;")]
+    assert "!prism_bake_key_compare(drawn, &asked)" in kept
+    own = branch[branch.index("if (!b->chosen)"):]
+    assert "return NULL" not in own and "bake_free" not in own
+    assert "lighting" not in branch and "flags" not in branch
     frame = _function(baker, "static void bake_frame(void)")
-    assert "path_traced = (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED) != 0;" in frame
-    assert re.search(r"if \(path_traced && bake\.held_generation\)\s*\n\s*bake\.held_generation = 0;", frame)
+    swap = frame[frame.index("next = bake_begin(1, &b->key, &held);"):frame.index("bake.swaps++;")]
+    assert re.search(r"if \(held\)\s*\{\s*b->generation = bake\.control\.generation;\s*goto keep;", swap)
     # (still nothing baked in play)
     assert "&& !in_play && bake_allowed();" in frame
-    # (and the path tracer never traces a bake of another set than the game's now: while the set's own is begun, the
-    # bake drawn before it is kept, and its scene is another geometry's)
-    lookup = _function(baker, "int xgpu_vulkan_bake_lookup(")
-    assert re.search(r"if \(b->generation != bake\.control\.generation\)\s*\n\s*return 0;", lookup)
-    assert lookup.index("bake_traceable(b)") < lookup.index("b->generation != bake.control.generation")
+    for head in ("int xgpu_vulkan_bake_lookup(", "struct xgpu_vulkan_image *xgpu_vulkan_bake_raster("):
+        body = _function(baker, head)
+        assert re.search(r"if \(b->generation != bake\.control\.generation\)\s*\n\s*return (0|NULL);", body), head
+        assert body.index("bake_traceable(b)") < body.index("b->generation != bake.control.generation"), head
 
 
 def test_path_traced_history_never_crosses_a_new_scene():

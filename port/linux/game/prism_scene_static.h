@@ -26,8 +26,9 @@ lightmapped surface (a cinematic's), so there is nothing to bake */
 int prism_scene_static_empty(void);
 /* port: the set is of the BSP the last one was of, begun again in play (the
 world geometry, the lighting or the traced kinds changed): no bake is made
-for it, the bake of its geometry loaded if there is one, else the last one
-kept until the next load (xgpu_vulkan_bake.c) */
+for it, the bake of its key loaded if there is one, else its own scene made,
+nothing baked, as a load with no bake makes it: never the bake drawn before
+it, another set's (xgpu_vulkan_bake.c) */
 boolean prism_scene_static_in_play(void);
 
 #endif

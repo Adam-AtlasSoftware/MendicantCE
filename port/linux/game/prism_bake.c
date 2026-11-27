@@ -1589,8 +1589,7 @@ static void control_fill(
 		(prism_bake_menus_up() ? XGPU_BAKE_FLAG_MENU : 0) |
 		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0) |
 		(prism_world_enhanced() ? XGPU_BAKE_FLAG_REMODEL : 0) |
-		(prism_scene_static_in_play() ? XGPU_BAKE_FLAG_IN_PLAY : 0) |
-		(prism_deferred_pathtraced() ? XGPU_BAKE_FLAG_PATH_TRACED : 0);
+		(prism_scene_static_in_play() ? XGPU_BAKE_FLAG_IN_PLAY : 0);
 	bake->map_checksum = (uint32_t)cache_files_get_checksum();
 	bake->bsp_index = global_structure_bsp_index_get();
 	bake->folder = (uint32_t)(unsigned long)prism_bake.folder;

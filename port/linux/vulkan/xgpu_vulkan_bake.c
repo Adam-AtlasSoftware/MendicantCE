@@ -666,13 +666,10 @@ static struct
 
 	uint32_t status_serial;
 	double last_status;
-	/* port: a set begun again in play (XGPU_BAKE_FLAG_IN_PLAY) with no whole
-	bake of its key: its generation + 1 (0 none), the bake drawn kept for it
-	until the next load (never under Path Traced, XGPU_BAKE_FLAG_PATH_TRACED:
-	the set's own scene is made); such holds and the swaps to a whole bake,
+	/* port: the sets begun again in play (XGPU_BAKE_FLAG_IN_PLAY) that took
+	the place of the bake drawn (a whole bake of theirs, or their own scene),
 	counted */
-	uint32_t held_generation;
-	uint32_t holds, swaps;
+	uint32_t swaps;
 } bake;
 
 /* ---------- time */
@@ -2554,10 +2551,14 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 	plan at its quality) */
 	file_choose(b);
 	/* (port: a set begun again in play, XGPU_BAKE_FLAG_IN_PLAY: never baked;
-	begun only where a whole bake of its key is there to load (the shipped
-	one or this machine's, as file_choose found it), else the caller keeps the
-	bake drawn until the next load; under Path Traced, else the set's own
-	scene is made, nothing baked) */
+	its whole bake loaded where one of its key is there (the shipped one or
+	this machine's, as file_choose found it), else the set's own scene made,
+	nothing baked, under every lighting: what a load of the map with no bake
+	gives that geometry (display.bake "off": the bake paused with nothing in
+	it, CE's frame under Enhanced, Path Traced's own light). The bake drawn
+	before it is never kept for it: another set's, often another world's
+	(the enhanced world's light on the classic geometry after a change from
+	Path Traced to Enhanced) */
 	if (in_play)
 	{
 		/* (the bake drawn is of this key already, the setting changed back:
@@ -2568,26 +2569,14 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) is the bake drawn's "
 				"geometry: kept as it is", b->map, (int)b->bsp, b->generation);
 			bake_free(b);
-			*held = 2;
-			return NULL;
-		}
-		/* (Path Traced: its geometry never depends on a bake, so the set's
-		own scene is made, nothing baked (paused, as a player's load without
-		a pack), never another geometry's scene kept) */
-		if (!b->chosen && (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED))
-		{
-			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) has no whole bake here "
-				"(%s): Path Traced: its own scene made, nothing baked in play, traced as it is", b->map, (int)b->bsp,
-				b->generation, b->path);
-		}
-		else if (!b->chosen)
-		{
-			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) has no whole bake here "
-				"(%s): nothing baked in play; the bake drawn is kept until the next load", b->map, (int)b->bsp,
-				b->generation, b->path);
-			bake_free(b);
 			*held = 1;
 			return NULL;
+		}
+		if (!b->chosen)
+		{
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) has no whole bake here "
+				"(%s): its own scene made, nothing baked in play (as a load with no bake), never the bake drawn before "
+				"it", b->map, (int)b->bsp, b->generation, b->path);
 		}
 		else
 			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u): its whole bake "
@@ -6468,7 +6457,7 @@ static void bake_frame(void)
 {
 	struct bake_state *b = bake.bake;
 	VkCommandBuffer commands;
-	int wanted, in_play, path_traced;
+	int wanted, in_play;
 
 	garbage_collect();
 	timing_collect();
@@ -6476,37 +6465,25 @@ static void bake_frame(void)
 	XGPU_BAKE_FLAG_IN_PLAY) */
 	in_play = (bake.control.flags & XGPU_BAKE_FLAG_IN_PLAY) != 0;
 	wanted = (bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0) && !in_play && bake_allowed();
-	/* (Path Traced holds no bake drawn for a set it is not of: a hold made
-	under another lighting is let go, the set's own scene made) */
-	path_traced = (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED) != 0;
-	if (path_traced && bake.held_generation)
-		bake.held_generation = 0;
 	/* (port: such a set of the BSP drawn: its whole bake loaded where there
-	is one, else the bake drawn kept, its generation remembered, until the
-	next load; never a bake begun in play) */
+	is one, else its own scene made, nothing baked (bake_begin); the bake
+	drawn is kept only where it is of the set's key already) */
 	if (b && in_play && b->generation != bake.control.generation && b->bsp == bake.control.bsp_index &&
 		b->request == bake.control.request && !strncmp(b->map, bake.control.map_name, sizeof(b->map) - 1))
 	{
 		int held = 0;
 		struct bake_state *next;
 
-		if (bake.held_generation == bake.control.generation + 1u)
-			goto keep;
 		next = bake_begin(1, &b->key, &held);
-		/* (the bake drawn is of the set's geometry: it takes the set's number) */
-		if (held == 2)
-		{
-			b->generation = bake.control.generation;
-			bake.held_generation = 0;
-			goto keep;
-		}
+		/* (the bake drawn is of the set's key: it takes the set's number) */
 		if (held)
 		{
-			bake.held_generation = bake.control.generation + 1u;
-			bake.holds++;
+			b->generation = bake.control.generation;
 			goto keep;
 		}
-		/* (its inputs not all in yet: the bake drawn kept meanwhile) */
+		/* (its inputs not all in yet: the bake drawn kept meanwhile, but
+		drawn by no lighting: xgpu_vulkan_bake_raster and _lookup draw only
+		the game's set now) */
 		if (!next)
 			goto keep;
 		bake_free(b);
@@ -6537,15 +6514,8 @@ static void bake_frame(void)
 		int held = 0;
 
 		/* (port: a set begun again in play with no bake drawn before it: its
-		whole bake loaded, or nothing, never baked) */
-		if (in_play && bake.held_generation == bake.control.generation + 1u)
-		{
-			status_write(NULL);
-			return;
-		}
+		whole bake loaded, else its own scene, never baked) */
 		b = bake.bake = bake_begin(in_play, NULL, &held);
-		if (held)
-			bake.held_generation = bake.control.generation + 1u;
 		if (!b)
 		{
 			status_write(NULL);
@@ -7438,6 +7408,12 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	if (!bake.made || !b || !copy || !base || !additions || !words || !extras || !view || !bake_traceable(b) ||
 		(!b->physical_count && !b->volume.done))
 		return NULL;
+	/* (port: a bake of another set than the game's now, kept while the set's
+	own is begun (its inputs not all in yet): another geometry's light, often
+	another world's, never drawn on the geometry drawn now; CE's frame until
+	the set's own is made) */
+	if (b->generation != bake.control.generation)
+		return NULL;
 	description = xgpu_vulkan_image_description(copy);
 	if (!bake.raster_light || xgpu_vulkan_image_description(bake.raster_light)->width != description->width ||
 		xgpu_vulkan_image_description(bake.raster_light)->height != description->height)
@@ -7640,9 +7616,9 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	if (!bake.made || !bake_traceable(b) || !b->block.tlas)
 		return 0;
 	/* (a bake of another set than the game's now, kept while the set's own
-	is begun (its inputs not all in yet) or held: its scene is another
-	geometry's, never traced under the geometry drawn now; CE's frame until
-	the set's own is made) */
+	is begun (its inputs not all in yet): its scene is another geometry's,
+	never traced under the geometry drawn now; CE's frame until the set's
+	own is made) */
 	if (b->generation != bake.control.generation)
 		return 0;
 	lookup->scene = scene_runtime_address(b);

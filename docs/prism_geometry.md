@@ -46,11 +46,11 @@ Traced draws the enhanced geometry in it, and the rest of its state is chosen at
 Path Traced's geometry and lighting never depend on a bake. It reads no lightmap of the enhanced world but traces the
 bake's scene, which the renderer makes for the BSP whether or not a pack is loaded (a player's bake is then paused,
 nothing baked), lit by the bake's light where it has it and by its own bounce else. When the geometry changes in a
-map (a change of lighting to or from Path Traced swaps it), SCENE_STATIC's set is begun again in play; under Path
-Traced (`XGPU_BAKE_FLAG_PATH_TRACED`) a set with no whole bake of its key makes its own scene, nothing baked, and is
-never drawn with the bake drawn before it (another geometry's scene; Enhanced keeps that hold, below), and the path
-tracer never traces a bake of another set than the game's now (`xgpu_vulkan_bake_lookup`), so while the set's own
-scene is made it shows CE's frame of the geometry drawn, never the old scene. The path tracer's history and the denoiser plugin's are dropped across a new scene (its generation, not only its address).
+map (a change of lighting to or from Path Traced swaps it), SCENE_STATIC's set is begun again in play; under every
+lighting a set with no whole bake of its key makes its own scene, nothing baked, and is never drawn with the bake
+drawn before it (another set's, often another world's: below), and neither Path Traced
+(`xgpu_vulkan_bake_lookup`) nor Enhanced (`xgpu_vulkan_bake_raster`) draws a bake of another set than the game's
+now, so while the set's own scene is made each shows CE's frame of the geometry drawn, never the old scene. The path tracer's history and the denoiser plugin's are dropped across a new scene (its generation, not only its address).
 
 Enhanced lighting needs the packs: a map without them draws its classic geometry under Enhanced (and the enhanced
 under Path Traced, back and forth as the lighting changes). A pack the ladder found but the renderer did not load
@@ -159,8 +159,13 @@ remodel's, not stock begun again a frame later.
 
 A set of SCENE_STATIC begun again for the BSP the last set was of (`display.prism_world_geometry` or the lighting
 changed in play) is marked `XGPU_BAKE_FLAG_IN_PLAY`. Nothing is baked for it: the host loads the whole bake of its
-key if the folder has one, else keeps the bake drawn until the next load (under Path Traced, else makes the set's own
-scene, unbaked: above), and logs which. Players never bake.
+key if the folder has one, else makes the set's own scene, nothing baked, and logs which. No lighting lights a
+geometry with a bake of another set or world: the bake drawn before the change is kept only where it is of the new
+set's key already (the setting changed back). Under Enhanced the set's own unbaked scene draws what a load of the map
+with no bake draws for that geometry (`display.bake` `"off"`: the bake paused with nothing in it, so Raster gives CE's
+frame), where before 2026-11-27 the bake drawn was kept until the next load: after Path Traced -> Enhanced on a map
+loaded under Classic with the enhanced packs, the enhanced world's light on the classic geometry (the boulders
+orange). Players never bake.
 
 ## Seeing it
 
