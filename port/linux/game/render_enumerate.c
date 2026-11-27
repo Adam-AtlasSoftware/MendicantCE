@@ -603,6 +603,18 @@ static boolean stand_ins_next(struct structure_bsp *structure_bsp, struct enumer
 			}
 		}
 	}
+	/* (no material stood in this round: the lightmap drawn without its
+	picture given it back now, as stand_ins_restore would at the next round,
+	which never comes. Left without it, the structure's own surfaces of that
+	lightmap lost their lightmap for the rest of the session: drawn unlit,
+	and SCENE_STATIC's set, the bake's key and plan, made without their
+	page, so that the farm's worker and a player's game, whose enumerations
+	differ, planned the BSP differently) */
+	if (!stand_ins.count && stand_ins.unlit)
+	{
+		stand_ins.unlit->bitmap_index = stand_ins.unlit_bitmap_index;
+		stand_ins.unlit = NULL;
+	}
 	return stand_ins.count != 0;
 }
 
