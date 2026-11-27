@@ -31,9 +31,19 @@ Which world a map gets is decided once, at its first BSP's load, and latched for
 
 | Rung | Geometry | Lighting | When |
 |---|---|---|---|
-| 1 | Enhanced (the sidecar) | Enhanced or Path Traced, from the enhanced packs | World Geometry Enhanced, the sidecar verified, and every BSP's enhanced pack shipped (`prism_bake_shipped/remodel/<map>/bsp<n>.pbk`, named in its `manifest.txt` with `geo:prsx:<world_id>`) |
+| 1 | Enhanced (the sidecar) | Enhanced or Path Traced, from the enhanced packs; Path Traced also without them | World Geometry Enhanced, the sidecar verified, and every BSP's enhanced pack shipped (`prism_bake_shipped/remodel/<map>/bsp<n>.pbk`, named in its `manifest.txt` with `geo:prsx:<world_id>`), or the lighting Path Traced |
 | 2 | Classic | Enhanced or Path Traced, from the classic packs | otherwise |
 | 3 | Classic | Classic | Classic lighting |
+
+Path Traced needs no pack for the enhanced geometry: it reads no lightmap of it, but traces the bake's scene, which
+the renderer makes for the BSP whether or not a pack is loaded (a player's bake is then paused, nothing baked), lit by
+the bake's light where it has it and by its own bounce else. Enhanced lighting does need them: a map chosen under Path
+Traced without them draws its classic geometry the moment the lighting is Enhanced (`prism_world_enhanced` asks each
+frame), and the enhanced again under Path Traced. A pack the ladder found but the renderer did not load whole (its
+manifest names the BSP's world_id but its own key is another geometry's, or the file is damaged: the player's bake of
+the BSP is then paused or failed) drops Enhanced lighting to rung 2 for the rest of the map, with a warning in the log
+(`prism_world_source_bake_refused`, from `prism_bake_frame`). The ladder reads the packs and manifests by their host
+paths, as the renderer and the menu do (an absolute `display.bake_shipped_folder` was read under the data folder).
 
 Classic lighting never opens a sidecar and never draws the enhanced geometry (its lightmaps on the remodel are the
 rock bug); switching to Classic in a map draws the map's own geometry at once. A World Geometry change applies at the

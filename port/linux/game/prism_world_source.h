@@ -18,7 +18,10 @@ on the loading screen) and latched for every BSP of it:
   rung 1  Enhanced geometry (the sidecar), lit by Enhanced or Path Traced
           from the enhanced packs: the sidecar opened and verified, and every
           BSP's enhanced pack present (a shipped bake whose key is that BSP's
-          enhanced world_id);
+          enhanced world_id); or, the lighting Path Traced, without them
+          (Path Traced reads no lightmap of it: it traces the bake's scene,
+          made with or without a pack). Enhanced lighting without the packs
+          draws the classic geometry, asked each frame;
   rung 2  Classic geometry, lit by Enhanced or Path Traced from the classic
           packs: rung 1 not available;
   rung 3  Classic geometry and Classic lighting: display.lighting classic.
@@ -34,7 +37,16 @@ opened, never a setting's or a manifest's (prism_identity.h).
 
 debug.world_unbaked (HALO_WORLD_UNBAKED) takes rung 1 without the packs:
 the farm's and the developers' (a bake to make, the geometry's checks),
-never a player's.
+never a player's. With no bake to light it, CE's lightmap passes draw the
+enhanced world flat (rasterizer_xbox_environment.c,
+prism_world_geometry_own_page_draw): never the BSP's stock lightmap read at
+the enhanced world's own coordinates.
+
+A pack the ladder found but the renderer does not load whole (its own key
+not the BSP's enhanced world_id though its manifest names it, a damaged
+file) drops Enhanced lighting to the classic geometry the moment the
+renderer says so (prism_world_source_bake_refused), with a warning: a
+player is never left with enhanced geometry and no light of its own.
 */
 
 #ifndef PRISM_WORLD_SOURCE_H
@@ -77,6 +89,17 @@ void prism_world_source_world_id(short bsp_index, unsigned char id[32]);
 /* the world_id's first 16 hex digits and the sidecar's name for the log and
 the bake's note ("" for the classic world) */
 char const *prism_world_source_label(short bsp_index);
+
+/* the renderer's verdict on the BSP's enhanced bake (prism_bake.c, each
+frame, from the host's status for this BSP and scene): its pack not loaded
+whole (a pack the manifest names whose own key is not this BSP's enhanced
+world_id, a damaged one, one the renderer cannot use) while the map is drawn
+with its enhanced geometry under Enhanced lighting. Enhanced lighting then
+draws the classic geometry for the rest of the map (rung 2), with a warning
+in the log, lit by its classic packs where it has them. (Never under
+debug.world_unbaked, whose rung 1 has no packs by design, nor under Path
+Traced, which needs none) */
+void prism_world_source_bake_refused(short bsp_index);
 
 /* display.world_geometry asks for the enhanced geometry */
 boolean prism_world_geometry_wanted(void);

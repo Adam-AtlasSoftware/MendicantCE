@@ -18,6 +18,7 @@ prism_world_source.h has what and why.
 #include "prism_prsx.h"
 #include "prism_ref_decode.h"
 #include "prism_world_source.h"
+#include "prism_deferred.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,19 @@ prism_world_source.h has what and why.
 /* (the C library's allocator: the sidecar's bytes are ours alone) */
 #undef malloc
 #undef free
+
+/* the sidecar, a data root file (maps_enhanced/<map>.prsx), is opened by
+port/linux/include/stdio.h's fopen, which reads a path as the Xbox's under
+the data folder; the shipped bake's files by their host paths, as the
+renderer that loads them (xgpu_vulkan_bake.c) and prism_bake_menu.c name
+them, by the C library's own: display.bake_shipped_folder is a host path,
+which that fopen would look for under the data folder (the packs never
+found, the map's classic_world_id never known) */
+static FILE *data_file_open(char const *path, char const *mode)
+{
+	return fopen(path, mode);
+}
+#undef fopen
 
 /* the platform's (port/linux/src) */
 char const *config_string(char const *name);
@@ -60,6 +74,12 @@ static struct
 	unsigned char classic_world_id[PRISM_ID_SIZE];
 	unsigned char classic_ids[MAXIMUM_BSPS][PRISM_ID_SIZE];
 	char classic_from[64];
+	/* (rung 1) every BSP's enhanced pack found by the ladder and not
+	refused by the renderer since (prism_world_source_bake_refused), and
+	debug.world_unbaked as the map was chosen: without either, only Path
+	Traced draws the enhanced geometry */
+	boolean packs_ok;
+	boolean unbaked;
 } world_source;
 
 /* ---------- private code */
@@ -106,7 +126,7 @@ static boolean sidecar_path(char const *map, char *path, unsigned long size)
 	/* (relative: the game's files are opened from the data root, its
 	working folder, as prism_world_geometry.c's always were) */
 	snprintf(path, size, "%s/%s.prsx", SIDECAR_FOLDER, map);
-	if ((file = fopen(path, "rb")) == NULL)
+	if ((file = data_file_open(path, "rb")) == NULL)
 		return FALSE;
 	fclose(file);
 	return TRUE;
@@ -125,7 +145,7 @@ static boolean packs_present(char const *map, char *why, unsigned long why_size)
 	if (shipped && *shipped)
 		snprintf(folder, sizeof(folder), "%s/remodel/%s", shipped, map);
 	else
-		snprintf(folder, sizeof(folder), "prism_bake_shipped/remodel/%s", map);
+		snprintf(folder, sizeof(folder), "%s/prism_bake_shipped/remodel/%s", platform_data_root(), map);
 	snprintf(manifest, sizeof(manifest), "%s/manifest.txt", folder);
 	for (bsp = 0; bsp < world_source.bsp_count; bsp++)
 	{
@@ -164,7 +184,10 @@ static void shipped_folder(char *folder, unsigned long size)
 {
 	char const *shipped = config_string("display.bake_shipped_folder");
 
-	snprintf(folder, size, "%s", shipped && *shipped ? shipped : "prism_bake_shipped");
+	if (shipped && *shipped)
+		snprintf(folder, size, "%s", shipped);
+	else
+		snprintf(folder, size, "%s/prism_bake_shipped", platform_data_root());
 }
 
 /* the map's classic_world_id (PLAN_FINAL.md section 2.5: computed on the
@@ -235,6 +258,8 @@ static void choose(void)
 	sidecar_close();
 	world_source.chosen = TRUE;
 	world_source.refused = FALSE;
+	world_source.packs_ok = FALSE;
+	world_source.unbaked = FALSE;
 	snprintf(world_source.map, sizeof(world_source.map), "%s", map);
 	memset(world_source.world_ids, 0, sizeof(world_source.world_ids));
 	memset(world_source.labels, 0, sizeof(world_source.labels));
@@ -256,7 +281,7 @@ static void choose(void)
 		world_source.rung = PRISM_WORLD_RUNG_CLASSIC;
 		return;
 	}
-	if (prism_world_ladder(lighting_classic(), FALSE, FALSE, FALSE, FALSE) == 3)
+	if (prism_world_ladder(lighting_classic(), FALSE, FALSE, FALSE, FALSE, FALSE) == 3)
 	{
 		world_source.rung = PRISM_WORLD_RUNG_CLASSIC;
 		platform_log("prism world: %s: classic geometry, classic lighting (rung 3)", map);
@@ -289,7 +314,7 @@ static void choose(void)
 			platform_data_root(), SIDECAR_FOLDER, map);
 		return;
 	}
-	world_source.file = fopen(world_source.path, "rb");
+	world_source.file = data_file_open(world_source.path, "rb");
 	if (!world_source.file || !prsx_source_file(&source, world_source.file))
 	{
 		platform_log("prism world: %s: classic geometry: %s cannot be read (rung 2)", map, world_source.path);
@@ -324,20 +349,28 @@ static void choose(void)
 		snprintf(world_source.labels[bsp], sizeof(world_source.labels[bsp]), "%.16s %s", hex, name ? name + 1 :
 			world_source.path);
 	}
-	if (prism_world_ladder(FALSE, TRUE, TRUE, packs_present(map, why, sizeof(why)),
-		config_boolean("debug.world_unbaked")) != 1)
+	world_source.packs_ok = packs_present(map, why, sizeof(why));
+	world_source.unbaked = config_boolean("debug.world_unbaked") != 0;
+	if (prism_world_ladder(FALSE, TRUE, TRUE, world_source.packs_ok, world_source.unbaked,
+		prism_deferred_pathtraced()) != 1)
 	{
 		platform_log("prism world: %s: classic geometry: %s (rung 2)", map, why);
 		sidecar_close();
 		return;
 	}
 	world_source.rung = PRISM_WORLD_RUNG_ENHANCED;
+	if (!world_source.packs_ok && !world_source.unbaked)
+	{
+		platform_log("prism world: %s: Path Traced: enhanced geometry without its lightmaps (%s): traced as it is; "
+			"Enhanced lighting draws the classic geometry (rung 2)", map, why);
+	}
 	for (bsp = 0; bsp < world_source.bsp_count; bsp++)
 	{
 		platform_log("prism world: %s: BSP %d enhanced world_id %s", map, (int)bsp, world_source.labels[bsp]);
 	}
 	platform_log("prism world: %s: enhanced geometry from %s (rung 1%s)", map, world_source.path,
-		config_boolean("debug.world_unbaked") ? "; debug.world_unbaked: its lightmaps not asked for" : "");
+		world_source.unbaked ? "; debug.world_unbaked: its lightmaps not asked for" :
+		!world_source.packs_ok ? "; Path Traced alone" : "");
 }
 
 /* ---------- the stock view prism_geom.c reads */
@@ -411,7 +444,8 @@ enum prism_world_rung prism_world_rung(void)
 boolean prism_world_enhanced(void)
 {
 	choose();
-	return world_source.rung == PRISM_WORLD_RUNG_ENHANCED && !world_source.refused && !lighting_classic();
+	return world_source.rung == PRISM_WORLD_RUNG_ENHANCED && !world_source.refused && !lighting_classic() &&
+		(world_source.packs_ok || world_source.unbaked || prism_deferred_pathtraced());
 }
 
 boolean prism_world_source_image(struct structure_bsp *bsp, short bsp_index, char const *bsp_name,
@@ -495,6 +529,19 @@ void prism_world_source_world_id(short bsp_index, unsigned char id[32])
 		memcpy(id, world_source.world_ids[bsp_index], 32);
 	else if (world_source.classic_known && world_source.rung != PRISM_WORLD_RUNG_NONE)
 		memcpy(id, world_source.classic_ids[bsp_index], 32);
+}
+
+void prism_world_source_bake_refused(short bsp_index)
+{
+	if (!prism_world_enhanced() || !world_source.packs_ok || world_source.unbaked || prism_deferred_pathtraced())
+		return;
+	platform_log("prism world: %s BSP %d: warning: the enhanced lightmaps of its geometry (%s) were not loaded (their "
+		"pack is not this geometry's, or is damaged: the renderer's log says which): Enhanced lighting draws the "
+		"classic geometry for the rest of the map (rung 2)", world_source.map, (int)bsp_index,
+		bsp_index >= 0 && bsp_index < world_source.bsp_count ? world_source.labels[bsp_index] : "?");
+	/* (for the rest of the map; the next map load chooses again. Path
+	Traced, which needs no pack, still draws the enhanced geometry) */
+	world_source.packs_ok = FALSE;
 }
 
 char const *prism_world_source_label(short bsp_index)

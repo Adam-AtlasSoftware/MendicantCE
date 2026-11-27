@@ -235,11 +235,12 @@ int prism_id_parse(const char *text, unsigned char id[PRISM_ID_SIZE])
 	return 1;
 }
 
-int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked)
+int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked,
+	int path_traced)
 {
 	if (lighting_classic)
 		return 3;
-	if (geometry_enhanced && sidecar_ok && (packs_ok || unbaked))
+	if (geometry_enhanced && sidecar_ok && (packs_ok || unbaked || path_traced))
 		return 1;
 	return 2;
 }

@@ -32,18 +32,18 @@ def _source(name):
 
 def test_ladder_every_input(tool):
     """rung 3 whenever the lighting is Classic; rung 1 only with the geometry asked for, the sidecar verified and
-    every BSP's enhanced pack (or the farm's unbaked override); rung 2 otherwise: geometry and light never
-    disagree"""
+    every BSP's enhanced pack (or the farm's unbaked override, or Path Traced, which reads no lightmap of it); rung 2
+    otherwise: geometry and light never disagree"""
     table = tool.ladder()
-    assert len(table) == 32
-    for (classic, geometry, sidecar, packs, unbaked), rung in table.items():
+    assert len(table) == 64
+    for (classic, geometry, sidecar, packs, unbaked, path_traced), rung in table.items():
         if classic:
             expected = 3
-        elif geometry and sidecar and (packs or unbaked):
+        elif geometry and sidecar and (packs or unbaked or path_traced):
             expected = 1
         else:
             expected = 2
-        assert rung == expected, (classic, geometry, sidecar, packs, unbaked, rung)
+        assert rung == expected, (classic, geometry, sidecar, packs, unbaked, path_traced, rung)
 
 
 def test_geometry_comes_from_the_sidecar_alone():
@@ -68,6 +68,8 @@ def test_classic_lighting_never_draws_it():
     body = source[source.index("boolean prism_world_enhanced(void)"):]
     body = body[:body.index("}")]
     assert "PRISM_WORLD_RUNG_ENHANCED" in body and "!lighting_classic()" in body and "!world_source.refused" in body
+    # (and, each frame, its packs, the farm's override or Path Traced: Enhanced without the packs draws classic)
+    assert "(world_source.packs_ok || world_source.unbaked || prism_deferred_pathtraced())" in body
     geometry = re.sub(r"/\*.*?\*/", "", _source("prism_world_geometry.c"), flags=re.S)
     assert "boolean enabled = prism_world_enhanced();" in geometry
     assert 'config_string("display.prism_world_geometry")' not in geometry
@@ -175,3 +177,77 @@ def test_own_page_draws_never_read_the_stock_lightmap():
     match = re.search(r"#define PRISM_OWN_PAGE_NEUTRAL_LIGHT ([0-9.]+)f", (ROOT / "source/rasterizer/xbox/"
                       "rasterizer_xbox_environment.c").read_text())
     assert match and 0.2 <= float(match.group(1)) <= 1.0
+
+
+def test_the_ladder_reads_the_shipped_packs_where_the_renderer_does():
+    """the ladder's packs and the map's classic_world_id are read from the shipped folder by its host path, as the
+    renderer that loads them and the menu do (an absolute display.bake_shipped_folder was read under the data folder by
+    port/linux/include/stdio.h's fopen: the packs never found); the sidecar stays a data root file"""
+    source = _source("prism_world_source.c")
+    undef = source.index("#undef fopen")
+    assert source.index("static FILE *data_file_open(") < undef
+    assert undef < source.index("static boolean packs_present(")
+    assert undef < source.index("static boolean classic_world_id_find(")
+    code = _code("port/linux/game/prism_world_source.c")
+    assert "data_file_open(path, \"rb\")" in _function(code, "static boolean sidecar_path(")
+    assert "world_source.file = data_file_open(world_source.path, \"rb\");" in code
+    packs = _function(code, "static boolean packs_present(")
+    assert '"%s/prism_bake_shipped/remodel/%s", platform_data_root(), map' in packs
+    shipped = _function(code, "static void shipped_folder(")
+    assert '"%s/prism_bake_shipped", platform_data_root()' in shipped
+    for name in ("prism_bake.c", "prism_bake_menu.c"):
+        assert '"%s/prism_bake_shipped", platform_data_root()' in _source(name), name
+
+
+def test_a_pack_the_renderer_does_not_load_drops_the_map_to_rung_2():
+    """a pack the ladder found (its manifest names the BSP's enhanced world_id) that the renderer does not load whole
+    (its own key another geometry's, a damaged file): a player bakes nothing, so the BSP's bake is paused there, or it
+    failed; the map is then drawn with its classic geometry for the rest of it, with a warning, never enhanced geometry
+    without its light under Enhanced. Never under debug.world_unbaked, whose rung 1 has no packs by design, nor under
+    Path Traced, which needs none"""
+    bake = _code("port/linux/game/prism_bake.c")
+    frame = _function(bake, "void prism_bake_frame(")
+    check = frame[frame.index("if (prism_world_enhanced() && !prism_deferred_pathtraced())"):
+                  frame.index("if (prism_bake.exit_when_done)")]
+    assert "XGPU_BAKE_STATE_PAUSED" in check and "XGPU_BAKE_STATE_FAILED" in check
+    assert "XGPU_BAKE_STATUS_BSP) == (long)global_structure_bsp_index_get()" in check
+    assert "XGPU_BAKE_STATUS_GENERATION) == (unsigned long)prism_scene_static_generation()" in check
+    assert "prism_world_source_bake_refused(global_structure_bsp_index_get());" in check
+    assert frame.index("xgpu_backend_prism_bake(&bake, NULL, 0);") < frame.index("prism_world_source_bake_refused(")
+    source = _code("port/linux/game/prism_world_source.c")
+    refused = _function(source, "void prism_world_source_bake_refused(")
+    assert ("if (!prism_world_enhanced() || !world_source.packs_ok || world_source.unbaked || "
+            "prism_deferred_pathtraced())") in refused
+    assert "warning" in refused and "rung 2" in refused
+    assert "world_source.packs_ok = FALSE;" in refused
+    # (the packs refused: under Enhanced the geometry is drawn classic at once, and the bake keyed to the classic
+    # world; Path Traced, which needs no pack, keeps the enhanced geometry)
+    enhanced = _function(source, "boolean prism_world_enhanced(void)")
+    assert "world_source.packs_ok ||" in enhanced
+    assert "if (prism_world_enhanced() && !prism_deferred_pathtraced())" in frame
+    world_id = _function(source, "void prism_world_source_world_id(")
+    assert world_id.index("prism_world_enhanced()") < world_id.index("world_source.classic_ids")
+    # (the host's state words this reads: a player's run never bakes, so a BSP without a whole bake is paused)
+    baker = _code("port/linux/vulkan/xgpu_vulkan_bake.c")
+    assert re.search(r"if \(!wanted && !b->complete && b->step > STEP_LOAD && b->step < STEP_COMMIT\)\s*\n\s*\{\s*\n\s*"
+                     r"status_write\(b\);\s*\n\s*status_set\(XGPU_BAKE_STATUS_STATE, XGPU_BAKE_STATE_PAUSED\);", baker)
+
+
+def test_path_traced_takes_the_enhanced_geometry_without_its_packs():
+    """Path Traced reads no lightmap of the enhanced world: it traces the bake's scene (made for the BSP whether or not
+    a pack is loaded: a player's paused bake), lit by the bake's light where it has it and its own bounce else; only
+    until that scene is made does it show CE's frame, whose lightmap pass draws the enhanced world flat. So the map's
+    choice passes the lighting to the ladder, and a map chosen under Path Traced without the packs is rung 1 (logged)"""
+    pt = _code("port/linux/vulkan/xgpu_vulkan_pt.c")
+    assert re.search(r"if \(!xgpu_vulkan_bake_lookup\(&lookup\)\)\s*\n\s*\{[^}]*CE's frame until it is made[^}]*"
+                     r"return NULL;", pt)
+    baker = _code("port/linux/vulkan/xgpu_vulkan_bake.c")
+    lookup = _function(baker, "int xgpu_vulkan_bake_lookup(")
+    assert "if (!bake.made || !bake_traceable(b) || !b->block.tlas)" in lookup
+    identity = _code("port/linux/game/prism_identity.c")
+    ladder = _function(identity, "int prism_world_ladder(")
+    assert "if (geometry_enhanced && sidecar_ok && (packs_ok || unbaked || path_traced))" in ladder
+    source = _code("port/linux/game/prism_world_source.c")
+    assert re.search(r"prism_world_ladder\(FALSE, TRUE, TRUE, world_source\.packs_ok, world_source\.unbaked,\s*"
+                     r"prism_deferred_pathtraced\(\)\) != 1", source)
+    assert "Path Traced: enhanced geometry without its lightmaps" in source

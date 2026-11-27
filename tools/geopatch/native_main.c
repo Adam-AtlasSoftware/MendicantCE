@@ -410,10 +410,11 @@ int main(int argc, char **argv)
 	{
 		int bits;
 
-		/* (every input: "ladder <classic> <geometry> <sidecar> <packs> <unbaked> <rung>") */
-		for (bits = 0; bits < 32; bits++)
-			printf("ladder %d %d %d %d %d %d\n", bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1, bits >> 4 & 1,
-				prism_world_ladder(bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1, bits >> 4 & 1));
+		/* (every input: "ladder <classic> <geometry> <sidecar> <packs> <unbaked> <path traced> <rung>") */
+		for (bits = 0; bits < 64; bits++)
+			printf("ladder %d %d %d %d %d %d %d\n", bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1, bits >> 4 & 1,
+				bits >> 5 & 1, prism_world_ladder(bits & 1, bits >> 1 & 1, bits >> 2 & 1, bits >> 3 & 1, bits >> 4 & 1,
+				bits >> 5 & 1));
 		return 0;
 	}
 	if (!strcmp(argv[1], "deflate") && argc == 3)

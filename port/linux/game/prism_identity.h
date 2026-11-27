@@ -93,8 +93,14 @@ Enhanced or Path Traced, 3 classic geometry and Classic lighting. Classic
 lighting is rung 3 whatever else holds (Classic's lightmaps are never drawn
 on the enhanced geometry); rung 1 needs the geometry asked for, the sidecar
 opened and verified, and every BSP's enhanced pack (or the farm's unbaked
-override) */
-int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked);
+override), except under Path Traced, which traces the enhanced world's own
+scene and reads no lightmap of it (the bake's light where it has it, else
+its own bounce): there the enhanced geometry needs no pack. Enhanced
+lighting without the packs is rung 2 (prism_world_enhanced asks again each
+frame: a change to Enhanced in the middle of a map without them draws the
+classic geometry at once) */
+int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked,
+	int path_traced);
 
 /* 64 lowercase hex digits and a terminator */
 void prism_id_hex(const unsigned char id[PRISM_ID_SIZE], char text[2 * PRISM_ID_SIZE + 1]);

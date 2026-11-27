@@ -151,12 +151,12 @@ class Native:
         return (result.stdout if result.returncode == 0 else None), result.stderr.decode(errors="replace").strip()
 
     def ladder(self):
-        """{(classic, geometry, sidecar, packs, unbaked): rung} of prism_world_ladder"""
+        """{(classic, geometry, sidecar, packs, unbaked, path_traced): rung} of prism_world_ladder"""
         result = subprocess.run([str(self.exe), "ladder"], capture_output=True, text=True, check=True)
         out = {}
         for line in result.stdout.splitlines():
             fields = [int(x) for x in line.split()[1:]]
-            out[tuple(fields[:5])] = fields[5]
+            out[tuple(fields[:6])] = fields[6]
         return out
 
     def base_id(self, path):

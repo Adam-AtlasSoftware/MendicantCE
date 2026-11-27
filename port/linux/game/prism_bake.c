@@ -1751,6 +1751,21 @@ void prism_bake_frame(
 	reach_frame();
 	control_fill(&bake, XGPU_BAKE_CONTROL);
 	xgpu_backend_prism_bake(&bake, NULL, 0);
+	/* (v4 geopatch: the enhanced geometry's bake not loaded whole, its
+	pack not this geometry's or damaged: a player bakes nothing, so it is
+	paused there, or it failed; the map falls back to its classic geometry,
+	prism_world_source.c) */
+	if (prism_world_enhanced() && !prism_deferred_pathtraced())
+	{
+		unsigned long state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
+
+		if ((state == XGPU_BAKE_STATE_PAUSED || state == XGPU_BAKE_STATE_FAILED) &&
+			(long)prism_bake_status(XGPU_BAKE_STATUS_BSP) == (long)global_structure_bsp_index_get() &&
+			prism_bake_status(XGPU_BAKE_STATUS_GENERATION) == (unsigned long)prism_scene_static_generation())
+		{
+			prism_world_source_bake_refused(global_structure_bsp_index_get());
+		}
+	}
 	/* debug.bake_exit: the game quits once the BSP's bake is done (as
 	debug.exit_after ends a run, with exit) */
 	if (prism_bake.exit_when_done)
