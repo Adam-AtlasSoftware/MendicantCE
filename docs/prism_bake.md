@@ -725,6 +725,17 @@ resolved frame with them: after the relight and any composite, before the fog sc
 Anything else an object drew at once into the light target belongs to the same rule: a pass of its own that the G-buffer
 has no twin for (a blended draw) is lost to the relight.
 
+**The level's alpha-tested decals go into the base** (`render_window`, render.c). CE draws the decal layer
+`_decal_layer_alpha_tested` (a sign's paint, a floor's markings: a10's LIFEPODS arrows and star signs) over the light,
+before the texture pass, multiplying it, and marks the stencil so that the texture pass leaves those pixels alone: the
+frame there is the light by the decal, no base map. In the deferred core the light target held the decal and the base
+target stayed white there, so once Raster (or Path Traced) put its own light in the light target's place the decal was
+gone and the shape came out as the bake's light alone (white in a10's corridors). Under `prism_deferred_raster` the
+layer is drawn as the base phase begins instead, before the texture pass, with the same stencil: the base is white by
+the decal, the light target the light, and the resolve gives Classic's frame with the bake's light in its place (and
+Classic's own where the bake has nothing). Classic and `ce_deferred` keep CE's order. A pack or mod material's albedo
+(`xgpu_vulkan_post_albedo_over`) still lies over such a decal where the level's surface under it has one.
+
 With `"materials"` the pixel is base × (1 − the specular's share) × the diffuse light + the specular light + its
 self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
 it), the exposure on both lights and the tone curve over the whole (below), and the resolve draws it as it is: CE's
