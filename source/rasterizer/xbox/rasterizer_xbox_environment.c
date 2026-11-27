@@ -169,6 +169,11 @@ symbols in this file:
 #include "rasterizer_xbox_draw_primitives.h"
 #include "rasterizer_xbox_internal.h"
 #include "prism_deferred.h" /* port: port/linux/game/prism_deferred.c */
+#include "prism_world_geometry.h" /* port: port/linux/game/prism_world_geometry.c */
+/* port: (v4 geopatch) the light CE's lightmap pass gives a remodelled
+material on the enhanced world's own lightmap page where it cannot read
+that page (_rasterizer_environment_lightmap_draw) */
+#define PRISM_OWN_PAGE_NEUTRAL_LIGHT 0.6f
 #include "draw_bounds.h" /* port: port/linux/game/draw_bounds.c */
 
 /* ---------- constants */
@@ -977,6 +982,23 @@ void _rasterizer_environment_lightmap_draw(
 		{
 			pixel_shader.final_combiner_constant_1 =
 				real_rgb_color_to_pixel32(&rasterizer_environment_globals.local_lightmap_ambient_color);
+			pixel_shader.final_combiner_inputs_abcd = 0x2002000C;
+		}
+		/* port: (v4 geopatch) a remodelled material on the enhanced world's
+		own lightmap page (LMUV v2): its lightmap coordinates are on that
+		page, not on the BSP's stock bitmap bound for this pass, which read at
+		them is no light at all (b30's beach orange, red and yellow, its
+		halls black and white). Such a draw takes the fullbright mode's
+		combiner with a neutral grey: CE's frame shows it flat, never the
+		stock page, wherever no bake lights it (the farm's and developers'
+		debug.world_unbaked, a shipped pack not yet loaded); with its bake,
+		Enhanced and Path Traced light it over CE's frame */
+		else if (prism_world_geometry_own_page_draw(vertex_buffer))
+		{
+			real_rgb_color neutral;
+
+			neutral.red = neutral.green = neutral.blue = PRISM_OWN_PAGE_NEUTRAL_LIGHT;
+			pixel_shader.final_combiner_constant_1 = real_rgb_color_to_pixel32(&neutral);
 			pixel_shader.final_combiner_inputs_abcd = 0x2002000C;
 		}
 
@@ -2279,10 +2301,14 @@ void _rasterizer_environment_specular_lightmap_draw(
 		0x77B,
 		global_d3d_device);
 
+	/* port: (and not a remodelled material on the enhanced world's own
+	lightmap page, whose coordinates are not on the bitmap bound here:
+	prism_world_geometry_own_page_draw) */
 	if (rasterizer_debug_options.drawing_mode == _rasterizer_drawing_mode_normal &&
 		rasterizer_debug_options.draw_environment_specular_lightmaps &&
 		rasterizer_globals.lightmap_mode == _rasterizer_lightmap_mode_normal &&
-		!rasterizer_environment_globals.lightmap_missing)
+		!rasterizer_environment_globals.lightmap_missing &&
+		!prism_world_geometry_own_page_draw(vertex_buffer))
 	{
 		struct shader_environment_definition *shader_environment;
 
@@ -2501,11 +2527,14 @@ void _rasterizer_environment_reflection_lightmap_mask_draw(
 		0x873,
 		global_d3d_device);
 
+	/* port: (and not a remodelled material on the enhanced world's own
+	lightmap page: prism_world_geometry_own_page_draw) */
 	if (rasterizer_debug_options.drawing_mode == _rasterizer_drawing_mode_normal &&
 		rasterizer_debug_options.draw_environment_reflection_lightmap_masks &&
 		rasterizer_debug_options.draw_environment_reflections &&
 		rasterizer_globals.lightmap_mode == _rasterizer_lightmap_mode_normal &&
-		!rasterizer_environment_globals.lightmap_missing)
+		!rasterizer_environment_globals.lightmap_missing &&
+		!prism_world_geometry_own_page_draw(vertex_buffer))
 	{
 		struct shader_environment_definition *shader_environment;
 

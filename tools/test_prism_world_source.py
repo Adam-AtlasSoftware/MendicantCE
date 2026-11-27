@@ -133,3 +133,45 @@ def test_players_never_bake():
     assert baker.count("folder_make(") == 3
     import prism_bake_ship as ship
     assert {"MSKF", "VOLF", "FCLS"} <= set(ship.LIGHT_RECORDS.values())
+
+
+def _code(path):
+    return re.sub(r"/\*.*?\*/", "", (ROOT / path).read_text(), flags=re.S)
+
+
+def _function(code, head):
+    body = code[code.index(head):]
+    return body[:body.index("\n}\n")]
+
+
+def test_own_page_draws_never_read_the_stock_lightmap():
+    """a remodelled material on the enhanced world's own lightmap page (LMUV v2) is never lit by CE's lightmap passes
+    from the BSP's stock bitmap read at its coordinates (b30's orange, red and yellow beach): the lightmap pass draws it
+    with the fullbright combiner and a neutral grey, the specular lightmap and reflection mask passes skip it; a stock
+    material, or a remodel on CE's own coordinates, is drawn as CE draws it"""
+    geometry = _code("port/linux/game/prism_world_geometry.c")
+    own = _function(geometry, "int prism_world_geometry_own_page_draw(")
+    assert "world_geometry.current" in own
+    assert "vertex_buffer == made->buffers" in own and "made->page != NONE" in own
+    assert "int prism_world_geometry_own_page_draw(struct vertex_buffer const *vertex_buffer);" in \
+        (ROOT / "port/linux/game/prism_world_geometry.h").read_text()
+    environment = _code("source/rasterizer/xbox/rasterizer_xbox_environment.c")
+    assert '#include "prism_world_geometry.h"' in environment
+    lightmap = _function(environment, "void _rasterizer_environment_lightmap_draw(")
+    branch = lightmap[lightmap.index("else if (prism_world_geometry_own_page_draw(vertex_buffer))"):]
+    branch = branch[:branch.index("switch (rasterizer_debug_options.drawing_mode)")]
+    assert "PRISM_OWN_PAGE_NEUTRAL_LIGHT" in branch
+    assert "pixel_shader.final_combiner_constant_1 = real_rgb_color_to_pixel32(&neutral);" in branch
+    assert "pixel_shader.final_combiner_inputs_abcd = 0x2002000C;" in branch
+    # (after the debug lightmap modes, which keep theirs, and before the draw)
+    assert lightmap.index("_rasterizer_lightmap_mode_fullbright") < lightmap.index("prism_world_geometry_own_page_draw")
+    assert lightmap.index("prism_world_geometry_own_page_draw") < lightmap.index(
+        "rasterizer_draw_dynamic_triangles_static_vertices2(\n\t\t\tdynamic_triangle_buffer_index")
+    for head in ("void _rasterizer_environment_specular_lightmap_draw(",
+                 "void _rasterizer_environment_reflection_lightmap_mask_draw("):
+        body = _function(environment, head)
+        gate = body[:body.index("{", body.index("if (rasterizer_debug_options.drawing_mode"))]
+        assert "!prism_world_geometry_own_page_draw(vertex_buffer)" in gate, head
+    match = re.search(r"#define PRISM_OWN_PAGE_NEUTRAL_LIGHT ([0-9.]+)f", (ROOT / "source/rasterizer/xbox/"
+                      "rasterizer_xbox_environment.c").read_text())
+    assert match and 0.2 <= float(match.group(1)) <= 1.0

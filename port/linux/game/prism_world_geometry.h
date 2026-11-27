@@ -107,5 +107,11 @@ long prism_world_geometry_own_pages(unsigned long (*sizes)[2], long most);
 /* a remodelled material's own page (its index among the own pages), or
 NONE: it is not drawn from the remodel, or its coordinates are CE's */
 short prism_world_geometry_material_page(short lightmap_index, short material_index);
+/* whether the draw of vertex_buffer (a pass's vertices, from
+prism_world_geometry_chunk) is a remodelled material on the enhanced
+world's own page: its lightmap coordinates are on that page, never on the
+BSP's stock lightmap bitmap the pass has bound, so CE's lightmap passes
+(rasterizer_xbox_environment.c) must not read that bitmap at them */
+int prism_world_geometry_own_page_draw(struct vertex_buffer const *vertex_buffer);
 
 #endif /* __PRISM_WORLD_GEOMETRY_H */

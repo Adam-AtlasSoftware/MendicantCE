@@ -87,6 +87,12 @@ the shipped pack streaming in 2,048 tiles a frame) is lit as an object is, by th
 not loaded either, by the open sky's light (the rig's sky, by the share of the sky its normal faces), with the sun
 traced (`raster_source`'s `unbaked`). Stock geometry takes the same fallback for such texels.
 
+Where no bake lights the enhanced world at all (`debug.world_unbaked`'s rung 1, a shipped pack not yet loaded, Path
+Traced before the bake's scene is made), the frame is CE's: its lightmap pass draws a remodelled material on an own page
+with the fullbright mode's combiner and a neutral grey (`PRISM_OWN_PAGE_NEUTRAL_LIGHT`), and the specular lightmap and
+reflection mask passes skip it (`prism_world_geometry_own_page_draw`, `rasterizer_xbox_environment.c`): flat, never the
+stock page read at our coordinates.
+
 ## Objects (`display.prism_models`)
 
 The resolver is `port/linux/vulkan/xgpu_geometry.c` (pure C: `tools/test_geometry_resolver.py`). The mesh store

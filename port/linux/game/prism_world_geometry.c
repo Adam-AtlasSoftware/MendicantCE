@@ -3154,6 +3154,14 @@ short prism_world_geometry_material_page(
 	return world_geometry.materials[world_geometry.lookup[entry]].page;
 }
 
+int prism_world_geometry_own_page_draw(
+	struct vertex_buffer const *vertex_buffer)
+{
+	struct world_material *made = world_geometry.current;
+
+	return made && vertex_buffer && vertex_buffer == made->buffers && made->page != NONE;
+}
+
 int prism_world_geometry_drawn(
 	void)
 {
