@@ -222,6 +222,12 @@ unsigned long long platform_memory_bytes(void);
 /* gives the memory of the pages of a part of an XPhysicalAlloc block back to
 the system, which reads as zeros (port/linux/src/xbox_memory.c) */
 void platform_contiguous_discard(void *address, unsigned long size);
+/* a read-write contiguous block at the lowest place it fits, for a large one
+kept while a BSP is loaded, freed with XPhysicalFree; NULL on failure. The
+window's bytes in use, the most there have been, and its largest free run
+(port/linux/src/xbox_memory.c) */
+void *platform_contiguous_alloc_low(unsigned long size, unsigned long alignment);
+void platform_contiguous_usage(unsigned long *in_use, unsigned long *high_water, unsigned long *largest_free);
 /* where Halo PC keeps the channels of the pixels a Custom Edition bitmap
 just arrived at (an enum custom_edition_channel_order,
 port/linux/game/cache_file_formats.h), which the renderer then samples in

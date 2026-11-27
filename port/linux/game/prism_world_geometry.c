@@ -95,7 +95,13 @@ rasterizer_geometry_compress_vertices, sit in the Xbox's contiguous memory
 as the map's geometry does, each array inside one of the renderer's mirror
 segments (MIRROR_SEGMENT_BYTES), so that the GPU draws them from its copy
 and nothing is streamed per draw. They are freed when the BSP changes and
-with the map.
+with the map. Their block (and the batches' indices) is placed from the
+bottom of the window's free room (platform_contiguous_alloc_low), not from
+the top as XPhysicalAlloc places everything else: placed from the top, the
+textures made while a BSP plays went right below its block, and the next
+BSP's, larger, found only the room it left (b30's BSP 1, 120708 KB, after
+BSP 0's 109328 KB with 3 MB of textures below it: out of memory, and its
+enhanced geometry and lighting refused for the rest of the map).
 
 What it costs. The passes before the surfaces do not draw the remodel as
 the surfaces are drawn: the sun's shadow maps (render_prism_shadow_pass,
@@ -1934,6 +1940,8 @@ static boolean world_geometry_make(
 	long lightmap_vertex_size = rasterizer_geometry_get_vertex_size(_rasterizer_vertex_type_environment_lightmap_compressed);
 	unsigned long total = 0, alignment, offset;
 	unsigned long triangles = 0, stock_triangles = 0, vertices = 0;
+	/* (the contiguous window, logged) */
+	unsigned long in_use, high_water, largest_free;
 	long usable = 0, index, lightmap_index, entry_count = 0, disagree = 0, coned = 0, facing = 0;
 	byte *scratch = NULL;
 	unsigned long scratch_size = 0;
@@ -1978,7 +1986,7 @@ static boolean world_geometry_make(
 	for (alignment = 0x1000; alignment < MIRROR_SEGMENT_BYTES && alignment < total + 1; alignment <<= 1)
 	{
 	}
-	world_geometry.geometry = XPhysicalAlloc(total + 1, (unsigned long)-1, alignment, PAGE_READWRITE);
+	world_geometry.geometry = platform_contiguous_alloc_low(total + 1, alignment);
 	world_geometry.materials = calloc(usable, sizeof(*world_geometry.materials));
 	world_geometry.lightmap_first = calloc(bsp->lightmaps.count + 1, sizeof(*world_geometry.lightmap_first));
 	world_geometry.runs = malloc(MAXIMUM_CHUNK_SURFACES * sizeof(*world_geometry.runs));
@@ -2004,7 +2012,10 @@ static boolean world_geometry_make(
 	if (!world_geometry.geometry || !world_geometry.materials || !world_geometry.lightmap_first ||
 		!world_geometry.runs || !scratch || !world_geometry.lookup || !corner_sources)
 	{
-		platform_log("prism world geometry: %s: out of memory (%lu KB of contiguous memory)", path, total / 1024);
+		platform_contiguous_usage(&in_use, &high_water, &largest_free);
+		platform_log("prism world geometry: %s: out of memory (%lu KB of contiguous memory; the window: %lu KB in use, "
+			"the most %lu KB, %lu KB free in one run)", path, total / 1024, in_use / 1024, high_water / 1024,
+			largest_free / 1024);
 		free(scratch);
 		free(corner_sources);
 		return FALSE;
@@ -2216,17 +2227,20 @@ static boolean world_geometry_make(
 		}
 		world_geometry.batch_capacity = 0;
 		world_geometry.batch_indices = most > 0 ?
-			XPhysicalAlloc((unsigned long)most * 3 * sizeof(word) + 64, (unsigned long)-1, 0x1000, PAGE_READWRITE) : NULL;
+			platform_contiguous_alloc_low((unsigned long)most * 3 * sizeof(word) + 64, 0x1000) : NULL;
 		if (world_geometry.batch_indices)
 		{
 			world_geometry.batch_capacity = (unsigned long)most * 3;
 		}
 	}
+	platform_contiguous_usage(&in_use, &high_water, &largest_free);
 	platform_log("prism world geometry: %s: %ld of %ld material parts remodelled, %lu triangles for %lu (%.1fx), "
-		"%lu vertices, %lu KB of contiguous memory; %.1f%% of the surfaces' levels can face away whole "
+		"%lu vertices, %lu KB of contiguous memory at 0x%08lx (the window: %lu KB in use, the most %lu KB, %lu KB free "
+		"in one run); %.1f%% of the surfaces' levels can face away whole "
 		"(%ld levels wound against their stock triangles, turned to them); %ld surfaces drawn as their stock triangles",
 		path, world_geometry.material_count, view_count, triangles, stock_triangles,
 		stock_triangles ? (double)triangles / (double)stock_triangles : 0.0, vertices, total / 1024,
+		(unsigned long)world_geometry.geometry, in_use / 1024, high_water / 1024, largest_free / 1024,
 		coned ? 100.0 * (double)facing / (double)coned : 0.0, disagree, fallen);
 
 	return TRUE;

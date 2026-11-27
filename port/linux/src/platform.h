@@ -162,6 +162,14 @@ used. */
 /* returns NULL on failure; physical_address places the block exactly */
 void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 	unsigned long physical_address, DWORD protect);
+/* the lowest place it fits, read-write (bottom-up first fit: contiguous_fit.h):
+for a large block kept while a BSP is loaded, out of the way of the blocks
+placed top-down as it plays (also declared for the game in
+halo_linux_source_fixups.h); NULL on failure */
+void *platform_contiguous_alloc_low(unsigned long size, unsigned long alignment);
+/* the window's bytes in use, the most there have been, and its largest free
+run (each may be NULL) */
+void platform_contiguous_usage(unsigned long *in_use, unsigned long *high_water, unsigned long *largest_free);
 void platform_contiguous_free(void *address);
 /* gives the memory of the pages of [address, address + size) back to the
 system: they stay the block's, with their protection, and read as zeros

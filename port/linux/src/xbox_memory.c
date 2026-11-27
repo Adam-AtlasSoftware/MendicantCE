@@ -26,6 +26,8 @@ Halo Custom Edition maps need the window their tag data is linked to,
 #include "halo_android_abi.h"
 #endif
 
+#include "contiguous_fit.h"
+
 #include <errno.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -52,9 +54,13 @@ static unsigned long block_page_count[CONTIGUOUS_PAGE_COUNT];
 /* each page in use: its block's first page (platform_contiguous_alloc's
 search passes a block at once) */
 static unsigned long block_first_page[CONTIGUOUS_PAGE_COUNT];
+/* the pages in use now, and the most there have been */
+static unsigned long pages_in_use, pages_high_water;
 static BOOL arena_reserved = FALSE;
 static pthread_mutex_t arena_lock = PTHREAD_MUTEX_INITIALIZER;
 static void *custom_edition_tag_cache = NULL;
+
+static void contiguous_log_blocks(void);
 
 static int protection_to_host(DWORD protect)
 {
@@ -181,21 +187,12 @@ static BOOL pages_free(unsigned long first, unsigned long count)
 	return TRUE;
 }
 
-/* the highest page of [first, first + count) in use; -1 if they are all free */
-static long pages_used_highest(unsigned long first, unsigned long count)
-{
-	unsigned long page;
+/* a block's place: CONTIGUOUS_TOP_DOWN, CONTIGUOUS_BOTTOM_UP, or the page
+offset in the window it is placed at */
+#define CONTIGUOUS_TOP_DOWN PLATFORM_ANY_PHYSICAL_ADDRESS
+#define CONTIGUOUS_BOTTOM_UP (PLATFORM_ANY_PHYSICAL_ADDRESS - 1)
 
-	for (page = first + count; page > first; page--)
-	{
-		if (page_protection[page - 1])
-			return (long)(page - 1);
-	}
-	return -1;
-}
-
-void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
-	unsigned long physical_address, DWORD protect)
+static void *contiguous_alloc(unsigned long size, unsigned long alignment, unsigned long place, DWORD protect)
 {
 	unsigned long count = (size + PAGE_SIZE_BYTES - 1) / PAGE_SIZE_BYTES;
 	unsigned long alignment_pages = alignment > PAGE_SIZE_BYTES ? alignment / PAGE_SIZE_BYTES : 1;
@@ -215,37 +212,24 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 		pthread_mutex_unlock(&arena_lock);
 		return NULL;
 	}
-	if (physical_address != PLATFORM_ANY_PHYSICAL_ADDRESS)
+	if (place == CONTIGUOUS_TOP_DOWN)
 	{
-		unsigned long wanted = (physical_address & ~PLATFORM_CONTIGUOUS_BASE) / PAGE_SIZE_BYTES;
+		/* top-down first fit, like the Xbox contiguous allocator
+		(contiguous_fit.h) */
+		first = contiguous_fit_top_down(page_protection, block_first_page, CONTIGUOUS_PAGE_COUNT, count,
+			alignment_pages);
+	}
+	else if (place == CONTIGUOUS_BOTTOM_UP)
+	{
+		first = contiguous_fit_bottom_up(page_protection, block_first_page, block_page_count, CONTIGUOUS_PAGE_COUNT,
+			count, alignment_pages);
+	}
+	else
+	{
+		unsigned long wanted = place / PAGE_SIZE_BYTES;
 
 		if (pages_free(wanted, count))
 			first = wanted;
-	}
-	else if (count <= CONTIGUOUS_PAGE_COUNT)
-	{
-		/* top-down first fit, like the Xbox contiguous allocator. A place
-		with a page in use is passed with every place below it that would
-		still hold a page of that page's block: none of them fits (the
-		menus' hundreds of pictures each walked the caches' blocks a page at
-		a time, a tenth of a second) */
-		unsigned long candidate = CONTIGUOUS_PAGE_COUNT - count;
-
-		for (;;)
-		{
-			long used;
-
-			candidate -= candidate % alignment_pages;
-			used = pages_used_highest(candidate, count);
-			if (used < 0)
-			{
-				first = candidate;
-				break;
-			}
-			if (block_first_page[used] < count)
-				break;
-			candidate = block_first_page[used] - count;
-		}
 	}
 	if (first == CONTIGUOUS_PAGE_COUNT)
 	{
@@ -268,11 +252,72 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 		block_first_page[page] = first;
 	}
 	block_page_count[first] = count;
+	pages_in_use += count;
+	if (pages_in_use > pages_high_water)
+		pages_high_water = pages_in_use;
 	pthread_mutex_unlock(&arena_lock);
 	/* (debug.fresh_memory_fill: its pattern over the fresh zeroed pages) */
 	if (halo_fresh_memory_fill() > 0 && (protection_to_host(protect) & PROT_WRITE))
 		memset(address, halo_fresh_memory_fill(), count * PAGE_SIZE_BYTES);
 	return address;
+}
+
+void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
+	unsigned long physical_address, DWORD protect)
+{
+	return contiguous_alloc(size, alignment, physical_address == PLATFORM_ANY_PHYSICAL_ADDRESS ? CONTIGUOUS_TOP_DOWN :
+		physical_address & ~PLATFORM_CONTIGUOUS_BASE, protect);
+}
+
+void *platform_contiguous_alloc_low(unsigned long size, unsigned long alignment)
+{
+	void *result = contiguous_alloc(size, alignment, CONTIGUOUS_BOTTOM_UP, PAGE_READWRITE);
+
+	if (!result)
+	{
+		platform_log("contiguous memory: cannot place %lu bytes from the bottom", size);
+		contiguous_log_blocks();
+	}
+	return result;
+}
+
+void platform_contiguous_usage(unsigned long *in_use, unsigned long *high_water, unsigned long *largest_free)
+{
+	unsigned long page, run = 0, largest = 0;
+
+	pthread_mutex_lock(&arena_lock);
+	for (page = 0; page < CONTIGUOUS_PAGE_COUNT; page++)
+	{
+		run = page_protection[page] ? 0 : run + 1;
+		if (run > largest)
+			largest = run;
+	}
+	if (in_use)
+		*in_use = pages_in_use * PAGE_SIZE_BYTES;
+	if (high_water)
+		*high_water = pages_high_water * PAGE_SIZE_BYTES;
+	if (largest_free)
+		*largest_free = largest * PAGE_SIZE_BYTES;
+	pthread_mutex_unlock(&arena_lock);
+}
+
+/* (a block that could not be placed: the window's state and its blocks of a
+megabyte or more, so that what holds the room can be told) */
+static void contiguous_log_blocks(void)
+{
+	unsigned long in_use, high_water, largest_free, page;
+
+	platform_contiguous_usage(&in_use, &high_water, &largest_free);
+	platform_log("contiguous memory: %lu KB in use (the most %lu KB), the largest free run %lu KB",
+		in_use / 1024, high_water / 1024, largest_free / 1024);
+	pthread_mutex_lock(&arena_lock);
+	for (page = 0; page < CONTIGUOUS_PAGE_COUNT; page++)
+	{
+		if (page_protection[page] && block_first_page[page] == page && block_page_count[page] >= 256)
+			platform_log("contiguous memory:   a block at 0x%08lx, %lu KB",
+				PLATFORM_CONTIGUOUS_BASE + page * PAGE_SIZE_BYTES, block_page_count[page] * (PAGE_SIZE_BYTES / 1024));
+	}
+	pthread_mutex_unlock(&arena_lock);
 }
 
 void platform_contiguous_free(void *address)
@@ -292,6 +337,7 @@ void platform_contiguous_free(void *address)
 		for (page = first; page < first + count; page++)
 			page_protection[page] = 0;
 		block_page_count[first] = 0;
+		pages_in_use -= count;
 	}
 	pthread_mutex_unlock(&arena_lock);
 }
@@ -339,6 +385,7 @@ LPVOID WINAPI XPhysicalAlloc(SIZE_T size, ULONG_PTR physical_address, ULONG_PTR 
 	{
 		platform_log("XPhysicalAlloc: cannot allocate %lu bytes (physical address 0x%08lx)",
 			(unsigned long)size, (unsigned long)physical_address);
+		contiguous_log_blocks();
 		SetLastError(ERROR_NOT_ENOUGH_MEMORY);
 	}
 	return result;
