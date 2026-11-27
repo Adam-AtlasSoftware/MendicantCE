@@ -7622,41 +7622,8 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	if (b->generation != bake.control.generation)
 		return 0;
 	lookup->scene = scene_runtime_address(b);
-	lookup->pages = b->pages.address;
-	lookup->charts = b->charts.address;
-	lookup->vpages = b->vpages.address;
-	lookup->table = b->table.address;
-	lookup->tiles = b->pool.address;
-	lookup->indirect = b->pool_indirect.address;
-	lookup->sun = b->sun.address;
-	lookup->masks = b->masks.address;
-	lookup->lightmaps = b->lightmaps.address;
-	lookup->page_count = b->plan.page_count;
-	lookup->tiles_done = b->tiles_done;
-	lookup->tiles_planned = b->tiles_planned;
-	if (b->probes.buffer && b->volume.done)
-	{
-		lookup->bricks = b->bricks.address;
-		lookup->coarse = b->bricks_coarse.address;
-		lookup->probes = b->probes.address;
-		lookup->brick_entries = b->brick_entries;
-		lookup->coarse_entries = b->coarse_entries;
-	}
-	lookup->probe_spacing = PROBE_SPACING;
-	lookup->coarse_spacing = COARSE_SPACING;
-	if (b->reflections_made && b->plan.reflection_count && b->reflections_done)
-	{
-		lookup->reflections = b->reflection_info.address;
-		lookup->reflection_table = b->reflection_table.address;
-		lookup->reflection_data = b->reflection_data.address;
-		lookup->reflection_count = b->reflections_done;
-		lookup->reflection_entries = b->reflection_entries;
-		lookup->reflection_levels = REFLECTION_LEVELS;
-		lookup->reflection_side = REFLECTION_SIDE;
-	}
 	lookup->generation = b->generation;
-	lookup->complete = b->step == STEP_DONE;
-	lookup->gamma = b->block.rig[1][3] > 1.001f ? b->block.rig[1][3] : 1.0f;
+	lookup->tiles_planned = b->tiles_planned;
 	return 1;
 }
 

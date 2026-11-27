@@ -83,10 +83,13 @@ copy holds at most, a node's floats */
 #define TREE_NODE_FLOATS 16u
 /* the radiance cache: its cells (a power of two) and each one's words
 (xgpu_vulkan_pt.glsl's CACHE_WORDS), whether it is on by default, and the
-indirect light's clamp by default (0 none) */
+indirect light's clamp by default (0 none). On since Path Traced reads no
+baked light (2026-11-27): its cells carry the bounces past the first, which
+the bake's light at a bounce's hit carried before (HALO_PT_CACHE=0 off: one
+bounce, its hit lit directly) */
 #define CACHE_CELLS (1u << 19)
 #define CACHE_WORDS 12u
-#define CACHE_DEFAULT 0
+#define CACHE_DEFAULT 1
 /* ReSTIR DI's initial candidates taken from the light tree, the rest from
 the grid's lists (HALO_PT_TREE_CANDIDATES): all 4 since the dark interiors'
 second round. With the specular lobe in the tree's importance (tree_lobe)
@@ -1772,8 +1775,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	changed in play, its tiles planned telling which world it is) */
 	if (!pt.generation_logged || lookup.generation + 1u != pt.generation_logged)
 	{
-		host_logf(HOST_LOG_INFO, "prism pt: tracing the bake's scene of set %u (%u tiles planned, %s)",
-			lookup.generation, lookup.tiles_planned, lookup.complete ? "a whole bake" : "no whole bake: its own bounce");
+		host_logf(HOST_LOG_INFO, "prism pt: tracing the bake's scene of set %u (%u tiles planned): its own light, "
+			"no bake's", lookup.generation, lookup.tiles_planned);
 		pt.generation_logged = lookup.generation + 1u;
 	}
 	scene = lookup.scene;
@@ -1862,21 +1865,9 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	if (raw != pt.raw_last)
 		flags &= ~(uint32_t)FLAG_HISTORY;
 	pt.raw_last = raw;
-	job->pages = lookup.pages;
-	job->charts = lookup.charts;
-	job->vpages = lookup.vpages;
-	job->table = lookup.table;
-	job->tiles = lookup.tiles;
-	job->indirect = lookup.indirect;
-	job->sun = lookup.sun;
-	job->masks = lookup.masks;
-	job->bricks = lookup.bricks;
-	job->coarse = lookup.coarse;
-	job->probes = lookup.probes;
-	job->lightmaps = lookup.lightmaps;
-	job->reflections = lookup.reflections;
-	job->reflection_table = lookup.reflection_table;
-	job->reflection_data = lookup.reflection_data;
+	/* (the job's bake fields (pages to reflection_data, their counts in
+	counts.x and .w, more and volume's x and y) stay 0: Path Traced reads no
+	baked light, xgpu_vulkan_bake_lookup gives it none) */
 	job->sums = pt.sums.address;
 	job->stats = pt.stats.address;
 	/* (the reprojection's counters: only for the diagnostics' file, their
@@ -2000,16 +1991,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		pt.last_jitter[0] = jitter[0];
 		pt.last_jitter[1] = jitter[1];
 	}
-	job->counts[0] = lookup.page_count;
 	job->counts[1] = description->width;
 	job->counts[2] = description->height;
-	job->counts[3] = lookup.brick_entries;
-	job->more[0] = lookup.coarse_entries;
-	job->more[1] = lookup.reflection_count;
-	job->more[2] = lookup.reflection_entries;
-	job->more[3] = lookup.reflection_levels | (lookup.reflection_side << 16);
-	job->volume[0] = lookup.probe_spacing;
-	job->volume[1] = lookup.coarse_spacing;
 	job->frame[0] = ++pt.frame;
 	job->frame[1] = flags;
 	job->frame[2] = pt_view;
@@ -2592,12 +2575,10 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	if (!pt.logged_first)
 	{
 		pt.logged_first = 1;
-		host_logf(HOST_LOG_INFO, "prism pt: first frame %ux%u (%s, denoiser %s): the bake's %u of %u tiles, %u pages, "
-			"%u dynamic lights, the volume %s, %u reflection probes", description->width, description->height,
+		host_logf(HOST_LOG_INFO, "prism pt: first frame %ux%u (%s, denoiser %s): its own light (no bake's), %u "
+			"dynamic lights, the radiance cache %s", description->width, description->height,
 			(flags & FLAG_PERFORMANCE) ? "performance" : "quality", denoiser_off ? "off" : raw ? "the plugin's" : "prism",
-			lookup.tiles_done,
-			lookup.tiles_planned, lookup.page_count, dynamic, lookup.probes ? "made" : "not made yet",
-			lookup.reflection_count);
+			dynamic, job->cache ? "on" : "off");
 	}
 	if (whole)
 		*whole = 1;

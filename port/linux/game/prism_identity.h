@@ -96,7 +96,7 @@ whatever else holds (Classic's lightmaps are never drawn on the enhanced
 geometry); rung 1 needs the geometry asked for and the sidecar opened and
 verified, and then, under Path Traced, nothing else: Path Traced's geometry
 never depends on a bake (it traces the enhanced world's own scene, lit by
-the bake's light where it has it, else its own bounce); under Enhanced,
+its own light, never a bake's); under Enhanced,
 every BSP's enhanced pack (or the farm's unbaked override): Enhanced
 lighting without them is rung 2 */
 int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked,

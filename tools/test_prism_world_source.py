@@ -242,7 +242,7 @@ def test_a_pack_the_renderer_does_not_load_drops_the_map_to_rung_2():
 
 def test_path_traced_takes_the_enhanced_geometry_without_its_packs():
     """Path Traced reads no lightmap of the enhanced world: it traces the bake's scene (made for the BSP whether or not
-    a pack is loaded: a player's paused bake), lit by the bake's light where it has it and its own bounce else; only
+    a pack is loaded: a player's paused bake), lit by its own light, never a bake's; only
     until that scene is made does it show CE's frame, whose lightmap pass draws the enhanced world flat. So the map's
     choice passes the lighting to the ladder, and a map chosen under Path Traced without the packs is rung 1 (logged)"""
     pt = _code("port/linux/vulkan/xgpu_vulkan_pt.c")

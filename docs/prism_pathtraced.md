@@ -2,7 +2,9 @@
 
 PRISM v4's milestone M3 (`overhaul_research/prism_v4_renderer/design.md`, sections 1.5, 2.1, 3.8 and 7): with
 `display.lighting` `"pathtraced"`, every CE light is off and the deferred core's opaque pixels are lit by the path
-tracer, from the G-buffer (raster primary visibility) and this machine's own bake of the level (`docs/prism_bake.md`).
+tracer, from the G-buffer (raster primary visibility) and the scene the bake makes of the level (`docs/prism_bake.md`),
+never its baked light (below, "No baked light"; the sections after it that speak of the bake's light at a pixel or a
+hit describe the path tracer before 2026-11-27).
 This document says what the path tracer traces, what it reads from the bake, which light each term carries (so that
 nothing is counted twice), the denoiser, the reference it is judged against, and what is not done yet. The gates'
 figures are in `docs/prism_gates.md` ("M3: Path Traced").
@@ -14,7 +16,7 @@ figures are in `docs/prism_gates.md` ("M3: Path Traced").
 | The mode | The game, `port/linux/game/prism_deferred.c` | `"pathtraced"` is the deferred core lit from the bake, as `"raster"` is: the same G-buffer pass, scene records, `PRISM_BAKE` control and light rig in the light's units (`prism_deferred_raster` is true for both); the resolve's value carries `XGPU_GBUFFER_PHASE_PATHTRACED`, the profile and the denoiser |
 | The path tracer | The renderer, `port/linux/vulkan/xgpu_vulkan_pt.c` | Its passes each frame, in the resolve's place of Raster's relight: light, temporal, fix, four a-trous steps, composite; or the reference |
 | Its shaders | `port/linux/vulkan/xgpu_vulkan_pt.glsl` | Each pass is the baker's `BAKE_COMMON` (`xgpu_vulkan_bake_glsl.inc`), then the file's common part, then its own; `tools/vulkan_pt_shaders.py` makes `xgpu_vulkan_pt_shaders.c` |
-| The bake's part | `port/linux/vulkan/xgpu_vulkan_bake.c` | `xgpu_vulkan_bake_lookup`: the bake's scene (its acceleration structure, materials, lamps, light-importance grid, fixtures and rig), Raster's lookups, the indirect layer on the GPU (a word a texel beside the tiles) and each level triangle's lightmap page and coordinates |
+| The bake's part | `port/linux/vulkan/xgpu_vulkan_bake.c` | `xgpu_vulkan_bake_lookup`: the bake's scene alone (its acceleration structure, materials, lamps, fixtures and rig), its set's generation and its plan's tiles (for the log); never its light |
 
 The path tracer traces the scene the bake was made from (SCENE_STATIC's level as drawn, its near level, and the static
 scenery), with the bake's materials and lights, by the bake's own functions (`lamp_pick`, `lamp_direction`,
@@ -33,6 +35,62 @@ SCENE_VIEW's axis). Before, at Ultra Performance (0.33) b30's hills went dark in
 next with the jitter's sequence, whatever the bake (`work/openh1_eval/v4_groundflash_runs`: the hill's frames' mean
 luma 44 to 164 frame to frame, steady at 138 after; the beach's small periodic flashes, +6 every ninth frame, gone
 too).
+
+## No baked light
+
+Adam's rule (2026-11-27): Path Traced's geometry and lighting do not depend on bakes. Its geometry is the selected one
+whatever the bakes (`docs/prism_geometry.md`); its light is the same whether or not a pack or a bake of this machine is
+installed. The path tracer still traces the scene the bake's code makes for the BSP (`SCENE_STATIC`'s level, the
+static scenery, the materials, the lamps, the fixtures and the rig: the geometry and the lights, made with or without a
+bake, nothing baked by a player), but reads none of the bake's light:
+
+- `xgpu_vulkan_bake_lookup` hands it the scene's block, the set's generation and the plan's tiles alone; the job's bake
+  fields (the lightmap's pages, chart maps and tiles, the indirect layer, the sun's table and masks, the irradiance
+  volume, the reflection probes, the triangles' lightmap coordinates) stay 0, and the light pass has no lookup of them
+  (`bake_at`, `volume_at`, `reflection_at` and their helpers are gone).
+- The light-importance grid (a step of the bake, kept in its file) is not read: `tools/vulkan_pt_shaders.py` wraps
+  BAKE_COMMON's `grid_cell` to find no cell, so the bake's lamp picks the path tracer shares are by power, and ReSTIR
+  DI's live candidates come from its own light tree, as they did.
+- **The sun** is a ray at every pixel (no baked mask past 60 units, no dark tiles left out).
+- **A ray's hit** (the diffuse bounce's, a traced reflection's, the water's) is lit by the path tracer's own light
+  (`hit_light_n`, `own_light`): its glow, and its albedo by the sun's light there (a ray to its disc), a lamp's
+  (`own_lamp`: one lamp of the light tree, one shadow ray) and a fixture's (resampled, one shadow ray) and the next
+  bounce's light: one cosine ray, the sky with the domes where it leaves, else **the radiance cache**'s mean at its
+  hit where that cell
+  holds a sample, else that hit's glow. The cache (below, now on by default) holds these hits' own light: one 8 x 8
+  block of pixels in 16 (other blocks each frame; by blocks, so that a subgroup takes one path: one pixel in 16
+  scattered cost the hall as much as every pixel) lights its hits and adds their light, the others read their hit's
+  cell, so each frame's hits add a bounce to what the cells hold and the bounces add up over the frames (in a closed room of albedo a the cells
+  tend to the direct light over 1 - a: `tools/test_prism_pt.py`). Before, a hit had the bake's light (every bounce,
+  converged); with no bake it had only its glow, the sun's and the lamps' light at the hit lost (the "own bounce" of a
+  set with no whole bake), so the light of a room lit by the light it bounces was missing.
+- **A rough reflection** (above the traced reflection's roughness) has no probe: it takes the light about the pixel
+  less the sun's and the lamps' (the domes', the floor's and the bounce's, which ReSTIR DI's specular light of the
+  lamps completes), through the denoiser.
+- The two profiles differ no more in the light they read (the performance profile's bake at the pixel and far sun mask
+  are gone).
+
+As measured (`work/openh1_eval/v4_geopatch_runs/pt_bakefree`, b30 at 1280 x 720 on the RTX 2060, the performance
+profile, the denoiser prism; the beach at G2's place (BSP 0) and the interior hall at G4's (BSP 1), each shot after
+1800 and 2200 frames still; mean absolute 8-bit difference, mean luma):
+
+| World Geometry | | before: no pack | before: the drawn world's pack | after: no pack | after: with the pack |
+|---|---|---|---|---|---|
+| Classic (classic pack) | beach luma, hall luma | 156.4, 59.7 | 161.0, 66.4 | 160.7, 65.1 | 160.7, 65.2 |
+| | no pack against pack (beach, hall) | 4.96, 14.44 | | 0.21, 2.42 (noise) | |
+| | against before with the pack (beach, hall) | | 0 | 2.25, 4.65 | 2.25, 4.24 |
+| Enhanced (the farm's v20 enhanced packs, draft) | beach luma, hall luma | 178.2, 84.2 | 181.7, 92.1 | 181.4, 91.4 | 181.4, 91.4 |
+| | no pack against pack (beach, hall) | 3.73, 8.41 | | 0.18, 1.99 (noise) | |
+| | against before with the pack (beach, hall) | | 0 | 1.70, 2.63 | 1.71, 3.53 |
+
+Before, a set with no whole bake lost the light its bounces carry (the hall's floor and lower walls black, the
+beach's shade a little darker); now the light is the same with or without a pack (the difference is the frames'
+noise) and within a few units of what the converged bake gave. The path tracer's frame (its passes, the light pass
+alone in brackets), ms, the last 600 frames of each view: Classic beach 18.5 (14.2) with no pack and 18.1 (13.7) with
+it before, 18.3 (13.9) after; hall 22.1 (18.3) and 19.3 (15.4) before, 24.3 (20.4) after; Enhanced beach 19.5 and 18.7
+before, 19.3 after; hall 18.2 and 15.3 before, 19.3 after. So about the cost of the old no-pack frame plus up to 10%,
+and up to 26% over a frame that read a whole bake in the hall. Lighting every hit at every pixel (every pixel feeding)
+cost 36 and 84 ms; one scattered pixel in 16, 22 and 46.
 
 ## Which light each term carries
 
@@ -514,8 +572,10 @@ cells once (2^19 cells of 12 words, 24 MB) and empties them for each bake's scen
   is its direction's, which a cache at the hit cannot take away. The interiors' remaining speckle is in the specular
   light (G4's `pt_specular` view: the small lamps' highlights on the semi-glossy walls), not in the diffuse bounce
   (`pt_indirect` is smooth). A cache earns its place where a path goes on past its first hit (a longer path,
-  the objects' bounce, the transparent layer's) or where the bake is missing; it stays in, off.
-- `HALO_PT_CACHE=1` turns it on (`0`, the default, off).
+  the objects' bounce, the transparent layer's) or where the bake is missing; it stayed in, off. Since 2026-11-27 the
+  path tracer reads no bake ("No baked light"), and the cache holds each hit's own light and carries the bounces past
+  the first: on by default.
+- `HALO_PT_CACHE=0` turns it off (one bounce, its hit lit directly; `1`, the default, on).
 
 **The indirect light's clamp** (`HALO_PT_INDIRECT_CLAMP=<luminance>`, off by default): a bounce's light past that
 luminance (the bake's unit, a white surface's radiance) is scaled down to it, its hue kept. It takes energy away

@@ -3,6 +3,7 @@ GLSL's, and its arithmetic (tools/prism_pt_model.py, the GLSL's as written) chec
 resampled importance unbiased over its mixed domains, the reference's running sums and its noise's estimate, its
 stopping rule, the temporal history's convergence and its hold on a change, the a-trous step's weights. No GPU, no
 game data."""
+import re
 import shutil
 import subprocess
 import sys
@@ -1328,3 +1329,67 @@ def test_the_tree_candidate_takes_the_specular_lobe_and_stays_unbiased():
     assert "#define TREE_LOBE_DEFAULT 1" in host
     assert "tree_bits = ((uint32_t)(from_tree < 1 ? 1 : from_tree > 8 ? 8 : from_tree) << 4) | (cones ? 8u : 0u);" in host
     assert "job->volume[3] = (float)(from_tree" not in host
+
+
+def test_path_traced_reads_no_baked_light():
+    """Path Traced's light never depends on a bake (Adam's rule of 2026-11-27): the bake's lookup hands the path tracer
+    its scene alone (the structure, materials, lamps, fixtures and rig: the geometry and the lights), never a lightmap
+    page, sun mask, irradiance volume, reflection probe or light-importance grid, a pack's or this machine's; the job's
+    bake fields stay 0; the light pass has no lookup of them left, a ray's hit is lit by Path Traced's own light, and
+    the bake's grid_cell finds no cell in its shaders, so its light is the same whether or not a bake is there"""
+    header = (ROOT / "port/linux/vulkan/xgpu_vulkan_bake.h").read_text()
+    struct = header[header.index("struct xgpu_vulkan_bake_lookup\n{"):]
+    struct = struct[:struct.index("};")]
+    fields = re.findall(r"^\s*(?:uint64_t|uint32_t|int|float)\s+([^;]+);", struct, re.M)
+    assert [name.strip() for group in fields for name in group.split(",")] == ["scene", "generation", "tiles_planned"]
+    host = re.sub(r"/\*.*?\*/", "", (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text(), flags=re.S)
+    for field in ("pages", "charts", "vpages", "table", "tiles", "indirect", "sun", "masks", "bricks", "coarse",
+                  "probes", "lightmaps", "reflections", "reflection_table", "reflection_data"):
+        assert not re.search(r"job->%s\s*=" % field, host), field
+    for field in (r"counts\[0\]", r"counts\[3\]", r"more\[[0-3]\]", r"volume\[[01]\]"):
+        assert not re.search(r"job->%s\s*=" % field, host), field
+    text = re.sub(r"/\*.*?\*/", "", GLSL.read_text(), flags=re.S)
+    for gone in ("bool bake_at(", "bool texel_of(", "float sun_of(", "bool cascade_at(", "bool volume_at(",
+                 "vec3 reflection_at(", "floor_of_triangle(", "floor_of_volume("):
+        assert gone not in text, gone
+    for field in ("pages", "charts", "vpages", "table", "tiles", "indirect", "sun", "masks", "bricks", "coarse",
+                  "probes", "lightmaps", "reflections", "reflection_table", "reflection_data"):
+        assert not re.search(r"\bjob\.%s\b" % field, text), field
+    hit = text[text.index("vec3 hit_light_n(vec3 o"):]
+    hit = hit[:hit.index("\n}\n")]
+    assert "own_light(h, nh, glow_of(t), albedo_of(t))" in hit and "own_light(h, nh, vec3(0.0), object_albedo)" in hit
+    own = text[text.index("vec3 own_light(vec3 h"):]
+    own = own[:own.index("\n}\n")]
+    for used in ("sun_ray(oh, blocker)", "own_lamp(h, nh, oh)", "fixtures_ris(h, nh, oh, kept)", "own_next(oh, nh)"):
+        assert used in own, used
+    assert "#define CACHE_DEFAULT 1" in host
+    # (the cells fed by whole 8 x 8 blocks, so that a subgroup takes one path)
+    assert "const uint CACHE_FEED = 16u;" in text
+    assert "hit_cache_feed = ((uint(pixel.x >> 3) + uint(pixel.y >> 3) * 5u + frame * 7u) & (CACHE_FEED - 1u)) == 0u;" in text
+    shaders = pytest.importorskip("vulkan_pt_shaders")
+    light = shaders.sources()["light"]
+    assert re.search(r"int grid_cell\(vec3 p\)\n\{\n    return -1;\n\}", light)
+    assert light.count("int grid_cell(vec3 p)\n{") == 1
+
+
+def test_the_radiance_caches_hits_add_up_the_bounces():
+    """a hit's own light is its direct light and its albedo by the next bounce's hit's cell mean: frame after frame the
+    cells take one bounce more, so in a closed white-walled room (every wall's direct light E, albedo a) a cell's mean
+    tends to E / (1 - a), the paths of every length (as the bake's light at a hit was), within the running mean's
+    noise; with no cache (one bounce, its hit lit directly) the light is E alone, the bounces past it lost"""
+    rng = np.random.default_rng(7)
+    direct, albedo, most, cells = 0.3, 0.7, 256.0, 64
+    mean = np.zeros(cells)
+    held = np.zeros(cells)
+    for frame in range(3000):
+        # (every fourth pixel's hit adds its light: a few samples a cell a frame, each the next hit's cell mean)
+        for _ in range(4):
+            cell = rng.integers(0, cells, cells)
+            nxt = rng.integers(0, cells, cells)
+            sample = direct * (1.0 + 0.5 * rng.standard_normal(cells)) + albedo * mean[nxt]
+            np.add.at(held, cell, 1.0)
+            weight = 1.0 / np.minimum(held[cell], most)
+            np.add.at(mean, cell, weight * (sample - mean[cell]))
+    expected = direct / (1.0 - albedo)
+    assert abs(mean.mean() - expected) < 0.03 * expected
+    assert mean.mean() > 2.5 * direct

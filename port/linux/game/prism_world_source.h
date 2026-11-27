@@ -34,8 +34,9 @@ chosen at its first Path Traced frame:
           world's own scene, made by the renderer with or without a pack
           (and again, never held from another world's bake, when the
           geometry changes in play: no lighting keeps the bake drawn for a
-          set begun again in play, xgpu_vulkan_bake.c), lit by the bake's
-          light where it has it and by its own bounce else;
+          set begun again in play, xgpu_vulkan_bake.c), lit by its own
+          light, never a bake's (docs/prism_pathtraced.md, "No baked
+          light");
   rung 2  Classic geometry, lit by Enhanced or Path Traced from the classic
           packs: rung 1 not available (World Geometry Classic, no sidecar or
           a refused one, or Enhanced lighting without the enhanced packs);

@@ -6,6 +6,46 @@ bake's scene, its materials, lamps, light-importance grid, fixtures and rig,
 and the estimator's light functions), then this file's common part, then
 the pass's own part (the sections "//@common" and "//@pass <name>").
 
+The path tracer traces the scene the bake was made from (its structure,
+materials, lamps, fixtures and rig: the geometry and the lights, which the
+renderer makes for the BSP whether or not a bake is there), by the bake's own
+functions, so that its reference (the pass "reference") is the same
+estimator unbiased at every pixel. It reads no baked light (since
+2026-11-27: Path Traced's lighting never depends on a bake): no lightmap
+page, sun mask, irradiance volume, reflection probe or light-importance grid
+of a pack or of this machine's bake, so its light is the same whether or not
+one is there (xgpu_vulkan_bake_lookup gives it the scene alone; the job's
+bake fields stay 0).
+
+At each opaque pixel of the G-buffer (raster primary visibility):
+
+  the sun: one ray toward a point of its disc;
+  the domes: one direction of each one's cone, its shadow traced (the
+    bake's domes_at, with the moving objects);
+  the lamps (the emitting triangles), the fixtures and the dynamic lights:
+    resampled importance (ReSTIR DI) over candidates from its own light tree
+    of the lamps (the grid's picks by power: the bake's grid is not read),
+    the target each one's unshadowed diffuse and specular light at the
+    pixel, one kept and its shadow traced;
+  the sky's ambient floor (the units' rig): a constant;
+  the indirect light: one bounce at every pixel (ReSTIR GI's temporal
+    reuse), its hit lit by Path Traced's own light (hit_light_n: its glow,
+    its albedo by the sun's ray, a lamp's and a fixture's sample and the
+    next bounce's light, which the radiance cache's cells carry from frame
+    to frame), the sky's domes where it leaves;
+  the reflections: below a roughness, one GGX ray (the visible normals'
+    distribution) whose hit is lit as the bounce's; above it, the light
+    about the pixel less the sun's and the lamps' (the domes', the floor's
+    and the bounce's).
+
+The noisy parts (the direct light, the indirect light, the reflections,
+the sun's visibility) go through the denoiser (temporal, fix, atrous); the
+floor is added after it. composite puts the frame together, in Raster's
+form: the diffuse light by the base colour less the specular's share, the
+specular light, the emissive light. */
+
+//@common" and "//@pass <name>").
+
 The path tracer reads the scene the bake was made from, by the bake's own
 functions, so that what it traces and what the bake holds are one
 estimator's: nothing is counted twice, and its reference (the pass
@@ -521,276 +561,6 @@ float lamp_mis_nee(Surface g, vec3 l, float solid, float radiance)
     return q * q / (q * q + pb * pb);
 }
 
-/* ---------- the bake's lookups (Raster's, xgpu_vulkan_bake_glsl.inc's raster pass) */
-
-bool texel_of(uint vp, ivec2 x, out uvec2 w, out uint indirect_word)
-{
-    Uints v = Uints(job.vpages);
-    uint tiles_x = v.v[vp * 8u + 2u], tiles_y = v.v[vp * 8u + 3u];
-    w = uvec2(0u);
-    indirect_word = 0u;
-    if (x.x < 0 || x.y < 0)
-        return false;
-    uvec2 t = uvec2(x) / 16u;
-    if (t.x >= tiles_x || t.y >= tiles_y)
-        return false;
-    uint physical = Uints(job.table).v[v.v[vp * 8u + 4u] + t.y * tiles_x + t.x];
-    if (physical == 0u)
-        return false;
-    uvec2 l = uvec2(x) % 16u;
-    uint at = (physical - 1u) * 512u + (l.y * 16u + l.x) * 2u;
-    Uints tl = Uints(job.tiles);
-    w = uvec2(tl.v[at], tl.v[at + 1u]);
-    if (job.indirect != uvec2(0u))
-        indirect_word = Uints(job.indirect).v[(physical - 1u) * 256u + l.y * 16u + l.x];
-    return (w.y & 0xff000000u) != 0u || w.x != 0u || w.y != 0u;
-}
-/* (sun_of's last call: whether its tile is all in the sun's shadow, the
-bake's state 1: none of its 16 x 16 texels' samples saw the sun) */
-bool sun_tile_dark = false;
-float sun_of(uint vp, vec2 x)
-{
-    sun_tile_dark = false;
-    Uints v = Uints(job.vpages);
-    uint tiles_x = v.v[vp * 8u + 2u], tiles_y = v.v[vp * 8u + 3u];
-    ivec2 t = ivec2(floor(x / 16.0));
-    if (any(lessThan(t, ivec2(0))) || t.x >= int(tiles_x) || t.y >= int(tiles_y))
-        return -1.0;
-    uint state = Uints(job.sun).v[v.v[vp * 8u + 4u] + uint(t.y) * tiles_x + uint(t.x)];
-    if (state == 0u)
-        return -1.0;
-    if (state < 3u)
-    {
-        sun_tile_dark = state == 1u;
-        return state == 2u ? 1.0 : 0.0;
-    }
-    vec2 m = clamp((x - vec2(t) * 16.0) * 4.0 - 0.5, vec2(0.0), vec2(63.0));
-    ivec2 a = ivec2(floor(m));
-    ivec2 b = min(a + 1, ivec2(63));
-    vec2 f = m - vec2(a);
-    Uints mk = Uints(job.masks);
-    uint base = (state - 3u) * 4096u;
-    uint i00 = base + uint(a.y * 64 + a.x), i10 = base + uint(a.y * 64 + b.x);
-    uint i01 = base + uint(b.y * 64 + a.x), i11 = base + uint(b.y * 64 + b.x);
-    float v00 = float((mk.v[i00 >> 2u] >> ((i00 & 3u) * 8u)) & 255u);
-    float v10 = float((mk.v[i10 >> 2u] >> ((i10 & 3u) * 8u)) & 255u);
-    float v01 = float((mk.v[i01 >> 2u] >> ((i01 & 3u) * 8u)) & 255u);
-    float v11 = float((mk.v[i11 >> 2u] >> ((i11 & 3u) * 8u)) & 255u);
-    return mix(mix(v00, v10, f.x), mix(v01, v11, f.x), f.y) / 255.0;
-}
-
-/* the bake at a level point: its CE lightmap page (1 on) and coordinates
-(0 to 1 on the page), the normal it is read at: the light less the sun's
-(the bake's total: direct and indirect), the indirect light alone, the sun's
-visibility (the mask; -1 unknown); false where no texel is baked about it */
-bool bake_at(uint page, vec2 uv, vec3 n, out vec3 total, out vec3 indirect_light, out float sun_v)
-{
-    total = vec3(0.0);
-    indirect_light = vec3(0.0);
-    sun_v = -1.0;
-    if (page == 0u || page > job.counts.x || job.pages == uvec2(0u))
-        return false;
-    Uints pg = Uints(job.pages);
-    uint offset = pg.v[(page - 1u) * 4u], pw = pg.v[(page - 1u) * 4u + 1u], ph = pg.v[(page - 1u) * 4u + 2u];
-    vec2 ce = uv * vec2(pw, ph);
-    ivec2 cell = clamp(ivec2(floor(ce)), ivec2(0), ivec2(pw, ph) - 1);
-    Uints cm = Uints(job.charts);
-    uint ci = offset + uint(cell.y) * pw + uint(cell.x);
-    uint vp1 = (cm.v[ci >> 1u] >> ((ci & 1u) * 16u)) & 0xffffu;
-    if (vp1 == 0u)
-        return false;
-    uint vp = vp1 - 1u;
-    float scale = float(Uints(job.vpages).v[vp * 8u + 1u]);
-    vec2 tx = ce * scale - 0.5;
-    ivec2 a = ivec2(floor(tx));
-    vec2 f = tx - vec2(a);
-    float weights = 0.0;
-    for (int k = 0; k < 4; k++)
-    {
-        ivec2 o = ivec2(k & 1, k >> 1);
-        uvec2 tw;
-        uint iw;
-        if (!texel_of(vp, a + o, tw, iw))
-            continue;
-        vec4 dir = unpackUnorm4x8(tw.y);
-        if (dir.w <= 0.0)
-            continue;
-        vec3 kk = (dir.xyz - 0.5) * 4.0;
-        float a0 = dir.w * 4.0 - 1.0;
-        float factor = clamp(a0 + dot(kk, n), 0.0, 4.0);
-        float wk = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
-        total += wk * rgb9e5(tw.x) * factor;
-        indirect_light += wk * rgb9e5(iw) * factor;
-        weights += wk;
-    }
-    if (weights <= 1.0e-4)
-        return false;
-    total /= weights;
-    indirect_light /= weights;
-    sun_v = sun_of(vp, ce * scale);
-    return true;
-}
-
-/* a cascade of the irradiance volume at p: the light over pi at the normal n
-(rgb) and the sun's visibility (w); false none */
-bool cascade_at(uvec2 table, uint entries, float spacing, vec3 p, vec3 n, out vec4 at_n)
-{
-    at_n = vec4(-1.0);
-    if (entries == 0u || table == uvec2(0u))
-        return false;
-    vec3 f = p / spacing - 0.5;
-    ivec3 g0 = ivec3(floor(f));
-    vec3 t = f - vec3(g0);
-    vec3 sum = vec3(0.0);
-    float sun = 0.0, weights = 0.0;
-    Uints bt = Uints(table);
-    Floats pr = Floats(job.probes);
-    vec4 yn = vec4(0.282095 * 3.14159265, 0.488603 * 2.0943951 * n.y, 0.488603 * 2.0943951 * n.z,
-        0.488603 * 2.0943951 * n.x);
-    for (int c = 0; c < 8; c++)
-    {
-        ivec3 gg = g0 + ivec3(c & 1, (c >> 1) & 1, (c >> 2) & 1);
-        ivec3 brick = ivec3(floor(vec3(gg) / 4.0));
-        ivec3 local = gg - brick * 4;
-        ivec3 key3 = brick + ivec3(32768);
-        uint key = (uint(key3.x) & 2047u) | ((uint(key3.y) & 2047u) << 11u) | ((uint(key3.z) & 1023u) << 22u);
-        uint h = hash_u(key ^ 0x68e31da4u) & (entries - 1u);
-        int first = -1;
-        for (uint probe = 0u; probe < 16u; probe++)
-        {
-            uint at = ((h + probe) & (entries - 1u)) * 2u;
-            uint k = bt.v[at];
-            if (k == 0u)
-                break;
-            if (k == key + 1u)
-            {
-                first = int(bt.v[at + 1u]);
-                break;
-            }
-        }
-        if (first < 0)
-            continue;
-        uint index = uint(first) + uint(local.z * 16 + local.y * 4 + local.x);
-        uint b = index * 8u;
-        float valid = pr.v[b + 7u];
-        if (valid <= 0.0)
-            continue;
-        vec3 w3 = mix(1.0 - t, t, vec3(c & 1, (c >> 1) & 1, (c >> 2) & 1));
-        float w = w3.x * w3.y * w3.z;
-        vec4 cr = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b])), unpackHalf2x16(floatBitsToUint(pr.v[b + 1u])));
-        vec4 cg = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b + 2u])), unpackHalf2x16(floatBitsToUint(pr.v[b + 3u])));
-        vec4 cb = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b + 4u])), unpackHalf2x16(floatBitsToUint(pr.v[b + 5u])));
-        sum += w * max(vec3(dot(cr, yn), dot(cg, yn), dot(cb, yn)) / 3.14159265, vec3(0.0));
-        sun += w * pr.v[b + 6u];
-        weights += w;
-    }
-    if (weights <= 1.0e-3)
-        return false;
-    at_n = vec4(sum / weights, sun / weights);
-    return true;
-}
-bool volume_at(vec3 p, vec3 n, out vec4 at_n)
-{
-    if (cascade_at(job.bricks, job.counts.w, job.volume.x, p, n, at_n))
-        return true;
-    return cascade_at(job.coarse, job.more.x, job.volume.y, p, n, at_n);
-}
-
-/* the reflection probes: the nearest few to p whose boxes hold it,
-parallax-corrected along r, at the roughness's level; found 0 none */
-vec3 reflection_at(vec3 p, vec3 r, float roughness, out float found)
-{
-    found = 0.0;
-    uint count = job.more.y;
-    if (count == 0u || job.reflections == uvec2(0u))
-        return vec3(0.0);
-    Floats pr = Floats(job.reflections);
-    ivec3 cell = ivec3(floor(p / 8.0));
-    uint entries = job.more.z;
-    uint key = (uint(cell.x + 32768) & 2047u) | ((uint(cell.y + 32768) & 2047u) << 11u) |
-        ((uint(cell.z + 32768) & 1023u) << 22u);
-    uint h = hash_u(key ^ 0x2c1b3c6du) & (entries - 1u);
-    Uints rtab = Uints(job.reflection_table);
-    int list = -1;
-    for (uint probe = 0u; probe < 32u; probe++)
-    {
-        uint at = ((h + probe) & (entries - 1u)) * 10u;
-        uint k = rtab.v[at];
-        if (k == 0u)
-            break;
-        if (k == key + 1u)
-        {
-            list = int(at);
-            break;
-        }
-    }
-    if (list < 0)
-        return vec3(0.0);
-    vec3 sum = vec3(0.0);
-    float weights = 0.0;
-    uint levels = job.more.w & 0xffffu, side = job.more.w >> 16;
-    float level = clamp(sqrt(roughness) * float(levels - 1u), 0.0, float(levels - 1u));
-    for (uint k = 0u; k < 8u; k++)
-    {
-        uint i = rtab.v[uint(list) + 2u + k];
-        if (i == 0xffffffffu)
-            break;
-        uint at = i * 12u;
-        vec3 c = vec3(pr.v[at], pr.v[at + 1u], pr.v[at + 2u]);
-        vec3 lo = vec3(pr.v[at + 4u], pr.v[at + 5u], pr.v[at + 6u]);
-        vec3 hi = vec3(pr.v[at + 8u], pr.v[at + 9u], pr.v[at + 10u]);
-        if (any(lessThan(p, lo - 0.5)) || any(greaterThan(p, hi + 0.5)))
-            continue;
-        vec3 rr = mix(r, vec3(1.0e-5), lessThan(abs(r), vec3(1.0e-5)));
-        vec3 t1 = (hi - p) / rr, t2 = (lo - p) / rr;
-        float tw = max(min(min(max(t1.x, t2.x), max(t1.y, t2.y)), max(t1.z, t2.z)), 0.0);
-        vec3 d = normalize(p + r * tw - c);
-        vec3 a = abs(d);
-        uint face;
-        vec2 uv;
-        if (a.x >= a.y && a.x >= a.z)
-        {
-            face = d.x > 0.0 ? 0u : 1u;
-            uv = vec2(d.x > 0.0 ? -d.z : d.z, -d.y) / a.x;
-        }
-        else if (a.y >= a.z)
-        {
-            face = d.y > 0.0 ? 2u : 3u;
-            uv = vec2(d.x, d.y > 0.0 ? d.z : -d.z) / a.y;
-        }
-        else
-        {
-            face = d.z > 0.0 ? 4u : 5u;
-            uv = vec2(d.z > 0.0 ? d.x : -d.x, -d.y) / a.z;
-        }
-        vec3 l2 = vec3(0.0);
-        for (int lv = 0; lv < 2; lv++)
-        {
-            uint li = min(uint(level) + uint(lv), levels - 1u);
-            uint s_ = max(side >> li, 1u);
-            uint first = floatBitsToUint(pr.v[at + 3u]);
-            uint offset = 0u;
-            for (uint q = 0u; q < li; q++)
-                offset += 6u * max(side >> q, 1u) * max(side >> q, 1u);
-            vec2 fx = clamp((uv * 0.5 + 0.5) * float(s_) - 0.5, vec2(0.0), vec2(float(s_) - 1.0));
-            ivec2 t0 = ivec2(floor(fx)), t1i = min(t0 + 1, ivec2(int(s_) - 1));
-            vec2 ff = fx - vec2(t0);
-            uint fb = first + offset + face * s_ * s_;
-            Uints rd = Uints(job.reflection_data);
-            vec3 value = mix(mix(rgb9e5(rd.v[fb + uint(t0.y) * s_ + uint(t0.x)]), rgb9e5(rd.v[fb + uint(t0.y) * s_ + uint(t1i.x)]), ff.x),
-                mix(rgb9e5(rd.v[fb + uint(t1i.y) * s_ + uint(t0.x)]), rgb9e5(rd.v[fb + uint(t1i.y) * s_ + uint(t1i.x)]), ff.x), ff.y);
-            l2 += (lv == 0 ? 1.0 - fract(level) : fract(level)) * value;
-        }
-        float w = 1.0 / (0.25 + dot(p - c, p - c));
-        sum += w * l2;
-        weights += w;
-    }
-    if (weights <= 0.0)
-        return vec3(0.0);
-    found = 1.0;
-    return sum / weights;
-}
-
 /* ---------- the lights at a surface
 
 The dynamic lights (SCENE_LIGHTS' dynamic class: the flashlight, plasma,
@@ -1059,20 +829,6 @@ vec3 floor_light(Surface g)
     if (!units_rig() || all(equal(outdoor, inside_light)))
         return outdoor;
     return surface_inside(g) ? inside_light : outdoor;
-}
-/* the floor the bake added at a ray's hit: its texel's triangle's (flag 8 in
-the bake's setup), or the volume's probes' (where they stand: the bake's
-floor_at) */
-vec3 floor_of_triangle(uint t)
-{
-    return indoor(t) ? ambient_indoor() : ambient();
-}
-vec3 floor_of_volume(vec3 p)
-{
-    vec3 outdoor = ambient(), inside_light = ambient_indoor();
-    if (!units_rig() || all(equal(outdoor, inside_light)))
-        return outdoor;
-    return mix(inside_light, outdoor, floor_at(p));
 }
 
 /* a light sample's parts at the surface: its diffuse light (the bake's
@@ -2001,84 +1757,139 @@ void sun_parts(Surface g, out vec3 dif, out vec3 spe)
     spe = ggx(g, s.sun.xyz) * s.rig[0].rgb * PI;
 }
 
-/* the light a ray's hit gives back toward the ray (the bake's unit): its
-glow and its albedo by the bake's light there (its texel's light less the
-sun's and less the ambient floor, which the estimator does not pass on; else
-the irradiance volume's) and the sun's by the mask (else the volume's
-visibility); a miss the sky's, the domes with it where the point did not
-take them as lights (domes: a reflection's ray, not a diffuse bounce's) */
+float scene_hit(vec3 o, vec3 d, float t_max, out vec3 nh, out uint t, out vec2 b, out vec3 object_albedo);
+vec3 hit_lamps(vec3 p, vec3 n, vec3 o, int candidates);
+
+/* ---------- a ray's hit: Path Traced's own light (no bake read)
+
+Path Traced reads no baked light (xgpu_vulkan_pt.c hands its passes the
+bake's scene alone: no lightmap, sun mask, irradiance volume, reflection
+probe or importance grid of a pack or of this machine's bake), so its light
+is the same whether or not a bake is there. A ray's hit is lit here as the
+reference's paths light one (reference_path): its glow, and its albedo by
+the sun's light there (a ray to a point of its disc), the lamps' and the
+fixtures' (resampled, one shadow ray each), and the next bounce's light: one
+cosine ray, the sky with the domes where it leaves, else the radiance
+cache's mean at its hit where that cell holds its samples, else that hit's
+glow. The cache's cells hold these hits' own light, so each frame's hits
+add a bounce to what the cells hold: the bounces add up over the frames,
+as the bake's paths' do over its samples. The units' floor is never added
+at a hit (the pixel takes it; the bake's estimator never passed it on) */
+vec4 cache_get(vec3 p, vec3 n, float distance_);
+void cache_add(vec3 p, vec3 n, float distance_, vec3 light);
+/* (the light pass sets these: the camera's place, for the cells' sizes;
+whether a hit reads a cell that holds its samples in place of its own light
+(hit_cache_read), and whether this pixel's hits add their light to their
+cells (hit_cache_feed: one 8 x 8 block in CACHE_FEED); no cache in the reference) */
+vec3 cache_eye = vec3(0.0);
+bool hit_cache_read = false, hit_cache_feed = false;
+/* (one 8 x 8 block of pixels in CACHE_FEED (a workgroup: its subgroups
+take one path, not the slowest lane's of both) lights its hits and feeds
+their cells, other blocks each frame; a hit of the others whose cell holds
+nothing yet gives its glow alone until the cell fills, within a few
+frames. One pixel in 16 alone, scattered, cost the hall at G4's place on the
+RTX 2060 as much as every pixel, each subgroup waiting for its feeding
+lanes) */
+const uint CACHE_FEED = 16u;
+bool cache_on() { return SPEC_CACHE && job.cache != uvec2(0u); }
+/* the next bounce's light from oh (normal nh): one cosine ray */
+vec3 own_next(vec3 oh, vec3 nh)
+{
+    vec3 wi = cosine_dir(nh), n2, a2;
+    uint t2;
+    vec2 b2;
+    float th = scene_hit(oh, wi, 300.0, n2, t2, b2, a2);
+    if (th < 0.0)
+        return sky_along(wi, true);
+    if (dot(n2, n2) <= 0.0)
+        return vec3(0.0);
+    vec3 h2 = oh + wi * th;
+    if (cache_on())
+    {
+        vec4 cell = cache_get(h2, n2, length(h2 - cache_eye));
+        if (cell.w > 0.0)
+            return cell.rgb;
+    }
+    return t2 == OBJECT_HIT ? vec3(0.0) : glow_of(t2);
+}
+/* a lamp's light at a hit: one lamp of the light tree (by power before
+the tree is made), one point of it, its shadow traced: next-event
+estimation unbiased, one descent and one ray (the reference's hit_lamps
+draws 4 candidates by the tree and the grid: 4 descents and 2 probabilities
+each, too many for every hit the live frames light) */
+vec3 own_lamp(vec3 p, vec3 n, vec3 o)
+{
+    if (s.counts.z == 0u || s.lamp.x <= 0.0 || s.rig[10].w < 0.5 || term_off(2u))
+        return vec3(0.0);
+    float probability;
+    uint lamp;
+    if (tree_on())
+        lamp = tree_pick(p, n, probability);
+    else
+    {
+        lamp = lamp_by_power();
+        probability = lamp_power(lamp) / max(s.lamp.x, 1.0e-20);
+    }
+    if (!(probability > 0.0))
+        return vec3(0.0);
+    Floats f = Floats(s.lamps);
+    uint at = lamp * 16u;
+    vec3 a0 = vec3(f.v[at], f.v[at + 1u], f.v[at + 2u]);
+    vec3 a1 = vec3(f.v[at + 3u], f.v[at + 4u], f.v[at + 5u]);
+    vec3 a2 = vec3(f.v[at + 6u], f.v[at + 7u], f.v[at + 8u]);
+    vec3 l;
+    float d, inverse_pdf;
+    if (!lamp_direction(p, a0, a1, a2, normalize(cross(a1 - a0, a2 - a0)), l, d, inverse_pdf))
+        return vec3(0.0);
+    float cr = dot(n, l);
+    if (cr <= 0.0 || !lamp_visible(o, l, d))
+        return vec3(0.0);
+    vec3 radiance = vec3(f.v[at + 9u], f.v[at + 10u], f.v[at + 11u]) * s.rig[11].x;
+    return radiance * (cr / PI) * inverse_pdf / probability;
+}
+/* the light a point h (normal nh) of glow and albedo gives back */
+vec3 own_light(vec3 h, vec3 nh, vec3 glow, vec3 albedo)
+{
+    vec3 oh = h + nh * 0.03, kept;
+    float blocker, c = dot(nh, s.sun.xyz);
+    vec3 e = s.sun.w > 0.0 && c > 0.0 ? s.rig[0].rgb * c * sun_ray(oh, blocker) : vec3(0.0);
+    e += own_lamp(h, nh, oh) + fixtures_ris(h, nh, oh, kept) + own_next(oh, nh);
+    return glow + albedo * e;
+}
+/* the light a ray's hit gives back toward the ray (the bake's unit):
+own_light at the hit, or its cell's mean (hit_cache_read); a miss the
+sky's, the domes with it where the point did not take them as lights
+(domes: a reflection's ray, not a diffuse bounce's) */
 vec3 hit_light_n(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance, out vec3 nh)
 {
     uint t;
     vec2 b;
+    vec3 object_albedo;
     hit_distance = -1.0;
     hit_light_triangle = 0xffffffffu;
-    float th = hit(o, d, t_max, nh, t, b);
-    /* (a moving object nearer: lit by the irradiance volume and the sun's
-    ray from its point) */
-    {
-        vec3 no, ao;
-        float ho = objects_hit(o, d, th < 0.0 ? t_max : th, no, ao);
-        if (ho >= 0.0)
-        {
-            hit_distance = ho;
-            nh = no;
-            vec3 h = o + d * ho, p = h + no * 0.05;
-            vec4 v;
-            vec3 total = volume_at(p, no, v) ? max(v.rgb - floor_of_volume(p), vec3(0.0)) : vec3(0.0);
-            float c = dot(no, s.sun.xyz), blocker;
-            vec3 sunlight = s.sun.w > 0.0 && c > 0.0 ? s.rig[0].rgb * c * sun_ray(h + no * 0.02, blocker) : vec3(0.0);
-            return ao * (total + sunlight);
-        }
-    }
+    float th = scene_hit(o, d, t_max, nh, t, b, object_albedo);
     if (th < 0.0)
         return sky_along(d, domes);
     hit_distance = th;
-    hit_light_triangle = t;
+    if (t != OBJECT_HIT)
+        hit_light_triangle = t;
     if (dot(nh, nh) <= 0.0)
         return vec3(0.0);
     vec3 h = o + d * th;
-    vec3 light = glow_of(t);
-    vec3 albedo = albedo_of(t);
-    vec3 total = vec3(-1.0), indirect_light;
-    float sun_v = -1.0;
-    /* (the level's triangles: their texel, by their lightmap page and
-    coordinates; the info's word 7 the triangle's kept index) */
-    uint kept = Uints(s.info).v[t * 8u + 7u];
-    if (t < s.counts.x + s.counts.y && kept != 0xffffffffu && job.lightmaps != uvec2(0u))
+    float from_eye = length(h - cache_eye);
+    bool cached = cache_on() && (hit_cache_read || hit_cache_feed);
+    if (cached && !hit_cache_feed)
     {
-        Uints lm = Uints(job.lightmaps);
-        uint page = lm.v[kept * 4u];
-        if (page > 0u)
-        {
-            vec2 uv0 = unpackUnorm2x16(lm.v[kept * 4u + 1u]);
-            vec2 uv1 = unpackUnorm2x16(lm.v[kept * 4u + 2u]);
-            vec2 uv2 = unpackUnorm2x16(lm.v[kept * 4u + 3u]);
-            vec2 uv = uv0 * (1.0 - b.x - b.y) + uv1 * b.x + uv2 * b.y;
-            vec3 tot;
-            float sv;
-            if (bake_at(page, uv, nh, tot, indirect_light, sv))
-            {
-                total = max(tot - floor_of_triangle(t), vec3(0.0));
-                sun_v = sv;
-            }
-        }
+        vec4 cell = cache_get(h, nh, from_eye);
+        if (cell.w > 0.0)
+            return cell.rgb;
+        return t == OBJECT_HIT ? vec3(0.0) : glow_of(t);
     }
-    if (total.x < 0.0)
-    {
-        vec4 v;
-        if (volume_at(h + nh * 0.05, nh, v))
-        {
-            total = max(v.rgb - floor_of_volume(h + nh * 0.05), vec3(0.0));
-            if (sun_v < 0.0)
-                sun_v = v.w;
-        }
-        else
-            total = vec3(0.0);
-    }
-    float c = dot(nh, s.sun.xyz);
-    vec3 sunlight = s.sun.w > 0.0 && c > 0.0 ? s.rig[0].rgb * c * max(sun_v, 0.0) : vec3(0.0);
-    return light + albedo * (total + sunlight);
+    vec3 light = t == OBJECT_HIT ? own_light(h, nh, vec3(0.0), object_albedo) :
+        own_light(h, nh, glow_of(t), albedo_of(t));
+    if (cached && hit_cache_feed)
+        cache_add(h, nh, from_eye, light);
+    return light;
 }
 vec3 hit_light(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance)
 {
@@ -2101,12 +1912,12 @@ finds it among CACHE_CELLS by open addressing (8 places). A cell's words: its
 key, this frame's sums (fixed point, by CACHE_FIXED) and count, the frame it
 was last updated, its mean light (floats) and the samples it holds.
 
-Each frame the light pass adds every fourth pixel's diffuse bounce as
-traced (the hit's light: the bake's there, the moving objects' by the
-volume and the sun's ray: the estimator's own value, so the cache starts
-from the bake and follows what the live hits see) into the hit's cell, and
-the bounce reads the cell's mean in place of its own hit's light where the
-cell holds job.cache_settings.z samples. The cache pass then folds the
+Each frame one 8 x 8 block of pixels in CACHE_FEED lights its rays' hits (hit_light_n's
+own_light: the path tracer's own light, no bake's) and adds that light into
+each hit's cell, and the other pixels' rays read their hit's cell mean in
+place of their own hit's light where it holds a sample (its glow alone
+until then); a hit's next bounce reads its own hit's cell, so the cells
+carry the bounces past the first. The cache pass then folds the
 frame's sums into each cell's mean (a running mean over at most
 job.cache_settings.w samples, so it follows a change in about that many),
 and lets a cell no frame has updated for CACHE_IDLE frames go. What it
@@ -2121,6 +1932,14 @@ const uint CACHE_CELLS = 1u << 19;
 const float CACHE_FIXED = 256.0;
 const uint CACHE_IDLE = 600u;
 layout(buffer_reference, std430, buffer_reference_align = 16) coherent buffer RadianceCache
+{
+    uint v[];
+};
+/* (the cells read by the light pass's hits: not coherent, so the reads go
+through the caches; a cell's mean changes only in the cache pass, between
+frames, and a slot's key once, by its atomic exchange: a read that misses
+this frame's new key finds the cell next frame) */
+layout(buffer_reference, std430, buffer_reference_align = 16) readonly buffer RadianceCacheRead
 {
     uint v[];
 };
@@ -2169,7 +1988,7 @@ void cache_add(vec3 p, vec3 n, float distance_, vec3 light)
 /* the cell's mean light, and its samples (0: no cell) */
 vec4 cache_get(vec3 p, vec3 n, float distance_)
 {
-    RadianceCache c = RadianceCache(job.cache);
+    RadianceCacheRead c = RadianceCacheRead(job.cache);
     uint place, key = cache_key(p, n, distance_, place);
     for (uint k = 0u; k < 8u; k++)
     {
@@ -2650,54 +2469,37 @@ void main()
     float offset = 0.01 + 0.0005 * g.distance;
     vec3 o = level_origin(g, offset);
     bool level = g.instance == 0u;
-    bool performance = (job.frame.y & FLAG_PERFORMANCE) != 0u;
     /* (the views of the direct light alone, the indirect light alone) */
     bool direct_on = view != 24u, indirect_on = view != 23u;
 
-    /* the bake at the pixel */
-    vec3 bake_total, bake_indirect;
-    float bake_sun;
-    bool texel = level && bake_at(g.page, g.lightmap, g.normal, bake_total, bake_indirect, bake_sun);
+    /* (the radiance cache's cells: the camera's place; one block of pixels
+    in CACHE_FEED lights its hits and adds their light to their cells, the
+    others read a cell that holds its samples: hit_light_n) */
+    cache_eye = g.point + g.eye * g.distance;
+    hit_cache_feed = ((uint(pixel.x >> 3) + uint(pixel.y >> 3) * 5u + frame * 7u) & (CACHE_FEED - 1u)) == 0u;
+    hit_cache_read = true;
 
-    /* the sun: a ray near the eye and on the objects, the mask beyond */
+    /* the sun: a ray to a point of its disc */
     float v_sun = 0.0, blocker = 0.0, traced = 0.0;
     /* (the ground's sun reaches past the cosine: its visibility wanted there too) */
     bool sun_side = dot(g.normal, s.sun.xyz) > 0.0 || (g.terrain.kind != 0u &&
         dot(ground_sun(g), vec3(1.0)) > 0.0);
     if (s.sun.w > 0.0 && sun_side && !part_off(PARTS_SUN))
     {
-        /* (the ray where the mask is not read (the performance profile's
-        far pixels read it), except in a tile the bake found all in shadow:
-        none of its texels' samples saw the sun, so the ray, the same
-        structure's to the same length, would not either; a moving object
-        only blocks. Round 7: most of an interior's sun rays, 0.85 ms of the
-        RTX 3070 Ti's light pass at G4 (HALO_PT_SUN_TILES=0: traced)) */
-        bool dark_tile = SPEC_SUN_TILES && texel && sun_tile_dark && bake_sun == 0.0;
-        if ((!texel || bake_sun < 0.0 || g.distance < job.settings.x) && !dark_tile)
-        {
-            seed_for(pixel, frame, 1u);
-            v_sun = sun_ray(o, blocker);
-            traced = 1.0;
-        }
-        else
-        {
-            v_sun = bake_sun;
-            /* (the moving objects' shadow over the mask, the sun's centre) */
-            seed_for(pixel, frame, 1u);
-            vec3 no, ao;
-            float ho = v_sun > 0.0 ? objects_hit(o, s.sun.xyz, sun_reach(), no, ao) : -1.0;
-            if (ho >= 0.0)
-            {
-                v_sun = 0.0;
-                blocker = ho;
-                traced = 1.0;
-            }
-        }
+        /* (at every pixel: no baked sun mask is read, nor the bake's dark
+        tiles that left a ray out) */
+        seed_for(pixel, frame, 1u);
+        v_sun = sun_ray(o, blocker);
+        traced = 1.0;
     }
     /* (the sun's visibility stored at the end, with the diffuse bounce's
     length in w) */
 
     vec3 noisy_d = vec3(0.0), noisy_s = vec3(0.0), clean_d = vec3(0.0), clean_s = vec3(0.0);
+    /* (the light about the pixel less the sun's and the lamps' (the domes',
+    the floor's and the bounce's: a white surface's radiance, the bake's
+    unit), which a rough reflection takes in place of the probes) */
+    vec3 incident = vec3(0.0);
     vec3 share = specular_share(g);
     /* (the ground's share of the open sky's and the bounced light: its
     layer's occlusion; 1 elsewhere) */
@@ -2736,14 +2538,17 @@ void main()
         vec3 m = vec3(0.0);
         seed_for(pixel, frame, 2u);
         if (!part_off(PARTS_DOMES))
-            noisy_d += domes_objects_at(o, g.normal, m) * ambient_share;
+        {
+            vec3 domes = domes_objects_at(o, g.normal, m);
+            noisy_d += domes * ambient_share;
+            incident += domes;
+        }
         vec3 ld, ls;
         lamps_probe = indirect_on && !(g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION)) &&
             (job.frame.y & FLAG_PROBE_ONLY) != 0u;
         seed_for(pixel, frame, 3u);
         lamps_mis = (glossy || lamp_ray) && !part_off(PARTS_REFLECTION);
-        lamp_direct_total = texel && (job.frame.y & FLAG_LAMP_MIS) != 0u ?
-            max(luma(bake_total - bake_indirect), 0.0) : 0.0;
+        lamp_direct_total = 0.0;
         lights_restir(pixel, g, o, job.extra.z > 0.0, ld, ls);
         lamps_mis = false;
         lamps_probe = false;
@@ -2756,30 +2561,17 @@ void main()
         /* the sky's floor (the units' rig: unoccluded, as the bake adds it;
         the indoor one in an indoor cluster) */
         clean_d += floor_light(g) * ambient_share;
+        incident += floor_light(g);
     }
     if (indirect_on)
     {
-        /* the indirect light: the bake's at the pixel, else a bounce (its
-        sample reused by ReSTIR GI where job.denoise.z gives it frames) */
-        /* (SPEC_BOUNCE_HALF: on half the level's 8 x 8 blocks (1) or half
-        its pixels (2), a checkerboard of them turning each frame, a pixel with its texel takes
-        the bake's indirect light as its sample of the bounce, through the
-        denoiser like the traced one: the two estimate the same light (the
-        bounce's hit is lit from the same bake), so the histories average
-        them; by blocks whole subgroups leave the bounce's ray out) */
-        int cell = SPEC_BOUNCE_HALF == 2 ? 0 : 3;
-        bool bake_bounce = SPEC_BOUNCE_HALF != 0 && texel && !performance &&
-            (((pixel.x >> cell) + (pixel.y >> cell) + int(frame)) & 1) != 0;
-        if ((performance && texel) || part_off(PARTS_BOUNCE))
-        {
-            clean_d += texel ? bake_indirect * ambient_share : vec3(0.0);
+        /* the indirect light: a bounce at every pixel (its sample reused by
+        ReSTIR GI where job.denoise.z gives it frames), its hit lit by Path
+        Traced's own light (hit_light_n: no bake's indirect layer) */
+        /* (the light the pixel's rough reflection takes where no ray is
+        traced for it: the bounce's, the domes' and the floor's, below) */
+        if (part_off(PARTS_BOUNCE))
             imageStore(gi_data_now, pixel, vec4(0.0));
-        }
-        else if (bake_bounce)
-        {
-            noisy_d += bake_indirect * ambient_share;
-            imageStore(gi_data_now, pixel, vec4(0.0));
-        }
         else
         {
             float hd;
@@ -2788,24 +2580,13 @@ void main()
             vec3 d = cosine_dir(g.normal);
             vec3 bounce = hit_light_n(o, d, 300.0, false, hd, hn);
             diffuse_hit = hd > 0.0 ? hd : 1000.0;
-            /* (the radiance cache: every fourth pixel's hit added to its
-            cell; the cell's mean in the hit's place where it has its
-            samples) */
-            if (SPEC_CACHE && job.cache != uvec2(0u) && hd > 0.0 && dot(hn, hn) > 0.0)
-            {
-                vec3 hp = o + d * hd;
-                float from_eye = length(hp - (g.point + g.eye * g.distance));
-                if (((uint(pixel.x) + uint(pixel.y) * 3u + frame) & 3u) == 0u)
-                    cache_add(hp, hn, from_eye, bounce);
-                vec4 cell = cache_get(hp, hn, from_eye);
-                if (cell.w >= job.cache_settings.z)
-                    bounce = cell.rgb;
-            }
             if (SPEC_CLAMP)
                 bounce = indirect_clamped(bounce);
             seed_for(pixel, frame, 8u);
-            noisy_d += (job.denoise.z > 0.0 && !part_off(PARTS_GI_REUSE) ?
-                restir_gi(pixel, g, o, d, hd, hn, bounce) : bounce) * ambient_share;
+            vec3 indirect_d = job.denoise.z > 0.0 && !part_off(PARTS_GI_REUSE) ?
+                restir_gi(pixel, g, o, d, hd, hn, bounce) : bounce;
+            noisy_d += indirect_d * ambient_share;
+            incident += indirect_d;
         }
         /* the reflections: a GGX ray below the roughness, else the probes */
         if (g.roughness <= job.settings.y && !part_off(PARTS_REFLECTION))
@@ -2840,7 +2621,6 @@ void main()
         }
         else
         {
-            float found;
             if (lamp_ray && direct_on && !part_off(PARTS_REFLECTION))
             {
                 vec3 weight;
@@ -2865,36 +2645,14 @@ void main()
                     }
                 }
             }
-            vec3 r = reflect(-g.eye, g.normal);
-            vec3 probe = reflection_at(o, r, g.roughness, found);
-            if (found <= 0.0)
-            {
-                vec4 v;
-                probe = volume_at(o, r, v) ? v.rgb : texel ? bake_total : vec3(0.0);
-            }
-            /* (the probes hold the lamps' faces (the bake's path() takes
-            each hit's glow), which ReSTIR DI's specular light already
-            gives this pixel, shadowed and sharp: the probe's light kept by
-            the share of the bake's light here that is not the lamps' own
-            (its indirect layer over its whole), so that the lamps are not
-            counted twice (c20's Library walls: 47% too much specular light
-            against R) and their pools on the walls stay ReSTIR's) */
-            /* (Only in an indoor cluster (XGPU_SCENE_INDOOR), and the
-            units rig's floor kept with the indirect layer: the bake's
-            direct light holds the domes' sky and the floor as well as the
-            lamps, and outdoors that share is the sky's, which no lamp
-            sample gives: the whole share taken there dimmed a rough
-            surface's reflected sky. Indoors the clusters have no sky, so
-            the direct share less the floor is the lamps' and the
-            fixtures'. Only the lamps' faces are in the probe: where a
-            fixture lights the wall the probe is dimmed by its share too,
-            an approximation a lamp mask in the probes' bake would end) */
-            if (texel && (job.frame.y & (FLAG_PROBE_NEE | FLAG_PROBE_ONLY)) == 0u && surface_inside(g))
-            {
-                vec3 kept = bake_indirect + ambient_indoor();
-                probe *= clamp(luma(kept) / max(luma(bake_total), 1.0e-6), 0.0, 1.0);
-            }
-            clean_s += probe * share;
+            /* (above the traced reflection's roughness: no probe of a bake
+            is read; the lobe, wide there, takes the light about the pixel
+            less the sun's and the lamps' (ReSTIR DI gives their specular
+            light, shadowed and sharp): the domes', the floor's and the
+            bounce's as the pixel estimated them (incident), as the bake's
+            light less the lamps' stood for the probes' where they had
+            none. Noisy (the bounce's), so through the denoiser) */
+            noisy_s += incident * share;
         }
     }
     if (any(isnan(noisy_d)) || any(isinf(noisy_d)))

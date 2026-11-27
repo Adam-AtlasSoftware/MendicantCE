@@ -50,7 +50,8 @@ def bake_common() -> str:
     for name in ("bake_common", "exposure_common", "terrain_common"):
         if name not in found:
             raise SystemExit(f"{BAKE}: no {name.upper()}")
-    return objects_traced(found["bake_common"]) + found["exposure_common"] + found["terrain_common"]
+    return (grid_unread(objects_traced(found["bake_common"])) + found["exposure_common"] +
+            found["terrain_common"])
 
 
 # the moving objects (PRISM v4 M3, xgpu_vulkan_rt.c's objects for "pathtraced"): BAKE_COMMON's visibility tests
@@ -75,6 +76,22 @@ def objects_traced(common: str) -> str:
         common = common.replace(signature, head + wrapper + renamed)
         head = ""
     return common
+
+
+# the light-importance grid (the bake's STEP_IMPORTANCE, kept in its file: a pack's when one is loaded): Path Traced
+# reads no bake's data but its scene, so BAKE_COMMON's grid_cell is renamed and wrapped to find no cell, and every lamp
+# pick of the bake's functions the path tracer shares (lamp_pick, lamps_all; its own grid_probability) is by power
+# alone, whether or not a bake is there; its live frames take their candidates from its own light tree
+# (docs/prism_pathtraced.md, "No baked light"). The baker's own text is not changed
+GRID_CELL = "int grid_cell(vec3 p)\n{"
+
+
+def grid_unread(common: str) -> str:
+    if common.count(GRID_CELL) != 1:
+        raise SystemExit(f"{BAKE}: BAKE_COMMON's grid_cell is not where it was")
+    wrapper = ("int grid_cell_baked(vec3 p);\n"
+               "int grid_cell(vec3 p)\n{\n    return -1;\n}\n")
+    return common.replace(GRID_CELL, wrapper + GRID_CELL.replace("grid_cell(", "grid_cell_baked("))
 
 
 def sources() -> dict[str, str]:

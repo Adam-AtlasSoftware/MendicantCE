@@ -45,7 +45,7 @@ Traced draws the enhanced geometry in it, and the rest of its state is chosen at
 
 Path Traced's geometry and lighting never depend on a bake. It reads no lightmap of the enhanced world but traces the
 bake's scene, which the renderer makes for the BSP whether or not a pack is loaded (a player's bake is then paused,
-nothing baked), lit by the bake's light where it has it and by its own bounce else. When the geometry changes in a
+nothing baked), lit by its own light, never the bake's (`docs/prism_pathtraced.md`, "No baked light"). When the geometry changes in a
 map (a change of lighting to or from Path Traced swaps it), SCENE_STATIC's set is begun again in play; under every
 lighting a set with no whole bake of its key makes its own scene, nothing baked, and is never drawn with the bake
 drawn before it (another set's, often another world's: below), and neither Path Traced
