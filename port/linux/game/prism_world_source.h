@@ -116,6 +116,18 @@ debug.world_unbaked, whose rung 1 has no packs by design, nor under Path
 Traced, which needs none) */
 void prism_world_source_bake_refused(short bsp_index);
 
+/* whether the BSP is drawn with its enhanced geometry now: rung 1, and the
+sidecar has its geometry, and it was made. Else it is the classic world's
+(d40's space, or a BSP prism_world_source_geometry_failed names): its bake
+keyed by its classic world_id and found among the shipped classic packs,
+whatever the map's rung */
+boolean prism_world_source_bsp_enhanced(short bsp_index);
+
+/* the BSP's enhanced geometry could not be made (prism_world_geometry.c: out
+of memory, or its checks refused it): it is the classic world's for the rest
+of the map (prism_world_source_bsp_enhanced), with a line in the log */
+void prism_world_source_geometry_failed(short bsp_index);
+
 /* display.world_geometry asks for the enhanced geometry */
 boolean prism_world_geometry_wanted(void);
 

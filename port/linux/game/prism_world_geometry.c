@@ -2324,7 +2324,12 @@ static void world_geometry_load(
 		else
 		{
 			world_geometry_release();
+			prism_world_source_geometry_failed(bsp_index);
 		}
+	}
+	else
+	{
+		prism_world_source_geometry_failed(bsp_index);
 	}
 	for (index = 0; views && index < view_count; index++)
 	{

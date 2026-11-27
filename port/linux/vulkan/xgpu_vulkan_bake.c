@@ -6453,6 +6453,16 @@ static int bake_allowed(void)
 	return allowed;
 }
 
+/* whether the bake is of another world than the one the game asks for now:
+the variant (XGPU_BAKE_FLAG_REMODEL, which also picks the shipped pack's
+folder: file_choose) or the BSP's world_id its key was made with
+(bake_begin) */
+static int bake_world_changed(const struct bake_state *b)
+{
+	return b->key.variant != ((bake.control.flags & XGPU_BAKE_FLAG_REMODEL) ? 1u : 0u) ||
+		memcmp(b->key.world_id, bake.control.world_id, sizeof(b->key.world_id)) != 0;
+}
+
 static void bake_frame(void)
 {
 	struct bake_state *b = bake.bake;
@@ -6490,11 +6500,14 @@ static void bake_frame(void)
 		bake.bake = b = next;
 		bake.swaps++;
 	}
-	/* (a bake of another BSP, scene or quality, a rebake asked, or one
-	opened while none was wanted that now is: let go) */
+	/* (a bake of another BSP, scene or quality, a rebake asked, one opened
+	while none was wanted that now is, or one of the other world: let go.
+	The world is the game's verdict for the BSP drawn (prism_world_source.c),
+	which can change with no new scene: an enhanced pack refused drops the
+	map to its classic world (rung 2), whose pack is then looked for) */
 	if (b && (b->generation != bake.control.generation || b->bsp != bake.control.bsp_index ||
 		b->quality != (bake.control.quality > PRISM_BAKE_QUALITY_MAX ? PRISM_BAKE_QUALITY_MAX : bake.control.quality) ||
-		b->request != bake.control.request || (b->idle && wanted)))
+		b->request != bake.control.request || (b->idle && wanted) || bake_world_changed(b)))
 	{
 		int rebake = b->request != bake.control.request && b->generation == bake.control.generation;
 		char path[XGPU_BAKE_PATH + 164];

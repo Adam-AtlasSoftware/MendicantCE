@@ -95,6 +95,11 @@ static struct
 	enhanced geometry (it needs neither: never a bake's state) */
 	boolean packs_ok;
 	boolean unbaked;
+	/* the BSPs whose enhanced geometry could not be made (out of memory, or
+	refused by prism_world_geometry.c's checks:
+	prism_world_source_geometry_failed): drawn classic, keyed and lit as the
+	classic world, for the rest of the map */
+	boolean geometry_failed[MAXIMUM_BSPS];
 } world_source;
 
 /* ---------- private code */
@@ -151,6 +156,12 @@ static boolean sidecar_path(char const *map, char *path, unsigned long size)
 static boolean bsp_has_geometry(short bsp)
 {
 	return world_source.open && prsx_find(&world_source.prsx, PRSX_GEOM, (uint16_t)bsp, 0) >= 0;
+}
+
+/* ... and so is one whose enhanced geometry could not be made */
+static boolean bsp_geometry_drawn(short bsp)
+{
+	return bsp >= 0 && bsp < world_source.bsp_count && !world_source.geometry_failed[bsp] && bsp_has_geometry(bsp);
 }
 
 /* every BSP's enhanced pack: the shipped bake's (display.bake_shipped_folder's
@@ -394,6 +405,7 @@ static void choose(void)
 		memset(world_source.world_ids, 0, sizeof(world_source.world_ids));
 		memset(world_source.labels, 0, sizeof(world_source.labels));
 		memset(world_source.classic_ids, 0, sizeof(world_source.classic_ids));
+		memset(world_source.geometry_failed, 0, sizeof(world_source.geometry_failed));
 		world_source.classic_known = FALSE;
 		scenario = global_scenario_try_and_get();
 		world_source.bsp_count = scenario ? scenario->structure_bsp_references.count : 0;
@@ -547,6 +559,10 @@ boolean prism_world_source_image(struct structure_bsp *bsp, short bsp_index, cha
 	*size = 0;
 	if (!prism_world_enhanced() || !world_source.open || bsp_index < 0 || !bsp)
 		return FALSE;
+	/* (one that could not be made stays classic, as its key and its light
+	are, when the lighting changes and the geometry is looked for again) */
+	if (bsp_index < world_source.bsp_count && world_source.geometry_failed[bsp_index])
+		return FALSE;
 	for (kind = 0; kind < 2; kind++)
 	{
 		long index = prsx_find(&world_source.prsx, kind ? PRSX_LMUV : PRSX_GEOM, (uint16_t)bsp_index, 0);
@@ -610,17 +626,32 @@ void prism_world_source_world_id(short bsp_index, unsigned char id[32])
 	memset(id, 0, 32);
 	if (bsp_index < 0 || bsp_index >= world_source.bsp_count)
 		return;
-	if (prism_world_enhanced() && bsp_has_geometry(bsp_index))
+	if (prism_world_enhanced() && bsp_geometry_drawn(bsp_index))
 		memcpy(id, world_source.world_ids[bsp_index], 32);
 	/* (a BSP drawn classic is lit by its classic bake, enhanced geometry chosen or not) */
 	else if (world_source.classic_known && world_source.lit_chosen && world_source.loaded_lit)
 		memcpy(id, world_source.classic_ids[bsp_index], 32);
 }
 
+boolean prism_world_source_bsp_enhanced(short bsp_index)
+{
+	return prism_world_enhanced() && bsp_geometry_drawn(bsp_index);
+}
+
+void prism_world_source_geometry_failed(short bsp_index)
+{
+	if (bsp_index < 0 || bsp_index >= world_source.bsp_count || world_source.geometry_failed[bsp_index])
+		return;
+	platform_log("prism world: %s BSP %d: its enhanced geometry (%s) could not be made: drawn classic for the rest of "
+		"the map, keyed and lit as the classic world (its classic pack where it has one)", world_source.map,
+		(int)bsp_index, world_source.labels[bsp_index]);
+	world_source.geometry_failed[bsp_index] = TRUE;
+}
+
 void prism_world_source_bake_refused(short bsp_index)
 {
 	if (!prism_world_enhanced() || !world_source.packs_ok || world_source.unbaked || prism_deferred_pathtraced() ||
-		!bsp_has_geometry(bsp_index))
+		!bsp_geometry_drawn(bsp_index))
 		return;
 	platform_log("prism world: %s BSP %d: warning: the enhanced lightmaps of its geometry (%s) were not loaded (their "
 		"pack is not this geometry's, or is damaged: the renderer's log says which): Enhanced lighting draws the "
