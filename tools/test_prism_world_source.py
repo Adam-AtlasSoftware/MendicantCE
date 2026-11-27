@@ -135,8 +135,8 @@ def test_players_never_bake():
     assert "#ifdef PRISM_BAKER_COMPILED_OUT" in farm and 'getenv("HALO_BAKE_FARM")' in farm
     assert "farm[0] == '1' && farm[1] == 0" in farm
     write = baker[baker.index("static void reach_file_write(uint64_t hash)"):]
-    write = write[:write.index("memcpy(head, \"PRCH\", 4);")]
-    assert "!bake_farm()" in write
+    write = write[:write.index("\n}\n")]
+    assert "!bake_farm()" in write.split("reach_bytes(", 1)[0]
     assert re.search(r"if \(bake_farm\(\)\)\s*\n\s*folder_make\(folder\);", baker)
     assert re.search(r"if \(bake_farm\(\)\)\s*\n\s*folder_make\(directory\);", baker)
     assert baker.count("folder_make(") == 3
