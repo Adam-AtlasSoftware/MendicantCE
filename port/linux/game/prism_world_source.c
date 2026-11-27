@@ -132,6 +132,12 @@ static boolean sidecar_path(char const *map, char *path, unsigned long size)
 	return TRUE;
 }
 
+/* a BSP the sidecar has no geometry of (d40's space) is drawn classic */
+static boolean bsp_has_geometry(short bsp)
+{
+	return world_source.open && prsx_find(&world_source.prsx, PRSX_GEOM, (uint16_t)bsp, 0) >= 0;
+}
+
 /* every BSP's enhanced pack: the shipped bake's (display.bake_shipped_folder's
 remodel/<map>/) bsp<n>.pbk, named in its manifest.txt with the key
 "geo:prsx:<the BSP's enhanced world_id>" */
@@ -152,6 +158,9 @@ static boolean packs_present(char const *map, char *why, unsigned long why_size)
 		char key[96], hex[2 * PRISM_ID_SIZE + 1], prefix[96];
 		boolean named = FALSE;
 
+		/* (no enhanced geometry: no enhanced lightmaps to ask for; the farm ships it empty) */
+		if (!bsp_has_geometry(bsp))
+			continue;
 		snprintf(path, sizeof(path), "%s/bsp%d.pbk", folder, (int)bsp);
 		if ((file = fopen(path, "rb")) == NULL)
 		{
@@ -525,15 +534,17 @@ void prism_world_source_world_id(short bsp_index, unsigned char id[32])
 	memset(id, 0, 32);
 	if (bsp_index < 0 || bsp_index >= world_source.bsp_count)
 		return;
-	if (prism_world_enhanced())
+	if (prism_world_enhanced() && bsp_has_geometry(bsp_index))
 		memcpy(id, world_source.world_ids[bsp_index], 32);
+	/* (a BSP drawn classic is lit by its classic bake, enhanced geometry chosen or not) */
 	else if (world_source.classic_known && world_source.rung != PRISM_WORLD_RUNG_NONE)
 		memcpy(id, world_source.classic_ids[bsp_index], 32);
 }
 
 void prism_world_source_bake_refused(short bsp_index)
 {
-	if (!prism_world_enhanced() || !world_source.packs_ok || world_source.unbaked || prism_deferred_pathtraced())
+	if (!prism_world_enhanced() || !world_source.packs_ok || world_source.unbaked || prism_deferred_pathtraced() ||
+		!bsp_has_geometry(bsp_index))
 		return;
 	platform_log("prism world: %s BSP %d: warning: the enhanced lightmaps of its geometry (%s) were not loaded (their "
 		"pack is not this geometry's, or is damaged: the renderer's log says which): Enhanced lighting draws the "

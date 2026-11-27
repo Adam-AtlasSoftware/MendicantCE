@@ -217,7 +217,7 @@ def test_a_pack_the_renderer_does_not_load_drops_the_map_to_rung_2():
     source = _code("port/linux/game/prism_world_source.c")
     refused = _function(source, "void prism_world_source_bake_refused(")
     assert ("if (!prism_world_enhanced() || !world_source.packs_ok || world_source.unbaked || "
-            "prism_deferred_pathtraced())") in refused
+            "prism_deferred_pathtraced() ||\n\t\t!bsp_has_geometry(bsp_index))") in refused
     assert "warning" in refused and "rung 2" in refused
     assert "world_source.packs_ok = FALSE;" in refused
     # (the packs refused: under Enhanced the geometry is drawn classic at once, and the bake keyed to the classic
@@ -251,3 +251,16 @@ def test_path_traced_takes_the_enhanced_geometry_without_its_packs():
     assert re.search(r"prism_world_ladder\(FALSE, TRUE, TRUE, world_source\.packs_ok, world_source\.unbaked,\s*"
                      r"prism_deferred_pathtraced\(\)\) != 1", source)
     assert "Path Traced: enhanced geometry without its lightmaps" in source
+
+
+def test_a_bsp_without_enhanced_geometry_asks_for_no_enhanced_pack():
+    # (d40's space BSP: no GEOM in the sidecar, drawn classic, shipped empty by the farm; the
+    # map's other BSPs still reach rung 1, and that BSP stays keyed to its classic world)
+    source = _code("port/linux/game/prism_world_source.c")
+    has = _function(source, "static boolean bsp_has_geometry(short bsp)")
+    assert "prsx_find(&world_source.prsx, PRSX_GEOM, (uint16_t)bsp, 0) >= 0" in has
+    present = _function(source, "static boolean packs_present(")
+    assert present.index("if (!bsp_has_geometry(bsp))") < present.index('"%s/bsp%d.pbk"')
+    world_id = _function(source, "void prism_world_source_world_id(")
+    assert "if (prism_world_enhanced() && bsp_has_geometry(bsp_index))" in world_id
+    assert "world_source.classic_ids[bsp_index]" in world_id
