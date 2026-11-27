@@ -215,7 +215,32 @@ void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
 		pthread_mutex_unlock(&arena_lock);
 		return NULL;
 	}
-	if (physical_address != PLATFORM_ANY_PHYSICAL_ADDRESS)
+	if (physical_address == PLATFORM_LOWEST_PHYSICAL_ADDRESS)
+	{
+		/* bottom-up first fit (PLATFORM_LOWEST_PHYSICAL_ADDRESS): a place
+		with a page in use is passed with its whole block */
+		unsigned long candidate = 0;
+
+		while (count <= CONTIGUOUS_PAGE_COUNT && candidate <= CONTIGUOUS_PAGE_COUNT - count)
+		{
+			unsigned long used = candidate;
+
+			candidate = (candidate + alignment_pages - 1) / alignment_pages * alignment_pages;
+			if (candidate > CONTIGUOUS_PAGE_COUNT - count)
+				break;
+			for (used = candidate; used < candidate + count && !page_protection[used]; used++)
+				;
+			if (used == candidate + count)
+			{
+				first = candidate;
+				break;
+			}
+			candidate = block_first_page[used] + block_page_count[block_first_page[used]];
+			if (candidate <= used)
+				candidate = used + 1;
+		}
+	}
+	else if (physical_address != PLATFORM_ANY_PHYSICAL_ADDRESS)
 	{
 		unsigned long wanted = (physical_address & ~PLATFORM_CONTIGUOUS_BASE) / PAGE_SIZE_BYTES;
 
@@ -355,8 +380,8 @@ LPVOID WINAPI XPhysicalAlloc(SIZE_T size, ULONG_PTR physical_address, ULONG_PTR 
 	there, which is how the game gets its fixed game state and tag cache
 	addresses; anything else may go anywhere. */
 	void *result = platform_contiguous_alloc(size, alignment,
-		physical_address < PLATFORM_CONTIGUOUS_SIZE ? physical_address : PLATFORM_ANY_PHYSICAL_ADDRESS,
-		protect);
+		physical_address < PLATFORM_CONTIGUOUS_SIZE || physical_address == PLATFORM_LOWEST_PHYSICAL_ADDRESS ?
+		physical_address : PLATFORM_ANY_PHYSICAL_ADDRESS, protect);
 
 	if (!result)
 	{
