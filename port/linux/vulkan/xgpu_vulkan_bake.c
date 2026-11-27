@@ -2523,6 +2523,9 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 		memcpy(b->plan.attributes + (size_t)kept * XGPU_SCENE_STATIC_ATTRIBUTE_WORDS, a,
 			XGPU_SCENE_STATIC_ATTRIBUTE_WORDS * 4);
 		indoor += (a[XGPU_SCENE_ATTRIBUTE_KIND_PAGE] & XGPU_SCENE_INDOOR) != 0;
+		/* (a remodel's triangle, a level of its own: the texels' flag 4's rule) */
+		if (level != XGPU_SCENE_LEVEL_BOTH)
+			b->saw_remodel = 1;
 		b->plan.tiers[kept] = bake.tiers && surface < bake.tier_count ? bake.tiers[surface] : 0;
 		kept++;
 	}
