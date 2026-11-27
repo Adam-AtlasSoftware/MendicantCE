@@ -709,7 +709,10 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
   over its lightmap pass instead: its projected shadow maps, their share of the light the G-buffer says that pass
   gave). An object pixel
   (the static scenery's too): the volume's eight probes about its point in its fine cascade, else its coarse one
-  (those inside the level left out), SH at its normal, and the sun's light by its shadow traced against the bake's
+  (those inside the level left out), SH at its normal (never under the probe's ambient part, L0 less half its L1's
+  length: the linear reading of a side turned from a probe's main light goes below it, to nothing where the light
+  is all from one side, as a door the bake has not, lit through the doorway from behind, was on c20's tp_sec4 back
+  wall), and the sun's light by its shadow traced against the bake's
   scene (the level and the static scenery). Both add the frame's dynamic lights (SCENE_LIGHTS' dynamic class: CE's
   falloff, 1 − d²/r²).
 - **The material.** The base colour is CE's (the level's its texture pass's, the decals with it; an object's the
