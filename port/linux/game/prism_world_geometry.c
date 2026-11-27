@@ -193,6 +193,9 @@ height (32 bits each) */
 /* the most of the Xbox's contiguous memory a BSP's remodel takes (of the
 port's 512 MB: platform.h's PLATFORM_CONTIGUOUS_SIZE) */
 #define MAXIMUM_CONTIGUOUS_BYTES (176UL * 1024 * 1024)
+/* (port/linux/src/platform.h's PLATFORM_LOWEST_PHYSICAL_ADDRESS: XPhysicalAlloc
+places the block at the lowest place it fits) */
+#define LOWEST_PHYSICAL_ADDRESS 0xfffffffeUL
 /* the most surfaces one chunk names (render.h's visible structure surfaces,
 and the lights' and shadows' MAXIMUM_LOCALLY_RENDERED_SURFACES) */
 #define MAXIMUM_CHUNK_SURFACES 32768
@@ -1978,7 +1981,15 @@ static boolean world_geometry_make(
 	for (alignment = 0x1000; alignment < MIRROR_SEGMENT_BYTES && alignment < total + 1; alignment <<= 1)
 	{
 	}
-	world_geometry.geometry = XPhysicalAlloc(total + 1, (unsigned long)-1, alignment, PAGE_READWRITE);
+	/* (bottom up, platform.h's PLATFORM_LOWEST_PHYSICAL_ADDRESS: the game's own
+	blocks fill the window from its top, so the BSP before's freed block and
+	the free memory past it are one run here, not pieces between the
+	textures the new BSP brought; top down, whether b30's second BSP (120708
+	KB, after the first's 109328 KB) fit with 188 MB free depended on where
+	the shadow maps' blocks had fallen: display.enhanced_shadow_resolution
+	1024 fit, the default 512 did not, and a fresh player's game drew that
+	BSP classic, its enhanced bake refused) */
+	world_geometry.geometry = XPhysicalAlloc(total + 1, LOWEST_PHYSICAL_ADDRESS, alignment, PAGE_READWRITE);
 	world_geometry.materials = calloc(usable, sizeof(*world_geometry.materials));
 	world_geometry.lightmap_first = calloc(bsp->lightmaps.count + 1, sizeof(*world_geometry.lightmap_first));
 	world_geometry.runs = malloc(MAXIMUM_CHUNK_SURFACES * sizeof(*world_geometry.runs));

@@ -404,6 +404,24 @@ rig (no `--rig`: a note that says a BSP was baked with the fitted rig is refused
 the records are packed already), each under GitHub's 2 GiB asset limit (a level past it splits by BSP). `install`
 unpacks a release's archives into a shipped folder (nothing outside it) and `verify` checks one (sizes, sha256, every
 file a whole lighting-only bake of its manifest's key).
+`--reach` carries each BSP's reach (the farm's walk, `<map>/bsp<n>.reach` beside its bake) in its bake as a `REAC`
+record where the bake has none (a bake committed by this baker writes its own), always as the bake's first record
+(sequence 0, every other record after it renumbered, payloads unchanged), and `--require-reach` refuses a BSP without
+one: a player's machine then walks no reach and finds the walk from the header and one record (below). `plancheck <shipped folder> <plans folder>` checks every
+shipped BSP against a player's plan of it (`<plans>/<map>/plan_bsp<n>.txt`, `HALO_BAKE_PLAN_ONLY`'s): the whole key,
+field by field, the tiles, and the `REAC` record's walk against the player's own (its inputs' hash, the bricks' and
+tiers' counts and CRC-32s). A BSP with no plan or any difference fails it: the farm's packaging runs it before anything
+is released, so that no pack a player's game would refuse, or would plan otherwise, ships.
+
+**A player's plan without a bake** (`HALO_BAKE_PLAN_ONLY=<file>`, `{bsp}` in the name for a file a BSP,
+`HALO_BAKE_PLAN_ONLY_BSPS` BSPs before the game quits, 1 by default): once the BSP is planned, its key (every field, at
+the quality asked: `HALO_BAKE_QUALITY=max` for a release's), the plan's counts, the key's BSP hash by part (the
+triangles' places and each attribute field) and the walk the game made itself are written, and the game quits. No bake
+is chosen, loaded or made and the reach is always walked here. In play (a player's path; `debug.bsp_switch_test` for the
+other BSPs) or by the main menu's worker (`debug.bake_worker`, `debug.bake_bsp`), with a fresh config: both now give the
+same key. (They did not before prism-v4-plan: the map's first frame's stand-ins, `render_enumerate.c`, left a lightmap
+of the structure without its picture when no material stood in, and SCENE_STATIC's set, the key and the plan lost that
+lightmap's page wherever an enumeration had left it so; the farm's worker and a player's game enumerate differently.)
 
 **The baker** (`xgpu_vulkan_bake.c`'s `file_open`): the world drawn's shipped file first (the game sends the folder and
 the world: `XGPU_BAKE_FLAG_REMODEL`), read only. Where its key is this BSP's it is loaded and drawn and nothing is
@@ -564,6 +582,12 @@ change (b30's beach into the structure and back, 3070 Ti) now holds the frame 0.
 again 1.5 to 3 s after it (the tiles loaded 2048 a frame), where before the frame stopped 20 s going in (the path
 tracer's lamp grid, made on the frame's thread for the structure's 1871 lamps although nothing was traced: now made at
 the first traced window) and the beach stayed CE's light 16 s coming out.
+Only the farm writes the file; a player's machine takes the shipped bake's `REAC` record instead (the same bytes:
+`PRCH`, its version, the inputs' hash, the flight flag, the summary, the bricks, the tiers; read whole, refused if cut
+short or grown) where its inputs' hash is the BSP's own, so a BSP's shipped light is used as soon as its bake loads
+(d40's eighth BSP's walk is 696 s on an RTX 2060 desktop's CPU, 1206 s on the farm's: its light now in use 5 to 6 s
+after the BSP's load, a30's first BSP's 8 s against 52). Where the shipped bake is refused all the same, the reach is
+walked here and the key made again from it.
 
 ## The settings
 

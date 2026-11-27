@@ -158,6 +158,12 @@ halo_android_abi.h), which must agree. Its pages are backed as they are
 used. */
 #define PLATFORM_CONTIGUOUS_SIZE 0x20000000UL
 #define PLATFORM_ANY_PHYSICAL_ADDRESS 0xffffffffUL
+/* (the port's: the block at the lowest place it fits, bottom up, away from the
+blocks the game's own top-down allocations put at the window's top: for the
+largest blocks a level frees and asks for again, the enhanced world's
+geometry, so that one BSP's freed block and the free memory past it make
+one run for the next BSP's) */
+#define PLATFORM_LOWEST_PHYSICAL_ADDRESS 0xfffffffeUL
 
 /* returns NULL on failure; physical_address places the block exactly */
 void *platform_contiguous_alloc(unsigned long size, unsigned long alignment,
