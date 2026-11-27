@@ -44,42 +44,6 @@ floor is added after it. composite puts the frame together, in Raster's
 form: the diffuse light by the base colour less the specular's share, the
 specular light, the emissive light. */
 
-//@common" and "//@pass <name>").
-
-The path tracer reads the scene the bake was made from, by the bake's own
-functions, so that what it traces and what the bake holds are one
-estimator's: nothing is counted twice, and its reference (the pass
-"reference") is that estimator unbiased, with no bake, at every pixel.
-
-At each opaque pixel of the G-buffer (raster primary visibility):
-
-  the sun: one ray toward a point of its disc within settings.x world units
-    of the eye (and at every object's pixel), else the baked sun mask (the
-    level's);
-  the domes: one direction of each one's cone, its shadow traced (the
-    bake's domes_at);
-  the lamps (the emitting triangles), the fixtures and the dynamic lights:
-    resampled importance (RIS) over candidates whose lamps come from the
-    light-importance grid (the bake's lamp_pick: its cell's seen and near
-    lists, the rest by power), the target each one's unshadowed diffuse and
-    specular light at the pixel, one kept and its shadow traced;
-  the sky's ambient floor (the units' rig): a constant, as the bake has it;
-  the indirect light: the bake's indirect layer at the pixel ("performance"
-    where the level has its texel), else one bounce, its hit lit from the
-    bake (the hit's texel or the irradiance volume, the sun there by the
-    mask or the volume's visibility, its glow), the sky's domes where it
-    leaves;
-  the reflections: below a roughness, one GGX ray (the visible normals'
-    distribution) whose hit is lit from the bake as the bounce's; above
-    it, the bake's reflection probes.
-
-The noisy parts (the direct light, the traced indirect light, the traced
-reflections, the sun's visibility) go through the denoiser (temporal, fix,
-atrous); the rest (the floor, the bake's indirect light at the pixel, the
-probes' reflections) is added after it. composite puts the frame together,
-in Raster's form: the diffuse light by the base colour less the specular's
-share, the specular light, the emissive light. */
-
 //@common
 #extension GL_KHR_shader_subgroup_arithmetic : require
 
