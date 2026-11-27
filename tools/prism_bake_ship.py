@@ -466,7 +466,10 @@ def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None,
                 raise BakeError(f"{file}: no LYRB record says which world it was baked from")
             if world == "stock" and not stock:
                 raise BakeError(f"{file}: a bake of the remodel, exported as the stock world's")
-            if world == "remodel" and stock:
+            # (a BSP with no lightmap tile, its light the volume's and the probes' alone, has no texel to say
+            # it saw the remodel, and its LYRB says stock however it was baked: its key says its world, variant 1
+            # and the enhanced world_id, checked below)
+            if world == "remodel" and stock and any(r["type"] == fourcc("ATLS") for r in records):
                 raise BakeError(f"{file}: a bake of the stock world (its LYRB record), exported as the remodel's")
             if header["variant"] != (0 if world == "stock" else 1):
                 raise BakeError(f"{file}: its key's variant is {header['variant']}, not the {world} world's")
@@ -495,7 +498,7 @@ def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None,
                 "world": world, "map": folder.name, "bsp": index, "of": count, "source": file, "data": data,
                 "file": f"{world}/{folder.name}/{file.name}", "size": len(data),
                 "sha256": hashlib.sha256(data).hexdigest(), "header": header, "records": len(records),
-                "key": manifest_key(header, RIG, stock, note["tags"].get(index)),
+                "key": manifest_key(header, RIG, world == "stock", note["tags"].get(index)),
             })
             if walk_summary is not None:
                 entries[-1]["reach"] = walk_summary

@@ -228,6 +228,20 @@ def test_export_refuses_a_stock_bake_as_the_remodel(tmp_path):
     assert not (tmp_path / "shipped").exists()
 
 
+def test_a_bsp_with_no_lightmap_tile_ships_as_the_remodel_by_its_key(tmp_path):
+    """a BSP whose bake has no lightmap tile (its light the volume's and the probes' alone) has no texel to say it saw
+    the remodel and its LYRB says stock: its key (variant 1, the enhanced world_id) says its world"""
+    kinds = ("PLAN", "LYRB", "VOLB", "VOLY", "PROB", "DONE")
+    folder = _folder(tmp_path, maps=("b30",), stock=True, kinds=kinds, variant=1,
+                     world_id=bytes([0xE5]) * 32)
+    entries = ship.export(folder, "remodel", tmp_path / "shipped", None, "max", None)
+    assert [e["key"].split(" geo:")[1][:8] for e in entries] == ["prsx:e5e", "prsx:e5e"]
+    # (with a tile, the stock LYRB is the stock world's bake: refused)
+    folder = _folder(tmp_path / "t", maps=("b30",), stock=True, variant=1, world_id=bytes([0xE5]) * 32)
+    with pytest.raises(ship.BakeError, match="stock world .*exported as the remodel"):
+        ship.export(folder, "remodel", tmp_path / "shipped2", None, "max", None)
+
+
 def test_rig_is_always_units(tmp_path):
     """no --rig: every key says units, and a note of a bake made with the fitted rig is refused"""
     folder = _folder(tmp_path, maps=("b30",))
