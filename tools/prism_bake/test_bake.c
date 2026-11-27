@@ -374,6 +374,37 @@ static void test_reach(void)
 			!walk_at(&reach, 5.2f, 8.6f, 0.3f) && !walk_at(&reach, 5.1f, 5.1f, 0.0f), "reach_water",
 			"the walk goes under the water, or not to the floors above it");
 		prism_bake_reach_free(&reach);
+		parameters.water_planes = NULL;
+		parameters.water_plane_count = 0;
+	}
+
+	/* the walk stopped (parameters.cancel): another BSP's inputs replaced
+	its own, and the render thread, which joins the walk's thread there, must
+	not wait out the whole walk (d40's BSP 8's, 696 s: the game stopped at
+	the switch from BSP 9 to 0). Asked before it starts, the build stops at
+	once, whatever the flood still had to do; a flag left at 0 changes
+	nothing */
+	{
+		int cancel = 1;
+		size_t walked;
+
+		seeds[0].position[0] = 5.1f;
+		seeds[0].position[1] = 5.1f;
+		seeds[0].position[2] = 0.3f;
+		parameters.flight = 1;
+		parameters.cancel = &cancel;
+		check(prism_bake_reach_build(&reach, &bsp, seeds, 1, &parameters) == PRISM_BAKE_REACH_CANCELLED,
+			"reach_cancelled", "a walk asked to stop is not stopped");
+		check(reach.walk_count <= 1 && reach.camera_count == 0 && reach.flight_count == 0, "reach_cancelled_at_once",
+			"a walk asked to stop before it starts floods on");
+		prism_bake_reach_free(&reach);
+		cancel = 0;
+		check(!prism_bake_reach_build(&reach, &bsp, seeds, 1, &parameters), "reach_cancel_unset", "out of memory");
+		walked = reach.walk_count;
+		check(walked > 1000 && walk_at(&reach, 9.6f, 0.4f, 0) && reach.flight_count > 0, "reach_cancel_unset_whole",
+			"a walk with its stop flag at 0 is not whole");
+		prism_bake_reach_free(&reach);
+		parameters.cancel = NULL;
 	}
 }
 

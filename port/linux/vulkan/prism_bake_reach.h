@@ -144,6 +144,10 @@ struct prism_bake_reach_parameters
 	int32_t water_plane_count;
 	size_t maximum_walk; /* floors before the walk stops (0: no limit) */
 	size_t maximum_flight; /* flight cells before the flight stops (0: no limit) */
+	/* (non-zero while the walk is still wanted: another thread setting it
+	stops the build within milliseconds, prism_bake_reach_build returning
+	PRISM_BAKE_REACH_CANCELLED; NULL never stopped) */
+	int const *cancel;
 };
 
 struct prism_bake_reach
@@ -159,7 +163,11 @@ struct prism_bake_reach
 /* the defaults: the cyborg's measures, generous where a guess is needed */
 void prism_bake_reach_defaults(struct prism_bake_reach_parameters *parameters);
 
-/* floods the reachable space from the seeds: 0, or -1 out of memory */
+/* prism_bake_reach_build's return when parameters.cancel was set */
+#define PRISM_BAKE_REACH_CANCELLED (-2)
+
+/* floods the reachable space from the seeds: 0, -1 out of memory, or
+PRISM_BAKE_REACH_CANCELLED (what was walked is kept, to be freed) */
 int prism_bake_reach_build(struct prism_bake_reach *reach, struct prism_bake_bsp3d const *bsp,
 	struct prism_bake_seed const *seeds, size_t seed_count, struct prism_bake_reach_parameters const *parameters);
 void prism_bake_reach_free(struct prism_bake_reach *reach);

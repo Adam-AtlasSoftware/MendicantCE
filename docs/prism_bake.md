@@ -592,6 +592,11 @@ short or grown) where its inputs' hash is the BSP's own, so a BSP's shipped ligh
 (d40's eighth BSP's walk is 696 s on an RTX 2060 desktop's CPU, 1206 s on the farm's: its light now in use 5 to 6 s
 after the BSP's load, a30's first BSP's 8 s against 52). Where the shipped bake is refused all the same, the reach is
 walked here and the key made again from it.
+A walk still running when another BSP's inputs begin (or the same BSP's new scene's) is stopped, not waited for: the
+render thread joins the walk's thread there, and waited out its whole walk before, so with no shipped bake d40's
+switch from its ninth BSP (nothing to bake) back to its first stopped the game for the rest of the eighth BSP's
+696 s walk, in Enhanced and Path Traced alike (`prism bake: bsp <n>'s reach stopped after <s> s: its inputs were
+replaced`; a BSP entered again walks again).
 
 ## The settings
 
