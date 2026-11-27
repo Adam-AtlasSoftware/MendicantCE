@@ -1449,7 +1449,12 @@ static void blob_put(
 	void const *data,
 	unsigned long size)
 {
-	if (blob->failed)
+	/* (an empty array puts nothing: its pointer may be NULL, as a BSP's
+	fighters, replaced placements and alpha maps are when it has none, and
+	the game's memcpy asserts on a NULL source; so is the blob's own before
+	its first put. A load and each BSP switch under Enhanced lighting failed
+	cseries.c's assert twice) */
+	if (blob->failed || !size)
 	{
 		return;
 	}
@@ -1588,7 +1593,7 @@ static void control_fill(
 	bake->flags = (prism_bake.foreground ? XGPU_BAKE_FLAG_FOREGROUND : 0) |
 		(prism_bake_menus_up() ? XGPU_BAKE_FLAG_MENU : 0) |
 		(prism_bake.reach_ended ? XGPU_BAKE_FLAG_REACH : 0) |
-		(prism_world_enhanced() ? XGPU_BAKE_FLAG_REMODEL : 0) |
+		(prism_world_source_bsp_enhanced(global_structure_bsp_index_get()) ? XGPU_BAKE_FLAG_REMODEL : 0) |
 		(prism_scene_static_in_play() ? XGPU_BAKE_FLAG_IN_PLAY : 0);
 	bake->map_checksum = (uint32_t)cache_files_get_checksum();
 	bake->bsp_index = global_structure_bsp_index_get();
@@ -1615,6 +1620,10 @@ static void control_fill(
 	classic where the map's classic_world_id is known: the bake's key holds
 	it, so a bake is used only for the world it was made from) */
 	prism_world_source_world_id((short)bake->bsp_index, bake->world_id);
+	/* (the world the BSP is drawn in, not the map's rung: a BSP of rung 1
+	drawn classic, which has no enhanced geometry or could not make it, is
+	keyed by its classic world_id above and its pack is the shipped classic
+	one, stock/<map>/bsp<n>.pbk, never remodel/'s) */
 }
 
 /* the reach's inputs copied from the BSP drawn once its scene is whole,
@@ -1755,7 +1764,7 @@ void prism_bake_frame(
 	pack not this geometry's or damaged: a player bakes nothing, so it is
 	paused there, or it failed; the map falls back to its classic geometry,
 	prism_world_source.c) */
-	if (prism_world_enhanced() && !prism_deferred_pathtraced())
+	if (prism_world_source_bsp_enhanced(global_structure_bsp_index_get()) && !prism_deferred_pathtraced())
 	{
 		unsigned long state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 

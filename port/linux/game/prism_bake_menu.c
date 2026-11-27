@@ -310,7 +310,7 @@ static void geometry_token(char const *tag, char *token, unsigned long size)
 		if (name[k] == '\\')
 			name[k] = '/';
 	}
-	if (name[0] && drawn && prism_world_enhanced())
+	if (name[0] && drawn && prism_world_source_bsp_enhanced(global_structure_bsp_index_get()))
 	{
 		char drawn_name[160], hex[65];
 		unsigned char id[32];

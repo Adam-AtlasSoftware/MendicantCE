@@ -57,7 +57,18 @@ under Path Traced, back and forth as the lighting changes). A pack the ladder fo
 whole (its manifest names the BSP's world_id but its own key is another geometry's, or the file is damaged: the
 player's bake of the BSP is then paused or failed) drops Enhanced lighting to rung 2 for the rest of the map, with a
 warning in the log (`prism_world_source_bake_refused`, from `prism_bake_frame`); Path Traced still draws the enhanced
-geometry. The ladder reads the packs and manifests by their host paths, as the renderer and the menu do (an absolute
+geometry. The renderer then lets go of the BSP's bake at once (`bake_world_changed`: the key's variant or world_id
+is not the control's), so the BSP's classic pack (`prism_bake_shipped/stock/<map>/bsp<n>.pbk`) is loaded then, not
+at the next BSP. The world is the BSP's, not the map's: a BSP of a rung 1 map drawn classic (no enhanced geometry in
+the sidecar, d40's space; or its enhanced geometry could not be made, out of memory or refused by its checks,
+`prism_world_source_geometry_failed`, for the rest of the map) is keyed by its classic world_id and lit by its classic
+pack (`prism_world_source_bsp_enhanced` sets `XGPU_BAKE_FLAG_REMODEL`, which picks the pack's folder). The enhanced
+geometry's block, up to 176 MB of the 512 MB contiguous window, is placed from the bottom of its free room
+(`platform_contiguous_alloc_low`, `port/linux/src/contiguous_fit.h`), apart from the textures the window places from the
+top as a BSP plays: placed from the top, they sat right below it and the next BSP's larger block did not fit (b30's
+BSP 1, 120708 KB after BSP 0's 109328 KB: out of memory, its enhanced geometry and lighting refused). The log's line
+for each BSP's geometry gives the window's use, the most it has held and its largest free run.
+The ladder reads the packs and manifests by their host paths, as the renderer and the menu do (an absolute
 `display.bake_shipped_folder` was read under the data folder). The log says what is drawn each time it changes
 (`prism world: <map>: drawn now: ... geometry, ... lighting (rung n)`).
 

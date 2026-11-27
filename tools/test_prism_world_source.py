@@ -214,7 +214,8 @@ def test_a_pack_the_renderer_does_not_load_drops_the_map_to_rung_2():
     Path Traced, which needs none"""
     bake = _code("port/linux/game/prism_bake.c")
     frame = _function(bake, "void prism_bake_frame(")
-    check = frame[frame.index("if (prism_world_enhanced() && !prism_deferred_pathtraced())"):
+    check = frame[frame.index("if (prism_world_source_bsp_enhanced(global_structure_bsp_index_get()) && "
+                              "!prism_deferred_pathtraced())"):
                   frame.index("if (prism_bake.exit_when_done)")]
     assert "XGPU_BAKE_STATE_PAUSED" in check and "XGPU_BAKE_STATE_FAILED" in check
     assert "XGPU_BAKE_STATUS_BSP) == (long)global_structure_bsp_index_get()" in check
@@ -224,14 +225,15 @@ def test_a_pack_the_renderer_does_not_load_drops_the_map_to_rung_2():
     source = _code("port/linux/game/prism_world_source.c")
     refused = _function(source, "void prism_world_source_bake_refused(")
     assert ("if (!prism_world_enhanced() || !world_source.packs_ok || world_source.unbaked || "
-            "prism_deferred_pathtraced() ||\n\t\t!bsp_has_geometry(bsp_index))") in refused
+            "prism_deferred_pathtraced() ||\n\t\t!bsp_geometry_drawn(bsp_index))") in refused
     assert "warning" in refused and "rung 2" in refused
     assert "world_source.packs_ok = FALSE;" in refused
     # (the packs refused: under Enhanced the geometry is drawn classic at once, and the bake keyed to the classic
     # world; Path Traced, which needs no pack, keeps the enhanced geometry)
     rung = _function(source, "enum prism_world_rung prism_world_rung(void)")
     assert "world_source.packs_ok," in rung
-    assert "if (prism_world_enhanced() && !prism_deferred_pathtraced())" in frame
+    assert "if (prism_world_source_bsp_enhanced(global_structure_bsp_index_get()) && !prism_deferred_pathtraced())" \
+        in frame
     world_id = _function(source, "void prism_world_source_world_id(")
     assert world_id.index("prism_world_enhanced()") < world_id.index("world_source.classic_ids")
     # (the host's state words this reads: a player's run never bakes, so a BSP without a whole bake is paused)
@@ -267,8 +269,63 @@ def test_a_bsp_without_enhanced_geometry_asks_for_no_enhanced_pack():
     present = _function(source, "static boolean packs_present(")
     assert present.index("if (!bsp_has_geometry(bsp))") < present.index('"%s/bsp%d.pbk"')
     world_id = _function(source, "void prism_world_source_world_id(")
-    assert "if (prism_world_enhanced() && bsp_has_geometry(bsp_index))" in world_id
+    assert "if (prism_world_enhanced() && bsp_geometry_drawn(bsp_index))" in world_id
     assert "world_source.classic_ids[bsp_index]" in world_id
+    drawn = _function(source, "static boolean bsp_geometry_drawn(short bsp)")
+    assert "!world_source.geometry_failed[bsp] && bsp_has_geometry(bsp)" in drawn
+
+
+def test_a_bsp_drawn_classic_under_rung_1_is_lit_by_its_classic_pack():
+    """a BSP of a rung 1 map drawn with its classic geometry (no enhanced geometry in the sidecar, or its enhanced
+    geometry could not be made) is the classic world's: its bake keyed by its classic world_id and its pack looked
+    for among the shipped classic packs (stock/<map>/bsp<n>.pbk: XGPU_BAKE_FLAG_REMODEL off), never remodel/'s, whose
+    key is another world's; and a refused enhanced pack is never blamed on it"""
+    bake = _code("port/linux/game/prism_bake.c")
+    fill = _function(bake, "static void control_fill(")
+    assert ("(prism_world_source_bsp_enhanced(global_structure_bsp_index_get()) ? XGPU_BAKE_FLAG_REMODEL : 0) |"
+            in fill)
+    assert "prism_world_enhanced()" not in fill
+    source = _code("port/linux/game/prism_world_source.c")
+    enhanced = _function(source, "boolean prism_world_source_bsp_enhanced(")
+    assert "return prism_world_enhanced() && bsp_geometry_drawn(bsp_index);" in enhanced
+    menu = _code("port/linux/game/prism_bake_menu.c")
+    token = _function(menu, "static void geometry_token(")
+    assert "prism_world_source_bsp_enhanced(global_structure_bsp_index_get())" in token
+    baker = _code("port/linux/vulkan/xgpu_vulkan_bake.c")
+    choose = _function(baker, "static void file_choose(struct bake_state *b)\n{")
+    assert '(bake.control.flags & XGPU_BAKE_FLAG_REMODEL) ? "remodel" : "stock"' in choose
+
+
+def test_a_bsp_whose_enhanced_geometry_cannot_be_made_stays_classic():
+    """the enhanced geometry not made (out of memory, its file refused by prism_world_geometry.c's checks) leaves the
+    BSP drawn classic, and the world source is told: the BSP is then the classic world's for the rest of the map
+    (its key, its pack), and its geometry is not made again when the lighting changes and it is looked for again,
+    which would draw geometry its key and its light are not of"""
+    geometry = _code("port/linux/game/prism_world_geometry.c")
+    load = _function(geometry, "static void world_geometry_load(")
+    assert load.count("prism_world_source_geometry_failed(bsp_index);") == 2
+    assert load.index("world_geometry_release();") < load.index("prism_world_source_geometry_failed(bsp_index);")
+    source = _code("port/linux/game/prism_world_source.c")
+    failed = _function(source, "void prism_world_source_geometry_failed(")
+    assert "world_source.geometry_failed[bsp_index] = TRUE;" in failed
+    image = _function(source, "boolean prism_world_source_image(")
+    assert "world_source.geometry_failed[bsp_index]" in image
+    choose = _function(source, "static void choose(void)")
+    assert "memset(world_source.geometry_failed, 0, sizeof(world_source.geometry_failed));" in choose
+
+
+def test_the_bake_of_a_world_no_longer_asked_for_is_let_go():
+    """the game's world for the BSP drawn can change with no new scene (an enhanced pack refused drops the map to
+    rung 2 with the BSP's geometry already classic, or a BSP's geometry not made): the renderer lets go of a bake
+    whose key's variant or world_id is not the control's, so that the classic world's bake (its shipped classic pack)
+    is chosen at once, not at the next BSP"""
+    baker = _code("port/linux/vulkan/xgpu_vulkan_bake.c")
+    changed = _function(baker, "static int bake_world_changed(")
+    assert "b->key.variant != ((bake.control.flags & XGPU_BAKE_FLAG_REMODEL) ? 1u : 0u)" in changed
+    assert "memcmp(b->key.world_id, bake.control.world_id, sizeof(b->key.world_id)) != 0" in changed
+    frame = _function(baker, "static void bake_frame(")
+    let_go = frame[frame.index("b->request != bake.control.request || (b->idle && wanted)"):]
+    assert let_go.index("bake_world_changed(b)") < let_go.index("bake_free(b);")
 
 
 def test_path_traced_draws_the_selected_geometry_whatever_the_bakes(tool):
