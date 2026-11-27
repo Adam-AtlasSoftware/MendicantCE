@@ -50,6 +50,11 @@ int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_i
 	struct xgpu_vulkan_image **aux, int *reference);
 /* the frame's end: the water's rays have no frame's job until the next */
 void xgpu_vulkan_pt_water_frame_end(void);
+/* whether the last frame traced took its own history (the same bake's
+scene and generation, the same window, the frames in a row): 0 after a
+frame with no scene, a new scene (the world's geometry changed in play) or
+a gap; the denoiser's plugin drops its own history then (xgpu_vulkan_upscale.c) */
+int xgpu_vulkan_pt_history_kept(void);
 /* the device going away: everything let go of */
 void xgpu_vulkan_pt_shutdown(void);
 

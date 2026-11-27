@@ -391,6 +391,15 @@ static struct
 	int history_valid;
 	uint32_t frame;
 	uint64_t scene_seen;
+	/* the bake's scene's generation the last frame traced (a new set's scene,
+	the world's geometry changed in play, never takes the history of
+	another's, whatever its address), and whether the last frame traced took
+	its history (xgpu_vulkan_pt_history_kept: the denoiser's plugin drops
+	its own where this did) */
+	uint32_t generation_seen;
+	int history_kept;
+	/* the scene's generation last logged, + 1 (0 none) */
+	uint32_t generation_logged;
 	uint64_t last_serial;
 	/* the timing: a query pool of TIME_SLOTS frames' STAMPS, each slot's
 	submission (0 free), the means' sums */
@@ -1755,9 +1764,18 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			host_logf(HOST_LOG_INFO, "prism pt: no bake's scene to trace yet: CE's frame until it is made");
 		pt.logged_no_bake = 1;
 		pt.history_valid = 0;
+		pt.history_kept = 0;
 		return NULL;
 	}
 	pt.logged_no_bake = 0;
+	/* (each scene traced named once: a new set's, the world's geometry
+	changed in play, its tiles planned telling which world it is) */
+	if (!pt.generation_logged || lookup.generation + 1u != pt.generation_logged)
+	{
+		host_logf(HOST_LOG_INFO, "prism pt: tracing the bake's scene of set %u (%u tiles planned, %s)",
+			lookup.generation, lookup.tiles_planned, lookup.complete ? "a whole bake" : "no whole bake: its own bounce");
+		pt.generation_logged = lookup.generation + 1u;
+	}
 	scene = lookup.scene;
 	description = xgpu_vulkan_image_description(light);
 	denoiser_off = (phase & XGPU_GBUFFER_PHASE_PT_DENOISER_OFF) != 0;
@@ -1831,7 +1849,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	the same size, from the same bake's scene; a frame is a submission or a
 	few, so a gap of more than 16 is frames this mode did not draw) */
 	if (pt.history_valid && (view->flags & XGPU_SCENE_VIEW_HISTORY) && scene == pt.scene_seen &&
-		pt.last_serial + 16 >= xgpu_vulkan_serial())
+		lookup.generation == pt.generation_seen && pt.last_serial + 16 >= xgpu_vulkan_serial())
 		flags |= FLAG_HISTORY;
 	reference = reference_take(view, scene, description->width, description->height);
 	if (reference)
@@ -2569,6 +2587,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		pt.time_serial[time_slot] = xgpu_vulkan_serial();
 	pt.last_serial = xgpu_vulkan_serial();
 	pt.scene_seen = scene;
+	pt.generation_seen = lookup.generation;
+	pt.history_kept = (flags & FLAG_HISTORY) != 0;
 	if (!pt.logged_first)
 	{
 		pt.logged_first = 1;
@@ -2683,6 +2703,11 @@ int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_i
 void xgpu_vulkan_pt_water_frame_end(void)
 {
 	pt.water_job = 0;
+}
+
+int xgpu_vulkan_pt_history_kept(void)
+{
+	return pt.history_kept;
 }
 
 void xgpu_vulkan_pt_shutdown(void)

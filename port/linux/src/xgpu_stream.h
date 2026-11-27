@@ -2954,8 +2954,14 @@ enum
 	/* port: the set was begun again in play (a setting changed: the world
 	geometry, the lighting): nothing is baked for it; the bake of its key is
 	loaded where there is a whole one, else the bake drawn is kept until the
-	next load (prism_scene_static_in_play, xgpu_vulkan_bake.c) */
+	next load (prism_scene_static_in_play, xgpu_vulkan_bake.c); except
+	under XGPU_BAKE_FLAG_PATH_TRACED */
 	XGPU_BAKE_FLAG_IN_PLAY = 16,
+	/* the lighting is Path Traced: its geometry never depends on a bake, so
+	a set begun again in play with no whole bake of its key is never drawn
+	with the bake drawn before it (another geometry's scene): its own scene
+	is made, nothing baked (a player's paused bake), and traced as it is */
+	XGPU_BAKE_FLAG_PATH_TRACED = 32,
 };
 /* the bake file's maker (xgpu_vulkan_bake.c's BAKE_VERSION: a change makes
 every bake stale), which the game's note of the BSPs baked holds too

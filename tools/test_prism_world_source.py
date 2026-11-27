@@ -56,20 +56,26 @@ def test_geometry_comes_from_the_sidecar_alone():
     source = re.sub(r"/\*.*?\*/", "", _source("prism_world_source.c"), flags=re.S)
     assert '#define SIDECAR_FOLDER "maps_enhanced"' in source
     assert "prism_geom_decode(" in source and "prsx_section_read(" in source
-    # (the sidecar opened only past the Classic check, and held until the map's tags go)
-    assert source.index("prism_world_ladder(lighting_classic()") < source.index("prsx_open(")
+    # (the sidecar opened only by lit_choose, which choose calls only under Enhanced or Path Traced, and held until
+    # the map's tags go)
+    assert "prsx_open(" in _function(source, "static void lit_choose(char const *map)")
+    choose = _function(source, "static void choose(void)")
+    assert choose.index("prism_world_ladder(lighting_classic()") < choose.index("lit_choose(map);")
+    assert "if (world_source.real && !world_source.lit_chosen && !lighting_classic())\n\t\tlit_choose(map);" in choose
     assert "prism_world_source_map_unloaded();" in code
 
 
 def test_classic_lighting_never_draws_it():
-    """the enhanced geometry is drawn only while the map is latched to rung 1 and the lighting is not Classic,
-    asked every frame (a change to Classic in a map draws the map's own at once)"""
+    """the enhanced geometry is drawn only where the ladder, asked every frame of the map's state and the frame's
+    lighting, is rung 1 (a change to Classic in a map draws the map's own at once)"""
     source = re.sub(r"/\*.*?\*/", "", _source("prism_world_source.c"), flags=re.S)
-    body = source[source.index("boolean prism_world_enhanced(void)"):]
-    body = body[:body.index("}")]
-    assert "PRISM_WORLD_RUNG_ENHANCED" in body and "!lighting_classic()" in body and "!world_source.refused" in body
+    body = _function(source, "boolean prism_world_enhanced(void)")
+    assert "return prism_world_rung() == PRISM_WORLD_RUNG_ENHANCED;" in body
+    rung = _function(source, "enum prism_world_rung prism_world_rung(void)")
     # (and, each frame, its packs, the farm's override or Path Traced: Enhanced without the packs draws classic)
-    assert "(world_source.packs_ok || world_source.unbaked || prism_deferred_pathtraced())" in body
+    assert re.search(r"prism_world_ladder\(lighting_classic\(\), world_source\.geometry_wanted,\s*"
+                     r"world_source\.sidecar_ok && world_source\.open && !world_source\.refused, world_source\.packs_ok,"
+                     r"\s*world_source\.unbaked, prism_deferred_pathtraced\(\)\)", rung)
     geometry = re.sub(r"/\*.*?\*/", "", _source("prism_world_geometry.c"), flags=re.S)
     assert "boolean enabled = prism_world_enhanced();" in geometry
     assert 'config_string("display.prism_world_geometry")' not in geometry
@@ -222,8 +228,8 @@ def test_a_pack_the_renderer_does_not_load_drops_the_map_to_rung_2():
     assert "world_source.packs_ok = FALSE;" in refused
     # (the packs refused: under Enhanced the geometry is drawn classic at once, and the bake keyed to the classic
     # world; Path Traced, which needs no pack, keeps the enhanced geometry)
-    enhanced = _function(source, "boolean prism_world_enhanced(void)")
-    assert "world_source.packs_ok ||" in enhanced
+    rung = _function(source, "enum prism_world_rung prism_world_rung(void)")
+    assert "world_source.packs_ok," in rung
     assert "if (prism_world_enhanced() && !prism_deferred_pathtraced())" in frame
     world_id = _function(source, "void prism_world_source_world_id(")
     assert world_id.index("prism_world_enhanced()") < world_id.index("world_source.classic_ids")
@@ -248,9 +254,7 @@ def test_path_traced_takes_the_enhanced_geometry_without_its_packs():
     ladder = _function(identity, "int prism_world_ladder(")
     assert "if (geometry_enhanced && sidecar_ok && (packs_ok || unbaked || path_traced))" in ladder
     source = _code("port/linux/game/prism_world_source.c")
-    assert re.search(r"prism_world_ladder\(FALSE, TRUE, TRUE, world_source\.packs_ok, world_source\.unbaked,\s*"
-                     r"prism_deferred_pathtraced\(\)\) != 1", source)
-    assert "Path Traced: enhanced geometry without its lightmaps" in source
+    assert "Path Traced draws it (rung 1), traced as it is" in source
 
 
 def test_a_bsp_without_enhanced_geometry_asks_for_no_enhanced_pack():
@@ -264,3 +268,85 @@ def test_a_bsp_without_enhanced_geometry_asks_for_no_enhanced_pack():
     world_id = _function(source, "void prism_world_source_world_id(")
     assert "if (prism_world_enhanced() && bsp_has_geometry(bsp_index))" in world_id
     assert "world_source.classic_ids[bsp_index]" in world_id
+
+
+def test_path_traced_draws_the_selected_geometry_whatever_the_bakes(tool):
+    """Path Traced's geometry and lighting never depend on a bake: with the sidecar verified, World Geometry Enhanced
+    is rung 1 under Path Traced whatever the packs and debug.world_unbaked say, and World Geometry Classic (or no
+    sidecar) rung 2; Enhanced and Classic keep their rules"""
+    table = tool.ladder()
+    for geometry in (0, 1):
+        for sidecar in (0, 1):
+            traced = {table[(0, geometry, sidecar, packs, unbaked, 1)] for packs in (0, 1) for unbaked in (0, 1)}
+            assert traced == {1 if geometry and sidecar else 2}, (geometry, sidecar, traced)
+    assert table[(0, 1, 1, 0, 0, 0)] == 2 and table[(0, 1, 1, 1, 0, 0)] == 1
+    assert {rung for key, rung in table.items() if key[0]} == {3}
+
+
+def test_the_ladder_is_asked_each_frame_of_a_state_chosen_once():
+    """a map's state is chosen once (World Geometry as it loads, the sidecar held whatever the packs), its lighting
+    read each frame: a map loaded under Enhanced without its packs keeps the sidecar, so a change to Path Traced in it
+    draws the enhanced geometry; a map loaded under Classic chooses the rest at its first change from Classic; a pack
+    the renderer refused under Enhanced leaves Path Traced's geometry alone"""
+    source = _code("port/linux/game/prism_world_source.c")
+    lit = _function(source, "static void lit_choose(char const *map)")
+    # (no rung decided here, and the sidecar never closed for the packs' sake)
+    assert "prism_world_ladder(" not in lit
+    after = lit[lit.index("world_source.packs_ok = packs_present("):]
+    assert "sidecar_close()" not in after and "world_source.sidecar_ok = TRUE;" in lit
+    assert lit.index("world_source.sidecar_ok = TRUE;") < lit.index("world_source.packs_ok = packs_present(")
+    assert "if (!world_source.geometry_wanted)" in lit and "prism_world_geometry_wanted()" not in lit
+    choose = _function(source, "static void choose(void)")
+    assert "world_source.geometry_wanted = prism_world_geometry_wanted();" in choose
+    assert choose.index("world_source.geometry_wanted =") < choose.index("prism_world_ladder(lighting_classic()")
+    # (the state forgotten with the map's tags)
+    unloaded = _function(source, "void prism_world_source_map_unloaded(void)")
+    for field in ("chosen", "real", "lit_chosen", "sidecar_ok", "refused"):
+        assert "world_source.%s = FALSE;" % field in unloaded, field
+    assert "sidecar_close();" in unloaded
+    # (what is drawn logged as it changes: the runs' record of each switch)
+    rung = _function(source, "enum prism_world_rung prism_world_rung(void)")
+    assert "drawn now: %s geometry, %s lighting (rung %d)" in rung
+    # (the classic world's bake key only once its classic_world_id has been looked for)
+    world_id = _function(source, "void prism_world_source_world_id(")
+    assert "world_source.classic_known && world_source.lit_chosen" in world_id
+
+
+def test_path_traced_never_traces_another_geometrys_bake():
+    """a set begun again in play (the geometry swapped by a change of lighting) under Path Traced with no whole bake
+    of its key makes its own scene, nothing baked, never keeps the bake drawn before it (another geometry's scene,
+    which the path tracer would trace under the new geometry); a hold made under another lighting is let go; under
+    Enhanced, as it was"""
+    stream = (ROOT / "port/linux/src/xgpu_stream.h").read_text()
+    assert "XGPU_BAKE_FLAG_PATH_TRACED = 32," in stream
+    bake = _code("port/linux/game/prism_bake.c")
+    fill = _function(bake, "static void control_fill(")
+    assert "(prism_deferred_pathtraced() ? XGPU_BAKE_FLAG_PATH_TRACED : 0)" in fill
+    baker = _code("port/linux/vulkan/xgpu_vulkan_bake.c")
+    begin = _function(baker, "static struct bake_state *bake_begin(")
+    branch = begin[begin.index("if (in_play)"):begin.index("b->started = now_seconds();")]
+    assert branch.index("if (!b->chosen && (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED))") < \
+        branch.index("else if (!b->chosen)") < branch.index("*held = 1;")
+    pt_part = branch[branch.index("XGPU_BAKE_FLAG_PATH_TRACED"):branch.index("else if (!b->chosen)")]
+    assert "return NULL" not in pt_part and "bake_free" not in pt_part
+    frame = _function(baker, "static void bake_frame(void)")
+    assert "path_traced = (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED) != 0;" in frame
+    assert re.search(r"if \(path_traced && bake\.held_generation\)\s*\n\s*bake\.held_generation = 0;", frame)
+    # (still nothing baked in play)
+    assert "&& !in_play && bake_allowed();" in frame
+    # (and the path tracer never traces a bake of another set than the game's now: while the set's own is begun, the
+    # bake drawn before it is kept, and its scene is another geometry's)
+    lookup = _function(baker, "int xgpu_vulkan_bake_lookup(")
+    assert re.search(r"if \(b->generation != bake\.control\.generation\)\s*\n\s*return 0;", lookup)
+    assert lookup.index("bake_traceable(b)") < lookup.index("b->generation != bake.control.generation")
+
+
+def test_path_traced_history_never_crosses_a_new_scene():
+    """the path tracer's history and the denoiser plugin's are dropped where the bake's scene is another (a new set's
+    generation, the world's geometry changed in play), not only where its address differs"""
+    pt = _code("port/linux/vulkan/xgpu_vulkan_pt.c")
+    assert re.search(r"scene == pt\.scene_seen &&\s*lookup\.generation == pt\.generation_seen &&", pt)
+    assert "pt.generation_seen = lookup.generation;" in pt
+    assert "pt.history_kept = (flags & FLAG_HISTORY) != 0;" in pt
+    upscale = _code("port/linux/vulkan/xgpu_vulkan_upscale.c")
+    assert "plugin_upscale(PLUGIN_DENOISER, commands, record, reset || !xgpu_vulkan_pt_history_kept()," in upscale

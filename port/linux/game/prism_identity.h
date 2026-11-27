@@ -87,18 +87,18 @@ void prism_world_id_enhanced(const struct prsx *prsx, uint16_t bsp, unsigned cha
 int prism_world_id_counts(const struct prsx_entry *entry, uint16_t bsp);
 
 /* ---------- the map's world (prism_world_source.c's ladder, PLAN_FINAL.md
-section 1.2), as a rule of its inputs alone so that the tests run it:
-1 enhanced geometry lit from the enhanced packs, 2 classic geometry lit by
-Enhanced or Path Traced, 3 classic geometry and Classic lighting. Classic
-lighting is rung 3 whatever else holds (Classic's lightmaps are never drawn
-on the enhanced geometry); rung 1 needs the geometry asked for, the sidecar
-opened and verified, and every BSP's enhanced pack (or the farm's unbaked
-override), except under Path Traced, which traces the enhanced world's own
-scene and reads no lightmap of it (the bake's light where it has it, else
-its own bounce): there the enhanced geometry needs no pack. Enhanced
-lighting without the packs is rung 2 (prism_world_enhanced asks again each
-frame: a change to Enhanced in the middle of a map without them draws the
-classic geometry at once) */
+section 1.2), as a rule of its inputs alone so that the tests run it, asked
+each frame of the map's state and the frame's lighting (so a change of
+lighting in a map draws what a load under it would):
+1 enhanced geometry, 2 classic geometry lit by Enhanced or Path Traced,
+3 classic geometry and Classic lighting. Classic lighting is rung 3
+whatever else holds (Classic's lightmaps are never drawn on the enhanced
+geometry); rung 1 needs the geometry asked for and the sidecar opened and
+verified, and then, under Path Traced, nothing else: Path Traced's geometry
+never depends on a bake (it traces the enhanced world's own scene, lit by
+the bake's light where it has it, else its own bounce); under Enhanced,
+every BSP's enhanced pack (or the farm's unbaked override): Enhanced
+lighting without them is rung 2 */
 int prism_world_ladder(int lighting_classic, int geometry_enhanced, int sidecar_ok, int packs_ok, int unbaked,
 	int path_traced);
 

@@ -27,35 +27,49 @@ vertices are rounded as the game's compressor rounds them, so the GPU draws the 
 positions move onto the 1/1024 world unit grid (b30: at most 0.005 world units, the snapped stock positions
 included).
 
-Which world a map gets is decided once, at its first BSP's load, and latched for the map (`prism_world_ladder`):
+Which world a map draws is the ladder (`prism_world_ladder`) of the map's state and the frame's lighting, asked every
+frame. The map's state is chosen once: World Geometry as the map loads (a change applies at the next load), and, at
+its first frame under Enhanced or Path Traced (the load, or the first change from Classic in the map), its
+`classic_world_id`, its sidecar opened and verified, held for the rest of the map whatever the lighting and the
+packs, and its enhanced packs looked for. So every change of lighting in a map, in every direction, draws at once
+what a load under that lighting would:
 
 | Rung | Geometry | Lighting | When |
 |---|---|---|---|
-| 1 | Enhanced (the sidecar) | Enhanced or Path Traced, from the enhanced packs; Path Traced also without them | World Geometry Enhanced, the sidecar verified, and every BSP's enhanced pack shipped (`prism_bake_shipped/remodel/<map>/bsp<n>.pbk`, named in its `manifest.txt` with `geo:prsx:<world_id>`), or the lighting Path Traced |
+| 1 | Enhanced (the sidecar) | Path Traced | World Geometry Enhanced and the sidecar verified: nothing else, never a bake's or a pack's state |
+| 1 | Enhanced (the sidecar) | Enhanced, from the enhanced packs | World Geometry Enhanced, the sidecar verified, and every BSP's enhanced pack shipped (`prism_bake_shipped/remodel/<map>/bsp<n>.pbk`, named in its `manifest.txt` with `geo:prsx:<world_id>`) and not refused by the renderer |
 | 2 | Classic | Enhanced or Path Traced, from the classic packs | otherwise |
 | 3 | Classic | Classic | Classic lighting |
 
-Path Traced needs no pack for the enhanced geometry: it reads no lightmap of it, but traces the bake's scene, which
-the renderer makes for the BSP whether or not a pack is loaded (a player's bake is then paused, nothing baked), lit by
-the bake's light where it has it and by its own bounce else. Enhanced lighting does need them: a map chosen under Path
-Traced without them draws its classic geometry the moment the lighting is Enhanced (`prism_world_enhanced` asks each
-frame), and the enhanced again under Path Traced. A pack the ladder found but the renderer did not load whole (its
-manifest names the BSP's world_id but its own key is another geometry's, or the file is damaged: the player's bake of
-the BSP is then paused or failed) drops Enhanced lighting to rung 2 for the rest of the map, with a warning in the log
-(`prism_world_source_bake_refused`, from `prism_bake_frame`). The ladder reads the packs and manifests by their host
-paths, as the renderer and the menu do (an absolute `display.bake_shipped_folder` was read under the data folder).
+Path Traced's geometry and lighting never depend on a bake. It reads no lightmap of the enhanced world but traces the
+bake's scene, which the renderer makes for the BSP whether or not a pack is loaded (a player's bake is then paused,
+nothing baked), lit by the bake's light where it has it and by its own bounce else. When the geometry changes in a
+map (a change of lighting to or from Path Traced swaps it), SCENE_STATIC's set is begun again in play; under Path
+Traced (`XGPU_BAKE_FLAG_PATH_TRACED`) a set with no whole bake of its key makes its own scene, nothing baked, and is
+never drawn with the bake drawn before it (another geometry's scene; Enhanced keeps that hold, below), and the path
+tracer never traces a bake of another set than the game's now (`xgpu_vulkan_bake_lookup`), so while the set's own
+scene is made it shows CE's frame of the geometry drawn, never the old scene. The path tracer's history and the denoiser plugin's are dropped across a new scene (its generation, not only its address).
 
-Classic lighting never opens a sidecar and never draws the enhanced geometry (its lightmaps on the remodel are the
-rock bug); switching to Classic in a map draws the map's own geometry at once. A World Geometry change applies at the
-next map load. Each BSP's enhanced `world_id` (`prism_identity.h`) is computed from the opened sidecar's GEOM and LMUV
+Enhanced lighting needs the packs: a map without them draws its classic geometry under Enhanced (and the enhanced
+under Path Traced, back and forth as the lighting changes). A pack the ladder found but the renderer did not load
+whole (its manifest names the BSP's world_id but its own key is another geometry's, or the file is damaged: the
+player's bake of the BSP is then paused or failed) drops Enhanced lighting to rung 2 for the rest of the map, with a
+warning in the log (`prism_world_source_bake_refused`, from `prism_bake_frame`); Path Traced still draws the enhanced
+geometry. The ladder reads the packs and manifests by their host paths, as the renderer and the menu do (an absolute
+`display.bake_shipped_folder` was read under the data folder). The log says what is drawn each time it changes
+(`prism world: <map>: drawn now: ... geometry, ... lighting (rung n)`).
+
+Classic lighting never draws the enhanced geometry (its lightmaps on the remodel are the rock bug), and a map loaded
+under it opens no sidecar until the lighting changes; switching to Classic in a map draws the map's own geometry at
+once. Each BSP's enhanced `world_id` (`prism_identity.h`) is computed from the opened sidecar's GEOM and LMUV
 sections and sent with the bake's control (`xgpu_stream_prism_bake.world_id`); the baker keys the bake to it (its key's
 world_id, `docs/prism_bake.md`, "The frozen bake"), so an enhanced bake is used only for the geometry it was made from.
 The classic world's bakes are keyed alike, to the classic world_id of the map's `classic_world_id` (the farm's hash of
 the map version's bake inputs, `tools/geopatch/classic_world.py`), which the game looks up by the player's map's
 `base_id` in the shipped manifests (`world <map> <base_id> <classic_world_id>`, until M7's signed manifest); a
 sidecar whose header names another `classic_world_id` than the map's is refused (rung 2). `debug.world_unbaked`
-(`HALO_WORLD_UNBAKED=1`) takes rung 1 without the packs: the farm's (to bake them) and the developers', never a
-player's.
+(`HALO_WORLD_UNBAKED=1`) takes rung 1 under Enhanced without the packs: the farm's (to bake them) and the developers',
+never a player's.
 
 ### The enhanced world's own lightmap layout (LMUV v2, geopatch M4)
 
@@ -143,7 +157,8 @@ remodel's, not stock begun again a frame later.
 
 A set of SCENE_STATIC begun again for the BSP the last set was of (`display.prism_world_geometry` or the lighting
 changed in play) is marked `XGPU_BAKE_FLAG_IN_PLAY`. Nothing is baked for it: the host loads the whole bake of its
-key if the folder has one, else keeps the bake drawn until the next load, and logs which. Players never bake.
+key if the folder has one, else keeps the bake drawn until the next load (under Path Traced, else makes the set's own
+scene, unbaked: above), and logs which. Players never bake.
 
 ## Seeing it
 

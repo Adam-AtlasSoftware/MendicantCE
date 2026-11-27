@@ -41,6 +41,7 @@ in the GENERAL layout.
 
 #include "xgpu_vulkan_upscale.h"
 #include "xgpu_vulkan_fsr3.h"
+#include "xgpu_vulkan_pt.h"
 #include "xgpu_vulkan_upscale_shaders.h"
 #include "xgpu_plugin.h"
 #include "host.h"
@@ -1586,9 +1587,11 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 		return;
 	}
 	pt_frame_clear();
+	/* (the denoiser's history dropped where the path tracer dropped its own:
+	no scene yet, a new scene of the world, a lighting change's gap) */
 	if (denoise_upscale)
-		done = plugin_upscale(PLUGIN_DENOISER, commands, record, reset, 1, pt_flags, width, height, output_width,
-			output_height);
+		done = plugin_upscale(PLUGIN_DENOISER, commands, record, reset || !xgpu_vulkan_pt_history_kept(), 1, pt_flags,
+			width, height, output_width, output_height);
 	else if (upscaler == XGPU_UPSCALE_UPSCALER_PLUGIN)
 		done = plugin_upscale(PLUGIN_UPSCALER, commands, record, reset, 0, pt_flags, width, height, output_width,
 			output_height);

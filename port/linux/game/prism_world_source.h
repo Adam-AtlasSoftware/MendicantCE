@@ -12,28 +12,38 @@ BSP, decoded at each BSP's load with every REF resolved from the map's own
 tags (prism_geom.c). The .pwg files the remodel pipeline makes are its
 intermediate on the farm (tools/geopatch/encode.py), never read here.
 
-prism_world_choose's ladder, decided once a map (at its first BSP's load,
-on the loading screen) and latched for every BSP of it:
+The map's state is chosen once (prism_world_source.c's choose, at its
+first BSP's load, on the loading screen): World Geometry as it loads (a
+change applies at the next load), and, at its first ask under Enhanced or
+Path Traced lighting (the load, or the first change from Classic in the
+map), its classic_world_id, its sidecar opened and verified and held for
+the rest of the map whatever the lighting and the packs, and its enhanced
+packs looked for. The ladder (prism_world_ladder) is then asked each frame
+of that state and the frame's lighting, so that every change of lighting in
+the middle of a map, in every direction, draws at once what a load under it
+would:
 
-  rung 1  Enhanced geometry (the sidecar), lit by Enhanced or Path Traced
-          from the enhanced packs: the sidecar opened and verified, and every
-          BSP's enhanced pack present (a shipped bake whose key is that BSP's
-          enhanced world_id); or, the lighting Path Traced, without them
-          (Path Traced reads no lightmap of it: it traces the bake's scene,
-          made with or without a pack). Enhanced lighting without the packs
-          draws the classic geometry, asked each frame;
+  rung 1  Enhanced geometry (the sidecar): World Geometry Enhanced and the
+          sidecar verified, and either the lighting Path Traced, or the
+          lighting Enhanced with every BSP's enhanced pack present (a
+          shipped bake whose key is that BSP's enhanced world_id). Path
+          Traced's geometry never depends on a bake: it traces the enhanced
+          world's own scene, made by the renderer with or without a pack
+          (and again, never held from another world's bake, when the
+          geometry changes in play: xgpu_vulkan_bake.c's
+          XGPU_BAKE_FLAG_PATH_TRACED), lit by the bake's light where it has
+          it and by its own bounce else;
   rung 2  Classic geometry, lit by Enhanced or Path Traced from the classic
-          packs: rung 1 not available;
+          packs: rung 1 not available (World Geometry Classic, no sidecar or
+          a refused one, or Enhanced lighting without the enhanced packs);
   rung 3  Classic geometry and Classic lighting: display.lighting classic.
 
-Classic lighting never opens a sidecar and never draws enhanced geometry
-(Classic's lightmaps on the remodel are the mismatch PLAN_FINAL calls the
-rock bug): a change of lighting to Classic in the middle of a map draws the
-map's own geometry at once, and the enhanced again when Enhanced or Path
-Traced is chosen back. A change of World Geometry applies at the next map
-load. Geometry and light never disagree: a pack is used only for the
-world_id it was baked from, and the world_id is the sidecar's actually
-opened, never a setting's or a manifest's (prism_identity.h).
+Classic lighting never draws enhanced geometry (Classic's lightmaps on the
+remodel are the mismatch PLAN_FINAL calls the rock bug), and a map loaded
+under it opens no sidecar until the lighting changes. Geometry and light
+never disagree: a pack is used only for the world_id it was baked from, and
+the world_id is the sidecar's actually opened, never a setting's or a
+manifest's (prism_identity.h).
 
 debug.world_unbaked (HALO_WORLD_UNBAKED) takes rung 1 without the packs:
 the farm's and the developers' (a bake to make, the geometry's checks),
@@ -46,7 +56,8 @@ A pack the ladder found but the renderer does not load whole (its own key
 not the BSP's enhanced world_id though its manifest names it, a damaged
 file) drops Enhanced lighting to the classic geometry the moment the
 renderer says so (prism_world_source_bake_refused), with a warning: a
-player is never left with enhanced geometry and no light of its own.
+player is never left with enhanced geometry and no light of its own. Path
+Traced, which needs no pack, still draws the enhanced geometry then.
 */
 
 #ifndef PRISM_WORLD_SOURCE_H
@@ -64,11 +75,11 @@ enum prism_world_rung
 	PRISM_WORLD_RUNG_CLASSIC,
 };
 
-/* the map's rung, chosen at its first ask (prism_world_choose) */
+/* the rung drawn now: the ladder of the map's state and this frame's
+lighting (logged as it changes) */
 enum prism_world_rung prism_world_rung(void);
 
-/* whether the enhanced geometry is drawn now: the map latched to rung 1 and
-the lighting Enhanced or Path Traced */
+/* whether the enhanced geometry is drawn now: prism_world_rung is rung 1 */
 boolean prism_world_enhanced(void);
 
 /* the BSP's remodel image (prism_geom.h: the PWG1 layout

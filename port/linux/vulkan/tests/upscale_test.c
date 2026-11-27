@@ -45,6 +45,8 @@ int xgpu_vulkan_handles(struct xgpu_vulkan_handles *handles)
 
 uint64_t xgpu_vulkan_completed(void) { return 0; }
 void xgpu_vulkan_wait(uint64_t fence) { (void)fence; }
+/* (the path tracer's: its history kept, xgpu_vulkan_pt.c) */
+int xgpu_vulkan_pt_history_kept(void) { return 1; }
 uint64_t xgpu_vulkan_serial(void) { return 1; }
 uint64_t xgpu_vulkan_fence(void) { return 1; }
 void *xgpu_vulkan_upload(uint32_t size, uint32_t alignment, struct xgpu_vulkan_range *range)

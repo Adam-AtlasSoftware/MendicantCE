@@ -668,7 +668,9 @@ static struct
 	double last_status;
 	/* port: a set begun again in play (XGPU_BAKE_FLAG_IN_PLAY) with no whole
 	bake of its key: its generation + 1 (0 none), the bake drawn kept for it
-	until the next load; such holds and the swaps to a whole bake, counted */
+	until the next load (never under Path Traced, XGPU_BAKE_FLAG_PATH_TRACED:
+	the set's own scene is made); such holds and the swaps to a whole bake,
+	counted */
 	uint32_t held_generation;
 	uint32_t holds, swaps;
 } bake;
@@ -2554,7 +2556,8 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 	/* (port: a set begun again in play, XGPU_BAKE_FLAG_IN_PLAY: never baked;
 	begun only where a whole bake of its key is there to load (the shipped
 	one or this machine's, as file_choose found it), else the caller keeps the
-	bake drawn until the next load) */
+	bake drawn until the next load; under Path Traced, else the set's own
+	scene is made, nothing baked) */
 	if (in_play)
 	{
 		/* (the bake drawn is of this key already, the setting changed back:
@@ -2568,7 +2571,16 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 			*held = 2;
 			return NULL;
 		}
-		if (!b->chosen)
+		/* (Path Traced: its geometry never depends on a bake, so the set's
+		own scene is made, nothing baked (paused, as a player's load without
+		a pack), never another geometry's scene kept) */
+		if (!b->chosen && (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED))
+		{
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) has no whole bake here "
+				"(%s): Path Traced: its own scene made, nothing baked in play, traced as it is", b->map, (int)b->bsp,
+				b->generation, b->path);
+		}
+		else if (!b->chosen)
 		{
 			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u) has no whole bake here "
 				"(%s): nothing baked in play; the bake drawn is kept until the next load", b->map, (int)b->bsp,
@@ -2577,8 +2589,9 @@ static struct bake_state *bake_begin(int in_play, const struct prism_bake_cache_
 			*held = 1;
 			return NULL;
 		}
-		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u): its whole bake loaded "
-			"(%s)", b->map, (int)b->bsp, b->generation, b->path);
+		else
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the set begun again in play (set %u): its whole bake "
+				"loaded (%s)", b->map, (int)b->bsp, b->generation, b->path);
 	}
 	/* the materials and alpha maps copied for the GPU (the set's may go) */
 	b->started = now_seconds();
@@ -6455,7 +6468,7 @@ static void bake_frame(void)
 {
 	struct bake_state *b = bake.bake;
 	VkCommandBuffer commands;
-	int wanted, in_play;
+	int wanted, in_play, path_traced;
 
 	garbage_collect();
 	timing_collect();
@@ -6463,6 +6476,11 @@ static void bake_frame(void)
 	XGPU_BAKE_FLAG_IN_PLAY) */
 	in_play = (bake.control.flags & XGPU_BAKE_FLAG_IN_PLAY) != 0;
 	wanted = (bake.control.mode == XGPU_BAKE_MODE_AUTO || bake.control.request != 0) && !in_play && bake_allowed();
+	/* (Path Traced holds no bake drawn for a set it is not of: a hold made
+	under another lighting is let go, the set's own scene made) */
+	path_traced = (bake.control.flags & XGPU_BAKE_FLAG_PATH_TRACED) != 0;
+	if (path_traced && bake.held_generation)
+		bake.held_generation = 0;
 	/* (port: such a set of the BSP drawn: its whole bake loaded where there
 	is one, else the bake drawn kept, its generation remembered, until the
 	next load; never a bake begun in play) */
@@ -7620,6 +7638,12 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 
 	memset(lookup, 0, sizeof(*lookup));
 	if (!bake.made || !bake_traceable(b) || !b->block.tlas)
+		return 0;
+	/* (a bake of another set than the game's now, kept while the set's own
+	is begun (its inputs not all in yet) or held: its scene is another
+	geometry's, never traced under the geometry drawn now; CE's frame until
+	the set's own is made) */
+	if (b->generation != bake.control.generation)
 		return 0;
 	lookup->scene = scene_runtime_address(b);
 	lookup->pages = b->pages.address;
