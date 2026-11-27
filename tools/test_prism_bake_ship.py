@@ -409,3 +409,106 @@ def test_a_bakes_own_reach_is_moved_first(tmp_path):
         assert ship.reach_payload(data, records) == _reach(input_hash=entry["bsp"])
         assert data[records[3]["offset"]:records[3]["offset"] + 40] == bytes(range(40))
     assert ship.verify(shipped) == []
+def test_split_ranges_fit_the_limit_and_cover_the_file():
+    for size, limit in ((10, 3), (9, 3), (2582037744, ship.ASSET_LIMIT), (5, 100), (1, 1)):
+        ranges = ship.split_ranges(size, limit)
+        assert all(n <= limit for _, n in ranges)
+        assert [o for o, _ in ranges] == [sum(n for _, n in ranges[:i]) for i in range(len(ranges))]
+        assert sum(n for _, n in ranges) == size
+        assert len(ranges) == -(-size // limit)
+    # (d40's enhanced BSP 8, 2.4 GiB: two parts of near equal sizes)
+    assert [n for _, n in ship.split_ranges(2582037744)] == [1291018872, 1291018872]
+
+
+def _split_release(tmp_path, monkeypatch, limit=300):
+    """a remodel level whose every BSP's file is past a (small) asset limit"""
+    monkeypatch.setattr(ship, "ASSET_LIMIT", limit)
+    folder = _folder(tmp_path, maps=("d40",), bsps=3, baked=(0, 1), stock=False)
+    shipped = tmp_path / "shipped"
+    archives = tmp_path / "release"
+    ship.export(folder, "remodel", shipped, None, "max", archives, empty="d40:2")
+    return folder, shipped, archives
+
+
+def test_a_bsp_past_the_asset_limit_is_split_into_parts(tmp_path, monkeypatch):
+    folder, shipped, archives = _split_release(tmp_path, monkeypatch)
+    size = (folder / "d40/bsp0.pbk").stat().st_size
+    count = -(-size // 300)
+    names = sorted(p.name for p in archives.iterdir())
+    assert names == sorted(f"prism_bake_d40_remodel_v19_bsp{b}_part{i}of{count}.ppk"
+                           for b in (0, 1) for i in range(1, count + 1))
+    for path in archives.iterdir():
+        with tarfile.open(path) as tar:
+            members = tar.getnames()
+        assert members[0] == "manifest.part.json" and len(members) == 2
+        assert all(m.startswith("remodel/d40/bsp") and ".pbk.part" in m for m in members[1:])
+    # (installed in any order: joined, checked, listed; nothing of the parts left)
+    installed = tmp_path / "player"
+    assert ship.install(installed, sorted(archives.iterdir(), reverse=True)) == []
+    for bsp in (0, 1):
+        assert (installed / f"remodel/d40/bsp{bsp}.pbk").read_bytes() == (folder / f"d40/bsp{bsp}.pbk").read_bytes()
+    assert not [p for p in installed.rglob("*") if ".part" in p.name or p.name.endswith(".joining")]
+    manifest = ship.manifest_load(installed)
+    assert [(e["bsp"], bool(e.get("empty"))) for e in manifest["bsps"]] == [(0, False), (1, False), (2, True)]
+    assert (installed / "remodel/d40/manifest.txt").read_text() == (shipped / "remodel/d40/manifest.txt").read_text()
+
+
+def test_split_parts_installed_over_several_installs(tmp_path, monkeypatch):
+    """a BSP is listed only once all its parts are in: until then verify names it"""
+    folder, shipped, archives = _split_release(tmp_path, monkeypatch)
+    paths = sorted(archives.iterdir())
+    bsp0 = [p for p in paths if "_bsp0_" in p.name]
+    rest = [p for p in paths if p not in bsp0]
+    installed = tmp_path / "player"
+    problems = ship.install(installed, bsp0[:-1] + rest)
+    assert any("remodel/d40/bsp0.pbk: " in p and "parts installed" in p for p in problems)
+    assert not (installed / "remodel/d40/bsp0.pbk").exists()
+    assert 0 not in [e["bsp"] for e in ship.manifest_load(installed)["bsps"]]
+    assert ship.install(installed, bsp0[-1:]) == []
+    assert (installed / "remodel/d40/bsp0.pbk").read_bytes() == (folder / "d40/bsp0.pbk").read_bytes()
+
+
+def test_a_damaged_part_is_refused(tmp_path, monkeypatch):
+    folder, shipped, archives = _split_release(tmp_path, monkeypatch)
+    path = sorted(archives.iterdir())[0]
+    data = bytearray(path.read_bytes())
+    with tarfile.open(path) as tar:
+        member = tar.getmembers()[1]
+        at = member.offset_data
+    data[at + 3] ^= 0xFF
+    path.write_bytes(bytes(data))
+    with pytest.raises(ship.BakeError, match="damaged"):
+        ship.install(tmp_path / "player", [path])
+    assert not list((tmp_path / "player").rglob("*.part*of*"))
+
+
+def test_an_earlier_releases_parts_do_not_mix_with_a_new_ones(tmp_path, monkeypatch):
+    folder, shipped, archives = _split_release(tmp_path, monkeypatch)
+    old = sorted(p for p in archives.iterdir() if "_bsp0_" in p.name)
+    installed = tmp_path / "player"
+    ship.install(installed, old[:1])
+    # (a new bake of BSP 0, its release's parts)
+    (folder / "d40/bsp0.pbk").write_bytes(_bake(map_name="d40", bsp=0, stock=False, world_id=b"\x77" * 32))
+    ship.export(folder, "remodel", tmp_path / "shipped2", None, "max", tmp_path / "release2", empty="d40:2")
+    new = sorted(p for p in (tmp_path / "release2").iterdir() if "_bsp0_" in p.name)
+    rest = sorted(p for p in (tmp_path / "release2").iterdir() if "_bsp0_" not in p.name)
+    # (the old release's part 1 is not taken for the new one's: BSP 0 waits for the new part 1)
+    problems = ship.install(installed, new[1:] + rest)
+    assert any("remodel/d40/bsp0.pbk: " in p and "parts installed" in p for p in problems)
+    assert ship.install(installed, new[:1]) == []
+    assert (installed / "remodel/d40/bsp0.pbk").read_bytes() == (folder / "d40/bsp0.pbk").read_bytes()
+
+
+def test_a_split_archive_with_a_part_its_manifest_does_not_name_is_refused(tmp_path, monkeypatch):
+    folder, shipped, archives = _split_release(tmp_path, monkeypatch)
+    path = sorted(archives.iterdir())[0]
+    evil = tmp_path / "evil.ppk"
+    with tarfile.open(path) as tar, tarfile.open(evil, "w") as out:
+        for member in tar.getmembers():
+            data = tar.extractfile(member).read()
+            if member.name != "manifest.part.json":
+                member.name = member.name.replace("part1of", "part2of")
+            out.addfile(member, __import__("io").BytesIO(data))
+    with pytest.raises(ship.BakeError, match="does not match"):
+        ship.install(tmp_path / "player", [evil])
+

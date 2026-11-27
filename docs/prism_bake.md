@@ -401,9 +401,13 @@ with any BSP's file missing is refused, nothing of the export written. A BSP wit
 surface: d40's BSP 9) is named `--empty map:index` and listed in the manifests with no file. The rig is always the units
 rig (no `--rig`: a note that says a BSP was baked with the fitted rig is refused).
 `--archives` writes a release asset a level and world (`prism_bake_<map>_<world>_v<baker>.ppk`, an uncompressed tar:
-the records are packed already), each under GitHub's 2 GiB asset limit (a level past it splits by BSP). `install`
-unpacks a release's archives into a shipped folder (nothing outside it) and `verify` checks one (sizes, sha256, every
-file a whole lighting-only bake of its manifest's key).
+the records are packed already), each under GitHub's 2 GiB asset limit (a level past it splits by BSP, and a BSP's
+file past it into parts: byte ranges of the file, `..._bsp<n>_part<i>of<k>.ppk`, each part's sha256 and the whole
+file's in every part's manifest). `install` unpacks a release's archives into a shipped folder (nothing outside it): a
+split BSP's parts wait beside it (`bsp<n>.pbk.part<i>of<k>`, `bsp<n>.pbk.parts.json`) until all are in, from one install
+or several, then are joined and checked against the manifest's size and sha256 before the BSP is listed. `verify`
+checks a shipped folder (sizes, sha256, every file a whole lighting-only bake of its manifest's key; a BSP whose parts
+are not all in).
 `--reach` carries each BSP's reach (the farm's walk, `<map>/bsp<n>.reach` beside its bake) in its bake as a `REAC`
 record where the bake has none (a bake committed by this baker writes its own), always as the bake's first record
 (sequence 0, every other record after it renumbered, payloads unchanged), and `--require-reach` refuses a BSP without

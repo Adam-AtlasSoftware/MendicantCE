@@ -24,7 +24,11 @@ player's own BSP's and bakes nothing.
         --archives, a release asset per level and world
         (prism_bake_<map>_<world>_v<baker>.ppk: an uncompressed tar of that
         level's files and its manifest lines; the records are packed
-        already), each under GitHub's 2 GiB asset limit.
+        already), each under GitHub's 2 GiB asset limit: a level past it
+        is split into an archive a BSP (..._v<baker>_bsp<n>.ppk), and a
+        BSP's file past it into parts, byte ranges of the file
+        (..._bsp<n>_part<i>of<k>.ppk, each part's sha256 and the whole
+        file's in every part's manifest), which install joins again.
         v4 geopatch M4: every bake is keyed to its BSP's world_id (its
         header's, xgpu_vulkan_bake.c): a stock bake's must be the classic
         world_id of the map's classic_world_id (--world-ids: the farm's
@@ -59,6 +63,12 @@ player's own BSP's and bakes nothing.
     install <shipped folder> <archive>...
         a release's archives unpacked into the shipped folder (its paths
         checked: nothing outside it), the manifests merged, then verified.
+        A split BSP's parts (each checked against its sha256) wait beside
+        it (bsp<n>.pbk.part<i>of<k>, bsp<n>.pbk.parts.json) until every
+        part is in, from this install or an earlier one; then they are
+        joined, the whole file checked against the manifest's size and
+        sha256, and only then is the BSP listed. verify names a BSP whose
+        parts are not all in.
     show <file.pbk>
         a bake file's key and records.
 
@@ -90,8 +100,10 @@ MAGIC = b"PRISMBAK"
 RECORD_MAGIC = b"PBKR"
 QUALITIES = ("draft", "high", "ultra", "max")
 # GitHub's release asset limit is 2 GiB a file: a level's archive past this
-# is split into one archive a BSP
+# is split into one archive a BSP, and a BSP's file past it into parts (byte
+# ranges of the file, an archive each), which install joins again
 ASSET_LIMIT = int(1.9 * 1024 ** 3)
+SHIPPED_FILE = r"(stock|remodel)/[A-Za-z0-9_-]+/bsp\d+\.pbk"
 
 
 def fourcc(text: str) -> int:
@@ -563,6 +575,37 @@ def export(bake_folder: Path, world: str, shipped: Path, maps: list[str] | None,
     return exported
 
 
+def _tar_info(name: str, size: int) -> tarfile.TarInfo:
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mtime = 0
+    info.mode = 0o644
+    return info
+
+
+def _sha256_range(path: Path, offset: int, size: int) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        file.seek(offset)
+        left = size
+        while left:
+            block = file.read(min(left, 1 << 20))
+            if not block:
+                raise BakeError(f"{path}: shorter than its manifest says")
+            digest.update(block)
+            left -= len(block)
+    return digest.hexdigest()
+
+
+def split_ranges(size: int, limit: int = None) -> list[tuple[int, int]]:
+    """a file's parts, (offset, size) each, as few as fit the asset limit and
+    of near equal sizes"""
+    limit = limit or ASSET_LIMIT
+    count = max(1, -(-size // limit))
+    step = -(-size // count)
+    return [(offset, min(step, size - offset)) for offset in range(0, size, step)] or [(0, 0)]
+
+
 def write_archives(shipped: Path, manifest: dict, archives: Path, levels: set) -> list[Path]:
     archives.mkdir(parents=True, exist_ok=True)
     written = []
@@ -575,31 +618,49 @@ def write_archives(shipped: Path, manifest: dict, archives: Path, levels: set) -
             baked = [e for e in entries if not e.get("empty")]
             groups = [[e] for e in baked]
             groups[0] = [e for e in entries if e.get("empty")] + groups[0]
+        worlds = {k: v for k, v in manifest.get("worlds", {}).items() if k == map_name}
         for group in groups:
             first = next(e for e in group if not e.get("empty"))
             suffix = "" if len(groups) == 1 else f"_bsp{first['bsp']}"
-            path = archives / f"prism_bake_{map_name}_{world}_v{version}{suffix}.ppk"
-            with tarfile.open(path, "w", format=tarfile.PAX_FORMAT) as tar:
-                worlds = {k: v for k, v in manifest.get("worlds", {}).items() if k == map_name}
-                part = json.dumps({"format": 1, "kind": "prism_bake_shipped", "bsps": group, "worlds": worlds},
-                                  indent=1, sort_keys=True).encode("utf-8")
-                info = tarfile.TarInfo("manifest.part.json")
-                info.size = len(part)
-                info.mtime = 0
-                tar.addfile(info, io.BytesIO(part))
-                for entry in group:
-                    if entry.get("empty"):
-                        continue
-                    info = tar.gettarinfo(str(shipped / entry["file"]), arcname=entry["file"])
-                    info.mtime = 0
-                    info.uid = info.gid = 0
-                    info.uname = info.gname = ""
-                    with (shipped / entry["file"]).open("rb") as file:
-                        tar.addfile(info, file)
-            if path.stat().st_size > 2 * 1024 ** 3:
-                raise BakeError(f"{path} is over GitHub's 2 GiB asset limit")
+            base = f"prism_bake_{map_name}_{world}_v{version}{suffix}"
+            if first["size"] > ASSET_LIMIT:
+                # (a BSP's file past the limit alone: its byte ranges, an archive each, every one carrying the
+                # group's manifest lines and the list of all the parts)
+                source = shipped / first["file"]
+                ranges = split_ranges(first["size"])
+                parts = [{"offset": o, "size": n, "sha256": _sha256_range(source, o, n)} for o, n in ranges]
+                for index, part in enumerate(parts, 1):
+                    path = archives / f"{base}_part{index}of{len(parts)}.ppk"
+                    split = {"file": first["file"], "index": index, "of": len(parts), "parts": parts}
+                    _write_archive(path, group, worlds, split, shipped)
+                    written.append(path)
+                continue
+            path = archives / f"{base}.ppk"
+            _write_archive(path, group, worlds, None, shipped)
             written.append(path)
     return written
+
+
+def _write_archive(path: Path, group: list[dict], worlds: dict, split: dict | None, shipped: Path) -> None:
+    with tarfile.open(path, "w", format=tarfile.PAX_FORMAT) as tar:
+        document = {"format": 1, "kind": "prism_bake_shipped", "bsps": group, "worlds": worlds}
+        if split:
+            document["split"] = split
+        part = json.dumps(document, indent=1, sort_keys=True).encode("utf-8")
+        tar.addfile(_tar_info("manifest.part.json", len(part)), io.BytesIO(part))
+        for entry in group:
+            if entry.get("empty"):
+                continue
+            with (shipped / entry["file"]).open("rb") as file:
+                if split and entry["file"] == split["file"]:
+                    piece = split["parts"][split["index"] - 1]
+                    file.seek(piece["offset"])
+                    name = f"{entry['file']}.part{split['index']}of{split['of']}"
+                    tar.addfile(_tar_info(name, piece["size"]), file)
+                else:
+                    tar.addfile(_tar_info(entry["file"], entry["size"]), file)
+    if path.stat().st_size > 2 * 1024 ** 3:
+        raise BakeError(f"{path} is over GitHub's 2 GiB asset limit")
 
 
 def verify(shipped: Path) -> list[str]:
@@ -637,6 +698,12 @@ def verify(shipped: Path) -> list[str]:
             problems.append(f"{entry['file']}: its key is not the manifest's")
         if "reach" in entry and walk_summary != entry["reach"]:
             problems.append(f"{entry['file']}: its reach is not the manifest's")
+    for pending in sorted(shipped.glob("*/*/bsp*.pbk.parts.json")):
+        info = json.loads(pending.read_text("utf-8"))
+        have = sum(1 for i in range(1, len(info["parts"]) + 1) if _part_path(shipped, info["file"], i,
+                                                                            len(info["parts"])).is_file())
+        problems.append(f"{info['file']}: {have} of {len(info['parts'])} parts installed (its other archives "
+                        "are missing): not listed until whole")
     if not (shipped / "manifest.txt").is_file():
         problems.append("manifest.txt: missing")
     return problems
@@ -723,6 +790,41 @@ def plancheck(shipped: Path, plans: Path, world: str | None = None, maps: list[s
     return problems
 
 
+def _part_path(shipped: Path, file: str, index: int, count: int) -> Path:
+    return shipped / f"{file}.part{index}of{count}"
+
+
+def _join_parts(shipped: Path, pending: Path) -> dict | None:
+    """a split BSP's file joined from its parts once all are in, checked
+    against its manifest entry (size, sha256); its entry, or None while a
+    part is missing"""
+    info = json.loads(pending.read_text("utf-8"))
+    entry, parts = info["entry"], info["parts"]
+    paths = [_part_path(shipped, info["file"], i, len(parts)) for i in range(1, len(parts) + 1)]
+    if not all(p.is_file() for p in paths):
+        return None
+    target = shipped / info["file"]
+    joined = target.with_name(target.name + ".joining")
+    digest = hashlib.sha256()
+    with joined.open("wb") as out:
+        for path, part in zip(paths, parts):
+            if path.stat().st_size != part["size"]:
+                joined.unlink()
+                raise BakeError(f"{path}: {path.stat().st_size} bytes, not its part's {part['size']}")
+            with path.open("rb") as source:
+                for block in iter(lambda: source.read(1 << 20), b""):
+                    digest.update(block)
+                    out.write(block)
+    if joined.stat().st_size != entry["size"] or digest.hexdigest() != entry["sha256"]:
+        joined.unlink()
+        raise BakeError(f"{info['file']}: its parts joined are not the manifest's file (size or sha256)")
+    joined.replace(target)
+    for path in paths:
+        path.unlink()
+    pending.unlink()
+    return entry
+
+
 def install(shipped: Path, archives: list[Path]) -> list[str]:
     shipped.mkdir(parents=True, exist_ok=True)
     root = shipped.resolve()
@@ -730,24 +832,59 @@ def install(shipped: Path, archives: list[Path]) -> list[str]:
     for archive in archives:
         with tarfile.open(archive, "r") as tar:
             part = None
+            chunks = []
             for member in tar.getmembers():
                 target = (shipped / member.name).resolve()
                 if not member.isfile() or (root not in target.parents and target != root) or \
-                        not re.fullmatch(r"(stock|remodel)/[A-Za-z0-9_-]+/bsp\d+\.pbk|manifest\.part\.json", member.name):
+                        not re.fullmatch(SHIPPED_FILE + r"(\.part[1-9]\d*of[1-9]\d*)?|manifest\.part\.json", member.name):
                     raise BakeError(f"{archive}: {member.name} is not a shipped bake's file")
                 source = tar.extractfile(member)
                 if member.name == "manifest.part.json":
                     part = json.loads(source.read().decode("utf-8"))
                     continue
+                if ".part" in member.name:
+                    chunks.append(member.name)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with target.open("wb") as out:
                     shutil.copyfileobj(source, out)
             if not part:
                 raise BakeError(f"{archive}: no manifest.part.json")
+            split = part.get("split")
+            held = set()
+            if split or chunks:
+                if not split or not re.fullmatch(SHIPPED_FILE, str(split.get("file"))):
+                    raise BakeError(f"{archive}: a part with no valid split in its manifest")
+                count, index, parts = split["of"], split["index"], split["parts"]
+                name = f"{split['file']}.part{index}of{count}"
+                entry = next((e for e in part["bsps"] if e.get("file") == split["file"]), None)
+                if chunks != [name] or len(parts) != count or not 1 <= index <= count or not entry or \
+                        sum(p["size"] for p in parts) != entry["size"]:
+                    raise BakeError(f"{archive}: its part does not match its manifest's split")
+                piece = parts[index - 1]
+                if _sha256_range(shipped / name, 0, piece["size"]) != piece["sha256"] or \
+                        (shipped / name).stat().st_size != piece["size"]:
+                    (shipped / name).unlink()
+                    raise BakeError(f"{archive}: part {index} of {count} of {split['file']} is damaged (sha256)")
+                pending = shipped / (split["file"] + ".parts.json")
+                if pending.is_file() and json.loads(pending.read_text("utf-8"))["parts"] != parts:
+                    # (an earlier release's parts: dropped, the new one's begun)
+                    for other in (shipped / split["file"]).parent.glob(Path(split["file"]).name + ".part*of*"):
+                        if other.name != Path(name).name:
+                            other.unlink()
+                pending.write_text(json.dumps({"file": split["file"], "entry": entry, "parts": parts},
+                                              indent=1, sort_keys=True) + "\n", "utf-8", newline="\n")
+                held.add(split["file"])
             names = {(e["world"], e["map"], e["bsp"]) for e in part["bsps"]}
             manifest["bsps"] = [e for e in manifest["bsps"] if (e["world"], e["map"], e["bsp"]) not in names]
-            manifest["bsps"].extend(part["bsps"])
+            manifest["bsps"].extend(e for e in part["bsps"] if e.get("file") not in held)
             manifest.setdefault("worlds", {}).update(part.get("worlds", {}))
+    # (each split BSP whose parts are all in, from this install or an earlier one: joined, then listed)
+    for pending in sorted(shipped.glob("*/*/bsp*.pbk.parts.json")):
+        entry = _join_parts(shipped, pending)
+        if entry:
+            key = (entry["world"], entry["map"], entry["bsp"])
+            manifest["bsps"] = [e for e in manifest["bsps"] if (e["world"], e["map"], e["bsp"]) != key]
+            manifest["bsps"].append(entry)
     manifest_save(shipped, manifest)
     return verify(shipped)
 
