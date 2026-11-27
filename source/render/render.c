@@ -439,9 +439,11 @@ static void render_window(
 	short rendered_cluster_index;
 	boolean world_ao_prepassed; /* port: (below) */
 	boolean prism_deferred; /* port: (below) */
+	boolean raster_alpha_tested_decals; /* port: (below) */
 
 	profile_render_window_start(TRUE);
 	prism_deferred = FALSE; /* port: (below) */
+	raster_alpha_tested_decals = FALSE; /* port: (below) */
 	render.scene_index++;
 	memset(&parameters, 0, sizeof(parameters));
 
@@ -665,14 +667,34 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
-		rasterizer_decals_begin(_decal_layer_alpha_tested);
-		for (rendered_cluster_index = 0;
-			rendered_cluster_index < render.rendered_cluster_count;
-			rendered_cluster_index++)
+		/* port: the alpha-tested decals (a sign's paint, a floor's markings)
+		multiply the light they lie on, and the stencil they mark keeps the
+		texture pass off their pixels: there the frame is the light by the
+		decal alone. Under the lighting lit from the bake (display.lighting
+		"enhanced" or "pathtraced": prism_deferred_raster) the light target's
+		light is replaced by the bake's, and the decal with it, while the base
+		target, which the texture pass never reached there, stayed white: the
+		decal came out as a flat shape of the bake's light (a10's LIFEPODS
+		markings and star signs white; not c40's orange floor pools, which
+		are its light cards' own light). There they are
+		drawn into the base target instead, first in it, before the texture
+		pass, so that their stencil keeps it off them as before: the base is
+		then white by the decal, the light target the light alone, and the
+		resolve's light by base Classic's frame with the bake's light in its
+		place (and Classic's own where the bake has nothing). Elsewhere, and
+		where the host draws no base target, the order is CE's */
+		raster_alpha_tested_decals = prism_deferred && prism_deferred_raster();
+		if (!raster_alpha_tested_decals)
 		{
-			rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			rasterizer_decals_begin(_decal_layer_alpha_tested);
+			for (rendered_cluster_index = 0;
+				rendered_cluster_index < render.rendered_cluster_count;
+				rendered_cluster_index++)
+			{
+				rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			}
+			rasterizer_decals_end();
 		}
-		rasterizer_decals_end();
 
 		/* port: display.lighting "ce_deferred": the texture pass and the
 		decals over it into the base target, the specular and reflection
@@ -682,6 +704,17 @@ static void render_window(
 		if (prism_deferred)
 		{
 			prism_deferred_phase(_prism_deferred_base);
+		}
+		if (raster_alpha_tested_decals) /* port: (above) */
+		{
+			rasterizer_decals_begin(_decal_layer_alpha_tested);
+			for (rendered_cluster_index = 0;
+				rendered_cluster_index < render.rendered_cluster_count;
+				rendered_cluster_index++)
+			{
+				rasterizer_decals_draw(rendered_cluster_get(rendered_cluster_index)->cluster_index);
+			}
+			rasterizer_decals_end();
 		}
 		structure_render_diffuse_texture();
 		/* port: (and the level's base colour of PRISM v4's pack and mod

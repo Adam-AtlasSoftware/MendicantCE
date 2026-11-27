@@ -128,3 +128,24 @@ def test_classic_has_no_prism_extras():
                  "prism_lightmaps", "prism_surface_maps", "prism_rt"):
         assert '"display.%s"' % name not in table, name
     assert '{ "display.graphics", "prism", "enhanced" },' in config
+
+
+def test_alpha_tested_decals_go_to_the_base_under_the_baked_lighting():
+    """render.c: CE's alpha-tested decals multiply the light and stencil the texture pass off their pixels. Under the
+    lighting lit from the bake (prism_deferred_raster: Enhanced, Path Traced) the light target's light is replaced, so
+    the layer is drawn once, into the base target as its phase begins and before the texture pass (a10's LIFEPODS
+    markings were drawn as flat white shapes); elsewhere once, in CE's place before the base phase"""
+    render = (ROOT / "source/render/render.c").read_text()
+    window = render[render.index("lights_render_diffuse();"):render.index("structure_render_transparent_geometry();")]
+    layer = "rasterizer_decals_begin(_decal_layer_alpha_tested);"
+    assert window.count(layer) == 2
+    first, second = window.index(layer), window.rindex(layer)
+    base = window.index("prism_deferred_phase(_prism_deferred_base);")
+    texture = window.index("structure_render_diffuse_texture();")
+    assert first < base < second < texture
+    assert "raster_alpha_tested_decals = prism_deferred && prism_deferred_raster();" in window
+    assert window[:first].rstrip().endswith("if (!raster_alpha_tested_decals)\n\t\t{")
+    assert window[base:second].rstrip().endswith("if (raster_alpha_tested_decals) /* port: (above) */\n\t\t{")
+    # (the light layer stays in the light target, and the primary layer over the texture pass)
+    assert window.index("rasterizer_decals_begin(_decal_layer_light);") < first
+    assert texture < window.index("rasterizer_decals_begin(_decal_layer_primary);")
