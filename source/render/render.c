@@ -675,7 +675,8 @@ static void render_window(
 		light is replaced by the bake's, and the decal with it, while the base
 		target, which the texture pass never reached there, stayed white: the
 		decal came out as a flat shape of the bake's light (a10's LIFEPODS
-		markings white, c40's floor inlays the lamps' orange). There they are
+		markings and star signs white; not c40's orange floor pools, which
+		are its light cards' own light). There they are
 		drawn into the base target instead, first in it, before the texture
 		pass, so that their stencil keeps it off them as before: the base is
 		then white by the decal, the light target the light alone, and the
