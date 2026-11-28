@@ -160,7 +160,9 @@ static short director_get_perspective(short local_player_index) { return perspec
 static boolean director_inhibited_facing(short local_player_index) { return FALSE; }
 static long scripted_camera_object_relative_to(void) { return NONE; }
 static boolean scripted_camera_object_is_first_person_camera(long index) { return FALSE; }
-static boolean cinematic_in_progress(void) { return FALSE; }
+/* a cinematic under way (its views are drawn between the ticks) */
+static boolean fake_cinematic = FALSE;
+static boolean cinematic_in_progress(void) { return fake_cinematic; }
 static int config_boolean(char const *name) { return direct_camera; }
 /* (no host's word against it: network_standard.c's, instant_aim_rule.c's) */
 static boolean network_standard_direct_camera_allowed(void) { return TRUE; }
@@ -1177,6 +1179,74 @@ static void as_before_case(boolean gun_view)
 	seat_gun_view = FALSE;
 }
 
+/* A vehicle of the macro lane (a Pelican the AI flies, a Warthog it drives) at 120, its rider's view drawn between
+the ticks, not from the newest step (a cinematic's first person in its troop bay, display.direct_camera off, a seat
+whose view is the gun's): a frame runs one to three sub-steps, so that the first after a tick comes before the next
+tick's first sub-step, which moves the vehicle a whole tick, or after it. The view stays on the line between the
+ticks' places of the seat's camera point, as the seat is drawn, either way: not a tick ahead of it at the ticks whose
+first frame came late, back and forth in the troop bay */
+static void riding_between_case(short reason)
+{
+	long frame;
+	long late_ticks = 0;
+	long tick_seen = NONE;
+
+	world_new(4, FALSE, _director_perspective_first_person);
+	fake_cinematic = reason == 0;
+	direct_camera = reason != 1;
+	seat_gun_view = reason == 2;
+	config_changes_count++;
+	for (frame = 0; frame < 400; frame++)
+	{
+		struct observer_result observer;
+		struct observer_result const *camera;
+		real_point3d before, after, line;
+		real tick;
+		short steps = (short)(1 + rand() % 3);
+
+		while (steps-- > 0)
+			world_substep();
+		if (ticks_ended < 3)
+			continue;
+		frame_begin(random_part());
+		if (tick_seen != ticks_ended)
+		{
+			tick_seen = ticks_ended;
+			if (substeps_run >= 1)
+				late_ticks++;
+		}
+		observer = observer_now();
+		camera = render_interpolation_camera(0, &observer);
+		/* (the view's snapshots begun: two ticks' first frames) */
+		if (ticks_ended < 6)
+		{
+			render_interpolation_frame_end();
+			continue;
+		}
+		tick = (real)ticks_ended;
+		{
+			real_matrix4x3 previous = q_frame(vehicle_rotation_at(tick - 1.0f), vehicle_place_at(tick - 1.0f));
+			real_matrix4x3 latest = q_frame(vehicle_rotation_at(tick), vehicle_place_at(tick));
+
+			before = placed(&previous, ANCHOR_AT);
+			after = placed(&latest, ANCHOR_AT);
+		}
+		line = at(before.x + (after.x - before.x) * fake_fraction, before.y + (after.y - before.y) * fake_fraction,
+			before.z + (after.z - before.z) * fake_fraction);
+		CHECK(!render_interpolation_view_newest(0), "frame %ld: the view drawn from the newest step", frame);
+		CHECK(distance(&camera->position, &line) < CLOSE, "frame %ld (%.3f ticks, %d of the open tick's sub-steps "
+			"run): the view %f off the line between the ticks' places of the seat's camera point", frame, frame_now,
+			substeps_run, distance(&camera->position, &line));
+		render_interpolation_frame_end();
+	}
+	CHECK(late_ticks > 10, "too few ticks whose first frame came after the next tick's first sub-step (%ld)",
+		late_ticks);
+	fake_cinematic = FALSE;
+	direct_camera = TRUE;
+	seat_gun_view = FALSE;
+	config_changes_count++;
+}
+
 /* The player on foot turns an A-D strafe at 30 (a Legacy game's rate): each step changes its velocity by a strafe's
 acceleration (speeding up and slowing a tick at a time, as bipeds.c's physics does), its place moved by the new
 velocity. The view drawn from the newest step, carried on by the velocity, would meet each step past or short of
@@ -1330,6 +1400,12 @@ int main(int argc, char **argv)
 		as_before_case(FALSE);
 	else if (!strcmp(argv[1], "gun_view"))
 		as_before_case(TRUE);
+	else if (!strcmp(argv[1], "riding_cinematic_macro"))
+		riding_between_case(0);
+	else if (!strcmp(argv[1], "riding_off_macro"))
+		riding_between_case(1);
+	else if (!strcmp(argv[1], "riding_gun_view_macro"))
+		riding_between_case(2);
 	else if (!strcmp(argv[1], "foot_strafe_30"))
 		case_foot_strafe();
 	else

@@ -8,7 +8,9 @@ step that the motion carried on did not foresee (a climb begun at once) is blend
 drawn, never jumped to, but a start from standing is drawn at once; the view's pitch held at the seat's easing limit
 moves evenly. A correction glides the vehicle and the view the same; getting in or out (dying, respawning in it)
 glides the vehicle from one drawing to the other. Off (display.direct_camera false), or a seat whose view is the
-gun's, it is drawn between the ticks as before."""
+gun's, it is drawn between the ticks as before; so is a cinematic's first person in the seat, and of a vehicle of the
+macro lane (a Pelican the AI flies) the view stays on the line between the ticks' places of the seat's camera point
+whether a tick's first frame came before the next tick's first sub-step or after it."""
 
 import sys
 from pathlib import Path
@@ -23,7 +25,8 @@ from test_render_substeps import generated  # noqa: E402
 CASES = ["steady_30", "steady_60", "steady_120", "steady_macro_60", "steady_macro_120", "physics_apart",
          "physics_apart_30", "accelerating", "accelerating_30", "accelerating_macro", "following", "following_30",
          "aim_in_world", "late", "following_late", "following_pulled", "leaving", "leaving_30", "leaving_teleported",
-         "kinked", "start", "pitch_held", "coming", "coming_30", "correction", "off", "gun_view", "foot_strafe_30"]
+         "kinked", "start", "pitch_held", "coming", "coming_30", "correction", "off", "gun_view", "foot_strafe_30",
+         "riding_cinematic_macro", "riding_off_macro", "riding_gun_view_macro"]
 
 # a fault in the code, and the case that must catch it
 NEGATIVE_CONTROLS = {
@@ -87,6 +90,11 @@ NEGATIVE_CONTROLS = {
     # the view in the seat not gliding with the corrected vehicle
     "view-unglided": (("\tdirect->position.x += correction.i;\n\tdirect->position.y += correction.j;\n"
                        "\tdirect->position.z += correction.k;\n\treturn direct;", "\treturn direct;"), "correction"),
+    # the view in a seat of a vehicle of the macro lane, drawn between the ticks, blended from snapshots that have
+    # the next tick's first sub-step in them when the tick's first frame came after it: a tick ahead at those ticks
+    "riding-ahead": (("\t\telse if ((riding_unit_index = render_interpolation_camera_riding_unit(local_player_index, "
+                      "timed)) != NONE)\n\t\t\trender_interpolation_camera_at_tick_riding(riding_unit_index, "
+                      "&camera->latest);\n", ""), "riding_cinematic_macro"),
     # a seat whose view is the gun's drawn from the newest step
     "gun-view-newest": (("\tif (gun_view)\n\t\treturn FALSE;", ""), "gun_view"),
 }
