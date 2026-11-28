@@ -58,6 +58,7 @@ the settings. Nothing crosses the network.
 #include "shaders/shaders.h"
 #include "prism_deferred.h"
 #include "prism_bake_menu.h"
+#include "mendicant/mendicant.h"
 #include "../src/xgpu_coverage.h"
 
 #include <xtl.h>
@@ -384,7 +385,14 @@ static void seeds_find(
 				seed_add(input, list + entry * 0x1C, PRISM_BAKE_SEED_WALK);
 			}
 		}
+		/* (the level's own firing positions: MENDICANT AI's maneuver slots,
+		48 an encounter of the loaded part after them during its tick, at its
+		first position's place, are not the level's. Taken, they moved the walk
+		and so the key's settings: b30's shipped bake refused after a lighting
+		change in play, 5415 seeds against the farm's 4983, the reach walked
+		here for 16 s and the BSP drawn with CE's light) */
 		list = (char const *)block_of(encounter, 0x98, 0x18, 4096, &entries);
+		entries = mendicant_encounter_own_firing_position_count(index, entries);
 		for (entry = 0; list && entry < entries; entry++)
 		{
 			seed_add(input, list + entry * 0x18, PRISM_BAKE_SEED_VIEW);

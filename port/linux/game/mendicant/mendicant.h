@@ -47,6 +47,12 @@ void mendicant_game_state_after_load(void);
 no encounter is saved held active by the AI */
 void mendicant_game_state_before_save(void);
 
+/* an encounter's own firing positions of the count its definition shows
+now: during a game tick the definitions of the loaded part carry the
+maneuver slots after them, which no reader outside the AI (PRISM's bake,
+prism_bake.c) may take for the level's */
+long mendicant_encounter_own_firing_position_count(long encounter_index, long count);
+
 /* the game tick (game_time.c around game_tick, game.c after the host's ai_update) */
 void mendicant_game_tick_begin(void);
 void mendicant_game_tick_end(void);

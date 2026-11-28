@@ -1158,6 +1158,15 @@ static void maneuver_swap(boolean in)
 	maneuver_swapped = in;
 }
 
+long mendicant_encounter_own_firing_position_count(long encounter_index, long count)
+{
+	int index = (short)encounter_index;
+
+	if (index < 0 || index >= MENDICANT_MAX_ENCOUNTERS || !maneuver_original[index] || count < maneuver_original[index])
+		return count;
+	return maneuver_original[index];
+}
+
 /* the copies are freed and every per-map value forgotten */
 static void maneuver_forget(void)
 {
