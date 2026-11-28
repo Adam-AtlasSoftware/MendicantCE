@@ -133,6 +133,9 @@ PACKS = [
          uses={"blender"}, mods=["prism_v3_cast", "prism_v3_elite_meshes"]),
     Pack("rocks", "the scenery rocks and boulders remodelled for the mesh store", needs=["dumps", "extract"],
          maps=["b30", "a30", "a50", "c10"], mods=["prism_v3_rocks"]),
+    Pack("vehicles", "the Warthog remodelled for the mesh store, its tyres round with CE's own tread, and the tyres' "
+                     "rubber as a PBR material", needs=["dumps", "extract"], uses={"blender"}, maps=["b30"],
+         mods=["prism_v4_vehicles"]),
     Pack("world", "each level's remodelled geometry (prism_world/levels/<level>/<bsp>.pwg)", needs=["extract"],
          uses={"blender", "cycles"}, level=True),
     Pack("lightmaps", "each level's lightmaps baked again from its own lamps and sky "
@@ -147,13 +150,13 @@ PACKS = [
 ]
 BY_NAME = {p.name: p for p in PACKS}
 CHARACTERS = ["class_masks", "materials", "base_maps", "chief_r2", "chief_maps", "ar_textures", "fp_arms",
-              "elite_r2", "bold", "chief_r3", "cast", "rocks"]
+              "elite_r2", "bold", "chief_r3", "cast", "rocks", "vehicles"]
 LEVEL_PACKS = ["world", "lightmaps", "v4_materials"]
 # the load order the packs play in (each over those before it), as the author's kit has it
 LOAD_ORDER = ["prism_base_local", "prism_class_masks", "prism_materials", "prism_v2r2_ar_textures",
               "prism_v2r2_chief_3p_maps", "prism_v2r2_fp_hands_ar", "prism_v2r2_chief_3p_model",
               "prism_r3_chief_meshes", "prism_r3_chief_materials", "prism_v2_elite_r2", "prism_v3_elite_meshes",
-              "prism_v3_cast", "prism_v3_rocks", "prism_v2_tex_bold", "prism_v4_materials"]
+              "prism_v3_cast", "prism_v3_rocks", "prism_v4_vehicles", "prism_v2_tex_bold", "prism_v4_materials"]
 OFF_BY_DEFAULT = ["prism_v3_elite_meshes"]
 LOCAL_ONLY = "Built on this computer from the player's own Halo maps. Never commit, share, upload or ship it.\n"
 
@@ -1137,6 +1140,27 @@ ROCK_MAPS = {"boulder_granite_": ("a50", "scenery/rocks/boulder_granite_large/bi
              "boulder": ("b30", "scenery/rocks/boulder/bitmaps/boulder.png")}
 
 
+def step_vehicles(ctx):
+    w = ctx.w("vehicles")
+    dump = dump_folder(ctx, "b30") / "vehicles_warthog_warthog.json"
+    recipe = recipe_copy(ctx, ART / "prism_cast" / "warthog_recipe.json", "vehicles_warthog_recipe.json")
+    mod = ctx.mod("prism_v4_vehicles")
+    shutil.rmtree(mod, ignore_errors=True)
+    out = mod / "meshes" / "max" / "vehicles" / "warthog" / "warthog.pmesh"
+    ctx.blender_run("prism_cast/vehicle_remodel.py", dump, recipe, out, mod / "reports" / "warthog.json",
+                    what="the Warthog: remodel")
+    ctx.run([PYTHON, "-B", "-I", ctx.tools / "pmesh.py", "check", out, "--dump", dump])
+    ctx.python("prism_cast/vehicle_material.py", recipe, mod / "reports" / "warthog.json", mod, "--sheet",
+               w / "warthog_tyre_maps.png", what="the Warthog's tyres: rubber")
+    write_mod(mod, "prism_v4_vehicles", "PRISM v4: vehicles (meshes, local)", "0.5.0",
+              "The Warthog remodelled for the mesh store (display.prism_models \\\"max\\\"): CE's hull with chamfered "
+              "hard edges and rounded curves, round tyres on CE's own tread map with their blocks raised from CE's "
+              "painted tread, plain rubber shoulders and CE's hub disc, a rounder chain gun; CE's lamps, glass, decals "
+              "and meters as they are; CE's own mesh at a distance. The tyres' rubber as a PBR material "
+              "(display.prism_materials \\\"pbr\\\": the tread's relief, rubber's roughness), on CE's tyres too. "
+              "Built on this computer from your own maps: never shared or shipped.")
+
+
 def step_rocks(ctx):
     mod = ctx.mod("prism_v3_rocks")
     shutil.rmtree(mod, ignore_errors=True)
@@ -1328,8 +1352,8 @@ STEPS = {"extract": step_extract, "dumps": step_dumps, "class_masks": step_class
          "materials": step_materials, "base_maps": step_base_maps, "chief_r2": step_chief_r2, "proto": step_proto,
          "chief_maps": step_chief_maps, "ar_textures": step_ar_textures, "tiers": step_tiers,
          "fp_arms": step_fp_arms, "elite_r2": step_elite_r2, "bold": step_bold, "chief_r3": step_chief_r3,
-         "cast": step_cast, "rocks": step_rocks, "world": step_world, "lightmaps": step_lightmaps,
-         "sun": step_sun, "probes": step_probes, "v4_materials": step_v4_materials}
+         "cast": step_cast, "vehicles": step_vehicles, "rocks": step_rocks, "world": step_world,
+         "lightmaps": step_lightmaps, "sun": step_sun, "probes": step_probes, "v4_materials": step_v4_materials}
 
 
 # ---------------------------------------------------------------- the command line

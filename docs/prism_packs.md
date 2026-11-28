@@ -131,6 +131,7 @@ write `mods/load_order.toml` with the packs in the order they were made for (Bol
 | `chief_r3` | `mods/prism_r3_chief_meshes`, `mods/prism_r3_chief_materials` | the round 3 Chief (gloves, pouches, lamps, helper bones) and his PBR materials | REMODELS MAX (`display.prism_models = "max"`), PBR MATERIALS (`display.prism_materials = "pbr"`) |
 | `cast` | `mods/prism_v3_cast`, `mods/prism_v3_elite_meshes` | the armoured Marine, Grunt and Jackal remodelled; the Elites stitched (left off: turn it on in MANAGE MODS to compare) | REMODELS MAX |
 | `rocks` | `mods/prism_v3_rocks` | the campaign's rocks and boulders remodelled | REMODELS MAX |
+| `vehicles` | `mods/prism_v4_vehicles` | the Warthog remodelled: chamfered hull, round tyres on CE's own tread map with their blocks raised from CE's painted tread (the tread's map fitted to CE's tread faces: `prism_cast/vehicle_tread.py`), and the tyres' rubber as a PBR material (the tread's relief as a normal map, rubber's roughness; on CE's tyres too) | REMODELS MAX; PBR MATERIALS for the rubber |
 | `world` | `prism_world/levels/<level>/<bsp>.pwg` | each level's remodelled geometry (a10, a30, a50, b30, c10) | WORLD GEOMETRY Remodel (`display.prism_world_geometry = "remodel"`) |
 | `lightmaps` | `prism_lightmaps/rebaked/*.prl` | each level's lightmaps baked again from its own lamps and sky | LIGHTMAPS Rebaked (`display.prism_lightmaps = "rebaked"`) |
 | `probes` | `prism/probes/<level>.probes` | local reflections (not in `all`: name it) | REFLECTIONS Local (`display.prism_reflections = "local"`) |
@@ -141,7 +142,7 @@ The QUALITY preset PRISM (`display.graphics = "prism"`) turns on surface maps, t
 shadows, but not the packs' own rows above.
 
 **On Windows**, REMODELS, PBR MATERIALS and TEXTURE DETAIL are not in the game's build yet, so `chief_r3`,
-`cast` and `rocks` draw nothing there. Everything else applies.
+`cast`, `rocks` and `vehicles` draw nothing there. Everything else applies.
 
 ## The upscalers and their licences
 

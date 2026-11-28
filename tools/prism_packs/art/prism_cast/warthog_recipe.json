@@ -1,0 +1,106 @@
+{
+ "_doc": "PRISM v4 Warthog (vehicles\\warthog\\warthog) for vehicle_remodel.py and vehicle_material.py. Shaders by the model's index: 0 tyres, 1 hull, 2 chain gun; the rest (lamps, glass, decals, meters, belt, the blur permutations) stay CE's. Distances in world units (1 wu = 3.048 m).",
+ "maps_root": "{extract}/b30",
+ "maps": {
+  "hull": {
+   "png": "bitmaps/vehicles/warthog/bitmaps/warthog.png",
+   "fine_px": 2,
+   "coarse_px": 6
+  },
+  "tyre": {
+   "png": "bitmaps/vehicles/warthog/bitmaps/warthog tires.png",
+   "fine_px": 3,
+   "coarse_px": 10,
+   "local_px": 8
+  },
+  "gun": {
+   "png": "bitmaps/vehicles/warthog/bitmaps/warthog chaingun.png",
+   "fine_px": 2,
+   "coarse_px": 6
+  }
+ },
+ "shaders": {
+  "0": {
+   "kind": "tyre",
+   "depth": 0.011,
+   "split_deg": 50,
+   "tread_map": "tyre",
+   "tread_steps": 21,
+   "fit_rms": 0.01
+  },
+  "1": {
+   "bevel": 0.01,
+   "segments": 3,
+   "profile": 0.5,
+   "hard_deg": 35,
+   "split_deg": 40,
+   "alpha": 0.6,
+   "relief": {
+    "kind": "grooves",
+    "map": "hull",
+    "depth": 0.004,
+    "raise": 0.0,
+    "cap_in": 0.004,
+    "cap_out": 0.001
+   }
+  },
+  "2": {
+   "bevel": 0.004,
+   "segments": 2,
+   "profile": 0.5,
+   "hard_deg": 35,
+   "split_deg": 40,
+   "alpha": 0.9,
+   "relief": {
+    "kind": "grooves",
+    "map": "gun",
+    "depth": 0.002,
+    "cap_in": 0.002,
+    "cap_out": 0.0005
+   }
+  }
+ },
+ "levels": [
+  {
+   "bevel": true,
+   "subdiv": {
+    "1": 1,
+    "2": 1
+   },
+   "relief": true,
+   "segments": 256
+  },
+  {
+   "bevel": true,
+   "subdiv": {
+    "1": 0,
+    "2": 0
+   },
+   "relief": false,
+   "segments": 40
+  }
+ ],
+ "cutoffs": [
+  120,
+  50
+ ],
+ "material": {
+  "shader": "vehicles\\warthog\\shaders\\warthog tires",
+  "map": "tyre",
+  "tyre_shader": "0",
+  "size": 1024,
+  "normal_scale": 1.0,
+  "relief_slope": 2.5,
+  "rubber": {
+   "roughness": 0.86,
+   "block_top": -0.08,
+   "groove": 0.08
+  },
+  "hub": {
+   "radius": 0.6,
+   "roughness": 0.55,
+   "relief": 0.35
+  },
+  "specular": 0.5
+ }
+}
