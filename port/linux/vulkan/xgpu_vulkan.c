@@ -998,6 +998,10 @@ struct allocation
 	VkDeviceMemory memory;
 	VkDeviceSize offset, size;
 	/* a dedicated allocation (block NULL): its memory is its own */
+	/* the use it is counted under (xgpu_vulkan_memory_counted) and its
+	memory type, counted 1 */
+	int use, counted;
+	uint32_t type;
 };
 
 /* ---------- resources */
@@ -1772,6 +1776,8 @@ static int memory_type(uint32_t bits, VkMemoryPropertyFlags wanted, VkMemoryProp
 	return -1;
 }
 
+static void memory_count(struct allocation *allocation);
+
 /* (addressed: for a buffer of VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
 buffer_make's where the device traces rays) */
 static int memory_dedicated_addressed(VkDeviceSize size, uint32_t type, struct allocation *allocation, int addressed)
@@ -1794,7 +1800,88 @@ static int memory_dedicated_addressed(VkDeviceSize size, uint32_t type, struct a
 	if (!check(vkAllocateMemory(vk.device, &info, NULL, &allocation->memory), "vkAllocateMemory"))
 		return 0;
 	allocation->size = size;
+	allocation->type = type;
+	memory_count(allocation);
 	return 1;
+}
+
+/* ---------- what holds the device's memory */
+
+static int64_t memory_counts[XGPU_VULKAN_MEMORY_USES][2];
+static _Thread_local int memory_use_now;
+static const char *const memory_use_names[XGPU_VULKAN_MEMORY_USES] =
+{
+	"core", "texture store", "mesh store", "pt images", "pt radiance cache", "pt other", "rt bvh", "rt scratch", "rt static set", "rt other",
+	"bake scene", "bake bvh", "irradiance volume", "upscale",
+};
+
+void xgpu_vulkan_memory_counted(int use, uint32_t type, int64_t bytes)
+{
+	int device;
+
+	if (use < 0 || use >= XGPU_VULKAN_MEMORY_USES || type >= vk.memory_properties.memoryTypeCount)
+		return;
+	device = (vk.memory_properties.memoryTypes[type].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0;
+	__atomic_add_fetch(&memory_counts[use][device], bytes, __ATOMIC_RELAXED);
+}
+
+int xgpu_vulkan_memory_use(int use)
+{
+	int last = memory_use_now;
+
+	memory_use_now = use;
+	return last;
+}
+
+void xgpu_vulkan_memory_uses(int64_t device_local[XGPU_VULKAN_MEMORY_USES])
+{
+	int use;
+
+	for (use = 0; use < XGPU_VULKAN_MEMORY_USES; use++)
+		device_local[use] = __atomic_load_n(&memory_counts[use][1], __ATOMIC_RELAXED);
+}
+
+void xgpu_vulkan_memory_log(const char *why)
+{
+	char text[1024];
+	size_t at;
+	uint64_t budget, usage, blocks = 0;
+	struct block *block;
+	int use;
+
+	xgpu_vulkan_memory_budget(&budget, &usage);
+	for (block = vk.blocks; block; block = block->next)
+		blocks += block->size;
+	at = (size_t)snprintf(text, sizeof(text), "prism memory: %s: the card %llu of %llu MB (blocks %llu MB):", why,
+		(unsigned long long)(usage >> 20), (unsigned long long)(budget >> 20), (unsigned long long)(blocks >> 20));
+	for (use = 0; use < XGPU_VULKAN_MEMORY_USES && at < sizeof(text); use++)
+	{
+		int64_t device = __atomic_load_n(&memory_counts[use][1], __ATOMIC_RELAXED);
+		int64_t host = __atomic_load_n(&memory_counts[use][0], __ATOMIC_RELAXED);
+
+		if (device >> 20 || host >> 20)
+			at += (size_t)snprintf(text + at, sizeof(text) - at, host >> 20 ? " %s %lld MB (+%lld host)," :
+				" %s %lld MB,", memory_use_names[use], (long long)(device >> 20), (long long)(host >> 20));
+	}
+	at = at < sizeof(text) ? at : sizeof(text) - 1;
+	if (text[at - 1] == ',')
+		text[at - 1] = 0;
+	host_logf(HOST_LOG_INFO, "%s", text);
+}
+
+/* an allocation counted under the thread's use, and given back */
+static void memory_count(struct allocation *allocation)
+{
+	allocation->use = memory_use_now;
+	allocation->counted = 1;
+	xgpu_vulkan_memory_counted(allocation->use, allocation->type, (int64_t)allocation->size);
+}
+
+static void memory_uncount(struct allocation *allocation)
+{
+	if (allocation->counted)
+		xgpu_vulkan_memory_counted(allocation->use, allocation->type, -(int64_t)allocation->size);
+	allocation->counted = 0;
 }
 
 static int memory_dedicated(VkDeviceSize size, uint32_t type, struct allocation *allocation)
@@ -1872,6 +1959,8 @@ static int memory_for(const VkMemoryRequirements *requirements, struct allocatio
 				allocation->memory = block->memory;
 				allocation->offset = start;
 				allocation->size = requirements->size;
+				allocation->type = block->type;
+				memory_count(allocation);
 				{
 					VkDeviceSize before = start - range->offset;
 					VkDeviceSize after = range->offset + range->size - (start + requirements->size);
@@ -1900,6 +1989,9 @@ static int memory_for(const VkMemoryRequirements *requirements, struct allocatio
 				free(block);
 				return 0;
 			}
+			/* (a block's memory counted only as it is given out; its
+			unused part under core) */
+			memory_uncount(&whole);
 			block->memory = whole.memory;
 		}
 		block->size = BLOCK_SIZE;
@@ -1912,6 +2004,7 @@ static int memory_for(const VkMemoryRequirements *requirements, struct allocatio
 
 static void memory_release(struct allocation *allocation)
 {
+	memory_uncount(allocation);
 	if (allocation->block)
 		block_free_insert(allocation->block, allocation->offset, allocation->size);
 	else if (allocation->memory)
@@ -12811,6 +12904,11 @@ static void pipeline_cache_make(const char *path)
 		host_logf(HOST_LOG_INFO, "vulkan: the pipeline cache's %lu bytes read from %s", (unsigned long)size, path);
 	}
 	free(data);
+}
+
+VkPipelineCache xgpu_vulkan_pipeline_cache(void)
+{
+	return vk.pipeline_cache;
 }
 
 void xgpu_vulkan_pipeline_cache_save(void)

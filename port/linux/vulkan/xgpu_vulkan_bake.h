@@ -53,6 +53,17 @@ struct xgpu_vulkan_bake_lookup
 	uint32_t generation, tiles_planned;
 };
 int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup);
+/* PRISM Path Traced short of the card's memory (xgpu_vulkan_pt.c): the
+bake's light, which it never reads, put in the host's memory (a whole bake's:
+nothing more baked, nothing being read from the file), the card's freed
+after this submission; back on the card as PRISM Raster draws again. 1
+where buffers were moved now; parked: 1 while they are in the host's */
+int xgpu_vulkan_bake_park(void);
+int xgpu_vulkan_bake_parked(void);
+/* PRISM Path Traced's shortage of the card's memory told to the game
+(XGPU_BAKE_STATUS_PT_MEMORY: 0 none, the light grid's scale in hundredths,
+1 no grid fits), which the bake's indicator shows */
+void xgpu_vulkan_bake_pt_memory(uint32_t value);
 /* (T4) the loaded bake's sun, the one Raster's light pass lights by (its
 direction toward the sun, w over 0 where it has one): 1 where there is one */
 int xgpu_vulkan_bake_sun(float sun[4]);

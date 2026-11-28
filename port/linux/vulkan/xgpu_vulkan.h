@@ -191,6 +191,12 @@ renamed over it) if pipelines were made since it was last written: after a
 map's preparation, and as the app goes to the background, since Android
 seldom lets an app exit cleanly. Render thread. */
 void xgpu_vulkan_pipeline_cache_save(void);
+/* the pipeline cache (VK_NULL_HANDLE none), which PRISM's compute passes
+are made through too (Path Traced's, the bake's, ray tracing's: made on a
+thread of their own, the cache synchronized by the driver), so that a start
+after the first makes them from it in moments, not the minute a cold
+driver cache takes, CE's frame meanwhile */
+VkPipelineCache xgpu_vulkan_pipeline_cache(void);
 
 /* what the front end's descriptions can ask of the device */
 struct xgpu_vulkan_capabilities
@@ -464,6 +470,37 @@ int xgpu_vulkan_format_sampled(uint8_t format);
 (VK_EXT_memory_budget), or the largest's size and 0 without it; 0 if not
 known */
 int xgpu_vulkan_memory_budget(uint64_t *budget, uint64_t *usage);
+/* what holds the device's memory (xgpu_vulkan_memory_counted): the log's
+"prism memory" lines say each use's device-local and host-visible bytes */
+enum xgpu_vulkan_memory_use
+{
+	XGPU_VULKAN_MEMORY_CORE,          /* the targets, uploads, the game's textures, everything else */
+	XGPU_VULKAN_MEMORY_TEXTURES,      /* the texture store's replacement textures */
+	XGPU_VULKAN_MEMORY_MESHES,        /* the mesh store's */
+	XGPU_VULKAN_MEMORY_PT_IMAGES,     /* Path Traced's light images */
+	XGPU_VULKAN_MEMORY_PT_CACHE,      /* its radiance cache */
+	XGPU_VULKAN_MEMORY_PT_OTHER,      /* its jobs, tree, reference */
+	XGPU_VULKAN_MEMORY_RT_STRUCTURES, /* the traced set's acceleration structures (BVH) */
+	XGPU_VULKAN_MEMORY_RT_SCRATCH,    /* their builds' scratch */
+	XGPU_VULKAN_MEMORY_RT_STATIC,     /* the traced set's corners, surfaces, levels */
+	XGPU_VULKAN_MEMORY_RT_OTHER,      /* the objects', the frame's, the cache's */
+	XGPU_VULKAN_MEMORY_BAKE_SCENE,    /* the bake's scene, tables, tiles */
+	XGPU_VULKAN_MEMORY_BAKE_STRUCTURES, /* the bake's scene's BVH and scratch */
+	XGPU_VULKAN_MEMORY_BAKE_VOLUME,   /* the irradiance volume */
+	XGPU_VULKAN_MEMORY_UPSCALE,       /* the upscalers' images */
+	XGPU_VULKAN_MEMORY_USES
+};
+/* bytes of a memory type's (an index of the device's memory types) taken
+(> 0) or given back (< 0) by a use; and the use the core's own allocations
+on this thread count under (xgpu_vulkan_image_create's), the last returned */
+void xgpu_vulkan_memory_counted(int use, uint32_t type, int64_t bytes);
+int xgpu_vulkan_memory_use(int use);
+/* each use's bytes said in the log (prism memory: <why>), with the
+device-local heaps' budget and usage */
+void xgpu_vulkan_memory_log(const char *why);
+/* the device-local bytes each use holds now (XGPU_VULKAN_MEMORY_USES of
+them) */
+void xgpu_vulkan_memory_uses(int64_t device_local[XGPU_VULKAN_MEMORY_USES]);
 /* the number of the last submission the GPU has done */
 uint64_t xgpu_vulkan_completed(void);
 /* an image's memory, in bytes */

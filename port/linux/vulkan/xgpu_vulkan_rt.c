@@ -217,6 +217,11 @@ struct rt_buffer
 	VkDeviceSize size;
 	VkDeviceAddress address;
 	void *mapped;
+	/* what it is counted under (xgpu_vulkan_memory_counted): the use, the
+	memory type, the bytes */
+	int use;
+	uint32_t type;
+	VkDeviceSize counted;
 };
 
 struct rt_garbage
@@ -522,7 +527,18 @@ static int memory_type(uint32_t bits, VkMemoryPropertyFlags wanted)
 	return -1;
 }
 
+static int buffer_make_use(VkDeviceSize size, VkBufferUsageFlags usage, int host, struct rt_buffer *made, int use);
+
+/* (counted as the traced set's structures where they are stored in it, else
+as the other buffers: buffer_make_use names the scratch and the static
+set's) */
 static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, struct rt_buffer *made)
+{
+	return buffer_make_use(size, usage, host, made, usage & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR ?
+		XGPU_VULKAN_MEMORY_RT_STRUCTURES : XGPU_VULKAN_MEMORY_RT_OTHER);
+}
+
+static int buffer_make_use(VkDeviceSize size, VkBufferUsageFlags usage, int host, struct rt_buffer *made, int use)
 {
 	VkBufferCreateInfo info;
 	VkMemoryRequirements requirements;
@@ -565,6 +581,10 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, st
 		return 0;
 	}
 	made->size = size;
+	made->use = use;
+	made->type = (uint32_t)type;
+	made->counted = requirements.size;
+	xgpu_vulkan_memory_counted(use, made->type, (int64_t)made->counted);
 	memset(&address, 0, sizeof(address));
 	address.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
 	address.buffer = made->buffer;
@@ -574,6 +594,8 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, st
 
 static void buffer_free(struct rt_buffer *buffer)
 {
+	if (buffer->counted)
+		xgpu_vulkan_memory_counted(buffer->use, buffer->type, -(int64_t)buffer->counted);
 	if (buffer->buffer)
 		vkDestroyBuffer(rt.device.device, buffer->buffer, NULL);
 	if (buffer->memory)
@@ -696,7 +718,7 @@ static int pipeline_make_pushed(const VkDescriptorType *types, uint32_t count, c
 	info.stage.module = module;
 	info.stage.pName = "main";
 	info.layout = *layout;
-	result = vkCreateComputePipelines(rt.device.device, VK_NULL_HANDLE, 1, &info, NULL, pipeline);
+	result = vkCreateComputePipelines(rt.device.device, xgpu_vulkan_pipeline_cache(), 1, &info, NULL, pipeline);
 	vkDestroyShaderModule(rt.device.device, module, NULL);
 	return result == VK_SUCCESS;
 }
@@ -878,7 +900,8 @@ static int make(void)
 			&slot->instances) ||
 			!buffer_make((VkDeviceSize)RT_ENTRIES * 32, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1, &slot->readback) ||
 			!buffer_make(RT_STORAGE_BYTES, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, 0, &slot->storage) ||
-			!buffer_make(RT_SCRATCH_BYTES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, &slot->scratch))
+			!buffer_make_use(RT_SCRATCH_BYTES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, &slot->scratch,
+				XGPU_VULKAN_MEMORY_RT_SCRATCH))
 		{
 			host_logf(HOST_LOG_WARN, "prism rt: no memory for its buffers: no ray tracing");
 			return 0;
@@ -1200,7 +1223,8 @@ static int static_structure_build(VkCommandBuffer commands, VkDeviceAddress vert
 	if (!buffer_make(sizes.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, 0,
 		storage))
 		return 0;
-	if (!buffer_make(sizes.buildScratchSize + rt.scratch_alignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, &scratch))
+	if (!buffer_make_use(sizes.buildScratchSize + rt.scratch_alignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, &scratch,
+		XGPU_VULKAN_MEMORY_RT_SCRATCH))
 	{
 		buffer_free(storage);
 		return 0;
@@ -1240,7 +1264,7 @@ static int static_buffer(const void *data, VkDeviceSize bytes, struct rt_buffer 
 {
 	VkDeviceSize size = bytes < 16 ? 16 : bytes;
 
-	if (!buffer_make(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, made))
+	if (!buffer_make_use(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, made, XGPU_VULKAN_MEMORY_RT_STATIC))
 		return 0;
 	memset(made->mapped, 0, (size_t)size);
 	if (data && bytes)
@@ -1443,6 +1467,13 @@ static int level_drawn(uint32_t tag, const uint32_t *levels, uint32_t words)
 		(level == XGPU_SCENE_LEVEL_FAR && far);
 }
 
+/* a triangle of the set received: its surface and level (word 7 of its
+attributes, as level_drawn reads it) */
+static uint32_t received_level_tag(uint32_t triangle)
+{
+	return rt.receiving_attributes[(size_t)triangle * XGPU_STREAM_RT_ATTRIBUTE_WORDS + 7];
+}
+
 /* the set received built: the triangles traced (the opaque, then the
 alpha-tested, each with their attributes), the lamps listed, the
 structures built; the last set's let go of */
@@ -1476,7 +1507,7 @@ static void static_build(void)
 	VkCommandBuffer commands;
 	uint32_t count = rt.receiving_count, triangle, opaque = 0, tested = 0, lamps = 0, traced, at[2];
 	float *to, *lamp, power = 0.0f;
-	uint32_t *attributes_to;
+	uint32_t *attributes_to, *opaque_from = NULL;
 	int pass;
 
 	if (!count)
@@ -1505,8 +1536,8 @@ static void static_build(void)
 	traced = opaque + tested;
 	if (!traced)
 		return;
-	if (!buffer_make((VkDeviceSize)traced * 36, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
-		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, &vertices) ||
+	if (!buffer_make_use((VkDeviceSize)traced * 36, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1, &vertices, XGPU_VULKAN_MEMORY_RT_STATIC) ||
 		!static_buffer(NULL, (VkDeviceSize)traced * XGPU_STREAM_RT_ATTRIBUTE_WORDS * 4, &attributes) ||
 		!static_buffer(rt.receiving_materials, (VkDeviceSize)rt.receiving_material_count * XGPU_STREAM_RT_MATERIAL_FLOATS *
 		4, &materials) ||
@@ -1524,6 +1555,12 @@ static void static_build(void)
 	after them), with their attributes; the lamps */
 	at[0] = 0;
 	at[1] = opaque;
+	/* (each opaque triangle's place in the set received: the levels' fold
+	below reads the corners and surfaces from there, never back from the
+	mapped buffers, which are write-combined: read back, b30's enhanced
+	world's 3.2 million triangles held the render thread about 7 s at each
+	new set, a change of lighting to Path Traced among them) */
+	opaque_from = (uint32_t *)malloc((size_t)opaque * sizeof(uint32_t) + 4);
 	to = (float *)vertices.mapped;
 	attributes_to = (uint32_t *)attributes.mapped;
 	lamp = (float *)emitters.mapped;
@@ -1537,6 +1574,8 @@ static void static_build(void)
 		if (kind != XGPU_RT_TRIANGLE_LIGHT)
 		{
 			pass = kind == XGPU_RT_TRIANGLE_ALPHA_TESTED && rt.receiving_alpha && material ? 1 : 0;
+			if (!pass && opaque_from)
+				opaque_from[at[0]] = triangle;
 			memcpy(to + (size_t)at[pass] * 9, corners, 36);
 			if (rt.receiving_attributes && triangle < rt.receiving_attributes_count)
 				memcpy(attributes_to + (size_t)at[pass] * XGPU_STREAM_RT_ATTRIBUTE_WORDS, rt.receiving_attributes +
@@ -1579,22 +1618,24 @@ static void static_build(void)
 		uint32_t leveled = 0, words = 0, serial = 0;
 		const uint32_t *levels = xgpu_vulkan_scene_levels(&words, &serial);
 
-		for (triangle = 0; triangle < opaque; triangle++)
-			if (attributes_to[(size_t)triangle * XGPU_STREAM_RT_ATTRIBUTE_WORDS + 7] >> 30)
+		for (triangle = 0; opaque_from && rt.receiving_attributes && triangle < opaque; triangle++)
+			if (opaque_from[triangle] < rt.receiving_attributes_count && received_level_tag(opaque_from[triangle]) >> 30)
 				leveled++;
 		memset(&levels_input, 0, sizeof(levels_input));
-		if (leveled && buffer_make((VkDeviceSize)opaque * 36,
+		if (leveled && buffer_make_use((VkDeviceSize)opaque * 36,
 			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 1,
-			&levels_input))
+			&levels_input, XGPU_VULKAN_MEMORY_RT_STATIC))
 		{
 			float *folded = (float *)levels_input.mapped;
 
 			for (triangle = 0; triangle < opaque; triangle++)
 			{
-				const float *corners = to + (size_t)triangle * 9;
+				const float *corners = rt.receiving + (size_t)opaque_from[triangle] * 9;
+				uint32_t tag = opaque_from[triangle] < rt.receiving_attributes_count ?
+					received_level_tag(opaque_from[triangle]) : 0;
 				int corner;
 
-				if (level_drawn(attributes_to[(size_t)triangle * XGPU_STREAM_RT_ATTRIBUTE_WORDS + 7], levels, words))
+				if (level_drawn(tag, levels, words))
 					memcpy(folded + (size_t)triangle * 9, corners, 36);
 				else
 					for (corner = 0; corner < 3; corner++)
@@ -1603,6 +1644,7 @@ static void static_build(void)
 			levels_serial = serial;
 		}
 	}
+	free(opaque_from);
 	commands = xgpu_vulkan_compute_commands();
 	if (opaque && !static_structure_build(commands, levels_input.buffer ? levels_input.address : vertices.address,
 		opaque, 1, &storage, &structure, &address, &bytes, levels_input.buffer ? &update_scratch : NULL))
@@ -1644,8 +1686,8 @@ static void static_build(void)
 	if (levels_input.buffer)
 	{
 		/* (its own scratch: one refit a frame at most, each after the last) */
-		if (buffer_make(update_scratch + rt.scratch_alignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0,
-			&rt.static_update_scratch))
+		if (buffer_make_use(update_scratch + rt.scratch_alignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0,
+			&rt.static_update_scratch, XGPU_VULKAN_MEMORY_RT_SCRATCH))
 			rt.static_update_scratch_size = update_scratch;
 		else
 			memset(&rt.static_update_scratch, 0, sizeof(rt.static_update_scratch));
@@ -1668,6 +1710,7 @@ static void static_build(void)
 		"alpha-tested (%.1f MB, %u KB of alpha maps), %u lamps (power %.2f), %u materials%s", opaque,
 		(double)bytes / 1048576.0, tested, (double)alpha_bytes / 1048576.0, rt.receiving_alpha_words / 256, lamps,
 		(double)power, rt.receiving_material_count, levels_input.buffer ? ", near and far levels as drawn" : "");
+	xgpu_vulkan_memory_log("the traced set built");
 }
 
 /* port: the set's triangles and their attributes taken from SCENE_STATIC's

@@ -954,6 +954,60 @@ composite; with `debug.pt_reference` it sums the reference's paths
 (`reference_path`) over the layer's filter footprint instead. Its GPU time is the debug.pass_times group `WATER`
 (with the layer's composite).
 
+## A change to Path Traced
+
+A change of lighting to Path Traced in play holds the game as little as it can (`tools/test_prism_pt_swap.py`):
+
+- its passes' pipelines are made on a thread of their own (`pipelines_thread`), CE's frame drawn meanwhile, never the
+  game held while the driver compiles them (cold, 47 s on Adam's RTX 3070 Ti, 118 s on a busy RTX 3090); they are
+  made through the renderer's pipeline cache (`xgpu_vulkan_pipeline_cache`, as the bake's and ray tracing's are), so
+  that a start after the first makes them from it in moments;
+- the traced structure of a new set (`xgpu_vulkan_rt.c`'s `static_build`) folds the near and far levels from the set
+  received, never reading back the buffers it fills, which are write-combined: read back, b30's enhanced world's
+  3.2 million triangles held the render thread about 7 s at each new set;
+- a BSP's reach walked or read once in a run is kept in memory by its inputs' hash (`reach_kept_take`, a few walks,
+  64 MB each at most), so that a set begun again in play (the geometry changed with the lighting) takes it at once
+  instead of walking it again; after a pack's walk was refused, only a walk made here is taken.
+
+## No room on the card
+
+The light's images are the path tracer's own and grow with the window: at every pixel of 3440x1440, 25 RGBA16F and
+10 RGBA32 images, about 1.8 GB. Adam's RTX 3070 Ti (8 GB, of which the driver gives the game about 6.2 GB beside his
+desktop), World Geometry Enhanced, b30 loaded under Classic and changed to Path Traced with no upscaler, refused every
+image (`VK_ERROR_OUT_OF_DEVICE_MEMORY`, 5,060 times) and the frame stayed CE's: the enhanced world, which has no
+classic lightmaps, drawn flat and unlit, with nothing of the path tracer's in the log. The log's `prism memory:` lines
+(`xgpu_vulkan_memory_log`: each use's device-local bytes, and host-visible ones in brackets, counted as they are
+allocated and freed: `xgpu_vulkan_memory_counted`) said where the card had gone, b30's enhanced world on the 3070 Ti:
+
+| use | MB |
+| --- | ---: |
+| the bake's light (lightmap tile pool 968, its indirect pool 484, the tile and sun tables, the atlas, the batches) | 2630 |
+| the irradiance volume (8.16 M probes) | 417 |
+| core (the window's targets, the game's textures, uploads) | 894 |
+| ray tracing's BVH of the traced set (3.2 M triangles) and its builds' scratch | 312 + 156 |
+| the bake's scene's BVH (2.6 M triangles), which Path Traced traces | 185 |
+| the mesh store, the texture store | 175, 85 |
+| ray tracing's static set (corners, surfaces, levels) | 0 (+316 in the host's memory) |
+| Path Traced's images at every pixel | 1854 |
+
+Path Traced reads the bake's scene alone (`xgpu_vulkan_bake_lookup`: its structure, corners, surfaces, materials,
+lamps, grid), never its light. So before the light's images are made where the budget has no room for them
+(VK_EXT_memory_budget's, 256 MB kept free), and again where the driver refuses them, the bake's light is put aside
+(`xgpu_vulkan_bake_park`, docs/prism_bake.md, "Path Traced short of the card's memory"): about 2.8 GB of b30's moved
+to the host's memory, the card's freed after the submission, and the same grid tried again a few frames later. b30 at
+3440x1440 then traces at every pixel on the 3070 Ti and on the 6 GB RTX 2060 (the card 4.4 of 6.2 GB, and of 5.9 GB).
+Raster brings the light back to the card as it draws again, letting go of Path Traced's images where both do not fit.
+
+Where that is still not enough (`xgpu_vulkan_pt_fit.h`, `images_fit`), the next coarser light grid (0.5, 0.35, 0.25 of
+the window each way: the traced light's upscaling below) is tried a few frames later, once its memory is free, one try
+a frame, until one fits; the grid found is kept for the window's size (never tried finer again, so the frames do not
+hunt) unless memory is put aside later (a bake still being baked when Path Traced began: `pt_fit_retry`), and said
+once in the log (`prism pt: warning: no memory on the card for the light's images at WxH: traced at wxh`) and on the
+screen, in amber where the bake's indicator stands ("Path Traced: low video memory, light at 50%":
+`XGPU_BAKE_STATUS_PT_MEMORY`). With the denoiser off, under Ray Reconstruction or for the reference, which trace at
+every pixel, or where no grid fits, the frame is CE's and both say so ("Path Traced: not enough video memory"); the
+coarsest is tried again every 120 frames. `tools/test_prism_pt_fit.py`.
+
 ## A lost device
 
 Path Traced was made on NVIDIA's cards. Should the driver lose the device while it draws (its timeout on a pass that

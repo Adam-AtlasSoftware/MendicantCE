@@ -39,6 +39,7 @@ a frame; the log: their means every 600 frames).
 
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_pt.h"
+#include "xgpu_vulkan_pt_fit.h"
 #include "xgpu_vulkan_pt_shaders.h"
 #include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_rt.h"
@@ -48,9 +49,11 @@ a frame; the log: their means every 600 frames).
 #include "xgpu_exr.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* ---------- constants */
 
@@ -298,7 +301,14 @@ struct pt_buffer
 	VkDeviceSize size;
 	VkDeviceAddress address;
 	void *mapped;
+	/* what it is counted under (xgpu_vulkan_memory_counted) */
+	int use;
+	uint32_t type;
+	VkDeviceSize counted;
 };
+
+/* the use the next buffer_make counts under (the radiance cache's sets it) */
+static int pt_memory_use = XGPU_VULKAN_MEMORY_PT_OTHER;
 
 /* the job block (xgpu_vulkan_pt.glsl's Job, field for field) */
 struct pt_job
@@ -345,6 +355,15 @@ struct pt_push
 static struct
 {
 	int made, failed;
+	/* the passes' pipelines made on a thread of their own (compile_thread:
+	compile_running while it runs, compile_done set as it ends, compile_ok
+	if every one was made), so that a first change to Path Traced never
+	holds the game while the driver compiles them (cold, 47 s on Adam's RTX
+	3070 Ti, 118 s on a busy RTX 3090, the game frozen throughout): CE's
+	frame meanwhile, as before a scene is made */
+	pthread_t compile_thread;
+	int compile_running, compile_done, compile_ok;
+	double compile_started;
 	struct xgpu_vulkan_rt_device device;
 	VkDescriptorSetLayout layout;
 	VkPipelineLayout pipeline_layout;
@@ -382,6 +401,10 @@ static struct
 	uint32_t low_width, low_height;
 	struct xgpu_vulkan_image *up_diff, *up_spec, *up_clean_diffuse, *up_clean_specular;
 	float low_logged;
+	/* the light's grid a shortage of the card's memory chose for the
+	window's size (images_fit, xgpu_vulkan_pt_fit.h) */
+	struct pt_fit_state memory;
+	uint32_t memory_freed, memory_checked, frames_undrawn;
 	/* the frame's exposure and curve (1x1: xgpu_vulkan_upscale_pt_frame's);
 	whether the last frame gave its light raw to display.denoiser's plugin
 	(the denoiser's images were then its guides: no history across a change) */
@@ -517,6 +540,10 @@ static int buffer_make(VkDeviceSize size, int host, struct pt_buffer *made)
 		return 0;
 	}
 	made->size = size;
+	made->use = pt_memory_use;
+	made->type = (uint32_t)type;
+	made->counted = requirements.size;
+	xgpu_vulkan_memory_counted(made->use, made->type, (int64_t)made->counted);
 	memset(&address, 0, sizeof(address));
 	address.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
 	address.buffer = made->buffer;
@@ -531,6 +558,7 @@ static void buffer_free(struct pt_buffer *buffer)
 	if (!buffer->buffer)
 		return;
 	xgpu_vulkan_wait(xgpu_vulkan_serial() > 0 ? xgpu_vulkan_serial() - 1 : 0);
+	xgpu_vulkan_memory_counted(buffer->use, buffer->type, -(int64_t)buffer->counted);
 	vkDestroyBuffer(pt.device.device, buffer->buffer, NULL);
 	vkFreeMemory(pt.device.device, buffer->memory, NULL);
 	memset(buffer, 0, sizeof(*buffer));
@@ -664,11 +692,55 @@ static int pipeline_make(int which, const uint32_t *words, size_t word_count)
 	info.stage.pName = "main";
 	info.stage.pSpecializationInfo = &specialization;
 	info.layout = pt.pipeline_layout;
-	result = vkCreateComputePipelines(pt.device.device, VK_NULL_HANDLE, 1, &info, NULL, &pt.pipelines[which]);
+	result = vkCreateComputePipelines(pt.device.device, xgpu_vulkan_pipeline_cache(), 1, &info, NULL, &pt.pipelines[which]);
 	vkDestroyShaderModule(pt.device.device, module, NULL);
 	if (result != VK_SUCCESS)
 		host_logf(HOST_LOG_WARN, "prism pt: %s's pipeline cannot be made (%d)", pass_names[which], (int)result);
 	return result == VK_SUCCESS;
+}
+
+static double pt_seconds(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (double)t.tv_sec + (double)t.tv_nsec * 1.0e-9;
+}
+
+/* every pass's pipeline (the compile thread's: Vulkan's pipeline creation
+needs no lock of ours, the layout made before the thread and the device
+not let go of before it is joined, xgpu_vulkan_pt_shutdown) */
+static void *pipelines_thread(void *unused)
+{
+	int ok;
+
+	(void)unused;
+	ok = pipeline_make(PASS_LIGHT, xgpu_vulkan_pt_light_words, xgpu_vulkan_pt_light_count) &&
+		pipeline_make(PASS_TEMPORAL, xgpu_vulkan_pt_temporal_words, xgpu_vulkan_pt_temporal_count) &&
+		pipeline_make(PASS_FIX, xgpu_vulkan_pt_fix_words, xgpu_vulkan_pt_fix_count) &&
+		pipeline_make(PASS_ATROUS, xgpu_vulkan_pt_atrous_words, xgpu_vulkan_pt_atrous_count) &&
+		pipeline_make(PASS_COMPOSITE, xgpu_vulkan_pt_composite_words, xgpu_vulkan_pt_composite_count) &&
+		pipeline_make(PASS_REFERENCE, xgpu_vulkan_pt_reference_words, xgpu_vulkan_pt_reference_count) &&
+		pipeline_make(PASS_LAMPS, xgpu_vulkan_pt_lamps_words, xgpu_vulkan_pt_lamps_count) &&
+		pipeline_make(PASS_CACHE, xgpu_vulkan_pt_cache_words, xgpu_vulkan_pt_cache_count) &&
+		pipeline_make(PASS_WATER, xgpu_vulkan_pt_water_words, xgpu_vulkan_pt_water_count) &&
+		pipeline_make(PASS_STABILIZE, xgpu_vulkan_pt_stabilize_words, xgpu_vulkan_pt_stabilize_count) &&
+		pipeline_make(PASS_UPSAMPLE, xgpu_vulkan_pt_upsample_words, xgpu_vulkan_pt_upsample_count) &&
+		pipeline_make(PASS_REFERENCE_STATS, xgpu_vulkan_pt_reference_stats_words,
+		xgpu_vulkan_pt_reference_stats_count);
+	pt.compile_ok = ok;
+	__atomic_store_n(&pt.compile_done, 1, __ATOMIC_RELEASE);
+	return NULL;
+}
+
+/* the compile thread, if one runs, waited for */
+static void pipelines_wait(void)
+{
+	if (pt.compile_running)
+	{
+		pthread_join(pt.compile_thread, NULL);
+		pt.compile_running = 0;
+	}
 }
 
 /* a lost device's (xgpu_vulkan_device_lost_note): where Path Traced drew
@@ -700,6 +772,21 @@ static int make(void)
 		return 1;
 	if (pt.failed)
 		return 0;
+	/* (the passes being made: CE's frame until they are) */
+	if (pt.compile_running)
+	{
+		if (!__atomic_load_n(&pt.compile_done, __ATOMIC_ACQUIRE))
+			return 0;
+		pipelines_wait();
+		if (!pt.compile_ok)
+		{
+			pt.failed = 1;
+			host_logf(HOST_LOG_WARN, "prism pt: its passes cannot be made: no path tracing");
+			return 0;
+		}
+		host_logf(HOST_LOG_INFO, "prism pt: its passes made in %.1f s", pt_seconds() - pt.compile_started);
+		goto passes_made;
+	}
 	pt.failed = 1;
 	if (!xgpu_vulkan_rt_device(&pt.device))
 		return 0;
@@ -745,24 +832,25 @@ static int make(void)
 	/* (logged first: a driver that ends the game as it compiles them leaves
 	this as halo.log's last Path Traced line. The next start does not yet
 	fall back to PRISM Rebaked for that, only for a lost device: report.c) */
-	host_logf(HOST_LOG_INFO, "prism pt: making its passes");
-	if (!pipeline_make(PASS_LIGHT, xgpu_vulkan_pt_light_words, xgpu_vulkan_pt_light_count) ||
-		!pipeline_make(PASS_TEMPORAL, xgpu_vulkan_pt_temporal_words, xgpu_vulkan_pt_temporal_count) ||
-		!pipeline_make(PASS_FIX, xgpu_vulkan_pt_fix_words, xgpu_vulkan_pt_fix_count) ||
-		!pipeline_make(PASS_ATROUS, xgpu_vulkan_pt_atrous_words, xgpu_vulkan_pt_atrous_count) ||
-		!pipeline_make(PASS_COMPOSITE, xgpu_vulkan_pt_composite_words, xgpu_vulkan_pt_composite_count) ||
-		!pipeline_make(PASS_REFERENCE, xgpu_vulkan_pt_reference_words, xgpu_vulkan_pt_reference_count) ||
-		!pipeline_make(PASS_LAMPS, xgpu_vulkan_pt_lamps_words, xgpu_vulkan_pt_lamps_count) ||
-		!pipeline_make(PASS_CACHE, xgpu_vulkan_pt_cache_words, xgpu_vulkan_pt_cache_count) ||
-		!pipeline_make(PASS_WATER, xgpu_vulkan_pt_water_words, xgpu_vulkan_pt_water_count) ||
-		!pipeline_make(PASS_STABILIZE, xgpu_vulkan_pt_stabilize_words, xgpu_vulkan_pt_stabilize_count) ||
-		!pipeline_make(PASS_UPSAMPLE, xgpu_vulkan_pt_upsample_words, xgpu_vulkan_pt_upsample_count) ||
-		!pipeline_make(PASS_REFERENCE_STATS, xgpu_vulkan_pt_reference_stats_words,
-		xgpu_vulkan_pt_reference_stats_count))
+	host_logf(HOST_LOG_INFO, "prism pt: making its passes (on a thread of their own: CE's frame until they are made)");
+	pt.compile_started = pt_seconds();
+	pt.compile_done = 0;
+	pt.compile_ok = 0;
+	if (pthread_create(&pt.compile_thread, NULL, pipelines_thread, NULL) == 0)
+	{
+		pt.compile_running = 1;
+		pt.failed = 0;
+		return 0;
+	}
+	/* (no thread: made here, the game held meanwhile, as before) */
+	pipelines_thread(NULL);
+	if (!pt.compile_ok)
 	{
 		host_logf(HOST_LOG_WARN, "prism pt: its passes cannot be made: no path tracing");
 		return 0;
 	}
+passes_made:
+	pt.failed = 1;
 	memset(sizes, 0, sizeof(sizes));
 	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 	sizes[0].descriptorCount = 5 * SET_SLOTS;
@@ -885,6 +973,141 @@ static int images_make(uint32_t width, uint32_t height, uint32_t low_width, uint
 	return 1;
 }
 
+/* the images of the window's and the light grid's sizes let go of (their
+memory freed as the GPU is done with them), so that they are made again
+whole at the next images_make */
+static void images_free(void)
+{
+	struct xgpu_vulkan_image **images[] =
+	{
+		&pt.noisy_diffuse, &pt.noisy_specular, &pt.clean_diffuse, &pt.clean_specular, &pt.sun_raw, &pt.diff[0],
+		&pt.diff[1], &pt.spec[0], &pt.spec[1], &pt.moments[0], &pt.moments[1], &pt.spec_moments[0],
+		&pt.spec_moments[1], &pt.sun[0], &pt.sun[1], &pt.diff_a, &pt.diff_b, &pt.spec_a, &pt.spec_b, &pt.sun_a,
+		&pt.sun_b, &pt.stab_diff[0], &pt.stab_diff[1], &pt.stab_spec[0], &pt.stab_spec[1], &pt.up_diff, &pt.up_spec,
+		&pt.up_clean_diffuse, &pt.up_clean_specular, &pt.guide[0], &pt.guide[1], &pt.reservoir_info[0],
+		&pt.reservoir_info[1], &pt.reservoir_point[0], &pt.reservoir_point[1], &pt.gi_point[0], &pt.gi_point[1],
+		&pt.gi_data[0], &pt.gi_data[1], &pt.out,
+	};
+	uint32_t index;
+
+	for (index = 0; index < sizeof(images) / sizeof(images[0]); index++)
+	{
+		if (*images[index])
+			xgpu_vulkan_image_destroy(*images[index]);
+		*images[index] = NULL;
+	}
+	pt.width = pt.height = pt.low_width = pt.low_height = 0;
+	pt.history_valid = 0;
+}
+
+/* the bytes images_make's images of a window's size and a light grid's
+take (the output, the grid's 25 RGBA16F and 10 RGBA32 images, with a coarser
+grid 4 RGBA16F of the window's size) */
+static uint64_t images_bytes(uint32_t width, uint32_t height, uint32_t low_width, uint32_t low_height)
+{
+	uint64_t window = (uint64_t)width * height, grid = (uint64_t)low_width * low_height;
+	int low = low_width != width || low_height != height;
+
+	return window * 8u + (low ? window * 32u : 0u) + grid * (25u * 8u + 10u * 16u);
+}
+
+/* (what the card is to keep free beside the images: the frame's own, the
+drivers', the texture store's growth) */
+#define IMAGES_MARGIN (256ull << 20)
+
+/* the memory Path Traced never reads put aside for its images (the bake's
+light to the host's memory, xgpu_vulkan_bake_park): 1 where some was, freed
+after this submission */
+static int images_room_made(void)
+{
+	if (!xgpu_vulkan_bake_park())
+		return 0;
+	pt.memory_freed++;
+	return 1;
+}
+
+/* images_make of the window's size and a light grid's, for pt_fit_choose:
+first, where the card's budget has no room for them, the memory Path Traced
+never reads put aside (PT_FIT_FREEING: tried again once it is freed); what
+a failed try made let go of, and that memory put aside before a coarser
+grid is tried */
+static int images_made(void *context, uint32_t low_width, uint32_t low_height)
+{
+	const uint32_t *size = (const uint32_t *)context;
+	uint64_t budget, usage, need = images_bytes(size[0], size[1], low_width, low_height);
+	int last, made;
+
+	if (!pt.out && xgpu_vulkan_memory_budget(&budget, &usage) && usage && usage + need + IMAGES_MARGIN > budget)
+	{
+		if (images_room_made())
+		{
+			xgpu_vulkan_memory_log("the light's images need room");
+			return PT_FIT_FREEING;
+		}
+		/* (no room in the budget at all, and nothing to put aside: refused
+		without a try, which the driver would refuse) */
+		if (usage + need > budget)
+			return PT_FIT_REFUSED;
+	}
+	last = xgpu_vulkan_memory_use(XGPU_VULKAN_MEMORY_PT_IMAGES);
+	made = images_make(size[0], size[1], low_width, low_height);
+	xgpu_vulkan_memory_use(last);
+	if (made)
+		return PT_FIT_MADE;
+	xgpu_vulkan_memory_log("the light's images refused");
+	images_free();
+	return images_room_made() ? PT_FIT_FREEING : PT_FIT_REFUSED;
+}
+
+/* the light grid's scale whose images the card has room for (the one
+asked, else a coarser one: xgpu_vulkan_pt_fit.h), -1 where none this frame
+(CE's frame); each grid a shortage chose, and none fitting, said once */
+static float images_fit(uint32_t width, uint32_t height, float asked, int low_allowed)
+{
+	uint32_t size[2] = { width, height };
+	int changed;
+	float scale;
+
+	/* (a coarser grid, or none, chosen before the bake's light could be put
+	aside (still being loaded then): the grid asked again once it is) */
+	if ((pt.memory.step || pt.memory.none) && pt.memory.width == width && pt.memory.height == height &&
+		!pt.memory.wait && images_room_made())
+	{
+		pt_fit_retry(&pt.memory);
+		host_logf(HOST_LOG_INFO, "prism pt: memory put aside: the light's grid asked tried again");
+	}
+	/* (the images made, but the card all but full beside them: a bake
+loaded since, the light's buffers on the card as far as they went, the rest
+in the host's memory; put aside too, every 30 frames at most) */
+	if (pt.out && ++pt.memory_checked >= 30)
+	{
+		uint64_t budget, usage;
+
+		pt.memory_checked = 0;
+		if (xgpu_vulkan_memory_budget(&budget, &usage) && usage && usage + IMAGES_MARGIN * 2 > budget &&
+			images_room_made())
+			xgpu_vulkan_memory_log("the card all but full beside Path Traced");
+	}
+	scale = pt_fit_choose(&pt.memory, width, height, asked, low_allowed, images_made, size, &changed);
+
+	if (changed && scale > 0.0f)
+	{
+		uint32_t low_width, low_height;
+
+		pt_fit_low_size(width, height, scale, &low_width, &low_height);
+		host_logf(HOST_LOG_WARN, "prism pt: warning: no memory on the card for the light's images at %ux%u: traced at "
+			"%ux%u (a light grid of %.2f, brought up guided by depth and normals)", width, height, low_width, low_height,
+			(double)scale);
+	}
+	else if (changed)
+		host_logf(HOST_LOG_WARN, "prism pt: warning: no memory on the card for the light's images at %ux%u at any "
+			"light grid: CE's frame until there is (a lower resolution or an upscaler needs less)", width, height);
+	/* (the game's indicator says so: XGPU_BAKE_STATUS_PT_MEMORY) */
+	xgpu_vulkan_bake_pt_memory(pt.memory.none ? 1u : pt.memory.step ?
+		(uint32_t)(pt_fit_scales[pt.memory.step - 1] * 100.0f + 0.5f) : 0u);
+	return scale;
+}
+
 /* ---------- the timing */
 
 static void times_collect(void)
@@ -937,6 +1160,7 @@ static void times_collect(void)
 				pt.time_sums[1] / n, pt.time_sums[2] / n, pt.time_sums[3] / n, pt.time_sums[4] / n);
 			memset(pt.time_sums, 0, sizeof(pt.time_sums));
 			pt.time_frames = 0;
+			xgpu_vulkan_memory_log("path traced");
 		}
 	}
 }
@@ -1786,15 +2010,21 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	a reference runs: each traces at the G-buffer's pixels) */
 	light_scale = denoiser_off || xgpu_vulkan_upscale_pt_raw() || reference_requested() ? 0.0f :
 		light_scale_of(phase);
+	/* (the images at the grid asked, else a coarser one where the card has
+	no room for them: images_fit) */
+	pt.frames_undrawn = 0;
+	light_scale = images_fit(description->width, description->height, light_scale, !denoiser_off &&
+		!xgpu_vulkan_upscale_pt_raw() && !reference_requested());
+	if (light_scale < 0.0f)
+	{
+		pt.history_valid = 0;
+		pt.history_kept = 0;
+		return NULL;
+	}
 	low_width = description->width;
 	low_height = description->height;
 	if (light_scale > 0.0f)
-	{
-		low_width = (uint32_t)((float)description->width * light_scale + 0.5f);
-		low_height = (uint32_t)((float)description->height * light_scale + 0.5f);
-		low_width = low_width < 16u ? 16u : low_width > description->width ? description->width : low_width;
-		low_height = low_height < 16u ? 16u : low_height > description->height ? description->height : low_height;
-	}
+		pt_fit_low_size(description->width, description->height, light_scale, &low_width, &low_height);
 	if (light_scale != pt.low_logged)
 	{
 		host_logf(HOST_LOG_INFO, light_scale > 0.0f ? "prism pt: the light traced at %ux%u of the G-buffer's %ux%u "
@@ -1803,8 +2033,6 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			description->width, description->height, (double)light_scale);
 		pt.low_logged = light_scale;
 	}
-	if (!images_make(description->width, description->height, low_width, low_height))
-		return NULL;
 	/* (the job block's slot and the descriptor set's, each once the GPU is
 	done with its last frame) */
 	slot = pt.job_next;
@@ -1942,11 +2170,13 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		if (cache_on && !reference && !pt.cache_made)
 		{
 			pt.cache_made = 1;
+			pt_memory_use = XGPU_VULKAN_MEMORY_PT_CACHE;
 			if (!buffer_make((VkDeviceSize)CACHE_CELLS * CACHE_WORDS * 4, 0, &pt.cache))
 				host_logf(HOST_LOG_WARN, "prism pt: no memory for the radiance cache: none");
 			else
 				host_logf(HOST_LOG_INFO, "prism pt: the radiance cache: %u cells (%u MB)", CACHE_CELLS,
 					(unsigned)((size_t)CACHE_CELLS * CACHE_WORDS * 4 >> 20));
+			pt_memory_use = XGPU_VULKAN_MEMORY_PT_OTHER;
 			pt.cache_generation = ~lookup.generation;
 		}
 		if (cache_on && !reference && pt.cache.buffer)
@@ -2579,6 +2809,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 			"dynamic lights, the radiance cache %s", description->width, description->height,
 			(flags & FLAG_PERFORMANCE) ? "performance" : "quality", denoiser_off ? "off" : raw ? "the plugin's" : "prism",
 			dynamic, job->cache ? "on" : "off");
+		xgpu_vulkan_memory_log("path traced's first frame");
 	}
 	if (whole)
 		*whole = 1;
@@ -2684,6 +2915,21 @@ int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_i
 void xgpu_vulkan_pt_water_frame_end(void)
 {
 	pt.water_job = 0;
+	/* (Path Traced not drawn for 4 s, another lighting chosen: its images of
+	the window's size, 1.8 GB at 3440x1440, let go of for the lighting drawn;
+	made again as it draws again) */
+	if (pt.out && ++pt.frames_undrawn >= 120 && xgpu_vulkan_pt_release())
+		host_logf(HOST_LOG_INFO, "prism pt: not drawn for 120 frames: its images let go of");
+}
+
+int xgpu_vulkan_pt_release(void)
+{
+	if (!pt.made || !pt.out)
+		return 0;
+	images_free();
+	memset(&pt.memory, 0, sizeof(pt.memory));
+	pt.low_logged = -1.0f;
+	return 1;
 }
 
 int xgpu_vulkan_pt_history_kept(void)
@@ -2707,8 +2953,17 @@ void xgpu_vulkan_pt_shutdown(void)
 	struct pt_buffer *buffers[] = { &pt.sums, &pt.stats, &pt.stats_readback, &pt.sums_readback, &pt.lamps_readback,
 		&pt.tree, &pt.cache };
 
+	/* (a compile still running: done before the device can go; its
+	pipelines then let go of with the rest, or alone where none was made) */
+	pipelines_wait();
 	if (!pt.made)
+	{
+		for (index = 0; index < PASSES; index++)
+			if (pt.pipelines[index])
+				vkDestroyPipeline(pt.device.device, pt.pipelines[index], NULL);
+		memset(pt.pipelines, 0, sizeof(pt.pipelines));
 		return;
+	}
 	for (index = 0; index < sizeof(images) / sizeof(images[0]); index++)
 	{
 		if (*images[index])
@@ -2718,6 +2973,7 @@ void xgpu_vulkan_pt_shutdown(void)
 	for (index = 0; index < sizeof(buffers) / sizeof(buffers[0]); index++)
 		if (buffers[index]->buffer)
 		{
+			xgpu_vulkan_memory_counted(buffers[index]->use, buffers[index]->type, -(int64_t)buffers[index]->counted);
 			vkDestroyBuffer(pt.device.device, buffers[index]->buffer, NULL);
 			vkFreeMemory(pt.device.device, buffers[index]->memory, NULL);
 			memset(buffers[index], 0, sizeof(*buffers[index]));
@@ -2725,6 +2981,7 @@ void xgpu_vulkan_pt_shutdown(void)
 	for (index = 0; index < JOB_SLOTS; index++)
 		if (pt.jobs[index].buffer)
 		{
+			xgpu_vulkan_memory_counted(pt.jobs[index].use, pt.jobs[index].type, -(int64_t)pt.jobs[index].counted);
 			vkDestroyBuffer(pt.device.device, pt.jobs[index].buffer, NULL);
 			vkFreeMemory(pt.device.device, pt.jobs[index].memory, NULL);
 			memset(&pt.jobs[index], 0, sizeof(pt.jobs[index]));

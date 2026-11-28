@@ -860,6 +860,23 @@ curve) until the resolve draws it into the frame's target (`xgpu_vulkan_post.c`'
 composition its light × CE's base + CE's additions, with `"materials"` view 2, the frame as it is). The composite to
 come takes the same meter (`meter_add`) and step.
 
+## Path Traced short of the card's memory
+
+Path Traced traces the bake's scene (its structure and the buffers its scene block points into) and never reads its
+light. Where the card has no room for Path Traced's images beside it (docs/prism_pathtraced.md, "No room on the
+card"), `xgpu_vulkan_bake_park` moves the light's buffers (the virtual pages, charts, tile table and pool, the
+indirect pool, the sun mask's table and masks, the volume's probes and bricks, the reflection probes, the final
+gather's atlas and map, the batches' working buffers: `park_buffer`) to the host's memory: each copied on the GPU,
+the card's let go of after the submission, the final gather's cache block written again with the new addresses
+(every pass reads the buffers by their addresses, so a pass that ran meanwhile would only be slower). Only a bake
+that bakes nothing more is parked: a whole bake's (the shipped one or this machine's, perhaps still being read from
+its file), an idle one's, a done or failed one's; never one being baked, relit or filtered (`park_allowed`). Raster
+moves them back before it draws (`bake_unpark`); where the card has no room for them yet it lets go of Path Traced's
+images (`xgpu_vulkan_pt_release`) and draws from the host's memory meanwhile. The scene's buffers and structures
+never move. And where the card has no room for a light's buffer as it is made (the steps after the scene's upload),
+it is made in the host's memory rather than the bake failing ("no memory for the irradiance volume" on the 6 GB RTX
+2060 once Path Traced's images were made first), said once, and moved to the card by the next `bake_unpark`.
+
 ## Measurements
 
 See `docs/prism_gates.md`, "M2 as measured": the bake against R, Raster against R, the frame times, the bake's time
