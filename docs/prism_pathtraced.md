@@ -1012,8 +1012,20 @@ coarsest is tried again every 120 frames. `tools/test_prism_pt_fit.py`.
 
 Path Traced was made on NVIDIA's cards. Should the driver lose the device while it draws (its timeout on a pass that
 does not end, a page fault), halo.log says where the GPU was: the last step recorded (each pass is named as it is
-recorded, the traced objects' skinning and builds too), and where the device can say, the last step it began and the
-last before which every command had finished (AMD's buffer markers) and the device's fault (`VK_EXT_device_fault`).
+recorded: Path Traced's, Enhanced's traced light and its sun and occlusion, Rebaked's light pass and exposure, the
+traced objects' skinning and builds, the upscaler's and the denoiser's frames), the steps of the last three
+submissions (the mode and passes then drawn), the map and BSP the bake was told of, and where the device can say, the
+last step it began and the last before which every command had finished and the device's fault
+(`VK_EXT_device_fault`). That record is the vendor's own: NVIDIA's checkpoints
+(`VK_NV_device_diagnostic_checkpoints`) on NVIDIA's cards, AMD's buffer markers (`VK_AMD_buffer_marker`, which
+NVIDIA's driver has too) on the others'; `HALO_VULKAN_CHECKPOINTS` chooses otherwise. Every submission's main commands
+begin and end with a step of their own, so Classic's frames say whether the GPU finished one. The start's line says
+what a lost device would log (`vulkan: should the device be lost, halo.log gets the last step recorded and NVIDIA's
+checkpoints (VK_NV_device_diagnostic_checkpoints), the fault's description (VK_EXT_device_fault)`); it is not a lost
+device. Before, it read `vulkan: a lost device's diagnosis: its fault AMD's markers`, which a playtest's log on the
+RTX 3070 Ti was taken to report a lost device by (2026-11-27; no device was lost, and NVIDIA's cards then logged
+AMD's markers, not their checkpoints). `HALO_VULKAN_TEST_FAULT=<n>` faults the device for real (an address no buffer
+has, from the `n`th submission) to test the report on a card. `tools/test_prism_device_lost.py`.
 The message says the device was lost in PRISM Path Traced, and the next start sets `display.lighting` to `"raster"`
 (PRISM Rebaked) and tells the player, once for that crash (report.c's `report_path_traced_fallback`); Settings can
 choose Path Traced again. Every ray is checked before it is traced: a NaN or infinite origin or direction, or a NaN

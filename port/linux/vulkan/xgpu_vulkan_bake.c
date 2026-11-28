@@ -1132,6 +1132,15 @@ static int pipeline_make(int which, const VkDescriptorType *types, uint32_t coun
 	return result == VK_SUCCESS;
 }
 
+/* a lost device's (xgpu_vulkan_device_lost_context): the map and BSP the
+bake was told of last, and its mode */
+static void lost_context(void)
+{
+	host_logf(HOST_LOG_ERROR, "prism bake: the device lost on %.*s bsp %d (the bake's mode %u, quality %u)",
+		(int)sizeof(bake.control.map_name), bake.control.map_name[0] ? bake.control.map_name : "no map",
+		(int)bake.control.bsp_index, (unsigned)bake.control.mode, (unsigned)bake.control.quality);
+}
+
 static int make(void)
 {
 	static const VkDescriptorType raster_types[] =
@@ -1248,6 +1257,7 @@ static int make(void)
 	bake.reach_bsp = -1;
 	bake.made = 1;
 	bake.failed = 0;
+	xgpu_vulkan_device_lost_context(lost_context);
 	host_logf(HOST_LOG_INFO, "prism bake: ready");
 	return 1;
 }
@@ -8830,8 +8840,20 @@ void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
 		bake.exposure_clock = now;
 	}
 	push.scene = bake.meter.address;
+	/* (HALO_VULKAN_TEST_FAULT=<n>: from the n-th submission on, the step
+	given an address no buffer has, a real page fault and lost device, for
+	testing the lost device's report on a card. For testing only) */
+	{
+		static long long test_fault = -1;
+
+		if (test_fault < 0)
+			test_fault = getenv("HALO_VULKAN_TEST_FAULT") ? atoll(getenv("HALO_VULKAN_TEST_FAULT")) : 0;
+		if (test_fault > 0 && xgpu_vulkan_serial() >= (uint64_t)test_fault)
+			push.scene = 0x00007ff000000000ull;
+	}
 	push.parameters[0] = mode;
 	barrier(commands);
+	xgpu_vulkan_breadcrumb(commands, 64, "Rebaked's exposure");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_EXPOSURE]);
 	vkCmdPushConstants(commands, bake.pipeline_layouts[PIPELINE_EXPOSURE], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
 		&push);

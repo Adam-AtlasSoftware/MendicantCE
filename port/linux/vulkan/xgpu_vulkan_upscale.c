@@ -1414,6 +1414,8 @@ static int plugin_upscale(int which, VkCommandBuffer commands, const struct xgpu
 	frame.render_height = height;
 	frame.output_width = output_width;
 	frame.output_height = output_height;
+	xgpu_vulkan_breadcrumb(commands, which == PLUGIN_DENOISER ? 71 : 70, which == PLUGIN_DENOISER ?
+		"the denoiser plugin's frame" : "the upscaler plugin's frame");
 	if (!table->evaluate(context, &frame))
 	{
 		plugin_failed(which, "evaluate");
@@ -1621,6 +1623,7 @@ void xgpu_vulkan_upscale_end(const struct xgpu_stream_upscale *record, struct xg
 		frame.sharpness = record->sharpness;
 		frame.reset = reset || upscaler != XGPU_UPSCALE_UPSCALER_FSR3;
 		frame.meters_per_unit = METERS_PER_UNIT;
+		xgpu_vulkan_breadcrumb(frame.commands, 72, "FSR 3's upscaling");
 		if (!xgpu_vulkan_fsr3_dispatch(&frame))
 		{
 			stretch(record, view, output);
@@ -1747,6 +1750,7 @@ int xgpu_vulkan_upscale_denoise(VkCommandBuffer commands, struct xgpu_vulkan_ima
 	frame.exposure = frame.pre_exposure = 1.0f;
 	frame.render_width = frame.output_width = width;
 	frame.render_height = frame.output_height = height;
+	xgpu_vulkan_breadcrumb(commands, 73, "the denoiser plugin's traced light");
 	if (!table->evaluate(up.plugins[PLUGIN_DENOISER].context, &frame))
 	{
 		plugin_failed(PLUGIN_DENOISER, "evaluate");

@@ -2813,6 +2813,7 @@ static void static_levels_record(VkCommandBuffer commands, struct rt_slot *slot)
 	push.levels = words ? copy->address : rt.static_vertices.address;
 	push.count = rt.opaque_triangles;
 	push.words = words;
+	xgpu_vulkan_breadcrumb(commands, 44, "the traced world's levels");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.levels);
 	vkCmdPushConstants(commands, rt.levels_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
 	vkCmdDispatch(commands, (rt.opaque_triangles + 63) / 64, 1, 1);
@@ -3466,6 +3467,7 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	vkUpdateDescriptorSets(rt.device.device, count, writes, 0, NULL);
 	if (gi && probes_updated && !reference)
 	{
+		xgpu_vulkan_breadcrumb(commands, 45, "the traced light's probes");
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes);
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes_pipeline_layout, 0, 1, &sets[0], 0,
 			NULL);
@@ -3477,6 +3479,7 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 	the temporal pass's place; no radiance cache) */
 	if (reference)
 	{
+		xgpu_vulkan_breadcrumb(commands, 46, "the traced light's paths");
 		if (rt.reference_adding)
 		{
 			vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path);
@@ -3500,6 +3503,7 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 			rt.cache_zeroed = 1;
 		}
+		xgpu_vulkan_breadcrumb(commands, 46, "the traced light's paths");
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path);
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.path_pipeline_layout, 0, 1, &sets[1], 0,
 			NULL);
@@ -3513,6 +3517,7 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 			cache_push[1] = (uint32_t)(rt.cache_buffer.address >> 32);
 			cache_push[2] = rt.frame.frame;
 			cache_push[3] = RT_CACHE_ENTRIES;
+			xgpu_vulkan_breadcrumb(commands, 47, "the traced light's radiance cache");
 			vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.cache_resolve);
 			vkCmdPushConstants(commands, rt.cache_resolve_layout_pipeline, VK_SHADER_STAGE_COMPUTE_BIT, 0,
 				sizeof(cache_push), cache_push);
@@ -3525,12 +3530,14 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 		if (xgpu_vulkan_upscale_denoise(commands, rt.pt_raw[0], rt.pt_raw[1], width, height))
 			barrier_global(commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+		xgpu_vulkan_breadcrumb(commands, 48, "the traced light's temporal pass");
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate);
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.accumulate_pipeline_layout, 0, 1,
 			&sets[2], 0, NULL);
 		vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
 		compute_barrier(commands);
 	}
+	xgpu_vulkan_breadcrumb(commands, 49, "the traced light's tiles and exposure");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.tiles);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.tiles_pipeline_layout, 0, 1, &sets[3], 0,
 		NULL);
@@ -3541,6 +3548,7 @@ static int pathtraced_record(VkCommandBuffer commands, struct rt_slot *slot, VkA
 		NULL);
 	vkCmdDispatch(commands, 1, 1, 1);
 	compute_barrier(commands);
+	xgpu_vulkan_breadcrumb(commands, 50, "the traced light's atrous pass");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.atrous);
 	for (step = 0; step < steps; step++)
 	{
@@ -4116,6 +4124,7 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 	/* gi: the probes updated, a workgroup each, before the trace reads them */
 	if (gi && probes_updated)
 	{
+		xgpu_vulkan_breadcrumb(commands, 45, "the traced light's probes");
 		vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes);
 		vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.probes_pipeline_layout, 0, 1, &sets[2], 0,
 			NULL);
@@ -4125,12 +4134,14 @@ whether the surfaces read the traced light in "shadows" and "gi" */
 		rt.probe_frame++;
 	}
 	/* the trace, then the resolve */
+	xgpu_vulkan_breadcrumb(commands, 51, "the traced sun and occlusion");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.trace);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.trace_pipeline_layout, 0, 1, &sets[0], 0,
 		NULL);
 	vkCmdDispatch(commands, (out_width + 7) / 8, (out_height + 7) / 8, 1);
 	barrier_global(commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+	xgpu_vulkan_breadcrumb(commands, 52, "the traced sun and occlusion's resolve");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.resolve);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, rt.resolve_pipeline_layout, 0, 1, &sets[1], 0,
 		NULL);
