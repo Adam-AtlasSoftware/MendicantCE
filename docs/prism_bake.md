@@ -766,6 +766,28 @@ ambient light left is 1 - strength x the mean.
   (a diagnostic, for the calibration against Path Traced); `HALO_RASTER_TIMING` logs the occlusion pass's and the light
   pass's GPU time every 300 frames.
 
+**The lights' shadows** (`display.enhanced_light_shadows`: `"ultra"`, the default, `"high"`, `"low"`, `"off"`).
+Classic and Enhanced lit the level with the moving lights unshadowed: the flashlight, a Warthog's headlights, muzzle
+flashes, plasma bolts and the other lights CE's world_scene gives the frame (SCENE_LIGHTS' dynamic class) shone
+through walls and from behind cover. The light pass now lights the level with them under either composition (with
+CE's, CE's diffuse light passes' light is replaced, in CE's encoding, after the exposure and its curve; a gelled
+light, the flashlight, at `RASTER_CE_GEL` of its spot) and traces their shadows as Path Traced's `light_seen` does:
+
+- **Which:** of the lights reaching a pixel, those giving it the most (by luminance, at least 1/500 of white): 8 at
+  ultra (the brightest two with two rays each, a soft edge), 4 at high, 2 at low; the rest light it unshadowed.
+- **By what:** the level and the static scenery (the bake's scene) to the light's place, and, while Ray Tracing
+  captures the moving objects (Object Shadows or Object Occlusion traced), the objects to `DYNAMIC_OWNER` short of it,
+  so a lamp on or in its own object is not shadowed by it; a light within a world unit of the eye (the player's
+  flashlight and muzzle flash) is not shadowed by the player's own body (mask 16).
+- **Its edge:** the point aimed at is spread over the light's size (`DYNAMIC_SIZE` of its reach, `DYNAMIC_SIZE_MOST`
+  at most, as Path Traced's) by the pixel's fixed pattern: soft as far as the caster is from the surface, no flicker.
+- **The baked lamps and fixtures:** while the objects are captured, the 2 (1 at low) lamps of the pixel's importance
+  cell and fixtures that light it most, in the bake's units, are taken from the baked light where an object blocks the
+  ray and the level does not, never under a tenth of it: an object casts a shadow from a room's own lights.
+
+Not in the bake's views (the gates' measures). Push flag bits 8 and 9 of the light pass, the resolve phase's bits 19
+and 20 (`XGPU_GBUFFER_PHASE_RASTER_LIGHT_SHADOWS_*`).
+
 **What composes the frame** (`display.prism_raster_composition`): by default (`"ce"`) CE's own shaders, until PRISM's
 materials reach theirs: the diffuse light (exposed, through the tone curve, below) goes into CE's light target in its light's
 place (the level's glow folded in as CE's lightmap pass folds it; an object's base colour, the G-buffer's, and glow

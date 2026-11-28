@@ -129,6 +129,14 @@ detonation's own light (its effect's, reaching 10 units) is left as it is:
 it lights the room already */
 #define GRENADE_REACH 2.0f
 #define GRENADE_GAIN 1.5f
+/* a light through a gel (the flashlight's) in Enhanced lighting with CE's
+composition: the light pass adds it by CE's own falloff, in CE's encoding,
+where CE's diffuse pass drew it through its gel; its share the gel's over
+the spot as CE draws it (world_scene.c's WORLD_SCENE_GEL is Path Traced's,
+by its inverse square's peak: under CE's falloff the flashlight's spot on
+a30's grass came out a quarter of Classic's; at this share within a tenth,
+work/openh1_eval/v4_playtest1/shadows) */
+#define RASTER_CE_GEL 0.45f
 
 /* a light as struct xgpu_stream_scene_light lays it out (20 words) */
 struct scene_light
@@ -408,7 +416,9 @@ void prism_scene_lights_frame(
 void prism_scene_lights_window(
 	void)
 {
-	if (!render_enumerating && (prism_deferred_pathtraced() || prism_deferred_raster_materials()))
+	/* (Enhanced lighting with either composition: its light pass lights
+	the level with them, CE's diffuse passes' light replaced) */
+	if (!render_enumerating && (prism_deferred_pathtraced() || prism_deferred_raster()))
 	{
 		scene_lights_send(TRUE);
 	}
@@ -590,7 +600,8 @@ static void scene_lights_send(
 				drawn->cone_cosine;
 		}
 		memcpy(light->radiance, drawn->color, 3 * sizeof(float));
-		light->radiance[3] = drawn->intensity * drawn->gel;
+		light->radiance[3] = drawn->intensity * (drawn->gel < 1.0f && prism_deferred_raster() &&
+			!prism_deferred_pathtraced() && !prism_deferred_raster_materials() ? RASTER_CE_GEL : drawn->gel);
 		dynamic_look(light, !(drawn->flags & WORLD_SCENE_LIGHT_GLOW) ? 1.0f :
 			light_port_object_type(drawn->id) == _object_type_projectile ? GLOW_PROJECTILE_SHARE : GLOW_FLARE_SHARE);
 		if (scene_light_grenade(drawn->id))

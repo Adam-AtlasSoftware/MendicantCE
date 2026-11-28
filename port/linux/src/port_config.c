@@ -971,6 +971,17 @@ static const struct config_setting config_settings[] =
 		"display.shadow_resolution under Enhanced lighting, for the game's own\n"
 		"object shadows (ray tracing off, or Object Shadows Classic): 128 to\n"
 		"1024." GRAPHICS_CHOOSES },
+	{ "display.enhanced_light_shadows", _config_string, "\"ultra\"", "HALO_ENHANCED_LIGHT_SHADOWS",
+		_environment_value, _platform_desktop,
+		"Enhanced lighting: the shadows of the lights other than the sun, traced\n"
+		"(docs/prism_bake.md, \"The lights' shadows\"). The flashlight, muzzle\n"
+		"flashes, plasma and the other moving lights are shadowed by the level\n"
+		"and, while display.prism_ray_tracing traces the moving objects, by\n"
+		"them, which then also cast shadows from the level's own lamps and\n"
+		"fixtures (taken from their baked light). \"ultra\" the 8 moving lights\n"
+		"that light a pixel most and 2 baked ones, the brightest two with soft\n"
+		"edges of two rays; \"high\" 4 and 2; \"low\" 2 and 1; \"off\" none.\n"
+		"Read each frame." },
 	{ "display.pt_dynamic_lights", _config_string, GRAPHICS_DYNAMIC_LIGHTS, "HALO_PT_DYNAMIC_LIGHTS",
 		_environment_value, _platform_desktop,
 		"display.dynamic_lights under Path Traced lighting (its own key: the\n"
@@ -4724,8 +4735,8 @@ static const char *const config_display_order[] =
 	"display.lighting",
 	"=Enhanced lighting (\"enhanced\") alone: its look and its ray tracing",
 	"display.prism_sky_light", "display.prism_raster_composition", "display.prism_raster_objects",
-	"display.enhanced_dynamic_lights", "display.prism_ray_tracing", "display.prism_raster_object_shadows",
-	"display.prism_raster_object_occlusion",
+	"display.enhanced_dynamic_lights", "display.enhanced_light_shadows", "display.prism_ray_tracing",
+	"display.prism_raster_object_shadows", "display.prism_raster_object_occlusion",
 	"display.enhanced_shadow_resolution", "display.prism_rt_objects", "display.prism_rt_cache",
 	"display.prism_rt_alpha",
 	"=Path Traced lighting (\"pathtraced\") alone: its own settings",
@@ -4801,6 +4812,7 @@ static const struct
 	{ "display.prism_raster_object_occlusion", "Enhanced with display.prism_ray_tracing on" },
 	{ "display.prism_ray_tracing", LIGHTING_ENHANCED },
 	{ "display.enhanced_dynamic_lights", LIGHTING_ENHANCED },
+	{ "display.enhanced_light_shadows", LIGHTING_ENHANCED },
 	{ "display.enhanced_shadow_resolution", LIGHTING_ENHANCED },
 	{ "display.prism_rt_objects", "Enhanced with display.prism_ray_tracing on" },
 	{ "display.prism_rt_cache", "Enhanced with display.prism_ray_tracing on" },
@@ -6654,6 +6666,7 @@ static const struct
 	{ "display.lighting", { "classic", "enhanced", "pathtraced", "ce_deferred", NULL }, "classic" },
 	{ "display.prism_ray_tracing", { "on", "off", NULL }, "on" },
 	{ "display.enhanced_dynamic_lights", { "classic", "enhanced", NULL }, "classic" },
+	{ "display.enhanced_light_shadows", { "ultra", "high", "low", "off", NULL }, "ultra" },
 	{ "display.pt_dynamic_lights", { "classic", "enhanced", NULL }, "classic" },
 	{ "display.prism_pt_objects", { "auto", "view_lod", "low_lod", NULL }, "auto" },
 	{ "display.world_geometry", { "classic", "enhanced", NULL }, "classic" },

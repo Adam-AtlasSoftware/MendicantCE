@@ -2800,6 +2800,9 @@ static void prism_rt_rows_show(struct widget_instance *list)
 		{ "op_prism_object_occlusion", "prism_object_occlusion_spinner" },
 		{ "op_prism_rt_objects", "prism_rt_objects_spinner" }, { "op_prism_rt_cache", "prism_rt_cache_spinner" },
 		{ "op_prism_rt_alpha", "prism_rt_alpha_spinner" },
+		/* (Enhanced's lights' shadows: traced, by the level whether or not
+		the objects are) */
+		{ "op_enhanced_light_shadows", "enhanced_light_shadows_spinner" },
 		/* (Path Traced's traced scene) */
 		{ "op_prism_pt_objects", "prism_pt_objects_spinner" }, { "op_prism_pt_cache", "prism_pt_cache_spinner" },
 		{ "op_prism_pt_alpha", "prism_pt_alpha_spinner" },
@@ -2942,6 +2945,7 @@ static struct
 	{ "op_prism_raster_composition", LIGHTING_E, NULL, NULL },
 	{ "op_prism_raster_objects", LIGHTING_E, NULL, NULL },
 	{ "op_enhanced_dynamic_lights", LIGHTING_E, NULL, NULL },
+	{ "op_enhanced_light_shadows", LIGHTING_E, NULL, NULL },
 	{ "op_prism_ray_tracing", LIGHTING_E, NULL, NULL },
 	{ "op_prism_object_shadows", LIGHTING_E, "display.prism_ray_tracing", "on" },
 	{ "op_prism_object_occlusion", LIGHTING_E, "display.prism_ray_tracing", "on" },

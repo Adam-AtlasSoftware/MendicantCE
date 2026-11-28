@@ -1791,6 +1791,13 @@
 			<choice shown="TRACED" value="traced"/>
 			<choice shown="OFF" value="off"/>
 		</row>
+		<row key="enhanced_light_shadows" kind="choice" setting="display.enhanced_light_shadows" label="LIGHT SHADOWS" crumb="VIDEO › PRISM › ENHANCED LIGHTING" search_choices="ultra high low" when="desktop">
+			<help>Shadows of the flashlight, muzzle flashes, plasma and the other lights, cast by the level and, while ray tracing is on, by characters and vehicles, which then also shadow the level's lamps.</help>
+			<choice shown="ULTRA" value="ultra"/>
+			<choice shown="HIGH" value="high"/>
+			<choice shown="LOW" value="low"/>
+			<choice shown="OFF" value="off"/>
+		</row>
 		<row key="enhanced_shadow_resolution" kind="choice" setting="display.enhanced_shadow_resolution" label="SHADOW QUALITY" crumb="VIDEO › PRISM › ENHANCED LIGHTING" search_choices="xbox medium high ultra" when="desktop">
 			<help>How sharp the game's own object shadows are, drawn while Object Shadows are Classic or ray tracing is off.</help>
 			<choice shown="XBOX" value="128"/>

@@ -22,10 +22,11 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_ray_tracing" x="28" y="210" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_object_shadows" x="28" y="231" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_object_occlusion" x="28" y="252" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_enhanced_shadow_resolution" x="28" y="273" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_rt_objects" x="28" y="294" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_rt_cache" x="28" y="315" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_rt_alpha" x="28" y="336" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_enhanced_light_shadows" x="28" y="273" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_enhanced_shadow_resolution" x="28" y="294" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_rt_objects" x="28" y="315" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_rt_cache" x="28" y="336" platform="desktop"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_prism_rt_alpha" x="28" y="357" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/button_bar" y="414"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/button_bar" type="column_list" width="640" height="28" flags="pass_unhandled_to_focused_child left_right_tabs_items" source="tools/port_settings.py settings_files/_settings_page">
@@ -170,11 +171,20 @@
 		<on event="created" run="port setting load"/>
 		<on event="a" run="port setting segment"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_enhanced_light_shadows" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_light_shadows_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_light_shadows_spinner" x="188"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_light_shadows_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_light_shadows_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ULTRA|HIGH|LOW|OFF" setting="display.enhanced_light_shadows" values="ultra|high|low|off" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/op_enhanced_shadow_resolution" width="344" height="20" flags="pass_unhandled_to_focused_child" bitmap="main_menu/settings/row" color="#FF2896FF" platform="desktop" wide="-106 244" source="tools/port_settings.py settings_files/_settings_page">
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_shadow_resolution_label"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_shadow_resolution_spinner" x="188"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_shadow_resolution_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="9" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_shadow_resolution_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/enhanced_shadow_resolution_spinner" type="spinner" top="1" width="140" height="18" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="XBOX|MEDIUM|HIGH|ULTRA" setting="display.enhanced_shadow_resolution" values="128|256|512|1024" font="ui\small_ui" color="#FF2896FF" align="center" text_y="0" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="4 -6 16 0" footer_bounds="4 140 16 146" wide="20 120" source="tools/port_settings.py settings_files/_settings_page">
 		<on event="created" run="port setting load"/>
@@ -185,7 +195,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_objects_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_objects_seg1" x="283" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_objects_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="10" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_objects_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_objects_seg0" type="text" controller="1" width="91" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="AS DRAWN" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -201,7 +211,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_cache_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_cache_seg1" x="240" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_cache_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="11" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_cache_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_cache_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -217,7 +227,7 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_alpha_seg0" x="188" y="1"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_alpha_seg1" x="240" y="1"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_alpha_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="12" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_alpha_label" type="text" controller="1" width="184" height="20" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/labels" string_index="13" color="#FF2896FF" text_x="10" text_y="1" wide="0 20" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/enhanced/prism_rt_alpha_seg0" type="text" controller="1" width="48" height="18" flags="keep_ends" bitmap="main_menu/settings/segment" text="ON" color="#FF2896FF" align="center" text_y="0" text_flags="no_focus_test" wide="20 0" font="ui\small_ui" source="tools/port_settings.py settings_files/_settings_page/_settings_text">
 	</widget>
@@ -237,6 +247,7 @@
 		<string text="RAY TRACING"/>
 		<string text="OBJECT SHADOWS"/>
 		<string text="OBJECT OCCLUSION"/>
+		<string text="LIGHT SHADOWS"/>
 		<string text="SHADOW QUALITY"/>
 		<string text="TRACED MODELS"/>
 		<string text="MODEL CACHE"/>
@@ -253,6 +264,7 @@
 		<string text="Traces the moving objects' sun shadows and the shapes below with the graphics card's ray tracing. Off: the game's own object shadows. Only where the graphics card traces rays."/>
 		<string text="The sun's shadows of vehicles, characters and weapons. Traced: on the ground, on each other and on themselves. Classic: the game's own, on the ground only."/>
 		<string text="The soft shade vehicles, characters and weapons cast about them: under a Warthog, at a Marine's feet, in their own creases. Traced: by ray tracing, as Path Traced shades them. Off: none."/>
+		<string text="Shadows of the flashlight, muzzle flashes, plasma and the other lights, cast by the level and, while ray tracing is on, by characters and vehicles, which then also shadow the level's lamps."/>
 		<string text="How sharp the game's own object shadows are, drawn while Object Shadows are Classic or ray tracing is off."/>
 		<string text="The objects' shapes traced. As Drawn: the remodels as drawn, within 40 units. Game's: the game's own models, cheaper."/>
 		<string text="Keeps each object's traced shape from frame to frame, refitting only what moved: much less work."/>
