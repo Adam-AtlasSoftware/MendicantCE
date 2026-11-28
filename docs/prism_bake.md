@@ -738,13 +738,14 @@ on). The bake is made without the moving objects, so neither the lightmaps nor t
 a character casts about it: under a Warthog, about a Marine's feet, in an object's own creases and on its neighbours.
 Path Traced has it (every ray meets the objects), Classic CE's projected shadow under each object, and before this
 Enhanced had none at all: its traced sun shadows replace CE's projected ones, and in shade, indoors or under a sky
-with no sun nothing stood in for them. With Ray Tracing off CE's projected shadow comes back only as a share of the
-sun's light, so not in shade either. The game sets RT_FRAME's `XGPU_RT_FLAG_RASTER_OCCLUSION`, which captures the
-objects as the traced sun shadows do (with them or alone: with Object Shadows Classic the sun shadows stay CE's), and
-before the light pass a compute pass (`occlusion_source`, `xgpu_vulkan_bake.c`'s `raster_occlusion`) traces, from each
-pixel the G-buffer has a normal for, cosine-distributed rays against the objects' structure (masks 4, 8 and the
-player's body, 16): a hit at t counts 1 - (t / reach)^2, as world AO's traced objects count, and the ambient light
-left is 1 - strength x the mean.
+with no sun nothing stood in for them. With Ray Tracing off CE's projected shadow came back only as a share of the
+sun's light, so not in shade either: it now darkens the rest of the light too (its whole texel, as Classic's does)
+wherever the objects' occlusion is not traced. The game sets RT_FRAME's `XGPU_RT_FLAG_RASTER_OCCLUSION`, which
+captures the objects as the traced sun shadows do (with them or alone: with Object Shadows Classic the sun shadows
+stay CE's), and before the light pass a compute pass (`occlusion_source`, `xgpu_vulkan_bake.c`'s `raster_occlusion`)
+traces, from each pixel the G-buffer has a normal for, cosine-distributed rays against the objects' structure (masks
+4, 8 and the player's body, 16): a hit at t counts 1 - (t / reach)^2, as world AO's traced objects count, and the
+ambient light left is 1 - strength x the mean.
 
 - **A level pixel** is darkened by the objects alone, within 2.5 world units: the bake already has the level's and the
   static scenery's own occlusion (the static scenery is left out of the capture, `XGPU_GBUFFER_FLAG_STATIC_SCENERY`),

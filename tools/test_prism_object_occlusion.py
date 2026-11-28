@@ -115,6 +115,15 @@ def test_level_darkened_by_objects_alone_and_ambient_only():
     assert "0xffffffffu" in OCCLUSION
 
 
+def test_classic_shadow_without_traced_occlusion():
+    """with the objects not traced (Ray Tracing off), CE's projected shadow darkens the light less the sun's as well
+    as the sun's (its whole texel, as Classic's): never where the occlusion is traced, which would darken it twice"""
+    block = RASTER.split("float ce_code = float(x.z >> 24u) / 255.0;", 1)[1].split("float v = s.sun.w", 1)[0]
+    assert "job.objects == uvec2(0u)" in block
+    assert "sunv *= clamp(drawn / ce_light, 0.0, 1.0);" in block
+    assert "if ((push.parameters.w & 8u) == 0u)\n                    lit *= clamp(drawn / ce_light, 0.0, 1.0);" in block
+
+
 def test_flag_and_capture():
     """the game's flag is the renderer's; it captures the objects alone too, and the traced sun shadows stay the
     RASTER_OBJECTS flag's (Object Shadows Classic keeps CE's projected shadows)"""
