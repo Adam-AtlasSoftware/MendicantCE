@@ -49,9 +49,19 @@ store's record (mod_textures.c); their ids go to the host with each material
 store answers again. The G-buffer pass draws a material's opaque draws by
 its family's uber-shader, which samples them (xgpu_spirv.c's gbuffer_pack).
 
+Below them, the relief tier (prism_relief.c, display.surface_relief): an
+environment shader of a relief class (Forerunner metal) that no mod or pack
+gives a material is given one of the pack tier whose only image is the
+normal map of its designs raised and sunk, made from the player's own
+bitmaps as the map loads (in the data folder's cache), with the relief flag
+(its colour, roughness, metal and specular the automatic tier's); a pack's
+material of such a shader takes that normal map in place of its own (CE's
+bump map). A mod's is drawn as it is.
+
 Only in the deferred modes (display.lighting "ce_deferred" or "raster"), with
-display.material_packs (the default): with "ce" nothing is read or sent, and
-the command stream is as it was. Nothing simulated reads a material.
+display.material_packs (the default) or display.surface_relief: with "ce"
+nothing is read or sent, and the command stream is as it was. Nothing
+simulated reads a material.
 */
 
 /* ---------- headers */
@@ -64,6 +74,7 @@ the command stream is as it was. Nothing simulated reads a material.
 #include "tag_files/tag_groups.h"
 #include "mods.h"
 #include "prism_deferred.h"
+#include "../src/posix.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -145,6 +156,7 @@ enum
 #define MODEL_AUTO 15UL
 #define FLAG_NORMAL_AT_BUMP 1UL
 #define FLAG_FOLIAGE 2UL
+#define FLAG_RELIEF 0x4000UL
 #define TYPE_SHIFT 4
 #define DETAIL_SHIFT 8
 #define MICRO_SHIFT 12
@@ -193,22 +205,28 @@ struct material
 
 static struct
 {
-	/* display.material_packs in a deferred mode (as read: config_changes
-	+ 1), and as the materials were last read */
+	/* display.material_packs and display.surface_relief in a deferred mode
+	(as read: config_changes + 1), and as the materials were last read */
 	unsigned long settings_read;
 	boolean setting;
+	boolean relief_setting;
 	boolean wanted;
+	boolean relief_wanted;
 	boolean read_wanted;
+	boolean read_relief;
 	struct material *materials;
 	long material_count;
 	short table[MATERIAL_TABLE_SIZE];
-	/* the images' files, each once (the store's queries) */
+	/* the images' files, each once (the store's queries): a mod's (NONE
+	one of the relief's), and the relief's cache's paths (NULL a mod's) */
 	long *files;
+	char **paths;
 	long file_count;
 	/* moved as the store's answers come (the maps sent again) */
 	unsigned long generation;
 	long pack_count;
 	long mod_count;
+	long relief_count;
 } prism_materials_globals;
 
 /* ---------- private code */
@@ -280,14 +298,23 @@ static short material_find(
 static void materials_dispose(
 	void)
 {
+	long index;
+
+	for (index = 0; prism_materials_globals.paths && index < prism_materials_globals.file_count; index++)
+	{
+		free(prism_materials_globals.paths[index]);
+	}
 	free(prism_materials_globals.materials);
 	free(prism_materials_globals.files);
+	free(prism_materials_globals.paths);
 	prism_materials_globals.materials = NULL;
 	prism_materials_globals.files = NULL;
+	prism_materials_globals.paths = NULL;
 	prism_materials_globals.material_count = 0;
 	prism_materials_globals.file_count = 0;
 	prism_materials_globals.pack_count = 0;
 	prism_materials_globals.mod_count = 0;
+	prism_materials_globals.relief_count = 0;
 	table_clear();
 
 	return;
@@ -300,12 +327,14 @@ static void settings_read(
 	{
 		prism_materials_globals.settings_read = config_changes() + 1;
 		prism_materials_globals.setting = prism_deferred_wanted() && config_boolean("display.material_packs");
+		prism_materials_globals.relief_setting = prism_deferred_wanted() && config_boolean("display.surface_relief");
 	}
 	/* (only where the renderer draws materials: without the textures' set's
 	material bindings, a device without block compression or with
 	HALO_MATERIALS_OFF, no pack's images are queued and no maps sent, every
 	shader at the automatic tier) */
 	prism_materials_globals.wanted = prism_materials_globals.setting && d3d8_materials_drawn();
+	prism_materials_globals.relief_wanted = prism_materials_globals.relief_setting && d3d8_materials_drawn();
 
 	return;
 }
@@ -805,8 +834,87 @@ static short texture_add(
 		return NONE;
 	}
 	prism_materials_globals.files[prism_materials_globals.file_count] = file;
+	prism_materials_globals.paths[prism_materials_globals.file_count] = NULL;
 
 	return (short)prism_materials_globals.file_count++;
+}
+
+/* a file of the relief's cache among the images' (each once), its index;
+NONE if there are too many or no memory */
+static short texture_add_path(
+	char const *path)
+{
+	long index;
+	char *copy;
+
+	for (index = 0; index < prism_materials_globals.file_count; index++)
+	{
+		if (prism_materials_globals.paths[index] && !strcmp(prism_materials_globals.paths[index], path))
+		{
+			return (short)index;
+		}
+	}
+	if (prism_materials_globals.file_count >= MAXIMUM_MATERIALS * MAPS || !(copy = malloc(strlen(path) + 1)))
+	{
+		return NONE;
+	}
+	strcpy(copy, path);
+	prism_materials_globals.files[prism_materials_globals.file_count] = NONE;
+	prism_materials_globals.paths[prism_materials_globals.file_count] = copy;
+
+	return (short)prism_materials_globals.file_count++;
+}
+
+/* an environment shader's material of the relief tier (no mod or pack
+gives it one), or a pack's given the relief's normal map; FALSE if its
+shader has no relief */
+static boolean relief_material(
+	long tag_index,
+	struct material *material,
+	boolean pack)
+{
+	char path[MAXIMUM_PATH];
+	void const *shader = tag_get('senv', tag_index);
+	boolean at_bump = FALSE;
+	short texture;
+
+	if (!prism_materials_globals.relief_wanted ||
+		!prism_relief_image(shader, tag_get_name(tag_index), path, sizeof(path), &at_bump) ||
+		(texture = texture_add_path(path)) == NONE)
+	{
+		return FALSE;
+	}
+	if (!pack)
+	{
+		short image;
+
+		memset(material, 0, sizeof(*material));
+		material->shader = shader;
+		material->tier = TIER_PACK;
+		material->model = MODEL_AUTO;
+		for (image = 0; image < MAPS; image++)
+		{
+			material->files[image] = NONE;
+			material->textures[image] = NONE;
+		}
+		material->scalars[_scalar_albedo] = material->scalars[_scalar_albedo + 1] =
+			material->scalars[_scalar_albedo + 2] = 1.0f;
+		material->scalars[_scalar_roughness] = material->scalars[_scalar_metal] =
+			material->scalars[_scalar_occlusion] = 1.0f;
+		material->scalars[_scalar_emissive] = material->scalars[_scalar_emissive + 1] =
+			material->scalars[_scalar_emissive + 2] = 1.0f;
+		/* (CE's type and detail functions, as a pack's "ce": its colour is
+		CE's own here, but the uber-shader's flags are a pack's) */
+		material->flags = FLAG_RELIEF | (((unsigned long)field_short(shader, SENV_TYPE) & 3) << TYPE_SHIFT) |
+			(((unsigned long)field_short(shader, SENV_DETAIL_FUNCTION) & 3) << DETAIL_SHIFT) |
+			(((unsigned long)field_short(shader, SENV_MICRO_DETAIL_FUNCTION) & 3) << MICRO_SHIFT);
+	}
+	material->files[_map_normal] = NONE;
+	material->textures[_map_normal] = texture;
+	material->scalars[_scalar_normal_scale] = 1.0f;
+	material->flags = (material->flags & ~FLAG_NORMAL_AT_BUMP) | (at_bump ? FLAG_NORMAL_AT_BUMP : 0);
+
+	return TRUE;
 }
 
 /* a shader's material of the mod or the pack tier, read; FALSE if it has
@@ -823,7 +931,7 @@ static boolean shader_material(
 	char const *pbr = config_string("display.prism_materials");
 	int format;
 
-	if (!tag_name || !shader)
+	if (!tag_name || !shader || !prism_materials_globals.wanted)
 	{
 		return FALSE;
 	}
@@ -871,11 +979,13 @@ static long materials_read(
 
 	prism_materials_globals.materials = malloc(MAXIMUM_MATERIALS * sizeof(*prism_materials_globals.materials));
 	prism_materials_globals.files = malloc(MAXIMUM_MATERIALS * MAPS * sizeof(*prism_materials_globals.files));
-	if (!prism_materials_globals.materials || !prism_materials_globals.files)
+	prism_materials_globals.paths = malloc(MAXIMUM_MATERIALS * MAPS * sizeof(*prism_materials_globals.paths));
+	if (!prism_materials_globals.materials || !prism_materials_globals.files || !prism_materials_globals.paths)
 	{
 		materials_dispose();
 		return 0;
 	}
+	prism_relief_begin();
 	for (group = 0; group < (int)(sizeof(groups) / sizeof(groups[0])); group++)
 	{
 		tag_iterator_new(&iterator, groups[group]);
@@ -887,7 +997,15 @@ static long materials_read(
 
 			if (!shader_material(groups[group], tag_index, material))
 			{
-				continue;
+				/* (the relief tier's, below the pack's and the mod's) */
+				if (groups[group] != 'senv' || !relief_material(tag_index, material, FALSE))
+				{
+					continue;
+				}
+			}
+			else if (material->tier == TIER_PACK && groups[group] == 'senv')
+			{
+				(void)relief_material(tag_index, material, TRUE);
 			}
 			for (image = 0; image < MAPS; image++)
 			{
@@ -896,7 +1014,11 @@ static long materials_read(
 					material->textures[image] = texture_add(material->files[image]);
 				}
 			}
-			if (material->tier == TIER_PACK)
+			if (material->flags & FLAG_RELIEF)
+			{
+				prism_materials_globals.relief_count++;
+			}
+			else if (material->tier == TIER_PACK)
 			{
 				prism_materials_globals.pack_count++;
 			}
@@ -908,15 +1030,18 @@ static long materials_read(
 			prism_materials_globals.material_count++;
 		}
 	}
+	prism_relief_end();
 	if (prism_materials_globals.material_count)
 	{
-		error(_error_silent, "materials: %ld of the map's shaders have PRISM materials (%ld a pack's, %ld a mod's), "
-			"%ld images", prism_materials_globals.material_count, prism_materials_globals.pack_count,
-			prism_materials_globals.mod_count, prism_materials_globals.file_count);
+		error(_error_silent, "materials: %ld of the map's shaders have PRISM materials (%ld a pack's, %ld a mod's, "
+			"%ld the relief's), %ld images", prism_materials_globals.material_count,
+			prism_materials_globals.pack_count, prism_materials_globals.mod_count,
+			prism_materials_globals.relief_count, prism_materials_globals.file_count);
 		if (mods_say())
 		{
-			console_printf(FALSE, "materials: %ld from packs, %ld from mods", prism_materials_globals.pack_count,
-				prism_materials_globals.mod_count);
+			console_printf(FALSE, "materials: %ld from packs, %ld from mods, %ld with relief",
+				prism_materials_globals.pack_count, prism_materials_globals.mod_count,
+				prism_materials_globals.relief_count);
 		}
 	}
 
@@ -933,8 +1058,9 @@ long prism_materials_update(
 	settings_read();
 	materials_dispose();
 	prism_materials_globals.read_wanted = prism_materials_globals.wanted;
+	prism_materials_globals.read_relief = prism_materials_globals.relief_wanted;
 	prism_materials_globals.generation++;
-	if (remove_all || !prism_materials_globals.wanted)
+	if (remove_all || (!prism_materials_globals.wanted && !prism_materials_globals.relief_wanted))
 	{
 		return 0;
 	}
@@ -957,7 +1083,8 @@ boolean prism_materials_frame(
 	void)
 {
 	settings_read();
-	if (prism_materials_globals.wanted == prism_materials_globals.read_wanted)
+	if (prism_materials_globals.wanted == prism_materials_globals.read_wanted &&
+		prism_materials_globals.relief_wanted == prism_materials_globals.read_relief)
 	{
 		return FALSE;
 	}
@@ -973,10 +1100,38 @@ long prism_materials_texture_count(
 	return prism_materials_globals.file_count;
 }
 
-long prism_materials_texture_file(
-	long index)
+boolean prism_materials_texture_query(
+	long index,
+	char const **path,
+	unsigned long *size,
+	unsigned long *stamp)
 {
-	return index >= 0 && index < prism_materials_globals.file_count ? prism_materials_globals.files[index] : NONE;
+	unsigned long stamps[2];
+	struct posix_file_information information;
+
+	if (index < 0 || index >= prism_materials_globals.file_count)
+	{
+		return FALSE;
+	}
+	if (prism_materials_globals.paths[index])
+	{
+		if (posix_stat(prism_materials_globals.paths[index], &information) != 0)
+		{
+			return FALSE;
+		}
+		*path = prism_materials_globals.paths[index];
+		*size = (unsigned long)information.size_low;
+		*stamp = (unsigned long)information.modification_seconds;
+		return TRUE;
+	}
+	if (!port_mods_file_stamp(prism_materials_globals.files[index], size, stamps))
+	{
+		return FALSE;
+	}
+	*path = port_mods_file_path(prism_materials_globals.files[index]);
+	*stamp = stamps[0];
+
+	return TRUE;
 }
 
 /* (mod_textures.c) the store's ids of the images (0 refused; ids NULL: no
@@ -1054,9 +1209,9 @@ void prism_materials_describe(
 	void)
 {
 	static long const groups[] = { 'senv', 'soso' };
-	static char const *const names[] = { "automatic", "pack", "mod" };
+	static char const *const names[] = { "automatic", "pack", "mod", "relief" };
 	struct tag_iterator iterator;
-	long tag_index, counts[3] = { 0, 0, 0 };
+	long tag_index, counts[4] = { 0, 0, 0, 0 };
 	char const *pbr = config_string("display.prism_materials");
 	int group;
 
@@ -1068,7 +1223,8 @@ void prism_materials_describe(
 		{
 			char const *tag_name = tag_get_name(tag_index);
 			short entry = material_find(tag_get(groups[group], tag_index));
-			int tier = entry == NONE ? 0 : prism_materials_globals.materials[entry].tier == TIER_PACK ? 1 : 2;
+			int tier = entry == NONE ? 0 : prism_materials_globals.materials[entry].flags & FLAG_RELIEF ? 3 :
+				prism_materials_globals.materials[entry].tier == TIER_PACK ? 1 : 2;
 			char key[MAXIMUM_PATH];
 
 			/* (a model shader's display.prism_materials material, mod_pbr.c's:
@@ -1083,11 +1239,13 @@ void prism_materials_describe(
 			error(_error_silent, "materials: %s %s", names[tier], tag_name ? tag_name : "?");
 		}
 	}
-	console_printf(FALSE, "materials (%s): %ld environment and model shaders, %ld from packs, %ld from mods, %ld at "
-		"the automatic tier (each in the log)", prism_materials_globals.wanted ? "on" :
-		prism_materials_globals.setting ? "off: the renderer draws no materials" :
-		"off: display.lighting \"ce\" or display.material_packs false", counts[0] + counts[1] + counts[2], counts[1],
-		counts[2], counts[0]);
+	console_printf(FALSE, "materials (%s): %ld environment and model shaders, %ld from packs, %ld from mods, %ld with "
+		"relief, %ld at the automatic tier (each in the log)",
+		prism_materials_globals.wanted || prism_materials_globals.relief_wanted ? "on" :
+		prism_materials_globals.setting || prism_materials_globals.relief_setting ?
+		"off: the renderer draws no materials" :
+		"off: display.lighting \"ce\", or display.material_packs and display.surface_relief false",
+		counts[0] + counts[1] + counts[2] + counts[3], counts[1], counts[2], counts[3], counts[0]);
 
 	return;
 }

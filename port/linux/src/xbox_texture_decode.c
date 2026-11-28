@@ -672,10 +672,10 @@ float xgpu_texture_alpha_coverage(unsigned int format_word, unsigned int size_wo
 /* ---------- display.prism_rt's materials (xgpu_coverage.h) */
 
 /* a 2D texture's first level no larger than largest each way, decoded
-(ARGB words, its size in *width and *height; free it); NULL where it cannot
-be read */
+(ARGB words, its size in *width and *height; free it; a palettized one's by
+palette, NULL grey); NULL where it cannot be read */
 static DWORD *texture_level_decoded(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
-	unsigned long largest, unsigned long *width, unsigned long *height)
+	const D3DCOLOR *palette, unsigned long largest, unsigned long *width, unsigned long *height)
 {
 	struct xgpu_texture_description description;
 	unsigned long level = 0;
@@ -700,7 +700,7 @@ static DWORD *texture_level_decoded(unsigned int format_word, unsigned int size_
 	if (description.compressed)
 		xgpu_texture_decode_dxt(&description, level, texels + xgpu_texture_level_offset(&description, level), decoded);
 	else if (!xgpu_texture_decode_level(&description, level, texels + xgpu_texture_level_offset(&description, level),
-		NULL, decoded))
+		palette, decoded))
 	{
 		free(decoded);
 		return NULL;
@@ -722,7 +722,7 @@ int xgpu_texture_mean_color_as(unsigned int format_word, unsigned int size_word,
 	static float linear[256];
 	unsigned long width, height, texel;
 	double sum[4] = { 0.0, 0.0, 0.0, 0.0 };
-	DWORD *decoded = texture_level_decoded(format_word, size_word, texels, largest, &width, &height);
+	DWORD *decoded = texture_level_decoded(format_word, size_word, texels, NULL, largest, &width, &height);
 	int channel;
 
 	if (!decoded)
@@ -773,12 +773,32 @@ int xgpu_texture_alpha_map(unsigned int format_word, unsigned int size_word, con
 	unsigned long largest, unsigned char *alpha, unsigned long *width, unsigned long *height)
 {
 	unsigned long texel;
-	DWORD *decoded = texture_level_decoded(format_word, size_word, texels, largest, width, height);
+	DWORD *decoded = texture_level_decoded(format_word, size_word, texels, NULL, largest, width, height);
 
 	if (!decoded)
 		return 0;
 	for (texel = 0; texel < *width * *height; texel++)
 		alpha[texel] = (unsigned char)((decoded[texel] >> 24) & 0xFFu);
+	free(decoded);
+	return 1;
+}
+
+int xgpu_texture_argb_map(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
+	const unsigned int *palette, unsigned long largest, unsigned int *argb, unsigned long *width,
+	unsigned long *height)
+{
+	D3DCOLOR words[256];
+	unsigned long texel;
+	DWORD *decoded;
+	int index;
+
+	for (index = 0; palette && index < 256; index++)
+		words[index] = (D3DCOLOR)palette[index];
+	decoded = texture_level_decoded(format_word, size_word, texels, palette ? words : NULL, largest, width, height);
+	if (!decoded)
+		return 0;
+	for (texel = 0; texel < *width * *height; texel++)
+		argb[texel] = (unsigned int)decoded[texel];
 	free(decoded);
 	return 1;
 }

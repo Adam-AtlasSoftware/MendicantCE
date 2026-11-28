@@ -5,7 +5,8 @@ The share of a texture's texels an alpha test draws, for code that cannot
 include xgpu.h (the game's: world_sdf.c, whose objects' occlusion fields
 take an alpha-tested leaf's card as blocking that share of what crosses it).
 Plain types only. Defined in xbox_texture_decode.c; with display.prism_rt's
-materials' mean colours and alpha maps (prism_rt.c).
+materials' mean colours and alpha maps (prism_rt.c), and the relief's
+texels (prism_relief.c).
 */
 
 #ifndef XGPU_COVERAGE_H
@@ -34,5 +35,11 @@ largest x largest), its size in *width and *height; 0 where it cannot be
 read */
 int xgpu_texture_alpha_map(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
 	unsigned long largest, unsigned char *alpha, unsigned long *width, unsigned long *height);
+/* ... and its texels whole, an ARGB word each (a palettized one's, a P8 bump
+map's, by palette's 256 ARGB words), into argb (room for largest x
+largest): the relief's bitmaps (port/linux/game/prism_relief.c) */
+int xgpu_texture_argb_map(unsigned int format_word, unsigned int size_word, const unsigned char *texels,
+	const unsigned int *palette, unsigned long largest, unsigned int *argb, unsigned long *width,
+	unsigned long *height);
 
 #endif

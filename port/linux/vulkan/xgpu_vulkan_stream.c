@@ -2329,6 +2329,8 @@ static void stream_scene_material(void *context, const struct xgpu_stream_scene_
 shader PRISM's material (the automatic tier's record forgets them); the
 count of the materials with maps kept, which the G-buffer pass's albedo
 target follows */
+typedef char relief_flag_assert[XGPU_SPIRV_PACK_FLAG_RELIEF == XGPU_SCENE_MAPS_FLAG_RELIEF ? 1 : -1];
+
 static void stream_scene_material_maps(void *context, const struct xgpu_stream_scene_material_maps *record)
 {
 	struct gbuffer_material *material;

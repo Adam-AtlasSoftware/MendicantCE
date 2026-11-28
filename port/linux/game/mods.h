@@ -283,9 +283,10 @@ long prism_materials_update(boolean remove_all, boolean at_load);
 void prism_materials_tags_unloaded(void);
 /* (mod_textures.c, once a frame: TRUE if the materials were read again) */
 boolean prism_materials_frame(void);
-/* (mod_textures.c) the images' files, and the store's ids of them */
+/* (mod_textures.c) the images' files (a mod's, or the relief's cache's:
+their paths, sizes and modification times), and the store's ids of them */
 long prism_materials_texture_count(void);
-long prism_materials_texture_file(long index);
+boolean prism_materials_texture_query(long index, char const **path, unsigned long *size, unsigned long *stamp);
 void prism_materials_textures_answered(unsigned long const *ids, long count);
 /* (prism_deferred.c) moves as the materials are read and answered; a
 shader's maps sent after its SCENE_MATERIAL (forget: the automatic tier's
@@ -294,5 +295,14 @@ unsigned long prism_materials_generation(void);
 void prism_materials_scene(void const *shader, unsigned long material_id, boolean forget);
 /* (mod_materials.c's prism_set "material_tiers list") */
 void prism_materials_describe(void);
+
+/* ---------- prototypes/PRISM_RELIEF.C (the relief tier of PRISM v4's
+materials: docs/prism_materials.md) */
+
+char const *prism_relief_class(char const *tag_name);
+void prism_relief_begin(void);
+void prism_relief_end(void);
+boolean prism_relief_image(void const *shader, char const *tag_name, char *path, unsigned long size,
+	boolean *at_bump);
 
 #endif

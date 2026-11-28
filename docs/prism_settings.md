@@ -59,7 +59,7 @@ The pages it opens:
 | Upscaling | Upscaler, Upscale Quality | E, P |
 | Lightmap Downloads | Classic Geometry, Enhanced Geometry (each its state) | E, P |
 | World Geometry | World Geometry (greyed in Classic lighting: "Needs Enhanced or Path Traced lighting"), Geometry Detail, Geometry Blend; Campaign Collision (greyed until M8) | |
-| Materials & Terrain | PBR Materials, Material Packs, Terrain, Ground Layers (sand, dirt, mud, rock, snow and ice), Footprints, Water; all but PBR Materials greyed in Classic | |
+| Materials & Terrain | PBR Materials, Material Packs, Surface Relief (Forerunner metal's designs raised: the relief classes, `docs/prism_materials.md`), Terrain, Ground Layers (sand, dirt, mud, rock, snow and ice), Footprints, Water; all but PBR Materials greyed in Classic | |
 | Foliage | Grass, Trees, Leaves, Wind: greyed until a content release brings foliage | |
 | Models & Textures | Remodels, Textures; Model Memory, Texture Memory, Secondary Motion, Texture Fade-In, Texture Wait, Preload, Detail Steadiness | |
 
@@ -98,9 +98,13 @@ twin, which writes the groups' rows, checked by `tools/test_prism_enhancements.p
 | Group | Rows | Classic / Remastered / Realistic |
 | --- | --- | --- |
 | World Geometry | `display.world_geometry` | classic / enhanced / enhanced |
-| Materials & Terrain | `display.prism_materials`, `display.material_packs`, `display.terrain`, `display.terrain_layers`, `display.terrain_tracks`, `display.water` | the game's / on / on |
+| Materials & Terrain | `display.prism_materials`, `display.material_packs`, `display.surface_relief`, `display.terrain`, `display.terrain_layers`, `display.terrain_tracks`, `display.water` | the game's / on / on |
 | Foliage | `display.foliage_grass`, `display.foliage_trees`, `display.foliage_leaves`, `display.foliage_wind` (nothing draws them yet) | classic / enhanced / realistic (trees enhanced) |
 | Models & Textures | `display.prism_models`, `display.prism_textures` | stock / enhanced / max |
+
+**The relief classes** (`RELIEF_CLASSES` beside `ENHANCEMENTS`, `prism_relief.c`'s `RELIEF_PATTERNS` its twin) are
+Surface Relief's: the shaders whose designs it raises, by tag path. A class (another level's metal, a Covenant hull)
+joins by its patterns in both; a RUNTIME row, it changes no bake.
 
 **Adding an enhancement:** classify it (PLAN_FINAL section 4.4); add its row to `config_enhancements` and to
 `ENHANCEMENTS` (a new group: its page in `ENHANCEMENT_GROUPS`, which puts its link on PRISM's page); a RUNTIME row needs

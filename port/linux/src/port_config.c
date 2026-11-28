@@ -1095,6 +1095,17 @@ static const struct config_setting config_settings[] =
 		"the one made from CE's shader as the map loads; false: every shader's\n"
 		"made from CE's. Needs a graphics card that draws display.prism_materials'\n"
 		"materials. Read each frame." ENHANCEMENTS_CHOOSES },
+	{ "display.surface_relief", _config_boolean, "true", "HALO_SURFACE_RELIEF", _environment_value,
+		_platform_desktop,
+		"PRISM v4's relief tier (docs/prism_materials.md), with display.lighting\n"
+		"\"enhanced\" or \"pathtraced\": the designs on Forerunner metal (its\n"
+		"plates, grooves, inlays and glyphs: the relief classes,\n"
+		"port/linux/game/prism_relief.c) raised and sunk, a normal map made on\n"
+		"this machine from the map's own bitmaps as it loads (kept in the data\n"
+		"folder's prism_relief cache), which the sun, the flashlight, the lamps\n"
+		"and the lightmaps' light show; false: those surfaces drawn flat, as\n"
+		"their vertices face. Needs a graphics card that draws\n"
+		"display.prism_materials' materials. Read each frame." ENHANCEMENTS_CHOOSES },
 	{ "display.upscaler", _config_string, "\"off\"", "HALO_UPSCALER", _environment_value, _platform_desktop,
 		"PRISM v4: the 3D view drawn smaller (display.upscaler_scale) and brought\n"
 		"to the screen's pixels before the HUD is drawn, the upscaler its\n"
@@ -4725,7 +4736,8 @@ static const char *const config_display_order[] =
 	"=The enhancements (display.enhancements, a preset of the settings it chooses; every lighting mode, the\n"
 		"world's geometry under Enhanced and Path Traced)",
 	"display.enhancements", "display.world_geometry", "display.prism_world_geometry_detail",
-	"display.prism_world_geometry_band", "display.prism_materials", "display.material_packs", "display.terrain",
+	"display.prism_world_geometry_band", "display.prism_materials", "display.material_packs",
+	"display.surface_relief", "display.terrain",
 	"display.terrain_layers", "display.terrain_tracks", "display.foliage_grass", "display.foliage_trees",
 	"display.foliage_leaves", "display.foliage_wind", "display.prism_models", "display.prism_textures",
 	"display.water",
@@ -4782,6 +4794,7 @@ static const struct
 	{ "display.prism_sky_light", LIGHTING_PRISM },
 	{ "display.bake_shipped_folder", LIGHTING_PRISM },
 	{ "display.material_packs", LIGHTING_PRISM },
+	{ "display.surface_relief", LIGHTING_PRISM },
 	{ "display.prism_raster_composition", LIGHTING_ENHANCED },
 	{ "display.prism_raster_objects", LIGHTING_ENHANCED },
 	{ "display.prism_raster_object_shadows", "Enhanced with display.prism_ray_tracing on" },
@@ -6162,6 +6175,7 @@ static const struct
 		_enhancement_world_baked, NULL },
 	{ "display.prism_materials", "\"stock\"", "\"pbr\"", "\"pbr\"", "materials", "CEP", _enhancement_runtime, NULL },
 	{ "display.material_packs", "false", "true", "true", "materials", "EP", _enhancement_runtime, NULL },
+	{ "display.surface_relief", "false", "true", "true", "materials", "EP", _enhancement_runtime, NULL },
 	{ "display.terrain", "\"off\"", "\"on\"", "\"on\"", "materials", "EP", _enhancement_runtime, NULL },
 	{ "display.terrain_layers", "\"ce\"", "\"hq\"", "\"hq\"", "materials", "EP", _enhancement_runtime, NULL },
 	{ "display.terrain_tracks", "false", "true", "true", "materials", "EP", _enhancement_runtime, NULL },

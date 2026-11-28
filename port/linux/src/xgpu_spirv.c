@@ -4289,7 +4289,8 @@ uber-shader:
   distance and the view's camera) and coordinates (surface_frame's);
 - both: roughness and metalness the ORM's times their factors (the automatic
   tier's where it is not resident), the occlusion its red, specular the
-  material's.
+  material's (the automatic tier's for the relief tier's, whose only image
+  is its normal map: XGPU_SPIRV_PACK_FLAG_RELIEF).
 Their base colour also goes to the albedo target (location 2), its alpha the
 occlusion (0 where the albedo is not resident: the level's base colour then
 stays the base target's). */
@@ -4497,7 +4498,10 @@ static void gbuffer_pack(struct module *m, struct pixel_state *state, int level,
 	metal = fselect(m, orm_resident, fmul(m, 1, extract(m, u1, 1), extract(m, orm, 2)), extract(m, automatic, 1));
 	occlusion = fselect(m, orm_resident, ext3(m, GLSL_F_MIX, m->t_float, one, extract(m, orm, 0), extract(m, u1, 2)),
 		one);
-	*parameters = construct4(m, saturate(m, 1, rough), saturate(m, 1, metal), saturate(m, 1, extract(m, u1, 3)),
+	/* (the relief tier's specular the automatic tier's: it has the normal map
+	alone) */
+	*parameters = construct4(m, saturate(m, 1, rough), saturate(m, 1, metal), saturate(m, 1, fselect(m,
+		pack_bit(m, flags, XGPU_SPIRV_PACK_FLAG_RELIEF), extract(m, automatic, 2), extract(m, u1, 3))),
 		extract(m, automatic, 3));
 	/* (the albedo target's alpha the occlusion, at least a step: 0 where the
 	albedo is not the pack's) */

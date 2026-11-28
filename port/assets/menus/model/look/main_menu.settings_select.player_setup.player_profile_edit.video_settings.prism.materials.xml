@@ -13,10 +13,11 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/section_0" x="28" y="50"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_prism_materials" x="28" y="72"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_material_packs" x="28" y="97"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_terrain" x="28" y="122"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_terrain_layers" x="28" y="147"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_terrain_tracks" x="28" y="172"/>
-		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_water" x="28" y="197"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_surface_relief" x="28" y="122"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_terrain" x="28" y="147"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_terrain_layers" x="28" y="172"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_terrain_tracks" x="28" y="197"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_water" x="28" y="222"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/button_bar" x="0" y="448"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/button_bar" role="buttons" type="column_list" box="0 0 640 28" place="foot">
@@ -77,6 +78,25 @@
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/material_packs_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="ON|OFF" scale="1 1.2"/>
 	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_surface_relief" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
+		<text color="#FF2896FF"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_label" x="0" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_spinner" x="188" y="0"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_seg0" x="188" y="2"/>
+		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_seg1" x="240" y="2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="3" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="ON" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_seg1" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="OFF" scale="1 1.2"/>
+	</look>
+	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/surface_relief_spinner" type="spinner" box="0 1 140 23" wide="40 120" past="60 60" header="bitmaps/arrow_sm_left" header_box="-6 6 0 18" footer="bitmaps/arrow_sm_right" footer_box="140 6 146 18">
+		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 0" items="ON|OFF" scale="1 1.2"/>
+	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/op_terrain" box="0 0 344 24" wide="-106 244" past="-143 193" picture="main_menu/settings/row_tall">
 		<text color="#FF2896FF"/>
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_label" x="0" y="0"/>
@@ -85,7 +105,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="3" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="4" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="ON" scale="1 1.2"/>
@@ -104,7 +124,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_layers_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_layers_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="4" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="5" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_layers_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="HQ" scale="1 1.2"/>
@@ -123,7 +143,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_tracks_seg1" x="240" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_tracks_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="5" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="6" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/terrain_tracks_seg0" type="text" box="0 0 48 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="ON" scale="1 1.2"/>
@@ -142,7 +162,7 @@
 		<at widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/water_seg1" x="254" y="2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/water_label" type="text" box="0 0 184 24" wide="0 40" past="0 60">
-		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="6" scale="1 1.2"/>
+		<text font="ui\small_ui" color="#FF2896FF" at="10 3" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/labels" index="7" scale="1 1.2"/>
 	</look>
 	<look name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/prism/materials/water_seg0" type="text" box="0 0 62 20" wide="40 0" past="60 0" place="keep_ends" picture="main_menu/settings/segment_tall">
 		<text font="ui\small_ui" color="#FF2896FF" align="center" at="0 1" flags="no_focus_test" text="PRISM" scale="1 1.2"/>

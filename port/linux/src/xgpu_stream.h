@@ -2574,6 +2574,10 @@ enum
 	/* the material is two-sided foliage (its translucency scalar its
 	diffuse transmission) */
 	XGPU_SCENE_MAPS_FLAG_FOLIAGE = 2,
+	/* the relief tier's (port/linux/game/prism_relief.c): its normal map
+	alone, its specular (like its colour, roughness and metal, which it has
+	no image of) the automatic tier's */
+	XGPU_SCENE_MAPS_FLAG_RELIEF = 1 << 14,
 };
 /* the model's value that keeps the automatic tier's (XGPU_GBUFFER_MODEL_*
 the others) */

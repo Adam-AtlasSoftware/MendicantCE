@@ -430,16 +430,23 @@ static void textures_send(
 			capacity = count + material_count;
 			for (index = 0; index < material_count; index++)
 			{
-				long file = index < pbr_count ? mod_pbr_texture_file(index) :
-					prism_materials_texture_file(index - pbr_count);
+				long file = index < pbr_count ? mod_pbr_texture_file(index) : NONE;
 				unsigned long size, stamp[2];
+				char const *path;
 
-				/* (a file not there now: a query of none, refused) */
+				/* (a file not there now: a query of none, refused; PRISM v4's
+				images a mod's or the relief's cache's) */
 				memset(&queries[count], 0, sizeof(queries[count]));
 				queries[count].kind = QUERY_KIND_MATERIAL;
-				if (file >= 0 && port_mods_file_stamp(file, &size, stamp))
+				if (index < pbr_count && file >= 0 && port_mods_file_stamp(file, &size, stamp))
 				{
 					queries[count].path = port_mods_file_path(file);
+					queries[count].file_size = size;
+					queries[count].stamp_seconds = stamp[0];
+				}
+				else if (index >= pbr_count && prism_materials_texture_query(index - pbr_count, &path, &size, stamp))
+				{
+					queries[count].path = path;
 					queries[count].file_size = size;
 					queries[count].stamp_seconds = stamp[0];
 				}
