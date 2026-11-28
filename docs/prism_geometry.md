@@ -55,9 +55,11 @@ now, so while the set's own scene is made each shows CE's frame of the geometry 
 Enhanced lighting needs the packs: a map without them draws its classic geometry under Enhanced (and the enhanced
 under Path Traced, back and forth as the lighting changes). A pack the ladder found but the renderer did not load
 whole (its manifest names the BSP's world_id but its own key is another geometry's, or the file is damaged: the
-player's bake of the BSP is then paused or failed) drops Enhanced lighting to rung 2 for the rest of the map, with a
-warning in the log (`prism_world_source_bake_refused`, from `prism_bake_frame`); Path Traced still draws the enhanced
-geometry. The renderer then lets go of the BSP's bake at once (`bake_world_changed`: the key's variant or world_id
+player's bake of the BSP is then paused, or failed before any of its light was drawn) drops Enhanced lighting to
+rung 2 for the rest of the map, with a warning in the log (`prism_world_source_bake_refused`, from
+`prism_bake_frame`); Path Traced still draws the enhanced geometry. A whole bake that failed after its tiles were
+drawn (out of memory for its volume: b30's enhanced first BSP on a 3070 Ti, before the whole bakes stopped making
+the baking's buffers, `docs/prism_bake.md`, "A BSP switch under Enhanced") still lights the geometry, and keeps it. The renderer then lets go of the BSP's bake at once (`bake_world_changed`: the key's variant or world_id
 is not the control's), so the BSP's classic pack (`prism_bake_shipped/stock/<map>/bsp<n>.pbk`) is loaded then, not
 at the next BSP. The world is the BSP's, not the map's: a BSP of a rung 1 map drawn classic (no enhanced geometry in
 the sidecar, d40's space; or its enhanced geometry could not be made, out of memory or refused by its checks,
@@ -119,9 +121,8 @@ and the own pages together stay under 127 (b30: 26 + 3 and 29 + 2). The sidecar 
 CE's own lightmap pass still draws the enhanced world, but under v2 it reads the BSP's stock page at our coordinates
 with each vertex's normal as its bump term: its light there is no light at all (b30's beach comes out orange, red and
 yellow). Enhanced lighting therefore never falls back to it on a texel the bake has a chart for but no texel: such a
-pixel (the whole of b30's first BSP's 646,021 tiles is not loaded until 25 s after its bake starts on a 3090,
-the shipped pack streaming in 2,048 tiles a frame) is lit as an object is, by the bake's volume, or, while the volume is
-not loaded either, by the open sky's light (the rig's sky, by the share of the sky its normal faces), with the sun
+pixel (a shipped pack's tiles still coming in after its BSP's switch, its volume first: `docs/prism_bake.md`, "A BSP
+switch under Enhanced") is lit as an object is, by the bake's volume, or, while the volume is not loaded either, by the open sky's light (the rig's sky, by the share of the sky its normal faces), with the sun
 traced (`raster_source`'s `unbaked`). Stock geometry takes the same fallback for such texels.
 
 Where no bake lights the enhanced world at all (`debug.world_unbaked`'s rung 1, a shipped pack not yet loaded, Path
