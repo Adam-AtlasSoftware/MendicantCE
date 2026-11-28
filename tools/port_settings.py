@@ -884,6 +884,7 @@ LIGHTING_MODE_ROWS = {
     # they are not traced)
     "prism_sky_light": "E", "prism_raster_composition": "E", "prism_raster_objects": "E",
     "enhanced_dynamic_lights": "E", "prism_ray_tracing": "E", "prism_object_shadows": "E",
+    "prism_object_occlusion": "E",
     "enhanced_shadow_resolution": "E", "prism_rt_objects": "E", "prism_rt_cache": "E", "prism_rt_alpha": "E",
     # (Path Tracing: its profile and denoiser, its moving lights and its own
     # traced scene)
@@ -2282,6 +2283,10 @@ PAGES = {
             ("OBJECT SHADOWS", "display.prism_raster_object_shadows", [("TRACED", "traced"), ("CLASSIC", "classic")],
              "The sun's shadows of vehicles, characters and weapons. Traced: on the ground, on each other and on "
              "themselves. Classic: the game's own, on the ground only.", "desktop", "prism_object_shadows"),
+            ("OBJECT OCCLUSION", "display.prism_raster_object_occlusion", [("TRACED", "traced"), ("OFF", "off")],
+             "The soft shade vehicles, characters and weapons cast about them: under a Warthog, at a Marine's feet, "
+             "in their own creases. Traced: by ray tracing, as Path Traced shades them. Off: none.", "desktop",
+             "prism_object_occlusion"),
             ("SHADOW QUALITY", "display.enhanced_shadow_resolution",
              [("XBOX", "128"), ("MEDIUM", "256"), ("HIGH", "512"), ("ULTRA", "1024")],
              "How sharp the game's own object shadows are, drawn while Object Shadows are Classic or ray tracing "

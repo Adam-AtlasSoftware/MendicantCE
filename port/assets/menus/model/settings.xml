@@ -1786,6 +1786,11 @@
 			<choice shown="TRACED" value="traced"/>
 			<choice shown="CLASSIC" value="classic"/>
 		</row>
+		<row key="prism_object_occlusion" kind="choice" setting="display.prism_raster_object_occlusion" label="OBJECT OCCLUSION" crumb="VIDEO › PRISM › ENHANCED LIGHTING" search_choices="traced" when="desktop">
+			<help>The soft shade vehicles, characters and weapons cast about them: under a Warthog, at a Marine's feet, in their own creases. Traced: by ray tracing, as Path Traced shades them. Off: none.</help>
+			<choice shown="TRACED" value="traced"/>
+			<choice shown="OFF" value="off"/>
+		</row>
 		<row key="enhanced_shadow_resolution" kind="choice" setting="display.enhanced_shadow_resolution" label="SHADOW QUALITY" crumb="VIDEO › PRISM › ENHANCED LIGHTING" search_choices="xbox medium high ultra" when="desktop">
 			<help>How sharp the game's own object shadows are, drawn while Object Shadows are Classic or ray tracing is off.</help>
 			<choice shown="XBOX" value="128"/>

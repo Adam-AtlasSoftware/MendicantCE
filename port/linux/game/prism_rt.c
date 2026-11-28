@@ -83,6 +83,7 @@ boolean mod_meshes_remodels_drawn(void);
 unsigned long mod_meshes_generation(void);
 boolean prism_deferred_pathtraced(void);
 boolean prism_deferred_raster_object_shadows(void);
+boolean prism_deferred_raster_object_occlusion(void);
 /* render_sky.c's (the sky's sun, as PRISM's cascaded shadows find it, and
 each of its lights) */
 boolean render_sky_sun(short sky_index, real_vector3d *direction, real_rgb_color *color, real *power);
@@ -162,6 +163,9 @@ enum
 	/* port: remodels drawn this frame (mods.h's mod_meshes_remodels_drawn),
 	spare[3] the set's number: the host pairs them with its store's */
 	PRISM_RT_FLAG_REMODELS_DRAWN = 64,
+	/* port: the moving objects' occlusion of the ambient light traced
+	(display.prism_raster_object_occlusion "traced") */
+	PRISM_RT_FLAG_RASTER_OCCLUSION = 128,
 	/* debug.pt_reference: its frames at most, its path's bytes
 	(XGPU_RT_REFERENCE_PATH) */
 	PRISM_RT_REFERENCE_FRAMES_MOST = 1 << 20,
@@ -1838,6 +1842,7 @@ void prism_rt_frame_begin(void)
 		the G-buffer pass's draws of them; "raster": their sun shadows) */
 		(raster_scene() && prism_deferred_pathtraced() ? PRISM_RT_FLAG_OBJECTS : 0) |
 		(raster_scene() && prism_deferred_raster_object_shadows() ? PRISM_RT_FLAG_RASTER_OBJECTS : 0) |
+		(raster_scene() && prism_deferred_raster_object_occlusion() ? PRISM_RT_FLAG_RASTER_OCCLUSION : 0) |
 		(mod_meshes_remodels_drawn() ? PRISM_RT_FLAG_REMODELS_DRAWN : 0);
 	/* (spare[3]: the remodels' set's number, 24 bits, for the host's
 	pairing of what the game and the host have as drawn this frame) */

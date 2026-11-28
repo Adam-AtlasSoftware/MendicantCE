@@ -2374,6 +2374,13 @@ enum
 	which the host pairs with its store's on the same frame
 	(xgpu_vulkan_meshes_pair, HALO_GEOMETRY_LOG) */
 	XGPU_RT_FLAG_REMODELS_DRAWN = 64,
+	/* port: display.lighting "enhanced" with display.prism_raster_object_
+	occlusion "traced" (mode XGPU_RT_OFF): the objects of the G-buffer pass
+	captured and their structure built as XGPU_RT_FLAG_RASTER_OBJECTS builds
+	them (with it or alone), and Raster's resolve traces the ambient light
+	they take from what is about them against it (xgpu_vulkan_bake.c's
+	raster_occlusion) */
+	XGPU_RT_FLAG_RASTER_OCCLUSION = 128,
 };
 #define XGPU_RT_REFERENCE_BOUNCES 32
 /* the reference file's path: a NUL-terminated UTF-8 string of at most this

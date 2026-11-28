@@ -187,6 +187,10 @@ static struct
 {
 	unsigned long settings_read;
 	boolean wanted, raster, raster_materials, raster_objects_volume, raster_object_shadows, pathtraced;
+	/* display.prism_raster_object_occlusion "traced": the moving objects'
+	occlusion of the ambient light traced (their structure captured as for
+	the traced sun shadows, with them or alone) */
+	boolean raster_object_occlusion;
 	unsigned long pt_profile;
 	boolean pt_denoiser_off;
 	/* display.pt_light_scale in hundredths (0 off) */
@@ -275,11 +279,21 @@ static void settings_read(
 	CE's projected shadows) */
 	value = config_string("display.prism_raster_object_shadows");
 	prism_deferred.raster_object_shadows = !value || strcmp(value, "classic");
+	/* (port: display.prism_raster_object_occlusion: "traced", the default,
+	the ambient light the moving objects take from the level about them and
+	from each other traced against their structure (the bake, made without
+	them, has none of it: a Warthog's shade on the ground under it, a
+	Marine's feet); "off" none) */
+	value = config_string("display.prism_raster_object_occlusion");
+	prism_deferred.raster_object_occlusion = !value || strcmp(value, "off");
 	/* (v4 geopatch M3: Enhanced lighting's RAY TRACING off traces nothing:
 	the game's own object shadows) */
 	value = config_string("display.prism_ray_tracing");
 	if (value && !strcmp(value, "off"))
+	{
 		prism_deferred.raster_object_shadows = FALSE;
+		prism_deferred.raster_object_occlusion = FALSE;
+	}
 	/* (display.player_shadow: the player's own body traced in first person,
 	its shadow cast in the traced modes) */
 	prism_deferred.body_shadow = config_boolean("display.player_shadow") != 0;
@@ -698,9 +712,10 @@ void prism_deferred_object(
 	}
 	absolute = object_index == -1 ? 0 : (unsigned long)DATUM_INDEX_TO_ABSOLUTE_INDEX(object_index) + 1;
 	prism_deferred.instance = absolute >= INSTANCE_FIRST_PERSON ? INSTANCE_FIRST_PERSON - 1 : absolute;
-	/* (port: static scenery, whose shadows the bake has: not among the
-	objects whose sun shadows PRISM Raster traces) */
-	prism_deferred.draw_flags = (absolute && prism_deferred.raster && prism_deferred.raster_object_shadows &&
+	/* (port: static scenery, whose shadows and occlusion the bake has: not
+	among the objects whose sun shadows and occlusion PRISM Raster traces) */
+	prism_deferred.draw_flags = (absolute && prism_deferred.raster && (prism_deferred.raster_object_shadows ||
+		prism_deferred.raster_object_occlusion) &&
 		prism_bake_object_static(object_index) ? DRAW_STATIC_SCENERY : 0) | prism_deferred.body_flags;
 	prism_deferred.lightmap = 0;
 	prism_deferred.lightmap_stock = 0;
@@ -770,7 +785,7 @@ boolean prism_deferred_body_traced(
 	}
 	settings_read();
 	if (!prism_deferred.body_shadow || !(prism_deferred.pathtraced ||
-		(prism_deferred.raster && prism_deferred.raster_object_shadows)))
+		(prism_deferred.raster && (prism_deferred.raster_object_shadows || prism_deferred.raster_object_occlusion))))
 	{
 		return FALSE;
 	}
@@ -847,6 +862,14 @@ boolean prism_deferred_raster_object_shadows(
 
 	/* (Path Traced traces every moving object itself: its own flag) */
 	return prism_deferred.raster && !prism_deferred.pathtraced && prism_deferred.raster_object_shadows;
+}
+
+boolean prism_deferred_raster_object_occlusion(
+	void)
+{
+	settings_read();
+
+	return prism_deferred.raster && !prism_deferred.pathtraced && prism_deferred.raster_object_occlusion;
 }
 
 void prism_deferred_lightmap(
