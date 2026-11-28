@@ -7783,6 +7783,54 @@ void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
 	}
 }
 
+/* what lit Raster's frame (HALO_RASTER_FRAME_LOG, a diagnostic: each change
+logged with the frame and the clock, and the frames each kind took in all
+at the change; the BSP switches' and checkpoints' sweep reads it): the
+bake whole, the bake in part (its tiles or volume still coming in), or
+CE's frame for want of a bake (none, another set's, nothing loaded yet, its
+scene not traceable); and whether the window had its G-buffer (without one,
+no lighting is Raster's: a camera outside the level), the bake's state
+logged all the same (xgpu_vulkan_bake_raster_note) */
+static const char *const raster_shown_names[XGPU_BAKE_RASTER_SHOWN_KINDS] =
+{
+	"baked", "baked in part", "classic: no bake", "classic: another set's bake", "classic: nothing loaded yet",
+	"classic: no traceable scene",
+};
+
+void xgpu_vulkan_bake_raster_note(int gbuffer)
+{
+	static int logging, last = -1, last_bsp = -2, last_gbuffer = -1;
+	static uint32_t frames, counts[XGPU_BAKE_RASTER_SHOWN_KINDS], last_quarter, without;
+	const struct bake_state *b = bake.bake;
+	int bsp = b ? (int)b->bsp : -1, shown;
+	uint32_t quarter = 0;
+
+	if (!logging)
+		logging = getenv("HALO_RASTER_FRAME_LOG") ? 1 : -1;
+	if (logging < 0)
+		return;
+	shown = !bake.made || !b ? XGPU_BAKE_RASTER_SHOWN_NONE : b->generation != bake.control.generation ?
+		XGPU_BAKE_RASTER_SHOWN_SET : !bake_traceable(b) ? XGPU_BAKE_RASTER_SHOWN_UNTRACEABLE : !b->physical_count &&
+		!b->volume.done ? XGPU_BAKE_RASTER_SHOWN_EMPTY : b->tiles_done < b->plan.tile_count ||
+		b->volume.done < b->plan.probe_count ? XGPU_BAKE_RASTER_SHOWN_PARTIAL : XGPU_BAKE_RASTER_SHOWN_FULL;
+	frames++;
+	counts[shown]++;
+	without += !gbuffer;
+	if (shown == XGPU_BAKE_RASTER_SHOWN_PARTIAL && b && b->plan.tile_count)
+		quarter = 1 + (uint32_t)((uint64_t)b->tiles_done * 4 / b->plan.tile_count);
+	if (shown == last && bsp == last_bsp && quarter == last_quarter && gbuffer == last_gbuffer)
+		return;
+	host_logf(HOST_LOG_INFO, "prism raster: frame %u at %.3f s: %s%s (bsp %d, set %u, the game's set %u; tiles %u of %u, "
+		"probes %u of %u); frames so far: %u baked, %u in part, %u classic, %u without a G-buffer", frames, now_seconds(),
+		raster_shown_names[shown], gbuffer ? "" : ", no G-buffer", bsp, b ? b->generation : 0u, bake.control.generation,
+		b ? b->tiles_done : 0u, b ? b->plan.tile_count : 0u, b ? b->volume.done : 0u, b ? b->plan.probe_count : 0u,
+		counts[0], counts[1], frames - counts[0] - counts[1], without);
+	last = shown;
+	last_bsp = bsp;
+	last_quarter = quarter;
+	last_gbuffer = gbuffer;
+}
+
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
 	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume, int *whole)
@@ -7802,6 +7850,8 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 
 	if (whole)
 		*whole = 0;
+	if (!bake_view)
+		xgpu_vulkan_bake_raster_note(copy && base && additions && words && extras && view);
 	if (!bake.made || !b || !copy || !base || !additions || !words || !extras || !view || !bake_traceable(b) ||
 		(!b->physical_count && !b->volume.done))
 		return NULL;

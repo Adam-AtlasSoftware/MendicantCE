@@ -37,6 +37,23 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
 	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume, int *whole);
 
+/* what lit a frame of Raster's (HALO_RASTER_FRAME_LOG, a diagnostic: its
+changes logged): the bake whole or in part, or CE's frame and why, and
+whether the window had its G-buffer; xgpu_vulkan_bake_raster notes its own
+frames, the resolve those it is not asked for (gbuffer 0) */
+enum
+{
+	XGPU_BAKE_RASTER_SHOWN_FULL,
+	XGPU_BAKE_RASTER_SHOWN_PARTIAL,
+	XGPU_BAKE_RASTER_SHOWN_NONE,
+	XGPU_BAKE_RASTER_SHOWN_SET,
+	XGPU_BAKE_RASTER_SHOWN_EMPTY,
+	XGPU_BAKE_RASTER_SHOWN_UNTRACEABLE,
+	XGPU_BAKE_RASTER_SHOWN_KINDS
+};
+
+void xgpu_vulkan_bake_raster_note(int gbuffer);
+
 /* PRISM Path Traced's view of the bake on the GPU (xgpu_vulkan_pt.c; docs/
 prism_pathtraced.md, "No baked light"): the scene's block alone, by its
 device address (xgpu_vulkan_bake_glsl.inc's Scene: the bake's acceleration

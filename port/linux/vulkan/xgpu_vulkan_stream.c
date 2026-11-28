@@ -6290,6 +6290,8 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 				xgpu_vulkan_pass_owner(NULL);
 			}
 			water_layer.pathtraced = pathtraced;
+			if (raster && !words && !pathtraced)
+				xgpu_vulkan_bake_raster_note(0);
 			xgpu_vulkan_post_deferred_resolve(color->image, deferred.base, deferred.additions, words,
 				words ? gbuffer.extras : NULL, depth && depth->depth && !depth->multisampled ? depth->image : NULL, view,
 				pathtraced && words ? pt_relight : raster && words ? raster_relight : NULL, &context);
