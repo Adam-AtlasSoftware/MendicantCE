@@ -252,9 +252,12 @@ static void *mesh_buffer_create(void *context, int kind, uint64_t size, void **m
 {
 	struct xgpu_vulkan_mesh_buffer *buffer;
 
+	int last = xgpu_vulkan_memory_use(XGPU_VULKAN_MEMORY_MESHES);
+
 	(void)context;
 	buffer = xgpu_vulkan_mesh_buffer_create(size, kind == XGPU_MESH_STORE_BUFFER_REST ? XGPU_VULKAN_MESH_BUFFER_REST :
 		kind == XGPU_MESH_STORE_BUFFER_INDICES ? XGPU_VULKAN_MESH_BUFFER_INDICES : XGPU_VULKAN_MESH_BUFFER_STAGING, mapped);
+	xgpu_vulkan_memory_use(last);
 	*bytes = xgpu_vulkan_mesh_buffer_bytes(buffer);
 	return buffer;
 }

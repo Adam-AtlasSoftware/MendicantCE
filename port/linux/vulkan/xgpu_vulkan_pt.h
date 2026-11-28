@@ -48,13 +48,19 @@ or the sizes differ */
 int xgpu_vulkan_pt_water(struct xgpu_vulkan_image *ripples, struct xgpu_vulkan_image *base, const float plane[4],
 	float ripple_strength, struct xgpu_vulkan_image **up, struct xgpu_vulkan_image **down,
 	struct xgpu_vulkan_image **aux, int *reference);
-/* the frame's end: the water's rays have no frame's job until the next */
+/* the frame's end: the water's rays have no frame's job until the next;
+Path Traced's images let go of once it has not drawn for 120 frames */
 void xgpu_vulkan_pt_water_frame_end(void);
 /* whether the last frame traced took its own history (the same bake's
 scene and generation, the same window, the frames in a row): 0 after a
 frame with no scene, a new scene (the world's geometry changed in play) or
 a gap; the denoiser's plugin drops its own history then (xgpu_vulkan_upscale.c) */
 int xgpu_vulkan_pt_history_kept(void);
+/* Path Traced's images of the window's size let go of (their memory freed
+after the submission), for the bake's light coming back to the card
+(xgpu_vulkan_bake.c): made again as Path Traced draws again; 1 where it had
+them */
+int xgpu_vulkan_pt_release(void);
 /* the device going away: everything let go of */
 void xgpu_vulkan_pt_shutdown(void);
 

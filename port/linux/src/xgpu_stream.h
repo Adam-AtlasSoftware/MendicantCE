@@ -2999,7 +2999,12 @@ enum
 	XGPU_BAKE_STATUS_SHOWN,
 	XGPU_BAKE_STATUS_SERIAL,
 	XGPU_BAKE_STATUS_SOURCE,
-	XGPU_BAKE_STATUS_WORDS = 16,
+	/* PRISM Path Traced short of the card's memory (xgpu_vulkan_pt.c's
+	images_fit): 0 not; its light traced on a coarser grid, the grid's scale
+	in hundredths (50: half the window each way); 1 no grid fits (CE's
+	frame). The bake's indicator says so (prism_bake_indicator.c) */
+	XGPU_BAKE_STATUS_PT_MEMORY,
+	XGPU_BAKE_STATUS_WORDS = 17,
 };
 enum
 {

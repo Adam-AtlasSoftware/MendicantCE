@@ -5,7 +5,9 @@ The in-game baker's indicator (docs/prism_bake.md; prism_bake.c): while a
 level's light is baked in the background (display.lighting "raster",
 display.bake), "Baking lightmaps 37%" at the screen's top left, and "Lightmaps
 baked" for a few seconds once the BSP's bake is done; a paused bake ("ask",
-not asked) says so. Off with display.bake_indicator false, and in the runs
+not asked) says so. In its place, in amber, PRISM Path Traced short of the
+card's memory (XGPU_BAKE_STATUS_PT_MEMORY): its light traced on a coarser
+grid, or not at all. Off with display.bake_indicator false, and in the runs
 a camera path drives (the quality gates' captures: nothing over their
 frames).
 */
@@ -46,16 +48,15 @@ static struct
 	unsigned long bsp;
 } indicator = { (unsigned long)-1 };
 
+static void indicator_text(
+	char const *text,
+	boolean warning);
+
 void prism_bake_indicator_draw(
 	void)
 {
-	long font_index;
 	unsigned long state, now = system_milliseconds();
 	char text[64];
-	real_argb_color color;
-	rectangle2d bounds;
-	struct font_header *font;
-	short line_height;
 
 	if (indicator.changes != config_changes())
 	{
@@ -64,7 +65,27 @@ void prism_bake_indicator_draw(
 		indicator.changes = config_changes();
 		indicator.enabled = config_boolean("display.bake_indicator") && !(path && *path);
 	}
-	if (!indicator.enabled || !prism_bake_wanted())
+	if (!indicator.enabled)
+		return;
+	/* (PRISM Path Traced short of the card's memory: its light traced on a
+	coarser grid, or CE's frame) */
+	{
+		unsigned long short_of = prism_bake_status(XGPU_BAKE_STATUS_PT_MEMORY);
+
+		if (short_of == 1)
+		{
+			snprintf(text, sizeof(text), "Path Traced: not enough video memory");
+			indicator_text(text, 1);
+			return;
+		}
+		if (short_of > 1 && short_of < 100)
+		{
+			snprintf(text, sizeof(text), "Path Traced: low video memory, light at %lu%%", short_of);
+			indicator_text(text, 1);
+			return;
+		}
+	}
+	if (!prism_bake_wanted())
 		return;
 	state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 	if (state != indicator.state || prism_bake_status(XGPU_BAKE_STATUS_BSP) != indicator.bsp)
@@ -74,10 +95,6 @@ void prism_bake_indicator_draw(
 		indicator.state = state;
 		indicator.bsp = prism_bake_status(XGPU_BAKE_STATUS_BSP);
 	}
-	color.alpha = 0.85f;
-	color.red = 0.75f;
-	color.green = 0.85f;
-	color.blue = 1.0f;
 	if (state == XGPU_BAKE_STATE_BAKING)
 		snprintf(text, sizeof(text), "Baking lightmaps %d%%",
 			(int)(prism_bake_status_real(XGPU_BAKE_STATUS_PROGRESS) * 100.0f));
@@ -87,6 +104,25 @@ void prism_bake_indicator_draw(
 		snprintf(text, sizeof(text), "Lightmaps baked");
 	else
 		return;
+	indicator_text(text, 0);
+}
+
+/* a line at the indicator's place: the bake's (blue-white), or a warning
+(amber) */
+static void indicator_text(
+	char const *text,
+	boolean warning)
+{
+	long font_index;
+	real_argb_color color;
+	rectangle2d bounds;
+	struct font_header *font;
+	short line_height;
+
+	color.alpha = 0.85f;
+	color.red = warning ? 1.0f : 0.75f;
+	color.green = warning ? 0.75f : 0.85f;
+	color.blue = warning ? 0.3f : 1.0f;
 	font_index = interface_get_tag_index(_interface_font_terminal);
 	if (font_index == NONE)
 		return;

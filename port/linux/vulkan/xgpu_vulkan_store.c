@@ -72,7 +72,12 @@ static void *store_image_create(void *context, const struct xgpu_texture_store_i
 	made.height = description->height;
 	made.depth_or_layers = description->cube ? 6 : 1;
 	made.levels = description->levels;
-	image = xgpu_vulkan_image_create(&made);
+	{
+		int last = xgpu_vulkan_memory_use(XGPU_VULKAN_MEMORY_TEXTURES);
+
+		image = xgpu_vulkan_image_create(&made);
+		xgpu_vulkan_memory_use(last);
+	}
 	*bytes = xgpu_vulkan_image_bytes(image);
 	return image;
 }

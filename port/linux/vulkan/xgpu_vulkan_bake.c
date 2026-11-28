@@ -67,6 +67,7 @@ top level.
 #include "xgpu_vulkan.h"
 #include "xgpu_vulkan_bake.h"
 #include "xgpu_vulkan_meshes.h"
+#include "xgpu_vulkan_pt.h"
 #include "xgpu_vulkan_bake_shaders.h"
 #include "xgpu_vulkan_rt.h"
 #include "xgpu_vulkan_scene.h"
@@ -241,7 +242,20 @@ struct bake_buffer
 	VkDeviceSize size;
 	VkDeviceAddress address;
 	void *mapped;
+	/* what it is counted under (xgpu_vulkan_memory_counted) */
+	int use;
+	uint32_t type;
+	VkDeviceSize counted;
 };
+
+/* the use the bake's buffers made on this thread count under (the scene's,
+else the irradiance volume's while volume_frame makes its; a structure's
+storage and scratch the structures') */
+static _Thread_local int bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_SCENE;
+/* buffer_make's device buffers made in the host's memory where the card has
+no room (the light's, which bake_park can move: the bake's steps after its
+scene's upload) */
+static _Thread_local int bake_memory_host;
 
 /* the scene's block (xgpu_vulkan_bake_glsl.inc's Scene, field for field) */
 struct bake_scene_block
@@ -581,6 +595,9 @@ struct bake_state
 	2 this machine's), loaded into cache: the plan is made at its quality */
 	int chosen;
 	struct prism_bake_layer_weights weights;
+	/* the light's buffers in the host's memory (bake_park): Path Traced,
+	short of the card's memory, drawing, which never reads them */
+	int parked;
 	int relighting, relight_open, relight_logged;
 	struct prism_bake_cache relight_reader;
 	uint32_t relight_tile, relight_probe, relight_reflection, relights;
@@ -685,6 +702,10 @@ static struct
 	the place of the bake drawn (a whole bake of theirs, or their own scene),
 	counted */
 	uint32_t swaps;
+	/* the light's buffers put in the host's memory once (buffer_make's
+	fallback, said once); bake_park's moves, counted */
+	int warned_host_memory, fallen_back;
+	uint32_t parks, unparks;
 } bake;
 
 /* ---------- time */
@@ -751,9 +772,26 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, st
 	allocate.memoryTypeIndex = (uint32_t)type;
 	if (type < 0 || vkAllocateMemory(bake.device.device, &allocate, NULL, &made->memory) != VK_SUCCESS)
 	{
-		vkDestroyBuffer(bake.device.device, made->buffer, NULL);
-		memset(made, 0, sizeof(*made));
-		return 0;
+		/* (no room on the card for a buffer of the light (bake_memory_host):
+		the host's memory, which the GPU reads more slowly, rather than none;
+		bake_unpark puts it on the card once there is room) */
+		int fallback = !host && bake_memory_host ? memory_type(requirements.memoryTypeBits,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) : -1;
+
+		allocate.memoryTypeIndex = (uint32_t)fallback;
+		if (fallback < 0 || vkAllocateMemory(bake.device.device, &allocate, NULL, &made->memory) != VK_SUCCESS)
+		{
+			vkDestroyBuffer(bake.device.device, made->buffer, NULL);
+			memset(made, 0, sizeof(*made));
+			return 0;
+		}
+		type = fallback;
+		host = 1;
+		bake.fallen_back = 1;
+		if (!bake.warned_host_memory)
+			host_logf(HOST_LOG_WARN, "prism bake: no room on the card for the light's buffers: in the host's memory "
+				"until there is (slower to draw)");
+		bake.warned_host_memory = 1;
 	}
 	if (vkBindBufferMemory(bake.device.device, made->buffer, made->memory, 0) != VK_SUCCESS ||
 		(host && vkMapMemory(bake.device.device, made->memory, 0, VK_WHOLE_SIZE, 0, &made->mapped) != VK_SUCCESS))
@@ -764,6 +802,11 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, st
 		return 0;
 	}
 	made->size = size;
+	made->use = usage & VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR ? XGPU_VULKAN_MEMORY_BAKE_STRUCTURES :
+		bake_memory_use;
+	made->type = (uint32_t)type;
+	made->counted = requirements.size;
+	xgpu_vulkan_memory_counted(made->use, made->type, (int64_t)made->counted);
 	memset(&address, 0, sizeof(address));
 	address.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
 	address.buffer = made->buffer;
@@ -773,6 +816,8 @@ static int buffer_make(VkDeviceSize size, VkBufferUsageFlags usage, int host, st
 
 static void buffer_free_now(struct bake_buffer *buffer)
 {
+	if (buffer->counted)
+		xgpu_vulkan_memory_counted(buffer->use, buffer->type, -(int64_t)buffer->counted);
 	if (buffer->buffer)
 		vkDestroyBuffer(bake.device.device, buffer->buffer, NULL);
 	if (buffer->memory)
@@ -987,7 +1032,7 @@ static int pipeline_make(int which, const VkDescriptorType *types, uint32_t coun
 	info.stage.module = module;
 	info.stage.pName = "main";
 	info.layout = bake.pipeline_layouts[which];
-	result = vkCreateComputePipelines(bake.device.device, VK_NULL_HANDLE, 1, &info, NULL, &bake.pipelines[which]);
+	result = vkCreateComputePipelines(bake.device.device, xgpu_vulkan_pipeline_cache(), 1, &info, NULL, &bake.pipelines[which]);
 	vkDestroyShaderModule(bake.device.device, module, NULL);
 	return result == VK_SUCCESS;
 }
@@ -1974,6 +2019,7 @@ static void reach_wait(void);
 static void reach_walk_own(void);
 static void reach_record_write(struct bake_state *b);
 static void filter_stop(struct bake_state *b);
+static int bake_unpark(VkCommandBuffer commands, struct bake_state *b);
 
 static void folder_make(const char *path)
 {
@@ -2822,11 +2868,14 @@ static int structure_build(VkCommandBuffer commands, VkDeviceAddress vertices, u
 	if (!buffer_make(sizes.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, 0,
 		storage))
 		return 0;
+	bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_STRUCTURES;
 	if (!buffer_make(sizes.buildScratchSize + bake.scratch_alignment, 0, 0, &scratch))
 	{
+		bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_SCENE;
 		buffer_free_now(storage);
 		return 0;
 	}
+	bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_SCENE;
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
 	create.buffer = storage->buffer;
@@ -2906,9 +2955,14 @@ static int scene_structure_into(VkCommandBuffer commands, const VkDeviceAddress 
 	sizes.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 	vkGetAccelerationStructureBuildSizesKHR(bake.device.device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
 		&count, &sizes);
+	bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_STRUCTURES;
 	if (!buffer_make(sizes.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, 0,
 		storage) || !buffer_make(sizes.buildScratchSize + bake.scratch_alignment, 0, 0, &scratch))
+	{
+		bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_SCENE;
 		return 0;
+	}
+	bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_SCENE;
 	memset(&create, 0, sizeof(create));
 	create.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
 	create.buffer = storage->buffer;
@@ -3348,6 +3402,9 @@ static int bake_upload(struct bake_state *b)
 			plan_atlas[scene_index] = index + 1u;
 	}
 	b->mask_capacity = plan->tile_count / 4 + 64;
+	/* (the light's buffers, which Path Traced never reads: in the host's
+	memory where the card has no room, rather than no light) */
+	bake_memory_host = 1;
 	if (!buffer_filled(commands, pages, (VkDeviceSize)plan->page_count * 16 + 16, &b->pages, 0) ||
 		!buffer_filled(commands, plan->charts, (VkDeviceSize)plan->chart_texels * 2 + 16, &b->charts, 0) ||
 		!buffer_filled(commands, vpages, (VkDeviceSize)plan->vpage_count * 32 + 32, &b->vpages, 0) ||
@@ -3359,7 +3416,10 @@ static int bake_upload(struct bake_state *b)
 		!buffer_filled(commands, tridata, (VkDeviceSize)plan->atlas.triangle_count * 64 + 64, &b->triangles, 0) ||
 		!buffer_filled(commands, plan->tile_triangles, (VkDeviceSize)plan->tile_triangle_count * 4 + 16, &b->ranges, 0) ||
 		!plan_atlas || !buffer_filled(commands, plan_atlas, (VkDeviceSize)plan->triangle_count * 4 + 16, &b->plan_atlas, 0))
+	{
+		bake_memory_host = 0;
 		goto done;
+	}
 	/* (the final gather's cache block: the addresses the lightmap's and the
 	volume's passes read the bake's own light through) */
 	{
@@ -3371,8 +3431,15 @@ static int bake_upload(struct bake_state *b)
 		cache[2] = b->pool.address;
 		cache[3] = b->triangles.address;
 		cache[4] = b->plan_atlas.address;
+		int last = bake_memory_host;
+
+		bake_memory_host = 0;
 		if (!buffer_filled(commands, cache, sizeof(cache), &b->cache_block, 0))
+		{
+			bake_memory_host = last;
 			goto done;
+		}
+		bake_memory_host = last;
 	}
 	/* the batch's: the texels' records, accumulators, states, running counts,
 	the setup's entries and the job blocks */
@@ -3388,7 +3455,11 @@ static int bake_upload(struct bake_state *b)
 		!buffer_make((VkDeviceSize)MASK_BATCH * MASK_TEXELS * 32, 0, 0, &b->mask_ranges) ||
 		!buffer_make((VkDeviceSize)MASK_BATCH * MASK_TEXELS, 0, 0, &b->mask_out) ||
 		!buffer_make(RASTER_LIGHTS_OFFSET + RASTER_LIGHTS * 12 * 4, 0, 0, &b->raster_job))
+	{
+		bake_memory_host = 0;
 		goto done;
+	}
+	bake_memory_host = 0;
 	vkCmdFillBuffer(commands, b->states.buffer, 0, VK_WHOLE_SIZE, 4u);
 	vkCmdFillBuffer(commands, b->running.buffer, 0, VK_WHOLE_SIZE, 0u);
 	barrier(commands);
@@ -5075,8 +5146,19 @@ static uint16_t float_to_half(float f)
 	return (uint16_t)(sign | ((exponent - 112u) << 10) | (mantissa >> 13));
 }
 
+static void volume_frame_counted(VkCommandBuffer commands, struct bake_state *b);
 
+/* (its buffers counted as the irradiance volume's) */
 static void volume_frame(VkCommandBuffer commands, struct bake_state *b)
+{
+	int last = bake_memory_use;
+
+	bake_memory_use = XGPU_VULKAN_MEMORY_BAKE_VOLUME;
+	volume_frame_counted(commands, b);
+	bake_memory_use = last;
+}
+
+static void volume_frame_counted(VkCommandBuffer commands, struct bake_state *b)
 {
 	struct bake_plan *plan = &b->plan;
 	uint32_t count;
@@ -6734,6 +6816,9 @@ bake still traces) */
 		bake.samples = SAMPLES_FIRST;
 	}
 	timestamp(commands, 0);
+	/* (the steps after the scene's upload make the light's buffers: in the
+	host's memory where the card has no room) */
+	bake_memory_host = b->step >= STEP_LOAD;
 	switch (b->step)
 	{
 	case STEP_PLAN:
@@ -6940,6 +7025,7 @@ bake still traces) */
 	default:
 		break;
 	}
+	bake_memory_host = 0;
 	timestamp(commands, 1);
 	if (b->step != STEP_DONE && b->step != STEP_FAILED)
 		bake_log_progress(b);
@@ -7084,6 +7170,90 @@ static unsigned char *reach_bytes(uint64_t hash, size_t *size)
 	if (counts[1])
 		memcpy(bytes + REACH_HEAD_BYTES + (size_t)counts[0] * 8, bake.tiers, counts[1]);
 	return bytes;
+}
+
+/* port: the last walks made here held in memory by their inputs' hash (the reach
+thread's alone), so that the same inputs sent again are not walked again: a
+set begun again in play (a change of lighting or World Geometry's in the
+map) sends its BSP's inputs again, and a player's run keeps no reach file,
+so the set of the other world walked them again unless that world's pack
+carried their walk: a change to Path Traced's enhanced geometry on a map
+with no enhanced pack (d40, or no packs installed) showed CE's frame for
+the whole walk (17 s for b30's first BSP on Adam's machine, minutes for
+d40's larger ones). The walk is of the inputs alone (the collision, the
+seeds, the static scenery), never of the world drawn */
+#define REACH_KEPT_MOST 4
+#define REACH_KEPT_BYTES_MOST (64u << 20)
+
+static struct
+{
+	uint64_t hash;
+	unsigned char *bytes;
+	size_t size;
+	uint32_t used;
+	int own;
+} reach_kept[REACH_KEPT_MOST];
+static uint32_t reach_kept_clock;
+/* (reach_walk_own's: the next walk is to be this machine's own, never a
+pack's walk held in memory) */
+static int reach_own_asked;
+
+/* the walk of these inputs taken from memory (with own, only a walk made
+here): 1 if it was there */
+static int reach_kept_take(uint64_t hash, int own)
+{
+	int index;
+
+	for (index = 0; index < REACH_KEPT_MOST; index++)
+	{
+		if (!reach_kept[index].bytes || reach_kept[index].hash != hash || (own && !reach_kept[index].own))
+			continue;
+		if (!reach_parse(reach_kept[index].bytes, reach_kept[index].size, hash))
+			return 0;
+		reach_kept[index].used = ++reach_kept_clock;
+		return 1;
+	}
+	return 0;
+}
+
+/* the walk held now kept in memory for these inputs (in the place of the
+least recently used); own if it was walked here */
+static void reach_kept_put(uint64_t hash, int own)
+{
+	unsigned char *bytes;
+	size_t size;
+	int index, place = 0;
+
+	for (index = 0; index < REACH_KEPT_MOST; index++)
+	{
+		if (reach_kept[index].bytes && reach_kept[index].hash == hash && (reach_kept[index].own || !own))
+		{
+			reach_kept[index].used = ++reach_kept_clock;
+			return;
+		}
+		if (reach_kept[index].bytes && reach_kept[index].hash == hash)
+		{
+			place = index;
+			break;
+		}
+		if (!reach_kept[index].bytes || reach_kept[index].used < reach_kept[place].used)
+			place = index;
+		if (!reach_kept[index].bytes)
+			break;
+	}
+	if ((bytes = reach_bytes(hash, &size)) == NULL)
+		return;
+	if (size > REACH_KEPT_BYTES_MOST)
+	{
+		free(bytes);
+		return;
+	}
+	free(reach_kept[place].bytes);
+	reach_kept[place].hash = hash;
+	reach_kept[place].bytes = bytes;
+	reach_kept[place].size = size;
+	reach_kept[place].used = ++reach_kept_clock;
+	reach_kept[place].own = own;
 }
 
 static int reach_file_read(const char *path, uint64_t hash)
@@ -7251,7 +7421,7 @@ static void *reach_thread(void *unused)
 	const float *bounds, *fighters, *water;
 	uint8_t *tiers = NULL, *surface_tiers = NULL;
 	size_t triangle_count = 0, slot, t;
-	int built = 0, failed = 1, from_file = 0;
+	int built = 0, failed = 1, from_file = 0, own;
 	uint64_t input_hash = 0;
 	size_t hashed_words = 0;
 	double started = now_seconds();
@@ -7446,6 +7616,19 @@ static void *reach_thread(void *unused)
 		from_file = 2;
 		goto done;
 	}
+	/* (port: these inputs' walk, made or read before in this run, held in
+	memory: the same BSP's inputs sent again for a set begun again in play,
+	whose world's pack carries no walk of them (the other world's pack's
+	walk of the same inputs is the same walk). After a pack's walk was
+	refused (reach_walk_own) only one made here) */
+	own = reach_own_asked;
+	reach_own_asked = 0;
+	if (!plan_only_path() && reach_kept_take(input_hash, own))
+	{
+		failed = 0;
+		from_file = 3;
+		goto done;
+	}
 	prism_bake_reach_defaults(&parameters);
 	memcpy(parameters.bounds, bounds, sizeof(parameters.bounds));
 	parameters.flight = 0;
@@ -7562,10 +7745,13 @@ done:
 	if (!failed)
 		host_logf(HOST_LOG_INFO, "prism bake: bsp %d's reach (%.1f s%s): %u floors walked, %u body and %u camera cells, %u "
 			"flight cells (%s), %u of %u seeds used; %u triangles near, %u seen further; %u bricks", (int)bake.reach_bsp,
-			now_seconds() - started, from_file == 2 ? ", the shipped pack's" : from_file ? ", from its file" : "",
+			now_seconds() - started, from_file == 3 ? ", held from before" : from_file == 2 ? ", the shipped pack's" :
+			from_file ? ", from its file" : "",
 			bake.reach_summary[0], bake.reach_summary[1], bake.reach_summary[2],
 			bake.reach_summary[3], bake.reach_flight ? "a fighter the player reaches" : "no fighter the player reaches",
 			bake.reach_summary[4], bake.reach_summary[5], bake.reach_summary[6], bake.reach_summary[7], bake.brick_count);
+	if (!failed && bake.reach_hashed && from_file != 3)
+		reach_kept_put(input_hash, from_file != 2);
 	bake.reach_from = from_file;
 	__atomic_store_n(&bake.reach_whole, failed ? -1 : 1, __ATOMIC_RELEASE);
 	return NULL;
@@ -7583,6 +7769,7 @@ static void reach_walk_own(void)
 	bake.tier_count = bake.brick_count = bake.brick_total = 0;
 	bake.reach_shipped_path[0] = 0;
 	bake.reach_whole = 0;
+	reach_own_asked = 1;
 	if (pthread_create(&bake.reach_thread, NULL, reach_thread, NULL) == 0)
 		bake.reach_running = 1;
 	else
@@ -7811,6 +7998,17 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	the set's own is made) */
 	if (b->generation != bake.control.generation)
 		return NULL;
+	/* (the light put aside while Path Traced drew, or made in the host's
+	memory for want of room: back on the card, Path Traced's images let go of
+	where it has no room for both; drawn from the host's memory until then) */
+	if (b->parked || bake.fallen_back)
+	{
+		VkCommandBuffer moving = xgpu_vulkan_compute_commands();
+
+		if (moving && !bake_unpark(moving, b) && xgpu_vulkan_pt_release())
+			host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: Path Traced's images let go of for the light's buffers",
+				b->map, (int)b->bsp);
+	}
 	description = xgpu_vulkan_image_description(copy);
 	if (!bake.raster_light || xgpu_vulkan_image_description(bake.raster_light)->width != description->width ||
 		xgpu_vulkan_image_description(bake.raster_light)->height != description->height)
@@ -8003,6 +8201,156 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	if (whole)
 		*whole = !bake_view && materials;
 	return bake.raster_light;
+}
+
+/* ---------- the light put aside (PRISM Path Traced short of the card's memory)
+
+Path Traced reads the bake's scene alone (xgpu_vulkan_bake_lookup); the
+bake's light (the lightmap's tiles and table, the sun mask, the volume's
+probes and bricks, the reflection probes, the final gather's atlas, the
+batches' working buffers) is Raster's and the bake's own. An 8 GB card at
+3440x1440 with b30's enhanced world had no room for Path Traced's images
+beside it (2.6 GB of the bake's buffers, 0.4 GB the volume's): bake_park
+moves those buffers to the host's memory (copied on the GPU, the card's let
+go of after the submission), where every pass still reads and writes them
+by their addresses, only more slowly; bake_unpark moves them back as Raster
+draws again. The scene's buffers and structures never move. */
+
+static struct bake_buffer *park_buffer(struct bake_state *b, uint32_t index)
+{
+	struct bake_buffer *buffers[] =
+	{
+		&b->pages, &b->charts, &b->vpages, &b->table, &b->pool, &b->pool_indirect, &b->lightmaps, &b->sun, &b->masks,
+		&b->bricks, &b->bricks_coarse, &b->reflection_points, &b->reflection_info, &b->reflection_data,
+		&b->reflection_table, &b->probes, &b->ranges, &b->triangles, &b->texels, &b->accumulators, &b->states,
+		&b->tile_origins, &b->cell_points, &b->cell_candidates, &b->cell_weights, &b->mask_ranges, &b->mask_out,
+		&b->probe_points, &b->probe_accumulators, &b->probe_states, &b->probe_statistics, &b->compact_list,
+		&b->plan_atlas,
+	};
+
+	return index < sizeof(buffers) / sizeof(buffers[0]) ? buffers[index] : NULL;
+}
+
+/* the final gather's cache block written again (its addresses: the
+buffers moved) */
+static void park_cache_block(VkCommandBuffer commands, struct bake_state *b)
+{
+	VkDeviceAddress cache[8];
+
+	if (!b->cache_block.buffer)
+		return;
+	memset(cache, 0, sizeof(cache));
+	cache[0] = b->vpages.address;
+	cache[1] = b->table.address;
+	cache[2] = b->pool.address;
+	cache[3] = b->triangles.address;
+	cache[4] = b->plan_atlas.address;
+	vkCmdUpdateBuffer(commands, b->cache_block.buffer, 0, sizeof(cache), cache);
+}
+
+/* each of the light's buffers in memory of the kind asked (host 1: the
+host's; 0: the card's), copied on the GPU, the one it leaves let go of after
+the submission; the bytes moved (*whole 0 where one could not be made: those
+moved stay moved, as every pass reads either) */
+static int64_t park_move(VkCommandBuffer commands, struct bake_state *b, int host, int *whole)
+{
+	struct bake_buffer *from, made;
+	int64_t moved = 0;
+	uint32_t index;
+	int last = bake_memory_host;
+
+	*whole = 1;
+	bake_memory_host = 0;
+	barrier(commands);
+	for (index = 0; (from = park_buffer(b, index)) != NULL; index++)
+	{
+		VkBufferCopy copy;
+
+		if (!from->buffer || (from->mapped != NULL) == host)
+			continue;
+		if (!buffer_make(from->size, 0, host, &made) || (made.mapped != NULL) != host)
+		{
+			if (made.buffer)
+				buffer_free_now(&made);
+			*whole = 0;
+			break;
+		}
+		copy.srcOffset = copy.dstOffset = 0;
+		copy.size = from->size;
+		vkCmdCopyBuffer(commands, from->buffer, made.buffer, 1, &copy);
+		moved += (int64_t)from->counted;
+		garbage_add(from, VK_NULL_HANDLE);
+		*from = made;
+	}
+	bake_memory_host = last;
+	park_cache_block(commands, b);
+	barrier(commands);
+	return moved;
+}
+
+/* a bake's light parked only where nothing more of it is baked: a whole
+bake's (the shipped one, or this machine's: still being read from its file
+perhaps, into whichever memory), an idle one's (display.bake off), a done or
+failed one's; never one being baked, relit or filtered, whose passes would
+crawl through the host's memory */
+static int park_allowed(const struct bake_state *b)
+{
+	return b && bake_traceable(b) && b->step >= STEP_LOAD && (b->complete || b->idle || b->step == STEP_DONE ||
+		b->step == STEP_FAILED) && !b->relighting && b->filter_state != 1 && !b->drafting;
+}
+
+int xgpu_vulkan_bake_park(void)
+{
+	struct bake_state *b = bake.bake;
+	VkCommandBuffer commands;
+	int64_t moved;
+	int whole;
+
+	if (!bake.made || !park_allowed(b))
+		return 0;
+	commands = xgpu_vulkan_compute_commands();
+	if (!commands)
+		return 0;
+	moved = park_move(commands, b, 1, &whole);
+	if (!moved)
+		return 0;
+	b->parked = 1;
+	bake.parks++;
+	host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the light's buffers put in the host's memory while Path Traced "
+		"draws (%lld MB%s; Path Traced never reads them)", b->map, (int)b->bsp, (long long)(moved >> 20),
+		whole ? "" : ", the rest left on the card: no more host memory");
+	return 1;
+}
+
+void xgpu_vulkan_bake_pt_memory(uint32_t value)
+{
+	if (bake.made)
+		status_set(XGPU_BAKE_STATUS_PT_MEMORY, value);
+}
+
+int xgpu_vulkan_bake_parked(void)
+{
+	return bake.made && bake.bake && bake.bake->parked;
+}
+
+/* the light put back on the card (Raster draws it); 0 where the card has no
+room yet (the light drawn from the host's memory meanwhile) */
+static int bake_unpark(VkCommandBuffer commands, struct bake_state *b)
+{
+	int64_t moved;
+	int whole;
+
+	if (!b->parked && !bake.fallen_back)
+		return 1;
+	moved = park_move(commands, b, 0, &whole);
+	if (!whole)
+		return 0;
+	b->parked = bake.fallen_back = 0;
+	bake.unparks++;
+	if (moved)
+		host_logf(HOST_LOG_INFO, "prism bake: %s bsp %d: the light's buffers back on the card (%lld MB)", b->map,
+			(int)b->bsp, (long long)(moved >> 20));
+	return 1;
 }
 
 int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
