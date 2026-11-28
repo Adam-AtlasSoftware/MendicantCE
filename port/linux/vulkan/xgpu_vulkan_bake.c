@@ -699,6 +699,11 @@ static struct
 	uint32_t reach_words, reach_received;
 	pthread_t reach_thread;
 	int reach_running, reach_flight;
+	/* (set to stop the reach's thread's walk: reach_cancel, as another BSP's
+	inputs begin. The render thread joins the thread there, and d40's BSP
+	8's walk, 696 s, held it that long at the switch after it: the game
+	stopped on "the level as drawn") */
+	int reach_cancel;
 	uint32_t reach_summary[8];
 	uint32_t reach_generation;
 	int32_t reach_bsp;
@@ -8494,17 +8499,28 @@ static void *reach_thread(void *unused)
 	parameters.water_plane_count = water_count;
 	parameters.maximum_walk = 50000000;
 	parameters.maximum_flight = 20000000;
+	parameters.cancel = &bake.reach_cancel;
 	prism_bake_voxels_init(&bricks, 1.0f);
-	built = prism_bake_reach_build(&reach, &bsp, seeds, (size_t)seed_count, &parameters) == 0;
-	if (built && fighter_reached(&reach, fighters, fighter_count))
+	built = prism_bake_reach_build(&reach, &bsp, seeds, (size_t)seed_count, &parameters);
+	if (!built && fighter_reached(&reach, fighters, fighter_count))
 	{
 		/* (a fighter the player can reach: flight, its air at a lower
 		priority) */
 		prism_bake_reach_free(&reach);
 		parameters.flight = 1;
 		bake.reach_flight = 1;
-		built = prism_bake_reach_build(&reach, &bsp, seeds, (size_t)seed_count, &parameters) == 0;
+		built = prism_bake_reach_build(&reach, &bsp, seeds, (size_t)seed_count, &parameters);
 	}
+	if (built == PRISM_BAKE_REACH_CANCELLED)
+	{
+		/* (another BSP's inputs, or the same BSP's new scene's, began: this
+		walk is no one's now) */
+		prism_bake_reach_free(&reach);
+		host_logf(HOST_LOG_INFO, "prism bake: bsp %d's reach stopped after %.1f s: its inputs were replaced",
+			(int)bake.reach_bsp, now_seconds() - started);
+		goto done;
+	}
+	built = built == 0;
 	if (!built)
 	{
 		host_logf(HOST_LOG_WARN, "prism bake: bsp %d's reach: no memory for its walk", (int)bake.reach_bsp);
@@ -8644,6 +8660,19 @@ static void reach_wait(void)
 	}
 }
 
+/* the reach's thread, if one runs, stopped (its walk is let go of) and
+waited for: milliseconds, where reach_wait waits out the whole walk */
+static void reach_cancel(void)
+{
+	if (bake.reach_running)
+	{
+		__atomic_store_n(&bake.reach_cancel, 1, __ATOMIC_RELAXED);
+		pthread_join(bake.reach_thread, NULL);
+		bake.reach_running = 0;
+	}
+	__atomic_store_n(&bake.reach_cancel, 0, __ATOMIC_RELAXED);
+}
+
 /* ---------- the stream's record */
 
 void xgpu_vulkan_bake_record(const struct xgpu_stream_prism_bake *record, const void *data)
@@ -8664,7 +8693,7 @@ void xgpu_vulkan_bake_record(const struct xgpu_stream_prism_bake *record, const 
 			light's "loaded ... (at <s>)" reads as the BSP's wait for its light) */
 			host_logf(HOST_LOG_INFO, "prism bake: bsp %d's reach's inputs begun at %.3f s", (int)record->bsp_index,
 				now_seconds());
-			reach_wait();
+			reach_cancel();
 			free(bake.reach_input);
 			free(bake.tiers);
 			free(bake.bricks);

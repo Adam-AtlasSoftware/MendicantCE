@@ -636,6 +636,11 @@ short or grown) where its inputs' hash is the BSP's own, so a BSP's shipped ligh
 (d40's eighth BSP's walk is 696 s on an RTX 2060 desktop's CPU, 1206 s on the farm's: its light now in use 5 to 6 s
 after the BSP's load, a30's first BSP's 8 s against 52). Where the shipped bake is refused all the same, the reach is
 walked here and the key made again from it.
+A walk still running when another BSP's inputs begin (or the same BSP's new scene's) is stopped, not waited for: the
+render thread joins the walk's thread there, and waited out its whole walk before, so with no shipped bake d40's
+switch from its ninth BSP (nothing to bake) back to its first stopped the game for the rest of the eighth BSP's
+696 s walk, in Enhanced and Path Traced alike (`prism bake: bsp <n>'s reach stopped after <s> s: its inputs were
+replaced`; a BSP entered again walks again).
 
 ## The settings
 
@@ -748,7 +753,10 @@ compute pass (`raster_source`) makes the frame's opaque pixels whole, from the G
   over its lightmap pass instead: its projected shadow maps, their share of the light the G-buffer says that pass
   gave). An object pixel
   (the static scenery's too): the volume's eight probes about its point in its fine cascade, else its coarse one
-  (those inside the level left out), SH at its normal, and the sun's light by its shadow traced against the bake's
+  (those inside the level left out), SH at its normal (never under the probe's ambient part, L0 less half its L1's
+  length: the linear reading of a side turned from a probe's main light goes below it, to nothing where the light
+  is all from one side, as a door the bake has not, lit through the doorway from behind, was on c20's tp_sec4 back
+  wall), and the sun's light by its shadow traced against the bake's
   scene (the level and the static scenery). Both add the frame's dynamic lights (SCENE_LIGHTS' dynamic class: CE's
   falloff, 1 − d²/r²).
 - **The material.** The base colour is CE's (the level's its texture pass's, the decals with it; an object's the

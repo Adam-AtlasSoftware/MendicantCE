@@ -358,6 +358,13 @@ static int inside_bounds(struct prism_bake_reach_parameters const *p, float x, f
 		z <= p->bounds[5];
 }
 
+/* whether the build was asked to stop (parameters.cancel), looked at once
+every 256 calls of the caller's counter */
+static int cancelled(struct prism_bake_reach_parameters const *p, size_t counter)
+{
+	return p->cancel && !(counter & 255u) && __atomic_load_n(p->cancel, __ATOMIC_RELAXED) != 0;
+}
+
 /* the floor below (x, y, top): 1 and its height and the surface's normal z */
 static int find_floor(struct walk_state *state, float x, float y, float top, float *floor_z, float *normal_z)
 {
@@ -606,7 +613,7 @@ static int cell_queue_push(struct cell_queue *queue, int32_t x, int32_t y, int32
 /* floods air from the queue's cells through the set's neighbours (26, or
 6), each joined by a clear segment between centres, up to levels steps
 (0: no limit) or maximum cells (0: no limit): -1 out of memory, 1 when
-stopped by maximum */
+stopped by maximum, PRISM_BAKE_REACH_CANCELLED when p->cancel was set */
 static int flood_air(struct prism_bake_bsp3d const *bsp, struct prism_bake_reach_parameters const *p,
 	struct prism_bake_voxels *set, struct cell_queue *queue, uint8_t flag, int neighbours, int32_t levels,
 	size_t maximum, size_t *count)
@@ -619,6 +626,9 @@ static int flood_air(struct prism_bake_bsp3d const *bsp, struct prism_bake_reach
 		int32_t x = c[0], y = c[1], z = c[2], level = c[3];
 		float cx = ((float)x + 0.5f) * cell, cy = ((float)y + 0.5f) * cell, cz = ((float)z + 0.5f) * cell;
 		int dx, dy, dz;
+
+		if (cancelled(p, queue->head))
+			return PRISM_BAKE_REACH_CANCELLED;
 
 		queue->head++;
 		if (levels && level >= levels)
@@ -717,7 +727,14 @@ int prism_bake_reach_build(struct prism_bake_reach *reach, struct prism_bake_bsp
 	/* the walk */
 	while (!state.failed && state.queue_head < state.queue_count)
 	{
-		struct floor_node node = state.queue[state.queue_head++];
+		struct floor_node node;
+
+		if (cancelled(state.p, state.queue_head))
+		{
+			result = PRISM_BAKE_REACH_CANCELLED;
+			goto done;
+		}
+		node = state.queue[state.queue_head++];
 
 		walk_expand(&state, node);
 	}
@@ -784,7 +801,7 @@ int prism_bake_reach_build(struct prism_bake_reach *reach, struct prism_bake_bsp
 			(int32_t)ceilf(parameters->camera_distance / cell), 0, &reach->camera_count);
 		if (flood < 0)
 		{
-			result = -1;
+			result = flood == PRISM_BAKE_REACH_CANCELLED ? flood : -1;
 			goto done;
 		}
 	}
@@ -837,7 +854,7 @@ int prism_bake_reach_build(struct prism_bake_reach *reach, struct prism_bake_bsp
 			parameters->maximum_flight, &reach->flight_count);
 		if (flood < 0)
 		{
-			result = -1;
+			result = flood == PRISM_BAKE_REACH_CANCELLED ? flood : -1;
 			goto done;
 		}
 		reach->flight_truncated = flood == 1;

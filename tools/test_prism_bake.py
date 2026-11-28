@@ -9,6 +9,7 @@ file, the convergence rule and the volume's batches.
 - With the player's maps (HALO_DATA_ROOT or assets, never committed): Rat Race's reachable space reaches every
   spawn and almost all its floor, and none of what is left is within jumping height of a floor walked.
 """
+import math
 import os
 import shutil
 import struct
@@ -204,3 +205,44 @@ def test_the_reach_blob_puts_an_empty_array_without_a_copy(tmp_path):
     exe = tmp_path / "blob"
     subprocess.run([CC, "-std=gnu89", "-O1", "-Wall", "-Werror", "-o", str(exe), str(main)], check=True)
     assert subprocess.run([str(exe)], capture_output=True, text=True, check=True).stdout.split() == ["0", "28", "1"]
+
+
+def _volume_read(coefficients, n, floored):
+    """PRISM Raster's read of one probe's channel at the normal n (xgpu_vulkan_bake_glsl.inc's cascade_at): its SH
+    L1 (L0, then y, z, x as the probe stores them), the light over pi; with floored, the ambient floor taken under it"""
+    l0, ly, lz, lx = coefficients
+    c0, c1 = 0.282095 * math.pi, 0.488603 * 2.0943951
+    linear = (l0 * c0 + c1 * (ly * n[1] + lz * n[2] + lx * n[0])) / math.pi
+    if not floored:
+        return max(linear, 0.0)
+    ambient = max(l0 * c0 - 0.5 * c1 * math.sqrt(lx * lx + ly * ly + lz * lz), 0.0) / math.pi
+    return max(linear, ambient)
+
+
+def test_the_volume_read_turned_from_its_light_keeps_the_ambient():
+    """A side turned from a probe's main light reads the probe's ambient part, not the linear L1 reading's ringing
+    below it: c20's tp_sec4 back wall (a door, which the bake has not), its probes lit through the doorway by the room
+    behind it, read 0.28x the level about it at its face turned from that room, where the path tracer has it 2.3x.
+    The shader floors both reads (the normal's and the reflection's) by it; the side toward the light is as before"""
+    source = (VULKAN / "xgpu_vulkan_bake_glsl.inc").read_text()
+    body = source[source.index("bool cascade_at("):source.index("bool volume_at(")]
+    assert "vec3 floor_a = max(vec3(cr.x, cg.x, cb.x) * (0.282095 * 3.14159265) - (0.5 * 0.488603 * 2.0943951) *" in body
+    assert "vec3(length(cr.yzw), length(cg.yzw), length(cb.yzw)), vec3(0.0)) / 3.14159265;" in body
+    assert body.count("/ 3.14159265, floor_a);") == 2
+    # an ambient radiance a and a light of intensity i from +x, projected into the probe's SH: the true light at a
+    # normal is a + i max(cos, 0) / pi; turned from the light, a alone
+    a, i = 0.2, 3.0
+    probe = (4.0 * math.pi * 0.282095 * a + 0.282095 * i, 0.0, 0.0, 0.488603 * i)
+    away, toward, side = (-1.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)
+    assert _volume_read(probe, away, False) < 0.25 * a
+    assert _volume_read(probe, away, True) == pytest.approx(a, rel=1e-4)
+    for n in (toward, side):
+        assert _volume_read(probe, n, True) == _volume_read(probe, n, False)
+    # a probe in front of c20's door (bsp2.pbk's at 38.875 -7.875 12.125, red): its L1 past its L0, the door's face
+    # read nothing before; a light with no main direction is as before
+    door = (0.0964, 0.0022, 0.0370, 0.0845)
+    assert _volume_read(door, away, False) == 0.0
+    assert _volume_read(door, away, True) > 0.2 * _volume_read(door, side, True)
+    even = (0.1, 0.001, -0.002, 0.001)
+    for n in (away, toward, side):
+        assert _volume_read(even, n, True) == _volume_read(even, n, False)
