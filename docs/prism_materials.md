@@ -11,7 +11,8 @@ automatic tier's.
 | --- | --- | --- | --- |
 | 1 | Mod | A mod's author (it may ship: it is the modder's own work) | `materials/<shader tag path>.material.json` in the mod's folder |
 | 2 | Pack | `prism_packs.py`'s `v4_materials` step, from the player's own maps | `materials/<shader tag path>.pack.json` in `mods/prism_v4_materials` |
-| 3 | Automatic | The host, from CE's shader, as the map loads | none |
+| 3 | Relief | The game, from the player's own bitmaps, as the map loads (below) | `prism_relief/<key>.<bump\|base>.ktx2` in the data folder (a cache) |
+| 4 | Automatic | The host, from CE's shader, as the map loads | none |
 
 Where a shader has both, the mod's is drawn. A mod's `materials/<path>.material.json` of format 1 is
 `display.prism_materials`' (the forward renderer's model materials, `port/linux/game/mod_pbr.c`): where that setting
@@ -123,6 +124,59 @@ albedo target, so no pack's twin is made.
 
 The images are streamed as `display.prism_materials`' are: each is usable once its levels from 256 texels down are
 resident, the uber-shader drawing the automatic tier's values and CE's bump map until then.
+
+## The relief tier
+
+Under Enhanced and Path Traced the automatic tier draws a level's surfaces with their vertices' normal: CE's bump
+maps, which Classic's lightmap pass reads, are in no G-buffer pixel of theirs, so Forerunner metal's designs (the
+floors' plates and grooves, the walls' inlays and glyphs) were flat paint under the rebaked light. The relief tier
+(`port/linux/game/prism_relief.c`, `display.surface_relief`, the Materials & Terrain group's SURFACE RELIEF, on in
+Remastered and Realistic) gives each environment shader of a relief class a normal map of its designs raised and sunk:
+
+- **The classes** are the enhancements' registry's (`tools/port_settings.py`'s `RELIEF_CLASSES`, whose twin is
+  `prism_relief.c`'s `RELIEF_PATTERNS`, checked by `tools/test_prism_relief.py`): shader tag paths, `*` any run of
+  characters, case not minded. `forerunner_metal` is b30's `metal *`, `decorative *` and `tech dense circuits` (a30,
+  b30, b40, c10, c20 and c40 draw them), b40's `b40_metal *`, `b40_panels *`, `b40_bridgeramp*`, `b40_cliffmetal*` and
+  `b40_generator *` (b40 and c40), and c20's `metal *`, `c20metal *` and `c20column*`; not their grates, lamps, glass
+  or mirrors. a10, a50, d20 and d40 draw no Forerunner metal (the Autumn's, the Truth and Reconciliation's). A class
+  joins by its patterns in both.
+- **The normal map** (`prism_relief_gen.c`) is made from the player's own bitmaps as the map loads: where the shader
+  has a bump map with relief in it (a texel in a hundred an eighth steep or more), its height is found again from its
+  slopes (a Poisson solve, multigrid, the tile's edges wrapping), the drift of the solve taken out (twice a box of a
+  quarter of the tile), the P8 palette's speckle with two medians, its plateaus flattened and its walls steepened (3t²
+  - 2t³ between its 2nd and 98th percentiles), and the normal made of it at CE's bump map's coordinates, its depth the
+  bump map's own (CE's tool's slopes) times 2, a quarter to 4 texels. CE's bump maps carry the designs where they have
+  any (b30's floors, panels and strips: the relief deepens them 1.4 to 1.9 times on average); the base map's painted
+  cracks and mottling raised beside them were noise. Where there is no such bump map, the base map's design: its
+  luminance's median of 3 × 3, the same band and shaping, its dark seams and grooves sunk and its light plates raised,
+  shallower (0.56 of a texel at 256), at the base map's coordinates; where the base map's band spans under 20 levels
+  of 255 (b30's `metal flat generic` and `metal panels generic ext clean`, 16 and 17: mottling), none. Every step is
+  integer arithmetic in a fixed order (no floating point, no platform maths), so every machine makes the same bytes (the test pins them, built with GCC and Clang, 32 and 64
+  bits). b30's 512 × 512 maps take about 0.15 s each.
+- **The cache**: `<data>/prism_relief/<key>.bump.ktx2` or `.base.ktx2` (BC5, every level, the box average of the
+  one above), `<key>.none` for a shader with no design; the key is FNV-1a over `PRISM_RELIEF_VERSION`, the gain and
+  every texel of both bitmaps. A later load reads it; Settings' Clear Caches deletes it (`game_caches.c`). Made from
+  the player's maps, it never leaves the player's machine.
+- **How it is drawn**: `prism_materials.c` sends a shader of a relief class that no mod or pack gives a material one
+  of the pack tier with the relief flag (`XGPU_SCENE_MAPS_FLAG_RELIEF`): its only image the normal map (sent to the
+  texture store from the cache, which accepts `/prism_relief/` paths for a material's image beside `/mods/`), CE's
+  bump map until it is resident, its colour, roughness, metal and specular the automatic tier's (the uber-shader takes
+  the automatic tier's specular for it); a pack's material of such a shader takes the relief's normal map in place of
+  its own (CE's bump map); a mod's is drawn as it is. `debug.gbuffer_view` `"material_source"` shows it as a pack's
+  (blue); the console's `prism_set "material_tiers list"` counts it apart, and the log says what was made and what
+  was read from the cache (`relief: ...`).
+- **The light it meets**: every light reads the G-buffer's normal, so the relief shows under the sun (Raster's N·L, its
+  sun visibility the bake's), the flashlight and the dynamic lights (`dynamic_at`), the reflections, Path Traced's
+  every ray from the first hit, and the bake's own light: each texel keeps the direction its light comes from (an SH
+  L1 band, `k` and `a0`, docs/prism_bake.md "The estimator"), read at the pixel's normal, `B(n) = B(n0) (a0 + k · n)`.
+  The bake is made at the surfaces' own normals (16 texels a world unit at MAX against 128 to 256 of a Forerunner
+  map's texels), never the relief's: **no bake changes, its key does not hold the relief's version, and no pack is
+  baked again** for it.
+- **Not yet**: parallax (POM) and the relief's self-shadowing. CE's base colour is drawn by CE's texture pass at the
+  unshifted coordinates, so a parallax shift would move the light's relief off the paint's (a pack's albedo, drawn by
+  the twin, could shift both); the shadow needs the light's direction, which the G-buffer pass does not have (the light
+  passes could march the height along the sun's, the flashlight's and the bake's direction, with a height image beside
+  the normal map).
 
 ## The pack (`prism_packs.py`'s `v4_materials`)
 

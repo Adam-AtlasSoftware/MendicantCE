@@ -14,6 +14,8 @@ before), at the cost of that start's time:
 - the menus' pictures: the data folder's menu_pictures (menu_pictures.c);
 - the world's volumes for the ambient occlusion: the data folder's
   world_sdf (world_sdf.c);
+- the relief's normal maps (the Forerunner metal's designs raised): the
+  data folder's prism_relief (port/linux/game/prism_relief.c);
 - the host's: the GPU's pipelines and the ASTC textures (host_caches,
   port/linux/vulkan/host_vulkan.c and port/macos/host_metal.m).
 
@@ -138,6 +140,10 @@ static unsigned long long game_caches_own(int clear)
 	snprintf(folder, sizeof(folder), "%s/menu_pictures", platform_data_root());
 	total += game_caches_folder(folder, 0, clear);
 	snprintf(folder, sizeof(folder), "%s/world_sdf", platform_data_root());
+	total += game_caches_folder(folder, 0, clear);
+	/* (the relief's normal maps, made again as a map loads:
+	port/linux/game/prism_relief.c) */
+	snprintf(folder, sizeof(folder), "%s/prism_relief", platform_data_root());
 	total += game_caches_folder(folder, 0, clear);
 	return total;
 }

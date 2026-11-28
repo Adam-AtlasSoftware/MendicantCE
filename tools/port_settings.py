@@ -938,6 +938,10 @@ ENHANCEMENTS = [
      ("false", "true", "true"), "EP", RUNTIME, None,
      "Each surface drawn by the material the material pack or a mod gives it: its colour without the painted "
      "light, its bumps, roughness and metal. Off: every material made from the game's shaders." + NEEDS_PRISM),
+    ("materials", "display.surface_relief", "SURFACE RELIEF", [("ON", "true"), ("OFF", "false")],
+     ("false", "true", "true"), "EP", RUNTIME, None,
+     "The designs on Forerunner metal raised and sunk, made from the game's own textures as a level loads, so "
+     "that the sun, your flashlight and the lamps catch their edges. Off: drawn flat." + NEEDS_PRISM),
     ("materials", "display.terrain", "TERRAIN", [("ON", "on"), ("OFF", "off")], ("off", "on", "on"), "EP", RUNTIME,
      None, "In a campaign: the HQ ground, its layers and footprints. Off: the ground as the game draws it. Never "
      "in multiplayer." + NEEDS_PRISM),
@@ -977,6 +981,21 @@ ENHANCEMENTS = [
      "PRISM: the water's surface drawn by PRISM, its reflection traced, in the game's own colour and ripples. "
      "Game's: the game's own water." + NEEDS_PRISM),
 ]
+# the relief classes (display.surface_relief: port/linux/game/prism_relief.c's RELIEF_PATTERNS is their twin,
+# tools/test_prism_relief.py checks that they agree): each class's shader tag paths, '*' any run of characters, case
+# not minded. A class joins by its patterns here and there; a surface's relief is made from the player's own bitmaps
+# as the map loads, never shipped (docs/prism_materials.md, "The relief tier")
+RELIEF_CLASSES = {
+    # Forerunner metal: b30's shaders (a30, b30, b40, c10, c20 and c40 draw them), b40's own and c20's own; their
+    # grates, lamps, glass and mirrors are not metal plate
+    "forerunner_metal": [
+        "levels\\b30\\shaders\\metal *", "levels\\b30\\shaders\\decorative *",
+        "levels\\b30\\shaders\\tech dense circuits", "levels\\b40\\shaders\\b40_metal *",
+        "levels\\b40\\shaders\\b40_panels *", "levels\\b40\\shaders\\b40_bridgeramp*",
+        "levels\\b40\\shaders\\b40_cliffmetal*", "levels\\b40\\shaders\\b40_generator *",
+        "levels\\c20\\shaders\\metal *", "levels\\c20\\shaders\\c20metal *", "levels\\c20\\shaders\\c20column*",
+    ],
+}
 # each group: its page, title and the help of its link on PRISM's page
 ENHANCEMENT_GROUPS = {
     "world_geometry": (WORLD_PAGE, "WORLD GEOMETRY", "world_geometry_page",

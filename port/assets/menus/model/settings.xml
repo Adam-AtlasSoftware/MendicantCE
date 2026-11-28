@@ -1989,6 +1989,11 @@
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
+		<row key="surface_relief" kind="choice" setting="display.surface_relief" label="SURFACE RELIEF" crumb="VIDEO › PRISM › MATERIALS &amp; TERRAIN" when="desktop">
+			<help>The designs on Forerunner metal raised and sunk, made from the game's own textures as a level loads, so that the sun, your flashlight and the lamps catch their edges. Off: drawn flat. Needs Enhanced or Path Traced lighting.</help>
+			<choice shown="ON" value="true"/>
+			<choice shown="OFF" value="false"/>
+		</row>
 		<row key="terrain" kind="choice" setting="display.terrain" label="TERRAIN" crumb="VIDEO › PRISM › MATERIALS &amp; TERRAIN" when="desktop">
 			<help>In a campaign: the HQ ground, its layers and footprints. Off: the ground as the game draws it. Never in multiplayer. Needs Enhanced or Path Traced lighting.</help>
 			<choice shown="ON" value="on"/>

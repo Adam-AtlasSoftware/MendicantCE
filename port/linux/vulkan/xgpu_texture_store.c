@@ -1015,8 +1015,11 @@ static int query_check(struct xgpu_texture_store *store, const struct xgpu_store
 	if (!realpath(query->path, resolved))
 		return XGPU_KTX2_UNREADABLE;
 	/* (a file the guest found in a mods folder, a KTX2 file wherever its
-	links lead: a mods folder linked to another disk is the player's own) */
-	if (!strstr(query->path, "/mods/") || !ends_with(resolved, ".ktx2"))
+	links lead: a mods folder linked to another disk is the player's own; or
+	a material's image the relief made in the data folder's cache,
+	port/linux/game/prism_relief.c) */
+	if ((!strstr(query->path, "/mods/") && !(query->material && strstr(query->path, "/prism_relief/"))) ||
+		!ends_with(resolved, ".ktx2"))
 		return XGPU_KTX2_PATH;
 	descriptor = open(resolved, O_RDONLY | O_CLOEXEC);
 	if (descriptor < 0)

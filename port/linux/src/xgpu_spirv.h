@@ -163,6 +163,10 @@ enum
 	XGPU_SPIRV_PACK_IMAGE_MICRO_DETAIL,
 	XGPU_SPIRV_PACK_IMAGES,
 };
+/* the material's flag (in [3]) of the relief tier's: its specular the
+automatic tier's (xgpu_stream.h's XGPU_SCENE_MAPS_FLAG_RELIEF, which
+xgpu_vulkan_stream.c checks is the same) */
+#define XGPU_SPIRV_PACK_FLAG_RELIEF 0x4000u
 
 /* the draw's values both stages read, laid out alike in C and in the
 shaders' uniform block (std140: vec4s, and floats in fours): the backend's
