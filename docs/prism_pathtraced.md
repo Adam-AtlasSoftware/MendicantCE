@@ -1025,7 +1025,11 @@ checkpoints (VK_NV_device_diagnostic_checkpoints), the fault's description (VK_E
 device. Before, it read `vulkan: a lost device's diagnosis: its fault AMD's markers`, which a playtest's log on the
 RTX 3070 Ti was taken to report a lost device by (2026-11-27; no device was lost, and NVIDIA's cards then logged
 AMD's markers, not their checkpoints). `HALO_VULKAN_TEST_FAULT=<n>` faults the device for real (an address no buffer
-has, from the `n`th submission) to test the report on a card. `tools/test_prism_device_lost.py`.
+has, from the `n`th submission) to test the report on a card. On NVIDIA's cards such a fault (Xid 109, the context
+switch's timeout, on Atlas's RTX 3090s and the RTX 2060) never came back as a lost device: the render thread waited
+for the GPU for ever and the game hung with nothing logged. A GPU that finishes nothing for 15 s while the render
+thread waits for it (`HALO_VULKAN_HANG_SECONDS`) is now reported as lost (`vulkan: the GPU finished nothing for
+15.0 s: ...`), and a poll of its progress that is told the device is lost reports it too. `tools/test_prism_device_lost.py`.
 The message says the device was lost in PRISM Path Traced, and the next start sets `display.lighting` to `"raster"`
 (PRISM Rebaked) and tells the player, once for that crash (report.c's `report_path_traced_fallback`); Settings can
 choose Path Traced again. Every ray is checked before it is traced: a NaN or infinite origin or direction, or a NaN

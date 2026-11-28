@@ -2309,9 +2309,14 @@ static void device_lost_report(void)
 static uint64_t completed_serial(void)
 {
 	uint64_t value = vk.completed;
+	VkResult result = vkGetSemaphoreCounterValue(vk.device, vk.timeline, &value);
 
-	if (vkGetSemaphoreCounterValue(vk.device, vk.timeline, &value) == VK_SUCCESS && value > vk.completed)
+	if (result == VK_SUCCESS && value > vk.completed)
 		vk.completed = value;
+	/* (a lost device told here too: a frame that polls for the GPU's
+	progress, never waiting for it, would draw on without the report) */
+	else if (result == VK_ERROR_DEVICE_LOST)
+		check(result, "vkGetSemaphoreCounterValue");
 	return vk.completed;
 }
 
@@ -2328,12 +2333,40 @@ to its wait, or ruled out */
 static uint64_t skin_frame_number(void);
 static uint32_t long_waits;
 
+/* a GPU that finishes nothing for HANG_SECONDS while the render thread
+waits for it (HALO_VULKAN_HANG_SECONDS; 0 waits for ever) is taken as a lost
+device and reported as one: NVIDIA's driver, after a fault it recovers the
+channel from (Xid 109, the context switch's timeout, seen on Atlas's RTX
+3090s for a traced pass's read of an address no buffer has), never ended
+the wait, and the game hung with nothing logged. No frame's work takes the
+GPU seconds (the bake's and the passes' are budgeted to milliseconds; a
+Windows driver resets after 2 s) */
+#define HANG_SECONDS 15.0
+#define HANG_WAIT_NANOSECONDS 500000000ull
+
+static double hang_seconds(void)
+{
+	static double seconds = -1.0;
+
+	if (seconds < 0.0)
+	{
+		const char *text = getenv("HALO_VULKAN_HANG_SECONDS");
+
+		seconds = text && *text ? atof(text) : HANG_SECONDS;
+		if (seconds < 0.0)
+			seconds = 0.0;
+	}
+	return seconds;
+}
+
 /* waits until the GPU has passed serial */
 #define serial_wait(serial) serial_wait_at((serial), __func__, __LINE__)
 static void serial_wait_at(uint64_t serial, const char *where, int line)
 {
 	VkSemaphoreWaitInfo info;
-	double started, began;
+	double started, began, progressed;
+	uint64_t progress;
+	VkResult result;
 
 	if (serial <= completed_serial())
 		return;
@@ -2343,8 +2376,31 @@ static void serial_wait_at(uint64_t serial, const char *where, int line)
 	info.pSemaphores = &vk.timeline;
 	info.pValues = &serial;
 	started = host_load_trace_enabled() ? host_load_trace_clock(CLOCK_MONOTONIC) : -1.0;
-	began = seconds_now();
-	check(vkWaitSemaphores(vk.device, &info, UINT64_MAX), "vkWaitSemaphores");
+	began = progressed = seconds_now();
+	progress = vk.completed;
+	/* (in steps, the GPU's progress looked at between them: a GPU that
+	finishes nothing for hang_seconds() is reported as lost) */
+	while ((result = vkWaitSemaphores(vk.device, &info, hang_seconds() > 0.0 ? HANG_WAIT_NANOSECONDS : UINT64_MAX)) ==
+		VK_TIMEOUT)
+	{
+		double now = seconds_now();
+
+		if (completed_serial() >= serial)
+			break;
+		if (vk.completed != progress)
+		{
+			progress = vk.completed;
+			progressed = now;
+		}
+		else if (now - progressed >= hang_seconds())
+		{
+			host_logf(HOST_LOG_ERROR, "vulkan: the GPU finished nothing for %.1f s: submission %llu waited for (%s:%d), "
+				"%llu done; taken as a lost device", now - progressed, (unsigned long long)serial, where, line,
+				(unsigned long long)vk.completed);
+			device_lost_report();
+		}
+	}
+	check(result, "vkWaitSemaphores");
 	{
 		double spent = seconds_now() - began;
 

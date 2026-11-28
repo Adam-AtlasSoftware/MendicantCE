@@ -98,6 +98,25 @@ def test_the_test_fault_is_a_real_fault_only_when_asked():
     assert "`HALO_VULKAN_TEST_FAULT=<n>`" in readme and "For testing only" in readme
 
 
+def test_a_gpu_that_finishes_nothing_is_reported_as_lost():
+    text = (VULKAN / "xgpu_vulkan.c").read_text()
+    wait = _function(text, "static void serial_wait_at(uint64_t serial, const char *where, int line)")
+    # (no wait for ever where the hang's time is set: steps, the progress looked at between them)
+    assert "vkWaitSemaphores(vk.device, &info, UINT64_MAX)" not in wait
+    assert "hang_seconds() > 0.0 ? HANG_WAIT_NANOSECONDS : UINT64_MAX" in wait
+    loop = wait[wait.index("while ((result = vkWaitSemaphores("):wait.index('check(result, "vkWaitSemaphores");')]
+    assert "== \n\t\tVK_TIMEOUT" in loop or "==\n\t\tVK_TIMEOUT" in loop
+    assert loop.index("completed_serial() >= serial") < loop.index("device_lost_report();")
+    assert "progressed = now;" in loop and "now - progressed >= hang_seconds()" in loop
+    assert re.search(r"#define HANG_SECONDS \d+\.\d+\n", text)
+    assert 'getenv("HALO_VULKAN_HANG_SECONDS")' in _function(text, "static double hang_seconds(void)")
+    # (a poll that is told the device is lost reports it)
+    completed = _function(text, "static uint64_t completed_serial(void)")
+    assert 'result == VK_ERROR_DEVICE_LOST)\n\t\tcheck(result, "vkGetSemaphoreCounterValue");' in completed
+    readme = (VULKAN / "README.md").read_text()
+    assert "`HALO_VULKAN_HANG_SECONDS=<s>`" in readme
+
+
 def test_the_steps_lines_are_short_and_in_the_order_recorded():
     text = (VULKAN / "xgpu_vulkan.c").read_text()
     steps = _function(text, "static void device_lost_steps(void)")
