@@ -56,7 +56,9 @@ def test_a_whole_bake_makes_none_of_the_baking_buffers():
     assert "PRISM_BAKE_RECORD_SUN_MASK_TILE" in early
     # (Path Traced's indirect pool and lightmap coordinates are gone: nothing read them)
     assert "pool_indirect" not in BAKE and "b->lightmaps" not in BAKE
-    volume = _function(BAKE, "volume_make")
+    # (volume_make counts its buffers as the irradiance volume's around volume_make_counted, which makes them)
+    assert "made = volume_make_counted(commands, b);" in _function(BAKE, "volume_make")
+    volume = _function(BAKE, "volume_make_counted")
     assert re.search(r"if \(b->bakes\)\s*b->probe_host", volume)
     assert re.search(r"b->bakes && \(!b->probe_host \|\|\s*!buffer_filled\(commands, plan->probes", volume)
 
@@ -70,7 +72,8 @@ def test_a_whole_bake_never_bakes_what_its_file_lacks():
     assert "else if (b->bakes)\n\t\t\treflections_frame(commands, b);" in frame
     mask = _function(BAKE, "mask_frame")
     assert mask.index("if (!b->bakes)") < mask.index("upload(commands, &b->tile_origins")
-    volume = _function(BAKE, "volume_frame")
+    assert "volume_frame_counted(commands, b);" in _function(BAKE, "volume_frame")
+    volume = _function(BAKE, "volume_frame_counted")
     assert volume.index("if (!b->bakes)") < volume.index("b->volume.batched > b->volume.done")
 
 

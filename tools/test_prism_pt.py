@@ -783,11 +783,15 @@ def test_the_dynamic_lights_flag_is_world_scenes_own():
     assert "WORLD_SCENE_LIGHT_DYNAMIC = " not in scene and "SCENE_DYNAMIC = " not in lights
     assert "world_scene_light_add(handles[index], WORLD_SCENE_LIGHT_DYNAMIC)" in scene
     assert "if (!(drawn->flags & WORLD_SCENE_LIGHT_DYNAMIC) || drawn->type == 2)" in lights
-    # (a gel-mapped light at the gel's share; Raster's frame by CE's composition takes CE's own passes instead)
-    assert "light->radiance[3] = drawn->intensity * drawn->gel;" in lights
+    # (a gel-mapped light at the gel's share; under Enhanced lighting with CE's composition at RASTER_CE_GEL, CE's
+    # falloff's: its light pass lights with them under either composition, CE's diffuse passes' light replaced,
+    # 024d318fb)
+    assert ("light->radiance[3] = drawn->intensity * (drawn->gel < 1.0f && prism_deferred_raster() &&\n"
+            "\t\t\t!prism_deferred_pathtraced() && !prism_deferred_raster_materials() ? RASTER_CE_GEL : drawn->gel);"
+            in lights)
     assert "#define WORLD_SCENE_GEL_MAP 0x64" in scene and "#define WORLD_SCENE_GEL 0.12f" in scene
     bake = (ROOT / "port/linux/vulkan/xgpu_vulkan_bake.c").read_text()
-    assert "lights = materials ? xgpu_vulkan_scene_light_table(&light_count, &serial) : NULL;" in bake
+    assert "\tlights = xgpu_vulkan_scene_light_table(&light_count, &serial);" in bake
 
 
 def test_the_dynamic_lights_layout_is_the_hosts():
@@ -1026,7 +1030,9 @@ def test_what_glows_lights_in_path_traced():
     assert 0x7E000000 & 0x80000000 == 0
     assert "lights_preprocess_scene();\n" in render and "prism_scene_lights_window();" in render
     assert render.index("lights_preprocess_scene();\n") < render.index("prism_scene_lights_window();")
-    assert "if (!render_enumerating && (prism_deferred_pathtraced() || prism_deferred_raster_materials()))" in scene
+    # (the table sent under Enhanced lighting with either composition too, 024d318fb; the glows still only where
+    # glow_lights_all says)
+    assert "if (!render_enumerating && (prism_deferred_pathtraced() || prism_deferred_raster()))" in scene
 
 
 def test_a_lightless_projectile_glows_its_weapons_colour_and_a_shields_flare_reaches_no_further_in_path_traced():

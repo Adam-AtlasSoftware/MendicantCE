@@ -69,11 +69,12 @@ def test_the_bake_light_put_aside_never_holds_the_scene_path_traced_reads():
     """2026-11-27: on the 8 GB card the bake's light (2.6 GB with the volume's) left no room for Path Traced's images.
     xgpu_vulkan_bake_park moves only buffers Path Traced never reads: none the scene block it traces by
     (xgpu_vulkan_bake_lookup) points into, nor a structure's storage, nor the final gather's cache block (written
-    again, its addresses moved)"""
+    again, its addresses moved); the irradiance volume the bake's guide reads (probes, bricks) it reads only while
+    they are on the card (xgpu_vulkan_bake_lookup_light: test_prism_pt.py). The indirect pool is gone (bd471385f)"""
     text = BAKE.read_text()
     parked = function(text, "static struct bake_buffer *park_buffer(")
     names = set(re.findall(r"&b->(\w+)", parked))
-    assert {"pool", "pool_indirect", "table", "sun", "probes", "probe_points", "bricks"} <= names
+    assert {"pool", "table", "sun", "probes", "probe_points", "bricks"} <= names
     block = set(re.findall(r"b->block\.\w+ = b->(\w+)\.address", text))
     assert block >= {"vertices", "info", "materials", "alpha", "lamps", "grid"}
     assert not names & (block | {"scene", "scene_runtime", "cache_block", "instances", "tlas_storage",
