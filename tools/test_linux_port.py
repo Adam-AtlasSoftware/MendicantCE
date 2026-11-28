@@ -574,10 +574,14 @@ def test_graphics_preset_chooses_the_settings_left_to_it(config_check_mac):
     run = config_check_mac
     assert run("get", "display.graphics") == "enhanced"
     assert graphics_values(run) == GRAPHICS_ENHANCED
+    assert run("get", "display.prism_surface_maps") == "true"
     text = run.config.read_text()
+    assert not re.search(r"^(# )?prism_surface_maps =", text, re.M)
     assert '\n# graphics = "enhanced"\n' in text and "\n# anisotropic_filtering = 16\n" in text
     run("write", "display.graphics", "classic")
     assert graphics_values(run) == GRAPHICS_CLASSIC
+    # (the remodels' surface maps, no player's setting: Enhanced's alone)
+    assert run("get", "display.prism_surface_maps") == "false"
     text = run.config.read_text()
     assert '\ngraphics = "classic"\n' in text
     assert not re.search(r"^(anti_aliasing|anisotropic_filtering|shadow_resolution) =", text, re.M)

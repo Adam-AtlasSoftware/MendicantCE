@@ -113,21 +113,35 @@ def test_settings_off_by_default():
 
 def test_classic_has_no_prism_extras():
     """v4 geopatch M3: Classic is CE's own options alone. Classic's PRISM extras (the model light's choices, the
-    shadows, the smoothed lightmaps, the surface maps) are no player's settings any more (_platform_internal: never
-    read from config.toml), off; display.graphics' "prism" preset of them is read as "enhanced", and no preset
-    chooses them"""
+    shadows, the smoothed lightmaps) are no player's settings any more (_platform_internal: never read from
+    config.toml), off; display.graphics' "prism" preset of them is read as "enhanced", and no preset chooses them.
+    The remodels' surface maps are no player's setting either, but display.graphics "enhanced"'s (the playtest kit's
+    "enhanced" drew the remodelled first-person weapons without their detail): test_enhanced_draws_the_surface_maps"""
     config = (SOURCE / "port_config.c").read_text()
     for name, default in (("prism_specular", "off"), ("prism_shadows", "stock"), ("prism_reflections", "stock"),
                           ("prism_lightmaps", "stock")):
         entry = config.split('\t{ "display.%s", ' % name, 1)[1].split("},\n", 1)[0]
         assert entry.startswith('_config_string, "\\"%s\\""' % default), name
         assert "_platform_internal" in entry, name
-    assert re.search(r'"display\.prism_surface_maps", _config_boolean, "false"', config)
     table = config.split("config_graphics[] =", 1)[1].split("};", 1)[0]
     for name in ("prism_bloom", "prism_world_geometry", "prism_reflections", "prism_specular", "prism_shadows",
-                 "prism_lightmaps", "prism_surface_maps", "prism_rt"):
+                 "prism_lightmaps", "prism_rt"):
         assert '"display.%s"' % name not in table, name
     assert '{ "display.graphics", "prism", "enhanced" },' in config
+
+
+def test_enhanced_draws_the_surface_maps():
+    """display.prism_surface_maps: on in display.graphics "enhanced" (its default), off in "classic", as "prism"
+    gave it before M3; still no player's setting (never read from config.toml), the environment overriding it"""
+    config = (SOURCE / "port_config.c").read_text()
+    entry = config.split('\t{ "display.prism_surface_maps", ', 1)[1].split("},\n", 1)[0]
+    assert entry.startswith('_config_boolean, "true", "HALO_PRISM_SURFACE_MAPS"')
+    assert "_platform_internal" in entry and "GRAPHICS_CHOOSES" in entry
+    table = config.split("config_graphics[] =", 1)[1].split("};", 1)[0]
+    assert '{ "display.prism_surface_maps", "false" },' in table
+    # (never the enhancements preset's too: the two presets share no setting)
+    enhancements = config.split("config_enhancements[] =", 1)[1].split("};", 1)[0]
+    assert '"display.prism_surface_maps"' not in enhancements
 
 
 def test_alpha_tested_decals_go_to_the_base_under_the_baked_lighting():

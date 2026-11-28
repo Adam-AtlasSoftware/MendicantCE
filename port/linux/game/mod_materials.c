@@ -79,11 +79,11 @@ whose class mask is not there (not built yet, or another map's), or not
 ready yet, draws with slots A and B and the channel rule alone, as a shader
 of two classes does.
 
-PRISM v2 surface maps (display.prism_surface_maps, off unless set): an
-RGBA PNG at a base map's coordinates (RG the normal's x and y, y up the
-picture; B the ambient occlusion; A the roughness, 1 matte and without a
-highlight), baked from a remodel's high-poly onto its game mesh at CE's own
-UVs (tools/prism_packs/art/prism_bake_ce.py, prism_surface_pack.py: built on the
+PRISM v2 surface maps (display.prism_surface_maps, display.graphics
+"enhanced"'s): an RGBA PNG at a base map's coordinates (RG the normal's x
+and y, y up the picture; B the ambient occlusion; A the roughness, 1 matte
+and without a highlight), baked from a remodel's high-poly onto its game
+mesh at CE's own UVs (tools/prism_packs/art/prism_bake_ce.py, prism_surface_pack.py: built on the
 player's machine from the player's maps). A mod gives one for a bitmap by
 putting it next to the bitmap's tag: tags\<bitmap>.surface.png for the
 bitmap's first picture, tags\<bitmap>.surface<n>.png for its picture n.

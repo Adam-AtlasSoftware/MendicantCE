@@ -335,8 +335,8 @@ metal, are not taken by the rule's A). The debug
 views (display.prism_overlay_view, the key's bits 1 to 3): 1 the tiles'
 weights, 2 the micro normal's change, 3 the fade, 4 the light alone.
 
-The surface map (display.prism_surface_maps, PRISM v2; off unless set):
-two BC5 images at the base map's coordinates, read once (not tiled), the
+The surface map (display.prism_surface_maps, PRISM v2; display.graphics
+"enhanced"'s): two BC5 images at the base map's coordinates, read once (not tiled), the
 images after the class mask (port/linux/game/mod_materials.c makes them
 from one RGBA PNG): the first's RG the tangent-space normal's x and y (y
 up the picture, 0.5 flat; its slope added to the tiles' in the same

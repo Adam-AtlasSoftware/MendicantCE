@@ -140,7 +140,8 @@ struct config_setting
 chooses (config_graphics), which are their defaults, the same on every
 build: SMAA (on the phones MSAA 2x), 16x anisotropic filtering, 512 shadow maps,
 the models' detail by the display's lines and lit for each pixel, the
-enhanced dynamic lights; ambient occlusion off (below) */
+enhanced dynamic lights, the remodels' surface maps; ambient occlusion off
+(below) */
 #if defined(HALO_IOS) || defined(HALO_ANDROID)
 /* (an iPhone's tile-based GPU resolves MSAA in its tile memory, the 3D view
 drawn in one pass, port/macos/xgpu_metal.m: about the cost of SMAA's
@@ -356,15 +357,12 @@ static const struct config_setting config_settings[] =
 		"The 3D view's look: \"classic\" as the Xbox drew it; \"enhanced\" with this\n"
 		"port's improvements together (anti-aliasing, sharper textures and\n"
 		"shadows, models' detail and lighting for each pixel, the enhanced\n"
-		"dynamic lights), the same on every machine (a renderer that lacks one\n"
-		"draws without it); \"prism\" is \"enhanced\" with PRISM's faithful light on\n"
-		"top (display.prism_lightmaps \"smooth\", display.ambient_occlusion\n"
-		"\"world\", display.prism_surface_maps true, display.prism_specular\n"
-		"\"subtle\", display.prism_shadows \"soft\"; never what is beyond CE).\n"
-		"Each of those settings, set here, wins over it. A quality preset, not a\n"
-		"lighting mode (display.lighting is): its lighting settings are Classic's;\n"
-		"Settings > Video > Advanced Graphics > Quality (Xbox, Enhanced, PRISM\n"
-		"Extras)." },
+		"dynamic lights, the remodels' surface maps: display.prism_surface_maps),\n"
+		"the same on every machine (a renderer that lacks one draws without it);\n"
+		"\"prism\", an older version's, is read as \"enhanced\". Each of those\n"
+		"settings, set here, wins over it. A quality preset, not a lighting mode\n"
+		"(display.lighting is): its lighting settings are Classic's; Settings >\n"
+		"Video > Advanced Graphics > Quality (Xbox, Enhanced)." },
 	{ "display.anti_aliasing", _config_string, GRAPHICS_ANTI_ALIASING, "HALO_ANTI_ALIASING", _environment_value,
 		_platform_all,
 		"Smoothing of jagged edges, which the Xbox did not have: \"off\"; \"fxaa\"\n"
@@ -655,7 +653,7 @@ static const struct config_setting config_settings[] =
 		"blue B, green left alone; with a class mask its four: white A, purple B,\n"
 		"orange C, green D, black left alone), 2 the micro normal, 3 its fade, 4\n"
 		"the light alone; 0 the game." },
-	{ "display.prism_surface_maps", _config_boolean, "false", "HALO_PRISM_SURFACE_MAPS", _environment_value,
+	{ "display.prism_surface_maps", _config_boolean, "true", "HALO_PRISM_SURFACE_MAPS", _environment_value,
 		_platform_internal,
 		"PRISM v2: light the model shaders whose base map has a surface map\n"
 		"in a mod (tags\\<bitmap>.surface.png, baked on this machine from your\n"
@@ -6068,6 +6066,10 @@ static const struct
 	{ "display.prism_texture_fade", "0" },
 	{ "display.prism_prefetch", "false" },
 	{ "display.prism_lod_hysteresis", "0" },
+	/* (the remodels' surface maps, the remodelled first-person weapons'
+	detail: Enhanced's since the playtest of quick3, where Enhanced drew
+	them without it; "prism" gave them before v4 geopatch M3 retired it) */
+	{ "display.prism_surface_maps", "false" },
 	{ "display.soft_particles", "false" },
 	{ "game.enhanced_animations", "false", 1 },
 	{ "display.menu_fade", "true", 1 },

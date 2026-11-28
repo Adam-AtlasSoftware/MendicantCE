@@ -71,7 +71,7 @@ Path Traced, and so on). On the first start of this version each new key takes t
 file (`config_migrate_enhancements`), so nothing a player chose is lost.
 
 **Classic is CE's own.** Classic's PRISM extras (`display.prism_lightmaps`, `_specular`, `_reflections`, `_shadows` and
-their detail, `_baked_shadows`, `_surface_maps`, `_material_overlay`, the remodel's shadow and occlusion shapes, world
+their detail, `_baked_shadows`, `_material_overlay`, the remodel's shadow and occlusion shapes, world
 ambient occlusion) and Classic's ray tracer (`display.prism_rt` and every `display.prism_rt_*` of its own, `display.
 prism_sun_size`) are no player's settings any more: off, the code kept for the farm and for later ports into Enhanced
 (a port not ready has no row; it is never left in Classic). `display.graphics`' `"prism"` (Classic with PRISM's extras)
@@ -115,3 +115,8 @@ nothing else, a BAKE_LAYER row a layer in a planned BAKE_VERSION, static geometr
 Enhanced everything (PLAN_FINAL section 10): Enhanced lighting, Enhanced world geometry, the enhancements at Realistic,
 ray tracing on where the card traces rays; Campaign collision Original until M8's gates pass (`game.campaign_collision`,
 always `"original"` in this version).
+
+The remodels' surface maps (`display.prism_surface_maps`: the remodelled first-person weapons', the Chief's, the
+Elites', the Marines' baked detail) are `display.graphics` `"enhanced"`'s, on by default, off in `"classic"`; no row,
+never read from `config.toml` (`HALO_PRISM_SURFACE_MAPS` overrides it). The playtest kit's `graphics = "enhanced"` drew
+the weapons without them while only the retired `"prism"` preset turned them on.
