@@ -1770,13 +1770,18 @@ void prism_bake_frame(
 	xgpu_backend_prism_bake(&bake, NULL, 0);
 	/* (v4 geopatch: the enhanced geometry's bake not loaded whole, its
 	pack not this geometry's or damaged: a player bakes nothing, so it is
-	paused there, or it failed; the map falls back to its classic geometry,
-	prism_world_source.c) */
+	paused there, or it failed before any of its light was drawn; the map
+	falls back to its classic geometry, prism_world_source.c. A whole bake
+	that failed after its tiles were drawn (out of memory for its volume:
+	b30's enhanced first BSP on a 3070 Ti) still lights the geometry, and
+	dropping the map to its classic world then was the jump to other light
+	a player saw) */
 	if (prism_world_source_bsp_enhanced(global_structure_bsp_index_get()) && !prism_deferred_pathtraced())
 	{
 		unsigned long state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 
-		if ((state == XGPU_BAKE_STATE_PAUSED || state == XGPU_BAKE_STATE_FAILED) &&
+		if ((state == XGPU_BAKE_STATE_PAUSED || (state == XGPU_BAKE_STATE_FAILED &&
+			prism_bake_status(XGPU_BAKE_STATUS_SHOWN) == XGPU_BAKE_SHOWN_NONE)) &&
 			(long)prism_bake_status(XGPU_BAKE_STATUS_BSP) == (long)global_structure_bsp_index_get() &&
 			prism_bake_status(XGPU_BAKE_STATUS_GENERATION) == (unsigned long)prism_scene_static_generation())
 		{
