@@ -1668,9 +1668,12 @@ backends), one sample, nothing blended, every channel written; its depth,
 stencil, raster, vertex program, alpha test, lighting and display.
 prism_materials' material kept (an object's base colour is its combiners'
 with its material's albedo); no HDR tag, no enhanced dynamic lights, no
-world's light, no material overlay, no sun's shadows, no lightmap filter, no
-samples counted (their sets and images are the colour passes'). The backend
-makes its shaders with the G-buffer's outputs (xgpu_spirv_options gbuffer) */
+world's light, no material overlay but a surface map's (XGPU_OVERLAY_SURFACE
+and XGPU_OVERLAY_SURFACE_ONLY alone: its normal the G-buffer's, which the
+light pass lights by; never its light), no sun's shadows, no lightmap filter,
+no samples counted (their sets and images are the colour passes'). The
+backend makes its shaders with the G-buffer's outputs (xgpu_spirv_options
+gbuffer) */
 #define XGPU_STREAM_FORMAT_GBUFFER 5u
 static inline int xgpu_stream_gbuffer_twin(struct xgpu_stream_pipeline_define *definition)
 {
@@ -1690,7 +1693,11 @@ static inline int xgpu_stream_gbuffer_twin(struct xgpu_stream_pipeline_define *d
 	definition->key.pixel.count_samples = definition->pixel_program.count_samples = 0;
 	definition->key.pixel.dynamic_lights = definition->pixel_program.dynamic_lights = 0;
 	definition->key.pixel.ambient_occlusion = definition->pixel_program.ambient_occlusion = 0;
-	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay = 0;
+	/* (a surface map's bits alone, where there is one: xgpu.h's
+	XGPU_OVERLAY_SURFACE, 64, and XGPU_OVERLAY_SURFACE_ONLY, 128) */
+	definition->key.pixel.material_overlay = definition->pixel_program.material_overlay =
+		(definition->pixel_program.material_overlay & 64u) ? (uint8_t)(definition->pixel_program.material_overlay &
+		(64u | 128u)) : 0;
 	definition->key.pixel.prism = 0;
 	definition->pixel_program.lightmap_filter = 0;
 	definition->pixel_program.prism_lighting = 0;

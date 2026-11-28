@@ -6423,6 +6423,27 @@ static void surface_frame(struct module *m, struct pixel_state *state, unsigned 
 	*frame_out = state->frame_valid = frame;
 }
 
+/* an object's G-buffer twin's normal by its surface map (XGPU_OVERLAY_SURFACE:
+the first image's RG the tangent-space normal's x and y), bent as
+overlay_light bends the micro normal with no tiles: slope = xy / z, z at
+least 0.3, times [10].x where there is a frame; the vertices' normal where
+there is none */
+static unsigned int gbuffer_surface_normal(struct module *m, struct pixel_state *state)
+{
+	unsigned int one = constant_float(m, 1.0f);
+	unsigned int world_normal = pixel_input(m, state, state->in_world_normal, m->t_v4), normal = xyz(m, world_normal);
+	unsigned int n, uv, p, tangent, bitangent, frame_scale, frame, s, sxy, sz, slope, ov10 = overlay_uniform(m, 10);
+
+	surface_frame(m, state, normal, &n, &uv, &p, &tangent, &bitangent, &frame_scale, &frame);
+	s = overlay_sample(m, state, XGPU_OVERLAY_SURFACE_IMAGE, uv);
+	sxy = fsub(m, 2, fscale(m, 2, xy(m, s), constant_float(m, 2.0f)), constant_splat(m, 2, 1.0f));
+	sz = ext1(m, GLSL_SQRT, m->t_float, fmax_scalar(m, 1, fsub(m, 1, one, fdot(m, sxy, sxy)), 0.09f));
+	slope = fscale(m, 2, sxy, fmul(m, 1, fdiv(m, 1, extract(m, ov10, 0), sz), frame));
+	/* (the tiles' y is up their pictures: against v, whose rows run down) */
+	return ext1(m, GLSL_NORMALIZE, m->t_v3, fadd(m, 3, n, fscale(m, 3, fsub(m, 3,
+		fscale(m, 3, tangent, extract(m, slope, 0)), fscale(m, 3, bitangent, extract(m, slope, 1))), frame_scale)));
+}
+
 /* the micro normal, cavity and roughness, and the light of the draw (v0's
 rgb) by them: after texture stage 2 */
 static void overlay_light(struct module *m, struct pixel_state *state, BOOL point_lights, BOOL dynamic_lights,
@@ -7099,8 +7120,15 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	traced light keyed: its fourth word, as a lightmap pass's) */
 	unsigned int model_light_ce = 0;
 	/* (display.prism_material_overlay: a model's lit for each pixel, by
-	its world position) */
-	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment;
+	its world position; never a G-buffer twin's, whose light is the light
+	pass's) */
+	BOOL overlay = program->material_overlay && program->per_pixel_lighting && !environment && !gbuffer;
+	/* (an object's G-buffer twin with a surface map, display.prism_surface_maps:
+	its normal the G-buffer's, by its frame, as overlay_light bends it; the
+	light pass lights the remodels' detail by it) */
+	BOOL gbuffer_surface = gbuffer && options->gbuffer == XGPU_SPIRV_GBUFFER_OBJECT && !pack &&
+		(program->material_overlay & XGPU_OVERLAY_SURFACE) && program->per_pixel_lighting && !environment &&
+		!(program->material_pbr & XGPU_PBR_ON);
 	/* (PRISM's sun shadows: a structure's lightmap pass, or a model's with
 	the overlay: xgpu.h) */
 	BOOL sun = XGPU_PRISM_SHADOWS_OF(program->prism_lighting) == XGPU_PRISM_SHADOWS_CASCADED;
@@ -7109,7 +7137,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 	/* (display.prism_materials: alike, by its GGX path; never a pack's twin) */
 	BOOL pbr = (program->material_pbr & XGPU_PBR_ON) && program->per_pixel_lighting && !environment && !pack;
 	BOOL world_position = (program->per_pixel_lighting && (program->per_pixel_lighting == 2 ||
-		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay || sun_lightmap || sun_model || pbr;
+		program->dynamic_lights == XGPU_DYNAMIC_LIGHTS_MODEL)) || environment || world || overlay || sun_lightmap || sun_model || pbr ||
+		gbuffer_surface;
 	BOOL count_samples = program->count_samples && options->count_samples;
 	unsigned int comparison = program->alpha_test ? comparison_opcode(program->alpha_test) : 0;
 	BOOL sample_mask = comparison && program->alpha_test_samples && program->alpha_test != D3DCMP_EQUAL &&
@@ -7171,6 +7200,8 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 		if (XGPU_PRISM_SHADOWS_TRACES(program->prism_lighting))
 			state.prism_cascades = world_cascades_declare(&m);
 	}
+	if (gbuffer_surface)
+		overlay_declare(&m, &state, FALSE, TRUE, TRUE, FALSE);
 	if (pbr)
 		material_declare(&m, &state);
 	else if (pack)
@@ -7433,6 +7464,9 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 			&pack_parameters);
 	state.r0 = vec4_of(&m, constant_splat(&m, 3, 0.0f), extract(&m, state.t[0], 3));
 	state.r1 = state.zero4;
+	/* (an object's twin with a surface map: its normal, pack_normal's place) */
+	if (gbuffer_surface)
+		pack_normal = gbuffer_surface_normal(&m, &state);
 	/* (display.lighting "ce_deferred": an object's G-buffer twin's base
 	colour, its combiners with white diffuse light, no specular light and no
 	self-illumination, the registers as they were after) */
