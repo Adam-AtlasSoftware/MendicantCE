@@ -9427,7 +9427,7 @@ static struct bake_buffer *park_buffer(struct bake_state *b, uint32_t index)
 {
 	struct bake_buffer *buffers[] =
 	{
-		&b->pages, &b->charts, &b->vpages, &b->table, &b->pool, &b->lightmaps, &b->sun, &b->masks,
+		&b->pages, &b->charts, &b->vpages, &b->table, &b->pool, &b->sun, &b->masks,
 		&b->bricks, &b->bricks_coarse, &b->reflection_points, &b->reflection_info, &b->reflection_data,
 		&b->reflection_table, &b->probes, &b->ranges, &b->triangles, &b->texels, &b->accumulators, &b->states,
 		&b->tile_origins, &b->cell_points, &b->cell_candidates, &b->cell_weights, &b->mask_ranges, &b->mask_out,
@@ -9464,7 +9464,7 @@ static int64_t park_move(VkCommandBuffer commands, struct bake_state *b, int hos
 	struct bake_buffer *from, made;
 	int64_t moved = 0;
 	uint32_t index;
-	int last = bake_memory_host;
+	int last = bake_memory_host, use, made_ok;
 
 	*whole = 1;
 	bake_memory_host = 0;
@@ -9475,7 +9475,12 @@ static int64_t park_move(VkCommandBuffer commands, struct bake_state *b, int hos
 
 		if (!from->buffer || (from->mapped != NULL) == host)
 			continue;
-		if (!buffer_make(from->size, 0, host, &made) || (made.mapped != NULL) != host)
+		/* (counted as the buffer it takes the place of) */
+		use = bake_memory_use;
+		bake_memory_use = from->use;
+		made_ok = buffer_make(from->size, 0, host, &made);
+		bake_memory_use = use;
+		if (!made_ok || (made.mapped != NULL) != host)
 		{
 			if (made.buffer)
 				buffer_free_now(&made);
@@ -9521,10 +9526,15 @@ int xgpu_vulkan_bake_park(void)
 		return 0;
 	for (index = 0; index <= bake.kept_count; index++)
 	{
-		struct bake_state *b = index < bake.kept_count ? bake.kept[index] : bake.bake;
+		struct bake_state *b = index ? bake.kept[index - 1] : bake.bake;
 
 		if (!park_allowed(b))
 			continue;
+		/* (room in the garbage for every buffer one bake moves: garbage_add
+		waits for the oldest when it is full, and those moved here are of the
+		submission still being recorded) */
+		if (bake.garbage_count + 40 > sizeof(bake.garbage) / sizeof(bake.garbage[0]))
+			break;
 		commands = xgpu_vulkan_compute_commands();
 		if (!commands)
 			return any;
