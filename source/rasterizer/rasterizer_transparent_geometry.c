@@ -741,6 +741,24 @@ void rasterizer_transparent_geometry_draw(
 			}
 			else
 			{
+				/* port: a group of the world after the first-person ones is
+				drawn by the world's projection again, not the weapon's: the
+				Cortana hack's groups (d40's) sort after every group, the
+				first-person ones too (group_sorted_indices_cmpfn), and
+				Enhanced lighting queues the first-person weapon's groups
+				even from the script's camera (the assert fired 375 times on
+				d40's BSP switches; Classic never queued both) */
+				if (first_person_flag)
+				{
+					viewmodel_projection_end();
+					rasterizer_set_frustum_z(0.0f, 0.0f);
+					if (first_person_camouflage_depth)
+					{
+						d3d8_viewport_depth_range(first_person_depth_range[0], first_person_depth_range[1], NULL);
+					}
+					first_person_flag = FALSE;
+					first_person_camouflage_depth = FALSE;
+				}
 				match_assert(
 					"c:\\halo\\SOURCE\\rasterizer\\rasterizer_transparent_geometry.c",
 					0x163,
