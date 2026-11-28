@@ -2020,6 +2020,10 @@ struct pixel_state
 	self-illuminated surface without its self-illumination:
 	XGPU_HDR_SELF_ILLUMINATION), a bit each */
 	unsigned int zeroed_stages;
+	/* the final combiner's C1 read as 0 (the level's lightmap pass's
+	emissive light: in the fullbright modes and on the enhanced world's own
+	page, rasterizer_xbox_environment.c, C1 stands in for the lightmap) */
+	unsigned int zeroed_final_c1;
 	/* the VR mode's effects (xgpu_spirv.h): gl_FragCoord, the scene's depth
 	and the sprite's thickness, and texture 0's parallax (a vec2 added to its
 	coordinates; 0 none) */
@@ -2891,6 +2895,8 @@ static unsigned int register_value(struct module *m, struct pixel_state *state, 
 	const struct xgpu_combiner_stage *combiner, unsigned int v1r0_sum, unsigned int ef_product)
 {
 	if (stage >= 0 && ((state->zeroed_stages >> stage) & 1) && (reg == XGPU_REGISTER_C0 || reg == XGPU_REGISTER_C1))
+		return state->zero4;
+	if (stage < 0 && state->zeroed_final_c1 && reg == XGPU_REGISTER_C1)
 		return state->zero4;
 	switch (reg)
 	{
@@ -7461,13 +7467,18 @@ BOOL xgpu_spirv_pixel_shader(const struct xgpu_pixel_program *program, const str
 			pack_albedo = vec4_of(&m, gbuffer_base, fmax_scalar(&m, 1, state.pack_occlusion, 1.0f / 255.0f));
 	}
 	/* (... and the level's lightmap pass's: its combiners with no lightmap,
-stage 2, what its self-illumination adds) */
+stage 2, nor the final combiner's C1, the lightmap's stand-in where the
+pass is drawn fullbright (the enhanced world's own page: its neutral grey,
+which as emissive light lit every remodelled surface flat), what its
+self-illumination adds) */
 	if (gbuffer && options->gbuffer == XGPU_SPIRV_GBUFFER_LEVEL && program->stages[2].mode == XGPU_TEXTURE_PROJECT2D)
 	{
 		unsigned int t2 = state.t[2], r0 = state.r0, r1 = state.r1;
 
 		state.t[2] = state.zero4;
+		state.zeroed_final_c1 = 1;
 		gbuffer_emissive = saturate(&m, 3, xyz(&m, combiners(&m, &state)));
+		state.zeroed_final_c1 = 0;
 		state.t[2] = t2;
 		state.r0 = r0;
 		state.r1 = r1;
