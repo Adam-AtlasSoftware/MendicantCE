@@ -11777,6 +11777,7 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 {
 	VkPhysicalDevice devices[16];
 	uint32_t count = 0, index, best_score = 0;
+	VkDeviceSize best_memory = 0;
 	int chosen = -1, graphics;
 
 	if (options->choose_physical)
@@ -11803,6 +11804,7 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 		VkPhysicalDeviceProperties properties;
 		VkQueueFamilyProperties families[16];
 		uint32_t family_count = 16, family, score;
+		VkDeviceSize memory;
 		struct device_identity identity;
 
 		vkGetPhysicalDeviceProperties(devices[index], &properties);
@@ -11843,9 +11845,22 @@ static int physical_choose(const struct xgpu_vulkan_options *options)
 		/* (display.vulkan_device: the one asked for above any other) */
 		if (!options->choose_physical && device_asked(options->device, index, &properties, &identity))
 			score = 100;
-		if (score > best_score)
+		/* (between two cards of one kind, the one with more memory of its
+		own: the bigger card, not the loader's first) */
+		memory = 0;
+		{
+			VkPhysicalDeviceMemoryProperties heaps;
+			uint32_t heap;
+
+			vkGetPhysicalDeviceMemoryProperties(devices[index], &heaps);
+			for (heap = 0; heap < heaps.memoryHeapCount; heap++)
+				if (heaps.memoryHeaps[heap].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+					memory += heaps.memoryHeaps[heap].size;
+		}
+		if (score > best_score || (score == best_score && memory > best_memory))
 		{
 			best_score = score;
+			best_memory = memory;
 			chosen = (int)index;
 			vk.queue_family = family;
 			vk.timestamp_bits = families[family].timestampValidBits;
