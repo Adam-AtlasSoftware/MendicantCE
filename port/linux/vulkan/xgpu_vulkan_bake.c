@@ -9611,6 +9611,25 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	return 1;
 }
 
+int xgpu_vulkan_bake_lookup_light(struct xgpu_vulkan_bake_light *light)
+{
+	struct bake_state *b = bake.bake;
+
+	memset(light, 0, sizeof(*light));
+	if (!bake.made || !b || b->generation != bake.control.generation || b->provisional || b->step != STEP_DONE)
+		return 0;
+	if (!b->probes.buffer || !b->volume.done || !b->bricks.address)
+		return 0;
+	light->bricks = b->bricks.address;
+	light->coarse = b->coarse_entries ? b->bricks_coarse.address : 0;
+	light->probes = b->probes.address;
+	light->brick_entries = b->brick_entries;
+	light->coarse_entries = b->coarse_entries;
+	light->probe_spacing = PROBE_SPACING;
+	light->coarse_spacing = COARSE_SPACING;
+	return 1;
+}
+
 int xgpu_vulkan_bake_sun(float sun[4])
 {
 	struct bake_state *b = bake.bake;

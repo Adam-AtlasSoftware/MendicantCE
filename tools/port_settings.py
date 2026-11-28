@@ -890,6 +890,7 @@ LIGHTING_MODE_ROWS = {
     # traced scene)
     "pt_profile": "P", "denoiser": "P", "pt_dynamic_lights": "P", "prism_dynamic_lights": "P",
     "prism_light_saturation": "P", "prism_pt_objects": "P", "prism_pt_cache": "P", "prism_pt_alpha": "P",
+    "prism_pt_bake": "P",
     # (Image: the PRISM modes' exposure and tone curve; bloom and tone grade
     # every mode's)
     "prism_exposure": "EP", "prism_exposure_bias": "EP", "prism_tone_curve": "EP",
@@ -2342,6 +2343,10 @@ PAGES = {
              "from the next start. "
              "Off: the light as traced, grainy (for checking).|DLSS's plugin: the prism-plugins README.",
              "desktop"),
+            ("BAKE GUIDE", "display.prism_pt_bake", ON_OFF,
+             "Uses this world's own shipped lightmaps where the traced light has nothing yet: a room you walk into "
+             "has its bounced light at once, and the lamps are picked by what each place sees. The traced light "
+             "stays what you see.", "desktop"),
             (SECTION, "MOVING LIGHTS"),
             ("DYNAMIC LIGHTS", "display.pt_dynamic_lights", [("CLASSIC", "classic"), ("ENHANCED", "enhanced")],
              "Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle "

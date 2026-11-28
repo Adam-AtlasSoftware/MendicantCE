@@ -544,6 +544,10 @@ hundredths, bits 20 to 26; 0 the G-buffer's own, as before. Clear of
 Raster's bits, which PT's phase never has) */
 #define XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_SHIFT 20
 #define XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_MASK 0x07f00000u
+/* (the bake's guide, display.prism_pt_bake: the drawn world's own whole bake
+read where the traced light has nothing yet, docs/prism_pathtraced.md "The
+bake's guide"; bit 27, clear of the light scale's) */
+#define XGPU_GBUFFER_PHASE_PT_BAKE 0x08000000u
 #define XGPU_PT_PROFILE_PERFORMANCE 0u
 #define XGPU_PT_PROFILE_QUALITY 1u
 /* (the path tracer's views: the diffuse light (denoised, the albedo left

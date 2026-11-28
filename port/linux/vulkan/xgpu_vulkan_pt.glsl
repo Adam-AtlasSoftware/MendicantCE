@@ -61,6 +61,7 @@ layout(constant_id = 4) const bool SPEC_DIAG = false;
 layout(constant_id = 5) const bool SPEC_BOIL = false;
 layout(constant_id = 6) const int SPEC_BOUNCE_HALF = 0;
 layout(constant_id = 7) const bool SPEC_SUN_TILES = false;
+layout(constant_id = 8) const bool SPEC_GRID = false;
 
 const float PI = 3.14159265;
 
@@ -157,6 +158,10 @@ const uint FLAG_REFERENCE = 8u;
 const uint FLAG_TILES = 16u;
 const uint FLAG_PROBE_NEE = 32u;
 const uint FLAG_PROBE_ONLY = 128u;
+/* (display.prism_pt_bake: the drawn world's own whole bake guides and
+fills in the traced light, xgpu_vulkan_pt.c; its volume in job.bricks,
+job.coarse and job.probes) */
+const uint FLAG_BAKE = 1024u;
 /* the reference's sums: floats a pixel (the diffuse light's mean, the
 specular's, the luminance's mean and squared deviations, the distance, then
 the means and squared deviations of its parts' luminances: the direct, the
@@ -1724,7 +1729,8 @@ void sun_parts(Surface g, out vec3 dif, out vec3 spe)
 float scene_hit(vec3 o, vec3 d, float t_max, out vec3 nh, out uint t, out vec2 b, out vec3 object_albedo);
 vec3 hit_lamps(vec3 p, vec3 n, vec3 o, int candidates);
 
-/* ---------- a ray's hit: Path Traced's own light (no bake read)
+/* ---------- a ray's hit: Path Traced's own light (no bake read but by the
+bake's guide, below, where its own light has nothing yet)
 
 Path Traced reads no baked light (xgpu_vulkan_pt.c hands its passes the
 bake's scene alone: no lightmap, sun mask, irradiance volume, reflection
@@ -1741,21 +1747,139 @@ as the bake's paths' do over its samples. The units' floor is never added
 at a hit (the pixel takes it; the bake's estimator never passed it on) */
 vec4 cache_get(vec3 p, vec3 n, float distance_);
 void cache_add(vec3 p, vec3 n, float distance_, vec3 light);
+
+/* ---------- the bake's guide (display.prism_pt_bake, docs/prism_pathtraced.md
+"The bake's guide"): the drawn world's own whole bake (never another
+geometry's: xgpu_vulkan_bake_lookup_light), read where the traced light has
+nothing yet. Its irradiance volume (the probes' SH L1 of the light from
+every direction less the sun's, the floor in it; the sun's visibility)
+at a bounce's hit stands in for a radiance cache cell that holds no samples
+yet (hit_light_n alone: one place in the light pass, whose registers each
+copy of the lookup costs), and seeds a new pixels' cell with BAKE_SEED
+samples of it less the floor (the temporal pass), which the cell's running
+mean lets go of as its own samples come (at most job.cache_settings.w
+kept): a place the eye has just come to has its bounced light at once, not
+its glow alone until its cells fill, and its pixels a prior from the first
+frame. Read only there (an empty cell met, a cell's first sample), so that
+its buffers may lie in the host's memory (xgpu_vulkan_bake_park) at no cost
+the frame sees. (Seeding the hits' cells in the cache pass instead, each
+empty cell a hit met asked of it, filled the cache's table with cells no
+sample ever came to: a10's turns went darker than with no bake) */
+const float BAKE_SEED = 4.0;
+bool bake_on() { return (job.frame.y & FLAG_BAKE) != 0u && job.probes != uvec2(0u); }
+/* (the bake's light-importance grid: read only where HALO_PT_BAKE_GRID made
+the passes with it (SPEC_GRID: off, its code left out) and the pass has
+found the guide on (grid_baked); BAKE_COMMON's grid_cell asks) */
+bool grid_baked = false;
+bool grid_wanted() { return SPEC_GRID && grid_baked; }
+/* a cascade of the irradiance volume at p: the light over pi at the normal n
+(rgb) and the sun's visibility (w); false none */
+bool cascade_at(uvec2 table, uint entries, float spacing, vec3 p, vec3 n, out vec4 at_n)
+{
+    at_n = vec4(-1.0);
+    if (entries == 0u || table == uvec2(0u))
+        return false;
+    vec3 f = p / spacing - 0.5;
+    ivec3 g0 = ivec3(floor(f));
+    vec3 t = f - vec3(g0);
+    vec3 sum = vec3(0.0);
+    float sun = 0.0, weights = 0.0;
+    Uints bt = Uints(table);
+    Floats pr = Floats(job.probes);
+    vec4 yn = vec4(0.282095 * 3.14159265, 0.488603 * 2.0943951 * n.y, 0.488603 * 2.0943951 * n.z,
+        0.488603 * 2.0943951 * n.x);
+    for (int c = 0; c < 8; c++)
+    {
+        ivec3 gg = g0 + ivec3(c & 1, (c >> 1) & 1, (c >> 2) & 1);
+        ivec3 brick = ivec3(floor(vec3(gg) / 4.0));
+        ivec3 local = gg - brick * 4;
+        ivec3 key3 = brick + ivec3(32768);
+        uint key = (uint(key3.x) & 2047u) | ((uint(key3.y) & 2047u) << 11u) | ((uint(key3.z) & 1023u) << 22u);
+        uint h = hash_u(key ^ 0x68e31da4u) & (entries - 1u);
+        int first = -1;
+        for (uint probe = 0u; probe < 16u; probe++)
+        {
+            uint at = ((h + probe) & (entries - 1u)) * 2u;
+            uint k = bt.v[at];
+            if (k == 0u)
+                break;
+            if (k == key + 1u)
+            {
+                first = int(bt.v[at + 1u]);
+                break;
+            }
+        }
+        if (first < 0)
+            continue;
+        uint index = uint(first) + uint(local.z * 16 + local.y * 4 + local.x);
+        uint b = index * 8u;
+        float valid = pr.v[b + 7u];
+        if (valid <= 0.0)
+            continue;
+        vec3 w3 = mix(1.0 - t, t, vec3(c & 1, (c >> 1) & 1, (c >> 2) & 1));
+        float w = w3.x * w3.y * w3.z;
+        vec4 cr = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b])), unpackHalf2x16(floatBitsToUint(pr.v[b + 1u])));
+        vec4 cg = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b + 2u])), unpackHalf2x16(floatBitsToUint(pr.v[b + 3u])));
+        vec4 cb = vec4(unpackHalf2x16(floatBitsToUint(pr.v[b + 4u])), unpackHalf2x16(floatBitsToUint(pr.v[b + 5u])));
+        sum += w * max(vec3(dot(cr, yn), dot(cg, yn), dot(cb, yn)) / 3.14159265, vec3(0.0));
+        sun += w * pr.v[b + 6u];
+        weights += w;
+    }
+    if (weights <= 1.0e-3)
+        return false;
+    at_n = vec4(sum / weights, sun / weights);
+    return true;
+}
+bool volume_at(vec3 p, vec3 n, out vec4 at_n)
+{
+    /* (one loop over the fine cascade, then the coarse where the fine has no
+    brick: one copy of the lookup's code where it is called) */
+    at_n = vec4(-1.0);
+    for (int k = 0; k < 2; k++)
+    {
+        bool fine = k == 0;
+        if (cascade_at(fine ? job.bricks : job.coarse, fine ? job.counts.w : job.more.x,
+            fine ? job.volume.x : job.volume.y, p, n, at_n))
+            return true;
+    }
+    return false;
+}
+/* the light the bake gives a hit h (normal nh, triangle t, OBJECT_HIT a
+moving object's) of glow and albedo: the glow and the albedo by the
+volume's light less the floor (never passed on: the pixel takes it) and the
+sun's by the volume's visibility; false where the volume has no probe there */
+bool bake_hit_light(vec3 h, vec3 nh, uint t, vec3 albedo, vec3 glow, out vec3 light)
+{
+    light = glow;
+    vec4 v;
+    vec3 p = h + nh * 0.05;
+    if (!bake_on() || !volume_at(p, nh, v))
+        return false;
+    vec3 floor_ = t == OBJECT_HIT ? min(ambient(), ambient_indoor()) : indoor(t) ? ambient_indoor() : ambient();
+    float c = dot(nh, s.sun.xyz);
+    vec3 sunlight = s.sun.w > 0.0 && c > 0.0 ? s.rig[0].rgb * c * clamp(v.w, 0.0, 1.0) : vec3(0.0);
+    light = glow + albedo * (max(v.rgb - floor_, vec3(0.0)) + sunlight);
+    return true;
+}
 /* (the light pass sets these: the camera's place, for the cells' sizes;
 whether a hit reads a cell that holds its samples in place of its own light
 (hit_cache_read), and whether this pixel's hits add their light to their
-cells (hit_cache_feed: one 8 x 8 block in CACHE_FEED); no cache in the reference) */
+cells (hit_cache_feed: one 8 x 8 block in cache_feed()); no cache in the reference) */
 vec3 cache_eye = vec3(0.0);
 bool hit_cache_read = false, hit_cache_feed = false;
-/* (one 8 x 8 block of pixels in CACHE_FEED (a workgroup: its subgroups
-take one path, not the slowest lane's of both) lights its hits and feeds
-their cells, other blocks each frame; a hit of the others whose cell holds
-nothing yet gives its glow alone until the cell fills, within a few
-frames. One pixel in 16 alone, scattered, cost the hall at G4's place on the
+/* (one 8 x 8 block of pixels in cache_feed() (a workgroup: its subgroups
+take one path, not the slowest lane's of both; CACHE_FEED, 16, unless the
+job gives it: 64 by default since the dark interiors' third round) lights
+its hits and feeds their cells, other blocks each frame; a hit of the
+others whose cell holds nothing yet gives its glow alone (the bake's light
+with the bake's guide) until the cell fills, within a few frames. One pixel in 16 alone, scattered, cost the hall at G4's place on the
 RTX 2060 as much as every pixel, each subgroup waiting for its feeding
 lanes) */
 const uint CACHE_FEED = 16u;
 bool cache_on() { return SPEC_CACHE && job.cache != uvec2(0u); }
+/* (the blocks a feeding one, job.more.z (a power of two: HALO_PT_CACHE_FEED),
+else CACHE_FEED) */
+uint cache_feed() { return job.more.z != 0u ? job.more.z : CACHE_FEED; }
 /* the next bounce's light from oh (normal nh): one cosine ray */
 vec3 own_next(vec3 oh, vec3 nh)
 {
@@ -1847,7 +1971,12 @@ vec3 hit_light_n(vec3 o, vec3 d, float t_max, bool domes, out float hit_distance
         vec4 cell = cache_get(h, nh, from_eye);
         if (cell.w > 0.0)
             return cell.rgb;
-        return t == OBJECT_HIT ? vec3(0.0) : glow_of(t);
+        /* (a cell that holds nothing yet: the bake's light at the hit, where
+        display.prism_pt_bake reads it, else the glow alone) */
+        vec3 glow = t == OBJECT_HIT ? vec3(0.0) : glow_of(t), baked;
+        if (bake_hit_light(h, nh, t, t == OBJECT_HIT ? object_albedo : albedo_of(t), glow, baked))
+            return baked;
+        return glow;
     }
     vec3 light = t == OBJECT_HIT ? own_light(h, nh, vec3(0.0), object_albedo) :
         own_light(h, nh, glow_of(t), albedo_of(t));
@@ -1890,8 +2019,22 @@ pool under it) takes the cell's mean over its cube instead of the patch's
 value: the same light spread over the cube, so the expected light of the
 pixels about it holds where the cube is small beside the distance; the
 sharp detail of the bounce's light at its hit (never the pixel's own) is
-lost. The reference never reads it. */
-const uint CACHE_WORDS = 12u;
+lost. The reference never reads it.
+
+The pixels' light (the denoiser's prior): a cell also holds the diffuse
+light the pixels whose surface lies in it took (the light pass's noisy
+diffuse light, the same signal the denoiser filters: its words 10 to 17,
+their sums, count, mean and samples, folded alike), fed by the same blocks
+as the hits, and seeded with BAKE_SEED samples of the bake's light there
+where display.prism_pt_bake reads it. Where a pixel's history is short (a
+disocclusion, the view's edge as the eye turns, a place just come to) the
+temporal pass holds its samples no lower than job.low.w times its cell's
+mean: the light its place has had, the world over, says how bright a sample
+there may be, where the cap by its neighbours' samples, as sparse as its own,
+took a dark room's rare bright samples away and the room went darker while
+the eye moved (docs/prism_pathtraced.md, "The pixels' cells"). Taking the
+mean itself as frames of history (tried) gave a new pixel the cell's blocks */
+const uint CACHE_WORDS = 20u;
 const uint CACHE_CELLS = 1u << 19;
 const float CACHE_FIXED = 256.0;
 const uint CACHE_IDLE = 600u;
@@ -1949,8 +2092,9 @@ void cache_add(vec3 p, vec3 n, float distance_, vec3 light)
         }
     }
 }
-/* the cell's mean light, and its samples (0: no cell) */
-vec4 cache_get(vec3 p, vec3 n, float distance_)
+/* the cell's mean light (first 6: the hits'; 14: the pixels'), and its
+samples (0: no cell) */
+vec4 cache_get_at(vec3 p, vec3 n, float distance_, uint first)
 {
     RadianceCacheRead c = RadianceCacheRead(job.cache);
     uint place, key = cache_key(p, n, distance_, place);
@@ -1959,12 +2103,46 @@ vec4 cache_get(vec3 p, vec3 n, float distance_)
         uint at = ((place + k) & (CACHE_CELLS - 1u)) * CACHE_WORDS;
         uint was = c.v[at];
         if (was == key)
-            return vec4(uintBitsToFloat(c.v[at + 6u]), uintBitsToFloat(c.v[at + 7u]), uintBitsToFloat(c.v[at + 8u]),
-                uintBitsToFloat(c.v[at + 9u]));
+            return vec4(uintBitsToFloat(c.v[at + first]), uintBitsToFloat(c.v[at + first + 1u]),
+                uintBitsToFloat(c.v[at + first + 2u]), uintBitsToFloat(c.v[at + first + 3u]));
         if (was == 0u)
             break;
     }
     return vec4(0.0);
+}
+vec4 cache_get(vec3 p, vec3 n, float distance_)
+{
+    return cache_get_at(p, n, distance_, 6u);
+}
+/* a pixel's diffuse light (its noisy diffuse light as the light pass
+traced it) added to its surface's cell, the cell seeded with the bake's
+light there (less the floor and the sun's, as the signal is) where it is
+new and display.prism_pt_bake reads the bake */
+void cache_add_pixel(vec3 p, vec3 n, float distance_, vec3 light)
+{
+    RadianceCache c = RadianceCache(job.cache);
+    uint place, key = cache_key(p, n, distance_, place);
+    for (uint k = 0u; k < 8u; k++)
+    {
+        uint at = ((place + k) & (CACHE_CELLS - 1u)) * CACHE_WORDS;
+        uint was = atomicCompSwap(c.v[at], 0u, key);
+        if (was == 0u || was == key)
+        {
+            float count = 1.0;
+            vec4 v;
+            if (was == 0u && bake_on() && volume_at(p + n * 0.05, n, v))
+            {
+                light += BAKE_SEED * max(v.rgb - min(ambient(), ambient_indoor()), vec3(0.0));
+                count += BAKE_SEED;
+            }
+            uvec3 add = uvec3(clamp(light, vec3(0.0), vec3(4096.0) * count) * CACHE_FIXED + 0.5);
+            atomicAdd(c.v[at + 10u], add.r);
+            atomicAdd(c.v[at + 11u], add.g);
+            atomicAdd(c.v[at + 12u], add.b);
+            atomicAdd(c.v[at + 13u], uint(count));
+            return;
+        }
+    }
 }
 /* the indirect light's clamp (job.cache_settings.x: a bounce's luminance;
 0 none): the light past it taken away, its hue kept */
@@ -2405,6 +2583,9 @@ void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
+    /* (the bake's light-importance grid: its lamp picks by the cell's lists
+where display.prism_pt_bake reads the drawn world's own bake) */
+    grid_baked = bake_on();
     low_begin();
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
@@ -2440,7 +2621,7 @@ void main()
     in CACHE_FEED lights its hits and adds their light to their cells, the
     others read a cell that holds its samples: hit_light_n) */
     cache_eye = g.point + g.eye * g.distance;
-    hit_cache_feed = ((uint(pixel.x >> 3) + uint(pixel.y >> 3) * 5u + frame * 7u) & (CACHE_FEED - 1u)) == 0u;
+    hit_cache_feed = ((uint(pixel.x >> 3) + uint(pixel.y >> 3) * 5u + frame * 7u) & (cache_feed() - 1u)) == 0u;
     hit_cache_read = true;
 
     /* the sun: a ray to a point of its disc */
@@ -2975,13 +3156,18 @@ void main()
         {
             uint here = imageLoad(guide_now, pixel).x;
             float top = ns.a;
-            for (int k = 0; k < 9; k++)
-            {
-                ivec2 q = pixel + ivec2(k % 3 - 1, k / 3 - 1);
-                if (k == 4 || !inside(q) || imageLoad(guide_now, q).x != here)
-                    continue;
-                top = max(top, raw ? imageLoad(noisy_specular, q).a : imageLoad(spec_b, q).a);
-            }
+            int r = push.parameters.y >= 2u ? 2 : 1;
+            for (int y = -r; y <= r; y++)
+                for (int x = -r; x <= r; x++)
+                {
+                    ivec2 q = pixel + ivec2(x, y);
+                    /* (the 5 x 5's ring: its 4 two pixels along each axis) */
+                    bool ring = abs(x) == 2 || abs(y) == 2;
+                    if ((x == 0 && y == 0) || (ring && x != 0 && y != 0) || !inside(q) ||
+                        imageLoad(guide_now, q).x != here)
+                        continue;
+                    top = max(top, raw ? imageLoad(noisy_specular, q).a : imageLoad(spec_b, q).a);
+                }
             float lh = luma(hs.rgb);
             if (lh > top)
                 hs.rgb *= top / lh;
@@ -3079,6 +3265,27 @@ void main()
         windows without the strips R reflects) */
         if (any_ && short_s)
             cap_s = min(cap_s, max(4.0 * k_short * most_s, floor_short));
+    }
+    /* (the pixels' cells, a short history's prior: its surface's cell's mean
+    of the pixels' light there (the pixels' cells; the bake's where
+    display.prism_pt_bake seeded it). Where the history is under 8 frames its cap is
+    never under job.low.w times that mean: a place whose light comes
+    in rare bright samples (a lamp few candidates find, a bounce off a lit
+    patch) keeps them, where its neighbours' samples, as sparse, held them to
+    a few times a dark neighbourhood's and a moving eye's frames went darker
+    than the still eye's) */
+    /* (the pixels' cells fed here, not in the light pass (whose registers
+    the feed's code cost 0.3 ms of the RTX 3070 Ti's at 3440 x 1440): the
+    light pass's feeding blocks' pixels add their diffuse light as traced to
+    their surface's cell; job.low.w the cap's multiple, 0 none) */
+    if (job.low.w > 0.0 && cache_on() && job.frame.z != 23u && job.frame.z != 24u &&
+        ((uint(pixel.x >> 3) + uint(pixel.y >> 3) * 5u + job.frame.x * 7u) & (cache_feed() - 1u)) == 0u)
+        cache_add_pixel(g.point, g.normal, g.distance, imageLoad(noisy_diffuse, pixel).rgb);
+    if ((!history || length_d < 8.0) && job.low.w > 0.0 && cache_on())
+    {
+        vec4 prior = cache_get_at(g.point, g.normal, g.distance, 14u);
+        if (prior.w >= job.cache_settings.z)
+            cap_d = max(cap_d, job.low.w * luma(prior.rgb));
     }
     vec3 cd = ld > cap_d ? nd.rgb * (cap_d / ld) : nd.rgb;
     vec3 cs = ls > cap_s ? ns.rgb * (cap_s / ls) : ns.rgb;
@@ -4029,6 +4236,7 @@ void main()
 {
     s = Scene(push.scene);
     job = Job(push.job);
+    grid_baked = bake_on();
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (!inside(pixel))
         return;
@@ -4302,8 +4510,8 @@ void main()
     uint at = cell * CACHE_WORDS;
     if (c.v[at] == 0u)
         return;
-    uint count = c.v[at + 4u], frame = job.frame.x;
-    if (count == 0u)
+    uint frame = job.frame.x;
+    if (c.v[at + 4u] == 0u && c.v[at + 13u] == 0u)
     {
         if (frame - c.v[at + 5u] > CACHE_IDLE)
         {
@@ -4312,20 +4520,30 @@ void main()
         }
         return;
     }
-    vec3 mean = vec3(c.v[at + 1u], c.v[at + 2u], c.v[at + 3u]) / (CACHE_FIXED * float(count));
-    vec3 kept = vec3(uintBitsToFloat(c.v[at + 6u]), uintBitsToFloat(c.v[at + 7u]), uintBitsToFloat(c.v[at + 8u]));
-    float samples = uintBitsToFloat(c.v[at + 9u]);
-    float held = min(samples, max(job.cache_settings.w - float(count), 0.0));
-    vec3 now = (kept * held + mean * float(count)) / (held + float(count));
-    c.v[at + 1u] = 0u;
-    c.v[at + 2u] = 0u;
-    c.v[at + 3u] = 0u;
-    c.v[at + 4u] = 0u;
+    /* (the hits' light at words 1 to 9, the pixels' at 10 to 17: each
+    frame's sums folded into its running mean) */
+    for (uint part = 0u; part < 2u; part++)
+    {
+        uint sums = part == 0u ? 1u : 10u, means = part == 0u ? 6u : 14u;
+        uint count = c.v[at + sums + 3u];
+        if (count == 0u)
+            continue;
+        vec3 mean = vec3(c.v[at + sums], c.v[at + sums + 1u], c.v[at + sums + 2u]) / (CACHE_FIXED * float(count));
+        vec3 kept = vec3(uintBitsToFloat(c.v[at + means]), uintBitsToFloat(c.v[at + means + 1u]),
+            uintBitsToFloat(c.v[at + means + 2u]));
+        float samples = uintBitsToFloat(c.v[at + means + 3u]);
+        float held = min(samples, max(job.cache_settings.w - float(count), 0.0));
+        vec3 now = (kept * held + mean * float(count)) / (held + float(count));
+        c.v[at + sums] = 0u;
+        c.v[at + sums + 1u] = 0u;
+        c.v[at + sums + 2u] = 0u;
+        c.v[at + sums + 3u] = 0u;
+        c.v[at + means] = floatBitsToUint(now.r);
+        c.v[at + means + 1u] = floatBitsToUint(now.g);
+        c.v[at + means + 2u] = floatBitsToUint(now.b);
+        c.v[at + means + 3u] = floatBitsToUint(held + float(count));
+    }
     c.v[at + 5u] = frame;
-    c.v[at + 6u] = floatBitsToUint(now.r);
-    c.v[at + 7u] = floatBitsToUint(now.g);
-    c.v[at + 8u] = floatBitsToUint(now.b);
-    c.v[at + 9u] = floatBitsToUint(held + float(count));
 }
 
 //@pass water

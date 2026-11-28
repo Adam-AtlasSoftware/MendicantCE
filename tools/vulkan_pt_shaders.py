@@ -78,11 +78,12 @@ def objects_traced(common: str) -> str:
     return common
 
 
-# the light-importance grid (the bake's STEP_IMPORTANCE, kept in its file: a pack's when one is loaded): Path Traced
-# reads no bake's data but its scene, so BAKE_COMMON's grid_cell is renamed and wrapped to find no cell, and every lamp
-# pick of the bake's functions the path tracer shares (lamp_pick, lamps_all; its own grid_probability) is by power
-# alone, whether or not a bake is there; its live frames take their candidates from its own light tree
-# (docs/prism_pathtraced.md, "No baked light"). The baker's own text is not changed
+# the light-importance grid (the bake's STEP_IMPORTANCE, kept in its file: a pack's when one is loaded): BAKE_COMMON's
+# grid_cell is renamed and wrapped so that it finds a cell only where the path tracer's grid_wanted says so (its
+# specialization constant SPEC_GRID, HALO_PT_BAKE_GRID, and display.prism_pt_bake reading the drawn world's own whole
+# bake: docs/prism_pathtraced.md, "The bake's guide"); else every lamp pick of the bake's functions the path tracer
+# shares (lamp_pick, lamps_all; its own grid_probability) is by power alone, as with no bake, and with SPEC_GRID off the
+# grid's code is left out of the passes. The baker's own text is not changed
 GRID_CELL = "int grid_cell(vec3 p)\n{"
 
 
@@ -90,7 +91,8 @@ def grid_unread(common: str) -> str:
     if common.count(GRID_CELL) != 1:
         raise SystemExit(f"{BAKE}: BAKE_COMMON's grid_cell is not where it was")
     wrapper = ("int grid_cell_baked(vec3 p);\n"
-               "int grid_cell(vec3 p)\n{\n    return -1;\n}\n")
+               "bool grid_wanted();\n"
+               "int grid_cell(vec3 p)\n{\n    return grid_wanted() ? grid_cell_baked(p) : -1;\n}\n")
     return common.replace(GRID_CELL, wrapper + GRID_CELL.replace("grid_cell(", "grid_cell_baked("))
 
 

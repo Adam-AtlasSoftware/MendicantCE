@@ -1331,45 +1331,180 @@ def test_the_tree_candidate_takes_the_specular_lobe_and_stays_unbiased():
     assert "job->volume[3] = (float)(from_tree" not in host
 
 
-def test_path_traced_reads_no_baked_light():
-    """Path Traced's light never depends on a bake (Adam's rule of 2026-11-27): the bake's lookup hands the path tracer
-    its scene alone (the structure, materials, lamps, fixtures and rig: the geometry and the lights), never a lightmap
-    page, sun mask, irradiance volume, reflection probe or light-importance grid, a pack's or this machine's; the job's
-    bake fields stay 0; the light pass has no lookup of them left, a ray's hit is lit by Path Traced's own light, and
-    the bake's grid_cell finds no cell in its shaders, so its light is the same whether or not a bake is there"""
+def test_path_traced_reads_only_its_own_worlds_whole_bake_and_only_where_asked():
+    """Path Traced's light is its own (the rule of 2026-11-27, relaxed the same day for the bake's guide): the bake's
+    lookup hands the path tracer its scene alone; display.prism_pt_bake (on by default, its own Path Tracing row) adds
+    the drawn world's own whole bake's irradiance volume and its light-importance grid, never another geometry's, a
+    bake not yet whole or one whose key is not checked yet, and never a lightmap page, sun mask or reflection probe.
+    The job's volume fields are set only under the guide's flag; the volume is read only where the traced light has
+    nothing yet (an empty cell, a new cell's seed), and a hit is still lit by Path Traced's own light"""
     header = (ROOT / "port/linux/vulkan/xgpu_vulkan_bake.h").read_text()
-    struct = header[header.index("struct xgpu_vulkan_bake_lookup\n{"):]
-    struct = struct[:struct.index("};")]
-    fields = re.findall(r"^\s*(?:uint64_t|uint32_t|int|float)\s+([^;]+);", struct, re.M)
-    assert [name.strip() for group in fields for name in group.split(",")] == ["scene", "generation", "tiles_planned"]
+
+    def fields_of(name):
+        struct = header[header.index("struct %s\n{" % name):]
+        struct = struct[:struct.index("};")]
+        found = re.findall(r"^\s*(?:uint64_t|uint32_t|int|float)\s+([^;]+);", struct, re.M)
+        return [field.strip() for group in found for field in group.split(",")]
+    assert fields_of("xgpu_vulkan_bake_lookup") == ["scene", "generation", "tiles_planned"]
+    assert fields_of("xgpu_vulkan_bake_light") == ["bricks", "coarse", "probes", "brick_entries", "coarse_entries",
+                                                   "probe_spacing", "coarse_spacing"]
+    bake = (ROOT / "port/linux/vulkan/xgpu_vulkan_bake.c").read_text()
+    light = bake[bake.index("int xgpu_vulkan_bake_lookup_light("):]
+    light = light[:light.index("\n}\n")]
+    assert ("b->generation != bake.control.generation || b->provisional || b->step != STEP_DONE" in light)
     host = re.sub(r"/\*.*?\*/", "", (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text(), flags=re.S)
-    for field in ("pages", "charts", "vpages", "table", "tiles", "indirect", "sun", "masks", "bricks", "coarse",
-                  "probes", "lightmaps", "reflections", "reflection_table", "reflection_data"):
+    for field in ("pages", "charts", "vpages", "table", "tiles", "indirect", "sun", "masks", "lightmaps",
+                  "reflections", "reflection_table", "reflection_data"):
         assert not re.search(r"job->%s\s*=" % field, host), field
-    for field in (r"counts\[0\]", r"counts\[3\]", r"more\[[0-3]\]", r"volume\[[01]\]"):
-        assert not re.search(r"job->%s\s*=" % field, host), field
+    guided = host[host.index("if (wanted && xgpu_vulkan_bake_lookup_light(&baked))"):]
+    guided = guided[:guided.index("}")]
+    for field in ("bricks", "coarse", "probes", r"counts\[3\]", r"more\[0\]", r"volume\[0\]", r"volume\[1\]"):
+        assert len(re.findall(r"job->%s\s*=" % field, host)) == 1, field
+        assert re.search(r"job->%s\s*=" % field, guided), field
+    assert "flags |= FLAG_BAKE;" in guided
+    assert "(phase & XGPU_GBUFFER_PHASE_PT_BAKE) != 0" in host
     text = re.sub(r"/\*.*?\*/", "", GLSL.read_text(), flags=re.S)
-    for gone in ("bool bake_at(", "bool texel_of(", "float sun_of(", "bool cascade_at(", "bool volume_at(",
-                 "vec3 reflection_at(", "floor_of_triangle(", "floor_of_volume("):
+    for gone in ("bool bake_at(", "bool texel_of(", "float sun_of(", "vec3 reflection_at(", "floor_of_triangle("):
         assert gone not in text, gone
-    for field in ("pages", "charts", "vpages", "table", "tiles", "indirect", "sun", "masks", "bricks", "coarse",
-                  "probes", "lightmaps", "reflections", "reflection_table", "reflection_data"):
+    for field in ("pages", "charts", "vpages", "table", "tiles", "indirect", "sun", "masks", "lightmaps",
+                  "reflections", "reflection_table", "reflection_data"):
         assert not re.search(r"\bjob\.%s\b" % field, text), field
+    assert "bool bake_on() { return (job.frame.y & FLAG_BAKE) != 0u && job.probes != uvec2(0u); }" in text
+    baked = text[text.index("bool bake_hit_light("):]
+    baked = baked[:baked.index("\n}\n")]
+    assert "!bake_on() || !volume_at(p, nh, v)" in baked
     hit = text[text.index("vec3 hit_light_n(vec3 o"):]
     hit = hit[:hit.index("\n}\n")]
     assert "own_light(h, nh, glow_of(t), albedo_of(t))" in hit and "own_light(h, nh, vec3(0.0), object_albedo)" in hit
+    # (the volume read where a cell holds nothing: after the cell's own mean)
+    assert hit.index("if (cell.w > 0.0)") < hit.index("bake_hit_light(")
     own = text[text.index("vec3 own_light(vec3 h"):]
     own = own[:own.index("\n}\n")]
     for used in ("sun_ray(oh, blocker)", "own_lamp(h, nh, oh)", "fixtures_ris(h, nh, oh, kept)", "own_next(oh, nh)"):
         assert used in own, used
+    # (the volume read at one place in the light pass, an empty cell a bounce's hit met; a pixels' cell seeded only
+    # as it is made, in the temporal pass)
+    light_pass = text[:text.index("//@pass temporal")]
+    assert light_pass.count("bake_hit_light(") == 2 and light_pass.count("volume_at(") == 3
+    add = text[text.index("void cache_add_pixel(vec3 p, vec3 n, float distance_, vec3 light)\n{"):]
+    add = add[:add.index("\n}\n")]
+    assert "if (was == 0u && bake_on() && volume_at(p + n * 0.05, n, v))" in add
     assert "#define CACHE_DEFAULT 1" in host
-    # (the cells fed by whole 8 x 8 blocks, so that a subgroup takes one path)
-    assert "const uint CACHE_FEED = 16u;" in text
-    assert "hit_cache_feed = ((uint(pixel.x >> 3) + uint(pixel.y >> 3) * 5u + frame * 7u) & (CACHE_FEED - 1u)) == 0u;" in text
+    assert "const uint CACHE_FEED = 16u;" in text and "#define CACHE_FEED_DEFAULT 64" in host
+    assert ("hit_cache_feed = ((uint(pixel.x >> 3) + uint(pixel.y >> 3) * 5u + frame * 7u) & (cache_feed() - 1u)) == 0u;"
+            in text)
+    config = (ROOT / "port/linux/src/port_config.c").read_text()
+    assert '{ "display.prism_pt_bake", _config_boolean, "true", "HALO_PRISM_PT_BAKE"' in config
+    assert '{ "display.prism_pt_bake", LIGHTING_PATH_TRACED }' in config
+    deferred = (ROOT / "port/linux/game/prism_deferred.c").read_text()
+    assert 'prism_deferred.pt_bake = config_boolean("display.prism_pt_bake") != 0;' in deferred
+    assert "(prism_deferred.pt_bake ? PHASE_PT_BAKE : 0)" in deferred
+    stream = (ROOT / "port/linux/src/xgpu_stream.h").read_text()
+    assert "#define XGPU_GBUFFER_PHASE_PT_BAKE 0x08000000u" in stream
+    # (clear of every other bit of Path Traced's phase)
+    assert 0x08000000 & (0x10000000 | 0x60000000 | 0x80000000 | 0x07f00000 | 0xff00) == 0
+    settings = (ROOT / "tools/port_settings.py").read_text()
+    assert '"prism_pt_bake": "P"' in settings
+    assert '("BAKE GUIDE", "display.prism_pt_bake", ON_OFF,' in settings
+    assert '{ "op_prism_pt_bake", LIGHTING_P, NULL, NULL }' in (ROOT / "port/linux/game/menu_functions.c").read_text()
     shaders = pytest.importorskip("vulkan_pt_shaders")
-    light = shaders.sources()["light"]
-    assert re.search(r"int grid_cell\(vec3 p\)\n\{\n    return -1;\n\}", light)
-    assert light.count("int grid_cell(vec3 p)\n{") == 1
+    sources = shaders.sources()
+    for name in ("light", "reference"):
+        assert re.search(r"int grid_cell\(vec3 p\)\n\{\n    return grid_wanted\(\) \? grid_cell_baked\(p\) : -1;\n\}",
+                         sources[name])
+        assert sources[name].count("int grid_cell(vec3 p)\n{") == 1
+        assert "grid_baked = bake_on();" in sources[name]
+        assert "bool grid_wanted() { return SPEC_GRID && grid_baked; }" in sources[name]
+    assert "#define BAKE_GRID_DEFAULT 0" in host
+    assert 'values[8] = env_int("HALO_PT_BAKE_GRID", BAKE_GRID_DEFAULT) != 0;' in host
+
+
+def test_a_cells_seed_from_the_bake_is_let_go_of_as_its_own_samples_come():
+    """a new cell takes BAKE_SEED samples of the bake's light beside its first own sample; its running mean (at most
+    job.cache_settings.w samples) lets go of them as its own come: whatever the bake says, the cell is the traced
+    light's within its own noise after a few hundred samples, so the bake's guide brings the light at once and never
+    stays in it"""
+    text = GLSL.read_text()
+    seed = float(re.search(r"const float BAKE_SEED = ([0-9.]+);", text).group(1))
+    most = 256.0
+    rng = np.random.default_rng(3)
+    traced, baked = 1.0, 3.0
+    kept, samples = 0.0, 0.0
+    shares = []
+    for frame in range(1500):
+        # (a cell's frame: a sample or two of its traced light, the seed with its first)
+        count = int(rng.integers(1, 3))
+        total = traced * count
+        if frame == 0:
+            total += seed * baked
+            count += seed
+        mean = total / count
+        held = min(samples, max(most - count, 0.0))
+        kept = (kept * held + mean * count) / (held + count)
+        samples = held + count
+        shares.append((kept - traced) / (baked - traced))
+    assert shares[0] > 0.5
+    assert shares[400] < 0.03
+    assert shares[-1] < 0.001
+
+
+def test_the_pixels_cells_keep_a_short_historys_rare_bright_samples():
+    """where a pixel's history is short (a disocclusion, the view's edge as the eye turns) its samples were held to a
+    few times its neighbours' brightest, as sparse as its own: in a dark room lit by samples few rays find, most such
+    holds took light away and the room went darker while the eye moved. The pixels' cells (the radiance cache's
+    cells, fed with the light pass's own diffuse signal) bound the cap from below by job.low.w times the cell's mean:
+    the expectation of the held sample comes back to the light's, and a firefly far past the place's light is still
+    held"""
+    text = GLSL.read_text()
+    host = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
+    cap = int(re.search(r"#define PRIOR_CAP_DEFAULT (\d+)", host).group(1)) * 0.01
+    assert "job->low[3] = cache_on && !reference && cap > 0 ? (float)cap * 0.01f : 0.0f;" in host
+    temporal = text[text.index("//@pass temporal"):text.index("//@pass fix")]
+    assert "if ((!history || length_d < 8.0) && job.low.w > 0.0 && cache_on())" in temporal
+    assert "vec4 prior = cache_get_at(g.point, g.normal, g.distance, 14u);" in temporal
+    assert "cap_d = max(cap_d, job.low.w * luma(prior.rgb));" in temporal
+    # (the bound applied before the sample is held)
+    assert temporal.index("cap_d = max(cap_d, job.low.w") < temporal.index("vec3 cd = ld > cap_d ?")
+    # (fed by the same blocks as the hits, the light pass's own diffuse signal, in the temporal pass)
+    assert "cache_add_pixel(g.point, g.normal, g.distance, imageLoad(noisy_diffuse, pixel).rgb);" in temporal
+    assert "cache_add_pixel(" not in text[text.index("//@pass light"):text.index("//@pass temporal")]
+    assert "const uint CACHE_WORDS = 20u;" in text and "#define CACHE_WORDS 20u" in host
+    # (the model: a sample is the light over p with chance p, else 0 (p down to 1 / job.low.w is kept whole);
+    # its neighbours' brightest of 8 like it)
+    rng = np.random.default_rng(11)
+    light, p, short = 1.0, 0.15, 4.0
+    samples = np.where(rng.random(200000) < p, light / p, 0.0)
+    neighbours = np.where(rng.random((200000, 8)) < p, light / p, 0.0).max(1)
+    floor = 4.0 * 1.0 / 8.0
+    by_neighbours = np.minimum(samples, np.maximum(short * neighbours, floor))
+    by_cell = np.minimum(samples, np.maximum(np.maximum(short * neighbours, floor), cap * light))
+    assert by_neighbours.mean() < 0.85 * light
+    assert abs(by_cell.mean() - light) < 0.02 * light
+    # (a firefly a hundred times the place's light is still held)
+    assert min(100.0 * light, max(floor, cap * light)) < 0.1 * 100.0 * light
+
+
+def test_a_moving_eyes_specular_hold_takes_the_5_by_5():
+    """the specular hold (a moving eye's glossy history no brighter than this frame's brightest sample about it) read
+    the 3 x 3: a lamp's pool on a semi-glossy floor, met by a sample in many, was held below itself most frames and
+    the floors went darker while the eye moved (the dark interiors' third round); the 3 x 3 and the 5 x 5's four
+    along the axes find it more often"""
+    host = (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text()
+    assert "#define SPEC_HOLD_DEFAULT 2" in host
+    assert 'hold = env_int("HALO_PT_SPEC_HOLD", SPEC_HOLD_DEFAULT);' in host
+    temporal = GLSL.read_text()
+    temporal = temporal[temporal.index("//@pass temporal"):temporal.index("//@pass fix")]
+    assert "int r = push.parameters.y >= 2u ? 2 : 1;" in temporal
+    assert "(ring && x != 0 && y != 0)" in temporal
+    # (the taps: the 3 x 3 and the ring's 4 along the axes, 13 where the 3 x 3 has 9)
+    taps = [(x, y) for y in range(-2, 3) for x in range(-2, 3)
+            if not ((abs(x) == 2 or abs(y) == 2) and x != 0 and y != 0)]
+    assert len(taps) == 13
+    rng = np.random.default_rng(5)
+    p = 0.04
+    seen3 = (rng.random((100000, 9)) < p).any(1).mean()
+    seen = (rng.random((100000, 13)) < p).any(1).mean()
+    assert seen > 1.3 * seen3
 
 
 def test_the_radiance_caches_hits_add_up_the_bounces():

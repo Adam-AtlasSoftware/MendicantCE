@@ -115,6 +115,8 @@ its denoiser off (display.denoiser "off") */
 /* (display.pt_light_scale in hundredths: xgpu_stream.h's
 XGPU_GBUFFER_PHASE_PT_LIGHT_SCALE_*) */
 #define PHASE_PT_LIGHT_SCALE_SHIFT 20
+/* (display.prism_pt_bake: xgpu_stream.h's XGPU_GBUFFER_PHASE_PT_BAKE) */
+#define PHASE_PT_BAKE 0x08000000ul
 /* the views the bake's relight shows (Raster's), the path tracer's */
 #define VIEW_BAKE_FIRST 12ul
 #define VIEW_PT_FIRST 20ul
@@ -198,6 +200,9 @@ static struct
 	boolean pt_denoiser_off;
 	/* display.pt_light_scale in hundredths (0 off) */
 	unsigned long pt_light_scale;
+	/* display.prism_pt_bake: the drawn world's own whole bake guides and
+	fills in the traced light (docs/prism_pathtraced.md, "The bake's guide") */
+	boolean pt_bake;
 	/* display.player_shadow, and the draw flags the player's body's draws
 	take now (prism_deferred_body) */
 	boolean body_shadow;
@@ -254,6 +259,7 @@ static void settings_read(
 	prism_deferred.pt_profile = value && !strcmp(value, "performance") ? 0 : 1;
 	value = config_string("display.denoiser");
 	prism_deferred.pt_denoiser_off = value && !strcmp(value, "off");
+	prism_deferred.pt_bake = config_boolean("display.prism_pt_bake") != 0;
 	{
 		/* (the traced light's upscaling: 0 off, else 0.25 to 1) */
 		double scale = config_real("display.pt_light_scale");
@@ -973,7 +979,8 @@ void prism_deferred_phase(
 		{
 			value |= PHASE_PATHTRACED | (prism_deferred.pt_profile << PHASE_PT_PROFILE_SHIFT) |
 				(prism_deferred.pt_denoiser_off ? PHASE_PT_DENOISER_OFF : 0) |
-				(prism_deferred.pt_light_scale << PHASE_PT_LIGHT_SCALE_SHIFT);
+				(prism_deferred.pt_light_scale << PHASE_PT_LIGHT_SCALE_SHIFT) |
+				(prism_deferred.pt_bake ? PHASE_PT_BAKE : 0);
 		}
 		else if (prism_deferred.raster)
 		{

@@ -89,10 +89,16 @@ copy holds at most, a node's floats */
 indirect light's clamp by default (0 none). On since Path Traced reads no
 baked light (2026-11-27): its cells carry the bounces past the first, which
 the bake's light at a bounce's hit carried before (HALO_PT_CACHE=0 off: one
-bounce, its hit lit directly) */
+bounce, its hit lit directly). Its words since the pixels' cells (the
+temporal pass's prior): 20, the pixels' light beside the hits'; a short
+history's cap at least this many times its cell's mean by default
+(HALO_PT_PRIOR_CAP, in hundredths; 0: no pixels' cells). The blocks of
+pixels a feeding one (a power of two, HALO_PT_CACHE_FEED) */
 #define CACHE_CELLS (1u << 19)
-#define CACHE_WORDS 12u
+#define CACHE_WORDS 20u
 #define CACHE_DEFAULT 1
+#define PRIOR_CAP_DEFAULT 800
+#define CACHE_FEED_DEFAULT 64
 /* ReSTIR DI's initial candidates taken from the light tree, the rest from
 the grid's lists (HALO_PT_TREE_CANDIDATES): all 4 since the dark interiors'
 second round. With the specular lobe in the tree's importance (tree_lobe)
@@ -127,9 +133,12 @@ reservoirs' confidence at most for a still eye (HALO_PT_RESTIR_M_STILL) */
 #define HISTORY_DEFAULT 32
 #define HISTORY_STILL_DEFAULT 128
 #define RESTIR_M_STILL_DEFAULT 20
-/* whether the temporal pass holds a moving eye's glossy specular history to
-this frame's 3 x 3 by default (HALO_PT_SPEC_HOLD) */
-#define SPEC_HOLD_DEFAULT 1
+/* how the temporal pass holds a moving eye's glossy specular history by
+default (HALO_PT_SPEC_HOLD): 0 not, 1 to this frame's 3 x 3, 2 to the 3 x 3
+and the 5 x 5's four along the axes (since the dark interiors' third round:
+the 3 x 3's sparse samples held a lamp's pools darker than they are while
+the eye moved) */
+#define SPEC_HOLD_DEFAULT 2
 /* the histories' anti-firefly's bound by default, in standard deviations of
 the neighbours' (HALO_PT_HIST_FIREFLY; 0 none): over the 240 moving frames
 of c40's lab the bright pixels the native frame has not fell 1.8 times
@@ -159,6 +168,14 @@ finds each lamp (HALO_PT_LAMP_MIS, on by default; 0: by its solid angle alone,
 as before) */
 #define LAMP_RAY_DEFAULT 0.0
 #define FLAG_LAMP_MIS 256u
+/* the job block's flag of the bake's guide (xgpu_vulkan_pt.glsl's FLAG_BAKE:
+display.prism_pt_bake, the drawn world's own whole bake read where the
+traced light has nothing yet; HALO_PT_BAKE=0 or 1 overrides the setting, a
+diagnosis) */
+#define FLAG_BAKE 1024u
+/* (with it, the bake's light-importance grid: HALO_PT_BAKE_GRID, off by
+default, the passes' specialization constant SPEC_GRID: spec_options) */
+#define BAKE_GRID_DEFAULT 0
 /* the short history's cap, times its neighbours' brightest, and the light
 below which it holds nothing, in eighths of the light shown as white
 (xgpu_vulkan_pt_frame) */
@@ -168,7 +185,7 @@ below which it holds nothing, in eighths of the light shown as white
 SPEC_*); whether half the level's 8 x 8 blocks (1) or half its pixels (2)
 take the bake's indirect light as their bounce by default
 (HALO_PT_BOUNCE_HALF, 0 none) */
-#define SPEC_COUNT 8u
+#define SPEC_COUNT 9u
 /* whether the sun's ray is left out in a tile the bake found all in shadow
 by default (HALO_PT_SUN_TILES) */
 #define SUN_TILES_DEFAULT 1
@@ -410,6 +427,9 @@ static struct
 	(the denoiser's images were then its guides: no history across a change) */
 	struct xgpu_vulkan_image *exposure;
 	int raw_last;
+	/* (the bake's guide as last logged: 1 off, 2 wanted with no whole bake,
+	3 on; 0 not yet) */
+	uint32_t bake_logged;
 	/* the last frame's jitter (pixels of its view's target: an upscaler's,
 	xgpu_vulkan_upscale_jitter; 0 none), its camera's rays turned by it */
 	float last_jitter[2];
@@ -656,6 +676,7 @@ static void spec_options(uint32_t values[SPEC_COUNT])
 	values[6] = (uint32_t)env_int("HALO_PT_BOUNCE_HALF", BOUNCE_HALF_DEFAULT);
 	values[6] = values[6] > 2u ? 1u : values[6];
 	values[7] = env_int("HALO_PT_SUN_TILES", SUN_TILES_DEFAULT) != 0;
+	values[8] = env_int("HALO_PT_BAKE_GRID", BAKE_GRID_DEFAULT) != 0;
 }
 
 static int pipeline_make(int which, const uint32_t *words, size_t word_count)
@@ -1692,7 +1713,7 @@ static uint32_t spec_hold(void)
 	static int hold = -1;
 
 	if (hold < 0)
-		hold = env_int("HALO_PT_SPEC_HOLD", SPEC_HOLD_DEFAULT) != 0;
+		hold = env_int("HALO_PT_SPEC_HOLD", SPEC_HOLD_DEFAULT);
 	return (uint32_t)hold;
 }
 
@@ -2093,9 +2114,38 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 	if (raw != pt.raw_last)
 		flags &= ~(uint32_t)FLAG_HISTORY;
 	pt.raw_last = raw;
-	/* (the job's bake fields (pages to reflection_data, their counts in
-	counts.x and .w, more and volume's x and y) stay 0: Path Traced reads no
-	baked light, xgpu_vulkan_bake_lookup gives it none) */
+	/* (the job's bake fields stay 0 (pages to tiles, sun, masks, lightmaps,
+	the reflections and their counts) but the irradiance volume's, which
+	display.prism_pt_bake (the phase's bit, HALO_PT_BAKE overriding it) reads
+	of the drawn world's own whole bake alone: xgpu_vulkan_bake_lookup_light;
+	docs/prism_pathtraced.md, "The bake's guide") */
+	{
+		static int forced = -2;
+		struct xgpu_vulkan_bake_light baked;
+		int wanted;
+
+		if (forced == -2)
+			forced = getenv("HALO_PT_BAKE") && getenv("HALO_PT_BAKE")[0] ? atoi(getenv("HALO_PT_BAKE")) != 0 : -1;
+		wanted = forced >= 0 ? forced : (phase & XGPU_GBUFFER_PHASE_PT_BAKE) != 0;
+		if (wanted && xgpu_vulkan_bake_lookup_light(&baked))
+		{
+			flags |= FLAG_BAKE;
+			job->bricks = baked.bricks;
+			job->coarse = baked.coarse;
+			job->probes = baked.probes;
+			job->counts[3] = baked.brick_entries;
+			job->more[0] = baked.coarse_entries;
+			job->volume[0] = baked.probe_spacing;
+			job->volume[1] = baked.coarse_spacing;
+		}
+		if (((flags & FLAG_BAKE) ? 3u : wanted ? 2u : 1u) != pt.bake_logged)
+		{
+			host_logf(HOST_LOG_INFO, "prism pt: the bake's guide %s", (flags & FLAG_BAKE) ? "on: the drawn world's own "
+				"whole bake (its irradiance volume) read where the traced light has nothing yet" : wanted ? "wanted, no whole bake of the drawn world's own: its own light alone" :
+				"off (display.prism_pt_bake)");
+			pt.bake_logged = (flags & FLAG_BAKE) ? 3u : wanted ? 2u : 1u;
+		}
+	}
 	job->sums = pt.sums.address;
 	job->stats = pt.stats.address;
 	/* (the reprojection's counters: only for the diagnostics' file, their
@@ -2167,6 +2217,28 @@ struct xgpu_vulkan_image *xgpu_vulkan_pt_frame(struct xgpu_vulkan_image *light, 
 		job->cache_settings[1] = cell;
 		job->cache_settings[2] = least;
 		job->cache_settings[3] = most;
+		/* (the pixels' cells: a short history's cap at least that many times
+		its surface's cell's mean of the pixels' light, xgpu_vulkan_pt.glsl's
+		temporal pass; 0 none, and none in the reference) */
+		{
+			static int cap = -1;
+
+			if (cap < 0)
+				cap = env_int("HALO_PT_PRIOR_CAP", PRIOR_CAP_DEFAULT);
+			job->low[3] = cache_on && !reference && cap > 0 ? (float)cap * 0.01f : 0.0f;
+		}
+		{
+			static int feed = -1;
+
+			if (feed < 0)
+			{
+				feed = env_int("HALO_PT_CACHE_FEED", CACHE_FEED_DEFAULT);
+				feed = feed < 1 ? 1 : feed > 256 ? 256 : feed;
+				while (feed & (feed - 1))
+					feed &= feed - 1;
+			}
+			job->more[2] = (uint32_t)feed;
+		}
 		if (cache_on && !reference && !pt.cache_made)
 		{
 			pt.cache_made = 1;
