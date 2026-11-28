@@ -1064,9 +1064,10 @@ static const struct config_setting config_settings[] =
 		"takes CE's light's place, its base colour and its specular and\n"
 		"reflection layers on it as CE draws them. \"materials\" PRISM's own materials:\n"
 		"the light split between diffuse and specular by each material's\n"
-		"roughness and metalness, the reflections from the bake's probes (until\n"
-		"PRISM's materials reach CE's shaders, darker than Classic where CE's\n"
-		"reflections and specular layers light a surface). Read each frame." },
+		"roughness and metalness, the reflections from the bake's probes; where\n"
+		"CE's own specular and reflection layers (its mirrors, its reflection\n"
+		"maps) are brighter, theirs, so that no surface CE reflects goes dark.\n"
+		"Read each frame." },
 	{ "display.prism_raster_objects", _config_string, "\"volume\"", "HALO_PRISM_RASTER_OBJECTS", _environment_value,
 		_platform_desktop,
 		"PRISM Raster, with CE's composition: how the objects (characters,\n"

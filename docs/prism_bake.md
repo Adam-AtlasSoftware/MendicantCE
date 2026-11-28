@@ -874,7 +874,11 @@ Classic's own where the bake has nothing). Classic and `ce_deferred` keep CE's o
 With `"materials"` the pixel is base × (1 − the specular's share) × the diffuse light + the specular light + its
 self-illumination (the level's by its base colour, as CE's lightmap pass folds it in; an object's as its combiners give
 it), the exposure on both lights and the tone curve over the whole (below), and the resolve draws it as it is: CE's
-specular, reflection and object-lighting layers are not added. Under the `"ce"` curve the diffuse light (the level's
+object-lighting layers are not added. CE's specular and reflection layers (its additions) are kept where they are
+brighter: each channel of the pixel is at least the diffuse part (through the curve) with CE's additions over it, as
+`"ce"` adds them. The probes' reflection has no dynamic mirror (c40's floors, the level and its moving light bridge
+reflected in them) and is far darker than CE's reflection cube maps (c40's wall panels): with the additions left out
+those surfaces came out flat and dark, as if they were not drawn. Under the `"ce"` curve the diffuse light (the level's
 and the objects', the sun's in it) is held at white as CE's page held its light (a colour past white divided by its
 brightest channel, its hue kept), after the exposure and before the base, so a sunlit wall whites out as Classic's
 does, and a sunlit object beside it with it. Where the
