@@ -733,6 +733,39 @@ characters, weapons, crates and the Pelican shadow the ground, and the objects',
 themselves. CE's projected shadows on the level are then left out (they were the same shadows, softer and drawn in
 CE's own direction). With `"classic"`, or a GPU without ray queries, nothing is captured and CE's stay.
 
+**The moving objects' occlusion** (`display.prism_raster_object_occlusion` `"traced"`, the default, with Ray Tracing
+on). The bake is made without the moving objects, so neither the lightmaps nor the volume hold the shade a vehicle or
+a character casts about it: under a Warthog, about a Marine's feet, in an object's own creases and on its neighbours.
+Path Traced has it (every ray meets the objects), Classic CE's projected shadow under each object, and before this
+Enhanced had none at all: its traced sun shadows replace CE's projected ones, and in shade, indoors or under a sky
+with no sun nothing stood in for them. With Ray Tracing off CE's projected shadow came back only as a share of the
+sun's light, so not in shade either: it now darkens the rest of the light too (its whole texel, as Classic's does)
+wherever the objects' occlusion is not traced. The game sets RT_FRAME's `XGPU_RT_FLAG_RASTER_OCCLUSION`, which
+captures the objects as the traced sun shadows do (with them or alone: with Object Shadows Classic the sun shadows
+stay CE's), and before the light pass a compute pass (`occlusion_source`, `xgpu_vulkan_bake.c`'s `raster_occlusion`)
+traces, from each pixel the G-buffer has a normal for, cosine-distributed rays against the objects' structure (masks
+4, 8 and the player's body, 16): a hit at t counts 1 - (t / reach)^2, as world AO's traced objects count, and the
+ambient light left is 1 - strength x the mean.
+
+- **A level pixel** is darkened by the objects alone, within 2.5 world units: the bake already has the level's and the
+  static scenery's own occlusion (the static scenery is left out of the capture, `XGPU_GBUFFER_FLAG_STATIC_SCENERY`),
+  so nothing is darkened twice.
+- **An object's pixel** by the objects, itself among them, within 1 world unit (a Warthog's wheel wells, a Marine's
+  arms over his chest): the volume's light is the place's, without the object, and its probes (0.25 wu apart) hold
+  the level about it.
+- **What it darkens:** the light less the sun's (the bake's texel or the volume's SH, the light the sun's shadows do
+  not already take) and, with PRISM's materials, the reflections; never the sun's light (its own traced shadow) or the
+  dynamic lights.
+- **No noise, no history.** Each pixel traces two rays, a sixteenth of its 4 x 4 block's 32 directions (a spiral, by
+  a 4 x 4 ordered dither); the light pass (`occlusion_at`) gathers the 4 x 4 texels about the pixel, each weighed by
+  its nearness to the pixel's plane and its normal, and only those of the same surface (the level's, or the same
+  object's), so every pixel sees every direction once and a Warthog's shade never bleeds onto the ground beside it or
+  the ground's onto it. `tools/test_prism_object_occlusion.py` checks that any 4 x 4 window holds every direction and
+  that the block's estimate is the converged integral's within 3% for a ceiling over a floor and a wall beside it.
+- `HALO_RASTER_OCCLUSION="<rays> <level reach> <object reach> <level strength> <object strength>"` tries another set
+  (a diagnostic, for the calibration against Path Traced); `HALO_RASTER_TIMING` logs the occlusion pass's and the light
+  pass's GPU time every 300 frames.
+
 **What composes the frame** (`display.prism_raster_composition`): by default (`"ce"`) CE's own shaders, until PRISM's
 materials reach theirs: the diffuse light (exposed, through the tone curve, below) goes into CE's light target in its light's
 place (the level's glow folded in as CE's lightmap pass folds it; an object's base colour, the G-buffer's, and glow

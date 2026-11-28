@@ -272,6 +272,7 @@ enum
 	PIPELINE_COMPACT,
 	PIPELINE_REFLECTION,
 	PIPELINE_EXPOSURE,
+	PIPELINE_OCCLUSION,
 	PIPELINES
 };
 
@@ -600,6 +601,9 @@ static struct
 	VkDescriptorPool pool;
 	VkDescriptorSet raster_sets[4];
 	uint32_t raster_set_next;
+	/* PRISM Raster's object occlusion pass's sets (raster_occlusion) */
+	VkDescriptorSet occlusion_sets[4];
+	uint32_t occlusion_set_next;
 	VkSampler sampler;
 	VkQueryPool queries;
 	uint64_t query_serial[8];
@@ -670,6 +674,11 @@ static struct
 	struct xgpu_vulkan_image *raster_light;
 	/* (the terrain's micro-shadows' stand-in: a white texel) */
 	struct xgpu_vulkan_image *micro_white;
+	/* PRISM Raster's object occlusion (raster_occlusion): its texels at the
+	frame's size, its stand-in where it does not run (a texel: none found),
+	its job's block */
+	struct xgpu_vulkan_image *occlusion, *occlusion_none;
+	struct bake_buffer occlusion_job;
 	uint32_t raster_frames;
 	/* the exposure's meter (xgpu_vulkan_bake_glsl.inc's EXPOSURE_COMMON: 128
 	bins, the exposure's log2, whether it is made, the last medians), kept
@@ -999,14 +1008,19 @@ static int make(void)
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+	};
+	static const VkDescriptorType occlusion_types[] =
+	{
+		VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
 	};
 	VkPhysicalDeviceAccelerationStructurePropertiesKHR structure_properties;
 	VkPhysicalDeviceProperties2 properties;
 	VkDescriptorPoolSize sizes[2];
 	VkDescriptorPoolCreateInfo pool_info;
 	VkDescriptorSetAllocateInfo allocate;
-	VkDescriptorSetLayout layouts[4];
+	VkDescriptorSetLayout layouts[8];
 	VkSamplerCreateInfo sampler;
 	VkQueryPoolCreateInfo queries;
 	uint32_t index;
@@ -1041,23 +1055,25 @@ static int make(void)
 		!pipeline_make(PIPELINE_IMPORTANCE, NULL, 0, xgpu_vulkan_bake_importance_words,
 		xgpu_vulkan_bake_importance_count) ||
 		!pipeline_make(PIPELINE_VOLUME, NULL, 0, xgpu_vulkan_bake_volume_words, xgpu_vulkan_bake_volume_count) ||
-		!pipeline_make(PIPELINE_RASTER, raster_types, 7, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
+		!pipeline_make(PIPELINE_RASTER, raster_types, 8, xgpu_vulkan_bake_raster_words, xgpu_vulkan_bake_raster_count) ||
 		!pipeline_make(PIPELINE_COMPACT, NULL, 0, xgpu_vulkan_bake_compact_words, xgpu_vulkan_bake_compact_count) ||
 		!pipeline_make(PIPELINE_REFLECTION, NULL, 0, xgpu_vulkan_bake_reflection_words,
 		xgpu_vulkan_bake_reflection_count) ||
-		!pipeline_make(PIPELINE_EXPOSURE, NULL, 0, xgpu_vulkan_bake_exposure_words, xgpu_vulkan_bake_exposure_count))
+		!pipeline_make(PIPELINE_EXPOSURE, NULL, 0, xgpu_vulkan_bake_exposure_words, xgpu_vulkan_bake_exposure_count) ||
+		!pipeline_make(PIPELINE_OCCLUSION, occlusion_types, 3, xgpu_vulkan_bake_occlusion_words,
+		xgpu_vulkan_bake_occlusion_count))
 	{
 		host_logf(HOST_LOG_WARN, "prism bake: its passes cannot be made: no bake");
 		return 0;
 	}
 	memset(sizes, 0, sizeof(sizes));
 	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	sizes[0].descriptorCount = 24;
+	sizes[0].descriptorCount = 24 + 8;
 	sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	sizes[1].descriptorCount = 4;
+	sizes[1].descriptorCount = 8 + 4;
 	memset(&pool_info, 0, sizeof(pool_info));
 	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-	pool_info.maxSets = 4;
+	pool_info.maxSets = 8;
 	pool_info.poolSizeCount = 2;
 	pool_info.pPoolSizes = sizes;
 	if (vkCreateDescriptorPool(bake.device.device, &pool_info, NULL, &bake.pool) != VK_SUCCESS)
@@ -1070,6 +1086,11 @@ static int make(void)
 	allocate.descriptorSetCount = 4;
 	allocate.pSetLayouts = layouts;
 	if (vkAllocateDescriptorSets(bake.device.device, &allocate, bake.raster_sets) != VK_SUCCESS)
+		return 0;
+	for (index = 0; index < 4; index++)
+		layouts[4 + index] = bake.layouts[PIPELINE_OCCLUSION];
+	allocate.pSetLayouts = layouts + 4;
+	if (vkAllocateDescriptorSets(bake.device.device, &allocate, bake.occlusion_sets) != VK_SUCCESS)
 		return 0;
 	memset(&sampler, 0, sizeof(sampler));
 	sampler.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -7783,6 +7804,237 @@ void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
 	}
 }
 
+/* PRISM Raster's object occlusion (display.prism_raster_object_occlusion
+"traced", xgpu_vulkan_bake_glsl.inc's occlusion_source): the rays a pixel
+(each pixel a sixteenth of its 4 x 4 block's directions), the reach and
+strength on the level and on an object, calibrated against Path Traced's
+frames of the same views (docs/prism_bake.md, "The moving objects'
+occlusion"); HALO_RASTER_OCCLUSION="<rays> <level reach> <object reach>
+<level strength> <object strength>" another set, a diagnostic */
+#define OCCLUSION_RAYS 2u
+#define OCCLUSION_LEVEL_REACH 2.5f
+#define OCCLUSION_OBJECT_REACH 1.0f
+#define OCCLUSION_LEVEL_STRENGTH 1.0f
+#define OCCLUSION_OBJECT_STRENGTH 0.8f
+
+struct bake_occlusion_job
+{
+	VkDeviceAddress objects, object_table;
+	float camera[4][4];
+	int32_t corners[4];
+	uint32_t counts[4];
+	float reach[4];
+};
+
+/* the occlusion pass for the frame (its moving objects' structure in the
+job, the occlusion asked by the game: RT_FRAME's XGPU_RT_FLAG_RASTER_
+OCCLUSION), its texels at the frame's size; NULL where it does not run */
+static struct xgpu_vulkan_image *raster_occlusion(VkCommandBuffer commands, const struct bake_raster_job *raster,
+	VkDeviceAddress objects, VkDeviceAddress object_table, struct xgpu_vulkan_image *words,
+	struct xgpu_vulkan_image *extras, uint32_t width, uint32_t height)
+{
+	static int asked = -1;
+	static float settings[5] = { (float)OCCLUSION_RAYS, OCCLUSION_LEVEL_REACH, OCCLUSION_OBJECT_REACH,
+		OCCLUSION_LEVEL_STRENGTH, OCCLUSION_OBJECT_STRENGTH };
+	struct bake_occlusion_job job;
+	struct xgpu_vulkan_image_description wanted;
+	VkDescriptorImageInfo images[3];
+	VkWriteDescriptorSet writes[3];
+	VkDescriptorSet set;
+	struct bake_push push;
+	uint32_t generation, material_count, alpha_words, index;
+	const float *materials;
+	const uint32_t *alpha;
+	const struct xgpu_stream_rt_frame *frame = NULL;
+
+	xgpu_vulkan_rt_scene(&generation, &materials, &material_count, &alpha, &alpha_words, &frame);
+	if (!frame || !(frame->flags & XGPU_RT_FLAG_RASTER_OCCLUSION) || !objects || !object_table)
+		return NULL;
+	if (asked < 0)
+	{
+		const char *text = getenv("HALO_RASTER_OCCLUSION");
+		float read[5];
+
+		asked = 0;
+		if (text && sscanf(text, "%f %f %f %f %f", &read[0], &read[1], &read[2], &read[3], &read[4]) == 5 &&
+			read[0] >= 1.0f && read[0] <= 8.0f && read[1] > 0.0f && read[2] > 0.0f)
+		{
+			memcpy(settings, read, sizeof(settings));
+			asked = 1;
+			host_logf(HOST_LOG_INFO, "prism raster: the object occlusion's HALO_RASTER_OCCLUSION: %g rays, reach %g "
+				"and %g, strength %g and %g", read[0], read[1], read[2], read[3], read[4]);
+		}
+	}
+	if (!bake.occlusion_job.buffer && !buffer_make(sizeof(job), 0, 0, &bake.occlusion_job))
+		return NULL;
+	if (!bake.occlusion || xgpu_vulkan_image_description(bake.occlusion)->width != width ||
+		xgpu_vulkan_image_description(bake.occlusion)->height != height)
+	{
+		if (bake.occlusion)
+			xgpu_vulkan_image_destroy(bake.occlusion);
+		memset(&wanted, 0, sizeof(wanted));
+		wanted.type = XGPU_VULKAN_IMAGE_2D;
+		wanted.format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+		wanted.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_STORAGE;
+		wanted.samples = 1;
+		wanted.width = width;
+		wanted.height = height;
+		wanted.depth_or_layers = 1;
+		wanted.levels = 1;
+		bake.occlusion = xgpu_vulkan_image_create(&wanted);
+		if (!bake.occlusion)
+			return NULL;
+	}
+	memset(&job, 0, sizeof(job));
+	job.objects = objects;
+	job.object_table = object_table;
+	memcpy(job.camera, raster->camera, sizeof(job.camera));
+	memcpy(job.corners, raster->corners, sizeof(job.corners));
+	job.counts[0] = (uint32_t)settings[0];
+	job.counts[1] = width;
+	job.counts[2] = height;
+	job.reach[0] = settings[1];
+	job.reach[1] = settings[2];
+	job.reach[2] = settings[3];
+	job.reach[3] = settings[4];
+	if (!upload(commands, &bake.occlusion_job, 0, &job, sizeof(job)))
+		return NULL;
+	xgpu_vulkan_image_compute_use(words, 0);
+	xgpu_vulkan_image_compute_use(extras, 0);
+	xgpu_vulkan_image_compute_use(bake.occlusion, 1);
+	set = bake.occlusion_sets[bake.occlusion_set_next];
+	bake.occlusion_set_next = (bake.occlusion_set_next + 1) & 3;
+	memset(images, 0, sizeof(images));
+	memset(writes, 0, sizeof(writes));
+	for (index = 0; index < 3; index++)
+	{
+		struct xgpu_vulkan_image *image = index == 0 ? words : index == 1 ? extras : bake.occlusion;
+
+		images[index].sampler = index != 2 ? bake.sampler : VK_NULL_HANDLE;
+		images[index].imageView = xgpu_vulkan_image_view(image);
+		images[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		writes[index].dstSet = set;
+		writes[index].dstBinding = index;
+		writes[index].descriptorCount = 1;
+		writes[index].descriptorType = index != 2 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER :
+			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		writes[index].pImageInfo = &images[index];
+	}
+	vkUpdateDescriptorSets(bake.device.device, 3, writes, 0, NULL);
+	barrier(commands);
+	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_OCCLUSION]);
+	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipeline_layouts[PIPELINE_OCCLUSION], 0, 1,
+		&set, 0, NULL);
+	memset(&push, 0, sizeof(push));
+	push.job = bake.occlusion_job.address;
+	vkCmdPushConstants(commands, bake.pipeline_layouts[PIPELINE_OCCLUSION], VK_SHADER_STAGE_COMPUTE_BIT, 0,
+		sizeof(push), &push);
+	xgpu_vulkan_breadcrumb(commands, 63, "Rebaked's object occlusion");
+	vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
+	barrier(commands);
+	return bake.occlusion;
+}
+
+/* HALO_RASTER_TIMING (a diagnostic): the occlusion pass's and the light
+pass's GPU time (timestamps before the one, between them and after the
+other, a ring of four frames read once done), their means logged every 300
+frames */
+static struct
+{
+	int asked;
+	VkQueryPool pool;
+	uint64_t serial[4];
+	int written[4];
+	uint32_t next, frames, ran;
+	double occlusion_ms, light_ms;
+} raster_timing;
+
+static int raster_timing_begin(VkCommandBuffer commands)
+{
+	uint32_t slot;
+
+	if (!raster_timing.asked)
+	{
+		raster_timing.asked = getenv("HALO_RASTER_TIMING") && bake.timestamp_period > 0.0 ? 1 : -1;
+		if (raster_timing.asked > 0)
+		{
+			VkQueryPoolCreateInfo info;
+
+			memset(&info, 0, sizeof(info));
+			info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+			info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+			info.queryCount = 12;
+			if (vkCreateQueryPool(bake.device.device, &info, NULL, &raster_timing.pool) != VK_SUCCESS)
+				raster_timing.asked = -1;
+		}
+	}
+	if (raster_timing.asked < 0)
+		return -1;
+	for (slot = 0; slot < 4; slot++)
+	{
+		uint64_t times[3];
+
+		if (!raster_timing.written[slot] || raster_timing.serial[slot] > xgpu_vulkan_completed())
+			continue;
+		raster_timing.written[slot] = 0;
+		if (vkGetQueryPoolResults(bake.device.device, raster_timing.pool, slot * 3, 3, sizeof(times), times,
+			sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) != VK_SUCCESS)
+			continue;
+		raster_timing.occlusion_ms += (double)(times[1] - times[0]) * bake.timestamp_period * 1.0e-6;
+		raster_timing.light_ms += (double)(times[2] - times[1]) * bake.timestamp_period * 1.0e-6;
+		if (++raster_timing.frames == 300)
+		{
+			host_logf(HOST_LOG_INFO, "prism raster: GPU ms a frame over 300 frames: the object occlusion %.3f (ran %u "
+				"frames), the light pass %.3f", raster_timing.occlusion_ms / 300.0, raster_timing.ran,
+				raster_timing.light_ms / 300.0);
+			raster_timing.frames = raster_timing.ran = 0;
+			raster_timing.occlusion_ms = raster_timing.light_ms = 0.0;
+		}
+	}
+	slot = raster_timing.next;
+	if (raster_timing.written[slot])
+		return -1;
+	raster_timing.next = (slot + 1) & 3;
+	vkCmdResetQueryPool(commands, raster_timing.pool, slot * 3, 3);
+	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, raster_timing.pool, slot * 3);
+	return (int)slot;
+}
+
+static void raster_timing_mark(VkCommandBuffer commands, int slot, uint32_t mark)
+{
+	if (slot < 0)
+		return;
+	vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, raster_timing.pool, (uint32_t)slot * 3 + mark);
+	if (mark == 2)
+	{
+		raster_timing.written[slot] = 1;
+		raster_timing.serial[slot] = xgpu_vulkan_serial();
+	}
+}
+
+/* the occlusion's stand-in where the pass does not run (the light pass's
+binding 7, unread then) */
+static struct xgpu_vulkan_image *raster_occlusion_none(void)
+{
+	struct xgpu_vulkan_image_description one;
+	static const uint32_t none[4] = { 0x3c00u, 0u, 0u, 0xffffffffu };
+
+	if (bake.occlusion_none)
+		return bake.occlusion_none;
+	memset(&one, 0, sizeof(one));
+	one.type = XGPU_VULKAN_IMAGE_2D;
+	one.format = XGPU_VULKAN_FORMAT_RGBA32_UINT;
+	one.usage = XGPU_VULKAN_USAGE_SAMPLED | XGPU_VULKAN_USAGE_STORAGE;
+	one.width = one.height = 1;
+	one.depth_or_layers = 1;
+	one.levels = 1;
+	bake.occlusion_none = xgpu_vulkan_image_create(&one);
+	if (bake.occlusion_none)
+		xgpu_vulkan_image_upload(bake.occlusion_none, 0, 0, 0, 0, 0, 1, 1, 1, none, 16, 16);
+	return bake.occlusion_none;
+}
+
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
 	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume, int *whole)
@@ -7791,14 +8043,16 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	const struct xgpu_vulkan_image_description *description;
 	struct xgpu_vulkan_image_description wanted;
 	struct bake_raster_job job;
-	VkDescriptorImageInfo images[7];
-	VkWriteDescriptorSet writes[7];
+	VkDescriptorImageInfo images[8];
+	VkWriteDescriptorSet writes[8];
 	VkDescriptorSet set;
-	struct xgpu_vulkan_image *micro;
+	struct xgpu_vulkan_image *micro, *occlusion = NULL;
+	int timing = -1;
 	VkCommandBuffer commands;
 	uint32_t index, flags = 0, light_count = 0, serial = 0, dynamic = 0;
 	const struct xgpu_stream_scene_light *lights;
 	float dynamic_lights[RASTER_LIGHTS * 12];
+	uint64_t objects = 0, object_table = 0;
 
 	if (whole)
 		*whole = 0;
@@ -7899,7 +8153,24 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	whole, CE's projected ones on the level left out; none in the bake's
 	views) */
 	if (!bake_view)
-		(void)xgpu_vulkan_rt_objects(&job.objects, &job.object_table, NULL);
+		(void)xgpu_vulkan_rt_objects(&objects, &object_table, NULL);
+	/* (port: their structure is the object occlusion's too, display.prism_
+	raster_object_occlusion "traced", which captures them with the sun
+	shadows "classic": the sun shadows traced only where RT_FRAME asks for
+	them, else CE's) */
+	{
+		uint32_t generation, material_count, alpha_words;
+		const float *materials_;
+		const uint32_t *alpha;
+		const struct xgpu_stream_rt_frame *frame = NULL;
+
+		xgpu_vulkan_rt_scene(&generation, &materials_, &material_count, &alpha, &alpha_words, &frame);
+		if (frame && (frame->flags & XGPU_RT_FLAG_RASTER_OBJECTS))
+		{
+			job.objects = objects;
+			job.object_table = object_table;
+		}
+	}
 	/* (the exposure: metered and applied in the frame whole, not in the bake's
 	views, the gates' measures) */
 	{
@@ -7945,28 +8216,47 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 		micro = bake.micro_white;
 	}
 	xgpu_vulkan_image_compute_use(micro, 0);
+	/* (port: the moving objects' occlusion of the ambient light, in the frame
+	whole where their structure is traced: display.prism_raster_object_
+	occlusion "traced") */
+	if (!bake_view)
+		timing = raster_timing_begin(commands);
+	if (!bake_view && objects)
+		occlusion = raster_occlusion(commands, &job, objects, object_table, words, extras, description->width,
+			description->height);
+	raster_timing_mark(commands, timing, 1);
+	if (occlusion)
+	{
+		flags |= 8u;
+		raster_timing.ran += timing >= 0;
+	}
+	else
+		occlusion = raster_occlusion_none();
+	if (!occlusion)
+		return NULL;
+	xgpu_vulkan_image_compute_use(occlusion, 0);
 	xgpu_vulkan_image_compute_use(bake.raster_light, 1);
 	set = bake.raster_sets[bake.raster_set_next];
 	bake.raster_set_next = (bake.raster_set_next + 1) & 3;
 	memset(images, 0, sizeof(images));
 	memset(writes, 0, sizeof(writes));
-	for (index = 0; index < 7; index++)
+	for (index = 0; index < 8; index++)
 	{
 		struct xgpu_vulkan_image *image = index == 0 ? words : index == 1 ? extras : index == 2 ? copy : index == 3 ?
-			bake.raster_light : index == 4 ? base : index == 5 ? additions : micro;
+			bake.raster_light : index == 4 ? base : index == 5 ? additions : index == 6 ? micro : occlusion;
 
-		images[index].sampler = index != 3 ? bake.sampler : VK_NULL_HANDLE;
+		images[index].sampler = index != 3 && index != 7 ? bake.sampler : VK_NULL_HANDLE;
 		images[index].imageView = xgpu_vulkan_image_view(image);
 		images[index].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		writes[index].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		writes[index].dstSet = set;
 		writes[index].dstBinding = index;
 		writes[index].descriptorCount = 1;
-		writes[index].descriptorType = index != 3 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER :
+		writes[index].descriptorType = index != 3 && index != 7 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER :
 			VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 		writes[index].pImageInfo = &images[index];
 	}
-	vkUpdateDescriptorSets(bake.device.device, 7, writes, 0, NULL);
+	vkUpdateDescriptorSets(bake.device.device, 8, writes, 0, NULL);
 	if (b->block.rig[1][3] > 1.001f)
 		flags |= 1u;
 	/* (the frame whole, its own materials composing it (display.
@@ -7998,6 +8288,7 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	xgpu_vulkan_breadcrumb(commands, 62, "Rebaked's light pass");
 	vkCmdDispatch(commands, (description->width + 7) / 8, (description->height + 7) / 8, 1);
 	barrier(commands);
+	raster_timing_mark(commands, timing, 2);
 	if (!bake_view)
 		xgpu_vulkan_bake_exposure_step(commands);
 	if (whole)
@@ -8059,6 +8350,15 @@ void xgpu_vulkan_bake_shutdown(void)
 	if (bake.raster_light)
 		xgpu_vulkan_image_destroy(bake.raster_light);
 	bake.raster_light = NULL;
+	if (bake.occlusion)
+		xgpu_vulkan_image_destroy(bake.occlusion);
+	if (bake.occlusion_none)
+		xgpu_vulkan_image_destroy(bake.occlusion_none);
+	bake.occlusion = bake.occlusion_none = NULL;
+	buffer_free_now(&bake.occlusion_job);
+	if (raster_timing.pool)
+		vkDestroyQueryPool(bake.device.device, raster_timing.pool, NULL);
+	memset(&raster_timing, 0, sizeof(raster_timing));
 	for (index = 0; index < PIPELINES; index++)
 	{
 		if (bake.pipelines[index])

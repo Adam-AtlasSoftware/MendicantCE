@@ -1066,6 +1066,14 @@ static const struct config_setting config_settings[] =
 		"frame: on the level, on each other and on themselves, in place of\n"
 		"CE's projected shadows (a GPU that traces rays). \"classic\" CE's\n"
 		"projected shadows on the level alone. Read each frame." },
+	{ "display.prism_raster_object_occlusion", _config_string, "\"traced\"",
+		"HALO_PRISM_RASTER_OBJECT_OCCLUSION", _environment_value, _platform_desktop,
+		"PRISM Raster: the moving objects' (vehicles, characters, weapons)\n"
+		"ambient occlusion, which the lightmaps, baked without them, cannot\n"
+		"hold. \"traced\" by ray tracing against the objects as drawn this\n"
+		"frame: the shade on the ground under a Warthog and about a Marine's\n"
+		"feet, and their own creases and each other's (a GPU that traces rays,\n"
+		"with display.prism_ray_tracing on). \"off\" none. Read each frame." },
 	{ "display.prism_sky_light", _config_string, "\"sky\"", "HALO_PRISM_SKY_LIGHT", _environment_value,
 		_platform_desktop,
 		"PRISM's bake (PRISM Rebaked's light and PRISM Path Traced's), the light in\n"
@@ -4706,6 +4714,7 @@ static const char *const config_display_order[] =
 	"=Enhanced lighting (\"enhanced\") alone: its look and its ray tracing",
 	"display.prism_sky_light", "display.prism_raster_composition", "display.prism_raster_objects",
 	"display.enhanced_dynamic_lights", "display.prism_ray_tracing", "display.prism_raster_object_shadows",
+	"display.prism_raster_object_occlusion",
 	"display.enhanced_shadow_resolution", "display.prism_rt_objects", "display.prism_rt_cache",
 	"display.prism_rt_alpha",
 	"=Path Traced lighting (\"pathtraced\") alone: its own settings",
@@ -4776,6 +4785,7 @@ static const struct
 	{ "display.prism_raster_composition", LIGHTING_ENHANCED },
 	{ "display.prism_raster_objects", LIGHTING_ENHANCED },
 	{ "display.prism_raster_object_shadows", "Enhanced with display.prism_ray_tracing on" },
+	{ "display.prism_raster_object_occlusion", "Enhanced with display.prism_ray_tracing on" },
 	{ "display.prism_ray_tracing", LIGHTING_ENHANCED },
 	{ "display.enhanced_dynamic_lights", LIGHTING_ENHANCED },
 	{ "display.enhanced_shadow_resolution", LIGHTING_ENHANCED },
@@ -6645,6 +6655,7 @@ static const struct
 	{ "display.prism_raster_objects", { "volume", "classic", NULL }, "volume" },
 	{ "camera.view", { "first_person", "third_person", NULL }, "first_person" },
 	{ "display.prism_raster_object_shadows", { "traced", "classic", NULL }, "traced" },
+	{ "display.prism_raster_object_occlusion", { "traced", "off", NULL }, "traced" },
 	{ "display.prism_sky_light", { "sky", "flat", NULL }, "sky" },
 	{ "debug.gbuffer_view", { "off", "base", "light", "additions", "albedo", "normal", "roughness", "metal",
 		"material_source", "instance", "motion", "emissive", "bake_light", "bake_sun", "bake_texels",

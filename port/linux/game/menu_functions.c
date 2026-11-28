@@ -2797,6 +2797,7 @@ static void prism_rt_rows_show(struct widget_instance *list)
 		card cannot trace: prism_deferred.c) and its traced rows) */
 		{ "op_prism_ray_tracing", "prism_ray_tracing_spinner" },
 		{ "op_prism_object_shadows", "prism_object_shadows_spinner" },
+		{ "op_prism_object_occlusion", "prism_object_occlusion_spinner" },
 		{ "op_prism_rt_objects", "prism_rt_objects_spinner" }, { "op_prism_rt_cache", "prism_rt_cache_spinner" },
 		{ "op_prism_rt_alpha", "prism_rt_alpha_spinner" },
 		/* (Path Traced's traced scene) */
@@ -2943,6 +2944,7 @@ static struct
 	{ "op_enhanced_dynamic_lights", LIGHTING_E, NULL, NULL },
 	{ "op_prism_ray_tracing", LIGHTING_E, NULL, NULL },
 	{ "op_prism_object_shadows", LIGHTING_E, "display.prism_ray_tracing", "on" },
+	{ "op_prism_object_occlusion", LIGHTING_E, "display.prism_ray_tracing", "on" },
 	{ "op_enhanced_shadow_resolution", LIGHTING_E, "display.prism_ray_tracing", "off" },
 	{ "op_enhanced_shadow_resolution", LIGHTING_E, "display.prism_raster_object_shadows", "classic" },
 	{ "op_prism_rt_objects", LIGHTING_E, "display.prism_ray_tracing", "on" },

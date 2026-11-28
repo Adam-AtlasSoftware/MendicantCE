@@ -1062,10 +1062,10 @@ void xgpu_vulkan_rt_frame(const struct xgpu_stream_rt_frame *record)
 	rt.frame_received = 1;
 	rt.frame_active = record->mode != XGPU_RT_OFF;
 	/* (port: the moving objects alone, the mode off: "pathtraced"'s
-	(HALO_PT_OBJECTS=0 none) or PRISM Raster's sun shadows') */
+	(HALO_PT_OBJECTS=0 none) or PRISM Raster's sun shadows' and occlusion's) */
 	rt.objects_only = !rt.frame_active && (((record->flags & XGPU_RT_FLAG_OBJECTS) &&
 		!(getenv("HALO_PT_OBJECTS") && !strcmp(getenv("HALO_PT_OBJECTS"), "0"))) ||
-		(record->flags & XGPU_RT_FLAG_RASTER_OBJECTS));
+		(record->flags & (XGPU_RT_FLAG_RASTER_OBJECTS | XGPU_RT_FLAG_RASTER_OCCLUSION)));
 	if (rt.objects_only)
 		rt.frame_active = 1;
 	rt.slot_ready = 0;

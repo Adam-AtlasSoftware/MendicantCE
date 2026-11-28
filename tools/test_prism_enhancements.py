@@ -141,7 +141,8 @@ def test_no_traced_choice_with_ray_tracing_off():
     """each traced row of Enhanced's page is shown only while its RAY TRACING is on (lighting_rows' conditions)"""
     table = MENU.split("} const lighting_rows[] =", 1)[1].split("};", 1)[0]
     entries = re.findall(r'\{ "op_(\w+)", ([A-Z_| ]+), (NULL|"[\w.]+"), (NULL|"[!\w]+") \}', table)
-    for row in ("prism_object_shadows", "prism_rt_objects", "prism_rt_cache", "prism_rt_alpha"):
+    for row in ("prism_object_shadows", "prism_object_occlusion", "prism_rt_objects", "prism_rt_cache",
+                "prism_rt_alpha"):
         conditions = [(setting, value) for key, _modes, setting, value in entries if key == row]
         assert conditions == [('"display.prism_ray_tracing"', '"on"')], row
     # (the traced shadows off with it in the renderer's settings too)
