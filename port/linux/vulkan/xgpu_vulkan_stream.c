@@ -5786,6 +5786,8 @@ struct raster_context
 	/* display.prism_raster_objects "volume": an object's light the volume's
 	alone (else never under Classic's for its pixel) */
 	int objects_volume;
+	/* display.enhanced_light_shadows: 0 off, 1 low, 2 high, 3 ultra */
+	uint32_t light_shadows;
 };
 
 static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light, struct xgpu_vulkan_image *base,
@@ -5794,7 +5796,7 @@ static struct xgpu_vulkan_image *raster_relight(struct xgpu_vulkan_image *light,
 	struct raster_context *raster = (struct raster_context *)context;
 
 	return xgpu_vulkan_bake_raster(light, base, additions, raster->words, raster->extras, raster->view, raster->bake_view,
-		raster->materials, raster->objects_volume, whole);
+		raster->materials, raster->objects_volume, raster->light_shadows, whole);
 }
 
 /* display.lighting "pathtraced": the frame lit by the path tracer
@@ -6270,6 +6272,8 @@ static void stream_gbuffer_phase(void *context, uint32_t value)
 			context.phase = value;
 			context.materials = (value & XGPU_GBUFFER_PHASE_RASTER_MATERIALS) != 0;
 			context.objects_volume = (value & XGPU_GBUFFER_PHASE_RASTER_OBJECTS_VOLUME) != 0;
+			context.light_shadows = raster ? (value & XGPU_GBUFFER_PHASE_RASTER_LIGHT_SHADOWS_MASK) >>
+				XGPU_GBUFFER_PHASE_RASTER_LIGHT_SHADOWS_SHIFT : 0;
 			held = view != 0;
 			if (context.bake_view)
 				view = 2;

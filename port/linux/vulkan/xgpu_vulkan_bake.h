@@ -31,11 +31,13 @@ specular light (*whole set: the frame itself, CE's own where the bake has
 nothing), into an image of its own (RGBA16F, the copy's size), read by the
 resolve in the copy's place; words and extras the G-buffer's targets, view
 SCENE_VIEW's cameras of the pass; the bake's view (XGPU_GBUFFER_VIEW_BAKE_*,
-0 none) shown in the light's place instead. NULL where the bake has nothing
+0 none) shown in the light's place instead; light_shadows display.
+enhanced_light_shadows (0 off to 3 ultra). NULL where the bake has nothing
 to give (CE's frame stays) */
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
-	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume, int *whole);
+	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume,
+	uint32_t light_shadows, int *whole);
 
 /* what lit a frame of Raster's (HALO_RASTER_FRAME_LOG, a diagnostic: its
 changes logged): the bake whole or in part, or CE's frame and why, and

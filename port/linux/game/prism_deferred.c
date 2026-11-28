@@ -104,6 +104,7 @@ void halo_scene_view(short x0, short y0, short x1, short y1, float const camera[
 #define PHASE_RASTER 0x10000ul
 #define PHASE_RASTER_MATERIALS 0x20000ul
 #define PHASE_RASTER_OBJECTS_VOLUME 0x40000ul
+#define PHASE_RASTER_LIGHT_SHADOWS_SHIFT 19
 /* display.lighting "pathtraced" (xgpu_stream.h's
 XGPU_GBUFFER_PHASE_PATHTRACED, from the word's top down, so that Raster's
 bits, from bit 16 up, never meet it), its profile (display.pt_profile) and
@@ -191,6 +192,8 @@ static struct
 	occlusion of the ambient light traced (their structure captured as for
 	the traced sun shadows, with them or alone) */
 	boolean raster_object_occlusion;
+	/* display.enhanced_light_shadows: 0 off, 1 low, 2 high, 3 ultra */
+	unsigned long raster_light_shadows;
 	unsigned long pt_profile;
 	boolean pt_denoiser_off;
 	/* display.pt_light_scale in hundredths (0 off) */
@@ -294,6 +297,14 @@ static void settings_read(
 		prism_deferred.raster_object_shadows = FALSE;
 		prism_deferred.raster_object_occlusion = FALSE;
 	}
+	/* (display.enhanced_light_shadows: the dynamic lights' shadows traced
+	(the flashlight's, the muzzle flashes', the plasma's) by the level, and
+	by the moving objects where their sun shadows are traced, which also
+	take their shadows from the baked lights; "ultra", the default, to
+	"off") */
+	value = config_string("display.enhanced_light_shadows");
+	prism_deferred.raster_light_shadows = !value || !strcmp(value, "ultra") ? 3 : !strcmp(value, "high") ? 2 :
+		!strcmp(value, "low") ? 1 : 0;
 	/* (display.player_shadow: the player's own body traced in first person,
 	its shadow cast in the traced modes) */
 	prism_deferred.body_shadow = config_boolean("display.player_shadow") != 0;
@@ -967,7 +978,8 @@ void prism_deferred_phase(
 		else if (prism_deferred.raster)
 		{
 			value |= PHASE_RASTER | (prism_deferred.raster_materials ? PHASE_RASTER_MATERIALS : 0) |
-				(prism_deferred.raster_objects_volume ? PHASE_RASTER_OBJECTS_VOLUME : 0);
+				(prism_deferred.raster_objects_volume ? PHASE_RASTER_OBJECTS_VOLUME : 0) |
+				(prism_deferred.raster_light_shadows << PHASE_RASTER_LIGHT_SHADOWS_SHIFT);
 		}
 		break;
 	}

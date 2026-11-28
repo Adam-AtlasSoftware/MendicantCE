@@ -9138,7 +9138,8 @@ void xgpu_vulkan_bake_raster_note(int gbuffer)
 
 struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy, struct xgpu_vulkan_image *base,
 	struct xgpu_vulkan_image *additions, struct xgpu_vulkan_image *words, struct xgpu_vulkan_image *extras,
-	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume, int *whole)
+	const struct xgpu_stream_scene_view *view, uint32_t bake_view, int materials, int objects_volume,
+	uint32_t light_shadows, int *whole)
 {
 	struct bake_state *b = bake.bake;
 	const struct xgpu_vulkan_image_description *description;
@@ -9227,10 +9228,12 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	job.coarse = b->bricks_coarse.address;
 	job.counts[3] = b->probes.buffer && b->volume.done ? b->coarse_entries : 0;
 	/* (this frame's dynamic lights: SCENE_LIGHTS' dynamic class, those on;
-	in the frame whole alone (display.prism_raster_composition "materials"):
-	CE's composition takes CE's own dynamic lights' passes (its additions),
-	which would count them twice) */
-	lights = materials ? xgpu_vulkan_scene_light_table(&light_count, &serial) : NULL;
+	with either composition: CE's dynamic lights' diffuse passes draw into
+	the light target, whose light this pass replaces (with CE's composition
+	the flashlight lit nothing the bake lights; only their specular passes,
+	CE's additions, stayed), so their diffuse light is this pass's, shadowed
+	(display.enhanced_light_shadows)) */
+	lights = xgpu_vulkan_scene_light_table(&light_count, &serial);
 	for (index = 0; lights && index < light_count && dynamic < RASTER_LIGHTS; index++)
 	{
 		const struct xgpu_stream_scene_light *l = &lights[index];
@@ -9382,6 +9385,11 @@ struct xgpu_vulkan_image *xgpu_vulkan_bake_raster(struct xgpu_vulkan_image *copy
 	alone, not held at Classic's) */
 	if (objects_volume)
 		flags |= 4u;
+	/* (display.enhanced_light_shadows, bits 8 and 9: the dynamic lights'
+	shadows traced, and the objects' taken from the baked lights; not in the
+	bake's views, the gates' measures) */
+	if (!bake_view)
+		flags |= (light_shadows & 3u) << 8;
 	barrier(commands);
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_RASTER]);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipeline_layouts[PIPELINE_RASTER], 0, 1, &set, 0,

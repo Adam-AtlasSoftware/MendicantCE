@@ -517,6 +517,12 @@ goes into the light target, CE's base and additions with it) */
 irradiance volume's alone; else, with CE's composition, never under the
 light CE gives the object's pixel) */
 #define XGPU_GBUFFER_PHASE_RASTER_OBJECTS_VOLUME 0x40000u
+/* (with it: display.enhanced_light_shadows, bits 19 and 20: 0 off, 1 low, 2
+high, 3 ultra: the dynamic lights' shadows traced, and the moving objects'
+taken from the baked lights where the objects are traced. Path Traced's
+phase never has Raster's bits, nor Raster's its light scale's) */
+#define XGPU_GBUFFER_PHASE_RASTER_LIGHT_SHADOWS_SHIFT 19
+#define XGPU_GBUFFER_PHASE_RASTER_LIGHT_SHADOWS_MASK 0x180000u
 #define XGPU_GBUFFER_PHASE_VIEW_MASK 0xff00u
 /* XGPU_GBUFFER_PHASE_PATHTRACED, or'd into the resolve's value in its
 place (M3, stream version 35): display.lighting "pathtraced" (PRISM Path
