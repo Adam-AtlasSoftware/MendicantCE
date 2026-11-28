@@ -106,7 +106,8 @@ nothing yet. The traced light stays the light shown: the bake only starts what t
 
 - **What is read**: the volume's two cascades (the probes' SH L1 of the light from every direction less the sun's,
   the floor in it, and the sun's visibility: `cascade_at`, `volume_at`, the same lookup Raster's objects take), by
-  their device addresses in either memory (`xgpu_vulkan_bake_park` may have put them in the host's). No lightmap page,
+  their device addresses, only while they are on the card (none while `xgpu_vulkan_bake_park` has put them in the
+  host's: every empty cell's lookup would cross the bus). No lightmap page,
   sun mask, reflection probe or triangle's lightmap coordinates (a whole bake no longer makes the last on the card,
   bd471385f). The light-importance grid (in the scene's block) is read only with `HALO_PT_BAKE_GRID=1`, off by
   default: its lamp picks are by the cell's lists where the live candidates are the light tree's anyway, and its
@@ -119,7 +120,7 @@ nothing yet. The traced light stays the light shown: the bake only starts what t
   `job.cache_settings.w`, 256, samples) lets go of a seed as the cell's own samples come (`tools/test_prism_pt.py`:
   under 3% of it after 400 frames, under 0.1% after 1500). So a place the eye has just come to (a turn, a door, the
   view's edge) has its bounced light at once, not its hits' glow alone until the feeding blocks have lit them, and the
-  volume is read only for the empty cells met and the cells made each frame, whatever memory it is in. Seeding the
+  volume is read only for the empty cells met and the cells made each frame. Seeding the
   cells in the cache pass instead (each empty cell a hit met made and asked of it, so that the light pass held none of
   the volume's code) filled the cache's table with cells no sample came to: a10's turn went darker than with no bake
   (`work/openh1_eval/v4_playtest3/ptnoise`, g8).

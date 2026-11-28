@@ -2344,9 +2344,8 @@ PAGES = {
              "Off: the light as traced, grainy (for checking).|DLSS's plugin: the prism-plugins README.",
              "desktop"),
             ("BAKE GUIDE", "display.prism_pt_bake", ON_OFF,
-             "Uses this world's own shipped lightmaps where the traced light has nothing yet: a room you walk into "
-             "has its bounced light at once, and the lamps are picked by what each place sees. The traced light "
-             "stays what you see.", "desktop"),
+             "Uses this world's own Enhanced bake where the traced light has nothing yet: a room you walk into or "
+             "turn to has its bounced light at once. The traced light stays what you see.", "desktop"),
             (SECTION, "MOVING LIGHTS"),
             ("DYNAMIC LIGHTS", "display.pt_dynamic_lights", [("CLASSIC", "classic"), ("ENHANCED", "enhanced")],
              "Enhanced: plasma bolts and needles light their surroundings too, each with a glow, and a muzzle "

@@ -77,7 +77,8 @@ bake's guide"): the light Path Traced may read of the drawn world's own
 whole bake, only where it was loaded whole for the set drawn now (never
 another geometry's, never a bake not yet whole or whose key is not yet
 checked): its irradiance volume's two cascades (their bricks' tables and the
-probes, by their device addresses, in either memory: xgpu_vulkan_bake_park),
+probes, by their device addresses; none while xgpu_vulkan_bake_park has put
+them in the host's memory),
 their entries and spacings. Its light-importance grid is in the scene's
 block already. 0 (and zeros) where there is none */
 struct xgpu_vulkan_bake_light

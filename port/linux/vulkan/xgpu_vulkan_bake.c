@@ -9618,7 +9618,9 @@ int xgpu_vulkan_bake_lookup_light(struct xgpu_vulkan_bake_light *light)
 	memset(light, 0, sizeof(*light));
 	if (!bake.made || !b || b->generation != bake.control.generation || b->provisional || b->step != STEP_DONE)
 		return 0;
-	if (!b->probes.buffer || !b->volume.done || !b->bricks.address)
+	/* (never while parked: every bounce hit's lookup would cross the bus
+	from the host's memory) */
+	if (!b->probes.buffer || !b->volume.done || !b->bricks.address || b->parked)
 		return 0;
 	light->bricks = b->bricks.address;
 	light->coarse = b->coarse_entries ? b->bricks_coarse.address : 0;

@@ -996,11 +996,11 @@ static const struct config_setting config_settings[] =
 	{ "display.prism_pt_alpha", _config_boolean, "true", "HALO_PRISM_PT_ALPHA", _environment_value, _platform_desktop,
 		"display.prism_rt_alpha under Path Traced lighting (its own key)." },
 	{ "display.prism_pt_bake", _config_boolean, "true", "HALO_PRISM_PT_BAKE", _environment_value, _platform_desktop,
-		"With display.lighting \"pathtraced\": the drawn world's own shipped\n"
-		"lightmaps (never another geometry's) guide the traced light and fill\n"
-		"it in where it has nothing yet: a place just come to has its bounced\n"
-		"light at once, and the lamps are picked by what each place sees. The\n"
-		"traced light stays the light shown. Read each frame." },
+		"With display.lighting \"pathtraced\": the drawn world's own whole\n"
+		"bake's irradiance volume (never another geometry's, never its\n"
+		"lightmaps) fills in the traced light where it has nothing yet: a\n"
+		"place just come to has its bounced light at once. The traced light\n"
+		"stays the light shown. Read each frame." },
 	{ "display.pt_profile", _config_string, "\"quality\"", "HALO_PT_PROFILE", _environment_value,
 		_platform_desktop,
 		"With display.lighting \"pathtraced\": \"quality\" traces a bounce at\n"

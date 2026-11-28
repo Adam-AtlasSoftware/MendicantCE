@@ -1352,6 +1352,8 @@ def test_path_traced_reads_only_its_own_worlds_whole_bake_and_only_where_asked()
     light = bake[bake.index("int xgpu_vulkan_bake_lookup_light("):]
     light = light[:light.index("\n}\n")]
     assert ("b->generation != bake.control.generation || b->provisional || b->step != STEP_DONE" in light)
+    # (none while parked in the host's memory: each empty cell's lookup would cross the bus)
+    assert "|| b->parked)" in light
     host = re.sub(r"/\*.*?\*/", "", (ROOT / "port/linux/vulkan/xgpu_vulkan_pt.c").read_text(), flags=re.S)
     for field in ("pages", "charts", "vpages", "table", "tiles", "indirect", "sun", "masks", "lightmaps",
                   "reflections", "reflection_table", "reflection_data"):

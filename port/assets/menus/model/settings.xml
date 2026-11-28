@@ -1839,7 +1839,7 @@
 			<choice shown="DLSS RR" value="dlss_rr"/>
 		</row>
 		<row key="prism_pt_bake" kind="choice" setting="display.prism_pt_bake" label="BAKE GUIDE" crumb="VIDEO › PRISM › PATH TRACING" when="desktop">
-			<help>Uses this world's own shipped lightmaps where the traced light has nothing yet: a room you walk into has its bounced light at once, and the lamps are picked by what each place sees. The traced light stays what you see.</help>
+			<help>Uses this world's own Enhanced bake where the traced light has nothing yet: a room you walk into or turn to has its bounced light at once. The traced light stays what you see.</help>
 			<choice shown="ON" value="true"/>
 			<choice shown="OFF" value="false"/>
 		</row>
