@@ -1132,6 +1132,15 @@ static int pipeline_make(int which, const VkDescriptorType *types, uint32_t coun
 	return result == VK_SUCCESS;
 }
 
+/* a lost device's (xgpu_vulkan_device_lost_context): the map and BSP the
+bake was told of last, and its mode */
+static void lost_context(void)
+{
+	host_logf(HOST_LOG_ERROR, "prism bake: the device lost on %.*s bsp %d (the bake's mode %u, quality %u)",
+		(int)sizeof(bake.control.map_name), bake.control.map_name[0] ? bake.control.map_name : "no map",
+		(int)bake.control.bsp_index, (unsigned)bake.control.mode, (unsigned)bake.control.quality);
+}
+
 static int make(void)
 {
 	static const VkDescriptorType raster_types[] =
@@ -1248,6 +1257,7 @@ static int make(void)
 	bake.reach_bsp = -1;
 	bake.made = 1;
 	bake.failed = 0;
+	xgpu_vulkan_device_lost_context(lost_context);
 	host_logf(HOST_LOG_INFO, "prism bake: ready");
 	return 1;
 }
@@ -8830,8 +8840,20 @@ void xgpu_vulkan_bake_exposure_step(VkCommandBuffer commands)
 		bake.exposure_clock = now;
 	}
 	push.scene = bake.meter.address;
+	/* (HALO_VULKAN_TEST_FAULT=<n>: from the n-th submission on, the step
+	given an address no buffer has, a real page fault and lost device, for
+	testing the lost device's report on a card. For testing only) */
+	{
+		static long long test_fault = -1;
+
+		if (test_fault < 0)
+			test_fault = getenv("HALO_VULKAN_TEST_FAULT") ? atoll(getenv("HALO_VULKAN_TEST_FAULT")) : 0;
+		if (test_fault > 0 && xgpu_vulkan_serial() >= (uint64_t)test_fault)
+			push.scene = 0x00007ff000000000ull;
+	}
 	push.parameters[0] = mode;
 	barrier(commands);
+	xgpu_vulkan_breadcrumb(commands, 64, "Rebaked's exposure");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, bake.pipelines[PIPELINE_EXPOSURE]);
 	vkCmdPushConstants(commands, bake.pipeline_layouts[PIPELINE_EXPOSURE], VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push),
 		&push);
@@ -9608,6 +9630,27 @@ int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup)
 	lookup->scene = scene_runtime_address(b);
 	lookup->generation = b->generation;
 	lookup->tiles_planned = b->tiles_planned;
+	return 1;
+}
+
+int xgpu_vulkan_bake_lookup_light(struct xgpu_vulkan_bake_light *light)
+{
+	struct bake_state *b = bake.bake;
+
+	memset(light, 0, sizeof(*light));
+	if (!bake.made || !b || b->generation != bake.control.generation || b->provisional || b->step != STEP_DONE)
+		return 0;
+	/* (never while parked: every bounce hit's lookup would cross the bus
+	from the host's memory) */
+	if (!b->probes.buffer || !b->volume.done || !b->bricks.address || b->parked)
+		return 0;
+	light->bricks = b->bricks.address;
+	light->coarse = b->coarse_entries ? b->bricks_coarse.address : 0;
+	light->probes = b->probes.address;
+	light->brick_entries = b->brick_entries;
+	light->coarse_entries = b->coarse_entries;
+	light->probe_spacing = PROBE_SPACING;
+	light->coarse_spacing = COARSE_SPACING;
 	return 1;
 }
 

@@ -72,6 +72,22 @@ struct xgpu_vulkan_bake_lookup
 	uint32_t generation, tiles_planned;
 };
 int xgpu_vulkan_bake_lookup(struct xgpu_vulkan_bake_lookup *lookup);
+/* the bake's guide (display.prism_pt_bake, docs/prism_pathtraced.md "The
+bake's guide"): the light Path Traced may read of the drawn world's own
+whole bake, only where it was loaded whole for the set drawn now (never
+another geometry's, never a bake not yet whole or whose key is not yet
+checked): its irradiance volume's two cascades (their bricks' tables and the
+probes, by their device addresses; none while xgpu_vulkan_bake_park has put
+them in the host's memory),
+their entries and spacings. Its light-importance grid is in the scene's
+block already. 0 (and zeros) where there is none */
+struct xgpu_vulkan_bake_light
+{
+	uint64_t bricks, coarse, probes;
+	uint32_t brick_entries, coarse_entries;
+	float probe_spacing, coarse_spacing;
+};
+int xgpu_vulkan_bake_lookup_light(struct xgpu_vulkan_bake_light *light);
 /* PRISM Path Traced short of the card's memory (xgpu_vulkan_pt.c): the
 bake's light, which it never reads, put in the host's memory (a whole bake's:
 nothing more baked, nothing being read from the file), the card's freed

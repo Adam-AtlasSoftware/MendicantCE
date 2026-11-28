@@ -54,7 +54,7 @@ The pages it opens:
 | --- | --- | --- |
 | Classic Lighting | Shadow Quality, Smooth Lighting, Dynamic Lights: the game's own options | C |
 | Enhanced Lighting | Sky Light, Light Mix (`display.prism_raster_composition`), Object Lighting, Dynamic Lights (`display.enhanced_dynamic_lights`), Light Shadows (`display.enhanced_light_shadows`: the flashlight's, headlights' and the other moving lights' traced shadows, docs/prism_bake.md); Ray Tracing (`display.prism_ray_tracing`, greyed where the card cannot trace rays), then while it is on Object Shadows, Object Occlusion (`display.prism_raster_object_occlusion`: the moving objects' traced ambient occlusion, docs/prism_bake.md), Traced Models, Model Cache, Cutout Shadows; Shadow Quality (`display.enhanced_shadow_resolution`) while the object shadows are the game's | E |
-| Path Tracing | Profile, Denoiser; Dynamic Lights (`display.pt_dynamic_lights`), Light Brightness, Light Saturation; Traced Models, Model Cache, Cutout Shadows (`display.prism_pt_objects`, `_cache`, `_alpha`) | P |
+| Path Tracing | Profile, Denoiser, Bake Guide (`display.prism_pt_bake`: the drawn world's own whole bake's irradiance volume fills in the traced light where it has nothing yet, docs/prism_pathtraced.md "The bake's guide"); Dynamic Lights (`display.pt_dynamic_lights`), Light Brightness, Light Saturation; Traced Models, Model Cache, Cutout Shadows (`display.prism_pt_objects`, `_cache`, `_alpha`) | P |
 | Image | Exposure, Exposure Bias, Tone Curve (E, P); Bloom, Tone Grade (every mode) | |
 | Upscaling | Upscaler, Upscale Quality | E, P |
 | Lightmap Downloads | Classic Geometry, Enhanced Geometry (each its state) | E, P |

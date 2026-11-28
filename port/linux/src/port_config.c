@@ -995,6 +995,12 @@ static const struct config_setting config_settings[] =
 		"display.prism_rt_cache under Path Traced lighting (its own key)." },
 	{ "display.prism_pt_alpha", _config_boolean, "true", "HALO_PRISM_PT_ALPHA", _environment_value, _platform_desktop,
 		"display.prism_rt_alpha under Path Traced lighting (its own key)." },
+	{ "display.prism_pt_bake", _config_boolean, "true", "HALO_PRISM_PT_BAKE", _environment_value, _platform_desktop,
+		"With display.lighting \"pathtraced\": the drawn world's own whole\n"
+		"bake's irradiance volume (never another geometry's, never its\n"
+		"lightmaps) fills in the traced light where it has nothing yet: a\n"
+		"place just come to has its bounced light at once. The traced light\n"
+		"stays the light shown. Read each frame." },
 	{ "display.pt_profile", _config_string, "\"quality\"", "HALO_PT_PROFILE", _environment_value,
 		_platform_desktop,
 		"With display.lighting \"pathtraced\": \"quality\" traces a bounce at\n"
@@ -4743,7 +4749,7 @@ static const char *const config_display_order[] =
 	"display.pt_profile", "display.pt_light_scale", "display.pt_clarity", "display.denoiser",
 	"display.pt_dynamic_lights", "display.prism_glow_lights",
 	"display.prism_dynamic_lights", "display.prism_light_saturation", "display.prism_pt_objects",
-	"display.prism_pt_cache", "display.prism_pt_alpha",
+	"display.prism_pt_cache", "display.prism_pt_alpha", "display.prism_pt_bake",
 	"=The enhancements (display.enhancements, a preset of the settings it chooses; every lighting mode, the\n"
 		"world's geometry under Enhanced and Path Traced)",
 	"display.enhancements", "display.world_geometry", "display.prism_world_geometry_detail",
@@ -4829,6 +4835,7 @@ static const struct
 	{ "display.prism_pt_objects", LIGHTING_PATH_TRACED },
 	{ "display.prism_pt_cache", LIGHTING_PATH_TRACED },
 	{ "display.prism_pt_alpha", LIGHTING_PATH_TRACED },
+	{ "display.prism_pt_bake", LIGHTING_PATH_TRACED },
 	{ "display.upscaler", "Enhanced and Path Traced (Classic draws without one)" },
 	{ "display.upscaler_scale", "Enhanced and Path Traced, with display.upscaler on" },
 	{ "display.upscaler_sharpness", "Enhanced and Path Traced, with display.upscaler on" },

@@ -2964,6 +2964,7 @@ static struct
 	{ "op_prism_pt_objects", LIGHTING_P, NULL, NULL },
 	{ "op_prism_pt_cache", LIGHTING_P, NULL, NULL },
 	{ "op_prism_pt_alpha", LIGHTING_P, NULL, NULL },
+	{ "op_prism_pt_bake", LIGHTING_P, NULL, NULL },
 	/* (Image: the PRISM modes' exposure and tone curve) */
 	{ "op_prism_exposure", LIGHTING_E | LIGHTING_P, NULL, NULL },
 	{ "op_prism_exposure_bias", LIGHTING_E | LIGHTING_P, NULL, NULL },

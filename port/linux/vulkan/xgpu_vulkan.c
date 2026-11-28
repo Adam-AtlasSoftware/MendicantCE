@@ -1268,10 +1268,14 @@ static struct
 	the last whose work before it was done), its checkpoints
 	(VK_NV_device_diagnostic_checkpoints), its fault's description
 	(VK_EXT_device_fault); what a user of the device adds
-	(xgpu_vulkan_device_lost_note) */
+	(xgpu_vulkan_device_lost_note) and logs (xgpu_vulkan_device_lost_context);
+	each step's last submission (the steps of the last few submissions
+	logged: the mode and passes then drawn) */
 	struct
 	{
 		const char *names[256];
+		uint64_t serials[256];
+		uint32_t orders[256], order;
 		const char *last;
 		uint64_t last_serial;
 		VkBuffer markers;
@@ -1282,6 +1286,7 @@ static struct
 		PFN_vkGetQueueCheckpointDataNV checkpoint_data;
 		PFN_vkGetDeviceFaultInfoEXT fault_info;
 		void (*note)(char *text, size_t size);
+		void (*context[4])(void);
 		int reporting;
 	} lost;
 	/* display.prism_rt: the device has acceleration structures and ray
@@ -2081,17 +2086,22 @@ known of where the GPU was: the last step recorded (xgpu_vulkan_breadcrumb:
 Path Traced's passes), and where the device can say, what it had begun and
 finished (VK_AMD_buffer_marker's markers, VK_NV_device_diagnostic_
 checkpoints' checkpoints) and its fault (VK_EXT_device_fault). A marker is
-the step's id and the low 24 bits of its submission's serial. */
+the step's id and the low 24 bits of its submission's serial. Every
+submission's main commands begin and end with a step of their own
+(SUBMISSION_BEGUN, SUBMISSION_DONE: Classic's frames too, which name no
+other), not the last step recorded. */
 
-void xgpu_vulkan_breadcrumb(VkCommandBuffer commands, uint32_t id, const char *name)
+#define SUBMISSION_BEGUN 30u
+#define SUBMISSION_DONE 31u
+#define SKIN_STEP 32u
+
+static void breadcrumb_write(VkCommandBuffer commands, uint32_t id, const char *name)
 {
 	uint32_t marker;
 
-	if (!commands || !id || id > 255)
-		return;
 	vk.lost.names[id] = name;
-	vk.lost.last = name;
-	vk.lost.last_serial = vk.serial;
+	vk.lost.serials[id] = vk.serial;
+	vk.lost.orders[id] = ++vk.lost.order;
 	marker = id | ((uint32_t)vk.serial << 8);
 	if (vk.lost.markers_mapped && vk.lost.write_marker)
 	{
@@ -2104,9 +2114,30 @@ void xgpu_vulkan_breadcrumb(VkCommandBuffer commands, uint32_t id, const char *n
 		vk.lost.set_checkpoint(commands, (const void *)(uintptr_t)marker);
 }
 
+void xgpu_vulkan_breadcrumb(VkCommandBuffer commands, uint32_t id, const char *name)
+{
+	if (!commands || !id || id > 255)
+		return;
+	vk.lost.last = name;
+	vk.lost.last_serial = vk.serial;
+	breadcrumb_write(commands, id, name);
+}
+
 void xgpu_vulkan_device_lost_note(void (*note)(char *text, size_t size))
 {
 	vk.lost.note = note;
+}
+
+void xgpu_vulkan_device_lost_context(void (*context)(void))
+{
+	uint32_t index;
+
+	for (index = 0; index < sizeof(vk.lost.context) / sizeof(vk.lost.context[0]); index++)
+		if (!vk.lost.context[index] || vk.lost.context[index] == context)
+		{
+			vk.lost.context[index] = context;
+			return;
+		}
 }
 
 /* a marker's step, as words */
@@ -2147,11 +2178,21 @@ static void device_lost_where(void)
 		}
 		if (count)
 			vk.lost.checkpoint_data(vk.queue, &count, points);
+		/* (one a stage: the last checkpoint the stage reached; the top of
+		the pipe's the last begun, the bottom's the last before which every
+		command finished) */
+		if (!count)
+			host_logf(HOST_LOG_ERROR, "vulkan: the device's checkpoints: none reached");
 		for (index = 0; index < count && index < 16; index++)
 		{
 			marker_text((uint32_t)(uintptr_t)points[index].pCheckpointMarker, done, sizeof(done));
-			host_logf(HOST_LOG_ERROR, "vulkan: the device's checkpoint: %s at stage 0x%x", done,
-				(unsigned)points[index].stage);
+			if (points[index].stage == VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT)
+				host_logf(HOST_LOG_ERROR, "vulkan: the device's checkpoints: the last step begun %s", done);
+			else if (points[index].stage == VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT)
+				host_logf(HOST_LOG_ERROR, "vulkan: the device's checkpoints: every command before %s finished", done);
+			else
+				host_logf(HOST_LOG_ERROR, "vulkan: the device's checkpoints: %s at stage 0x%x", done,
+					(unsigned)points[index].stage);
 		}
 	}
 	if (vk.lost.fault_info)
@@ -2189,12 +2230,61 @@ static void device_lost_where(void)
 	}
 }
 
+/* the steps last recorded in each of the last submissions
+(LOST_STEPS_SUBMISSIONS), the oldest first, each in the order recorded:
+what the frames drew (Rebaked's, Path Traced's passes, the upscaler's) */
+#define LOST_STEPS_SUBMISSIONS 3u
+#define LOST_STEPS_LINE 320u
+static void device_lost_steps(void)
+{
+	char text[LOST_STEPS_LINE + 256];
+	uint64_t serial, first = vk.serial >= LOST_STEPS_SUBMISSIONS ? vk.serial - LOST_STEPS_SUBMISSIONS + 1 : 0;
+	uint32_t ids[256], count, id, index, at;
+
+	for (serial = first; serial <= vk.serial; serial++)
+	{
+		size_t used = 0;
+
+		count = 0;
+		for (id = 1; id < 256; id++)
+			if (vk.lost.names[id] && vk.lost.serials[id] == serial)
+			{
+				/* (by the order recorded: an insertion, stable) */
+				for (at = count; at > 0 && vk.lost.orders[ids[at - 1]] > vk.lost.orders[id]; at--)
+					ids[at] = ids[at - 1];
+				ids[at] = id;
+				count++;
+			}
+		/* (a line of at most LOST_STEPS_LINE characters, more lines after
+		it: the log's lines are short) */
+		text[0] = 0;
+		for (index = 0; index <= count; index++)
+		{
+			size_t length = index < count ? strlen(vk.lost.names[ids[index]]) + 2 : 0;
+
+			if (used && (index == count || used + length > LOST_STEPS_LINE))
+			{
+				host_logf(HOST_LOG_ERROR, "vulkan: the steps last recorded in submission %llu: %s%s",
+					(unsigned long long)serial, text, index < count ? ";" : "");
+				used = 0;
+				text[0] = 0;
+			}
+			if (index < count)
+			{
+				snprintf(text + used, sizeof(text) - used, "%s%s", used ? "; " : "", vk.lost.names[ids[index]]);
+				used += strlen(text + used);
+			}
+		}
+	}
+}
+
 /* the device lost: what is known logged, then the game ended with a
 message (and what a user of the device adds: Path Traced's "in PRISM Path
 Traced", which the next start reads, report.c) */
 static void device_lost_report(void)
 {
 	char note[512];
+	uint32_t index;
 
 	note[0] = 0;
 	if (!vk.lost.reporting)
@@ -2203,7 +2293,11 @@ static void device_lost_report(void)
 		host_logf(HOST_LOG_ERROR, "vulkan: the device was lost: submission %llu recorded, %llu done; the last step "
 			"recorded %s (submission %llu)", (unsigned long long)vk.serial, (unsigned long long)vk.completed,
 			vk.lost.last ? vk.lost.last : "none", (unsigned long long)vk.lost.last_serial);
+		device_lost_steps();
 		device_lost_where();
+		for (index = 0; index < sizeof(vk.lost.context) / sizeof(vk.lost.context[0]); index++)
+			if (vk.lost.context[index])
+				vk.lost.context[index]();
 		if (vk.lost.note)
 			vk.lost.note(note, sizeof(note));
 	}
@@ -2215,9 +2309,14 @@ static void device_lost_report(void)
 static uint64_t completed_serial(void)
 {
 	uint64_t value = vk.completed;
+	VkResult result = vkGetSemaphoreCounterValue(vk.device, vk.timeline, &value);
 
-	if (vkGetSemaphoreCounterValue(vk.device, vk.timeline, &value) == VK_SUCCESS && value > vk.completed)
+	if (result == VK_SUCCESS && value > vk.completed)
 		vk.completed = value;
+	/* (a lost device told here too: a frame that polls for the GPU's
+	progress, never waiting for it, would draw on without the report) */
+	else if (result == VK_ERROR_DEVICE_LOST)
+		check(result, "vkGetSemaphoreCounterValue");
 	return vk.completed;
 }
 
@@ -2234,12 +2333,40 @@ to its wait, or ruled out */
 static uint64_t skin_frame_number(void);
 static uint32_t long_waits;
 
+/* a GPU that finishes nothing for HANG_SECONDS while the render thread
+waits for it (HALO_VULKAN_HANG_SECONDS; 0 waits for ever) is taken as a lost
+device and reported as one: NVIDIA's driver, after a fault it recovers the
+channel from (Xid 109, the context switch's timeout, seen on Atlas's RTX
+3090s for a traced pass's read of an address no buffer has), never ended
+the wait, and the game hung with nothing logged. No frame's work takes the
+GPU seconds (the bake's and the passes' are budgeted to milliseconds; a
+Windows driver resets after 2 s) */
+#define HANG_SECONDS 15.0
+#define HANG_WAIT_NANOSECONDS 500000000ull
+
+static double hang_seconds(void)
+{
+	static double seconds = -1.0;
+
+	if (seconds < 0.0)
+	{
+		const char *text = getenv("HALO_VULKAN_HANG_SECONDS");
+
+		seconds = text && *text ? atof(text) : HANG_SECONDS;
+		if (seconds < 0.0)
+			seconds = 0.0;
+	}
+	return seconds;
+}
+
 /* waits until the GPU has passed serial */
 #define serial_wait(serial) serial_wait_at((serial), __func__, __LINE__)
 static void serial_wait_at(uint64_t serial, const char *where, int line)
 {
 	VkSemaphoreWaitInfo info;
-	double started, began;
+	double started, began, progressed;
+	uint64_t progress;
+	VkResult result;
 
 	if (serial <= completed_serial())
 		return;
@@ -2249,8 +2376,31 @@ static void serial_wait_at(uint64_t serial, const char *where, int line)
 	info.pSemaphores = &vk.timeline;
 	info.pValues = &serial;
 	started = host_load_trace_enabled() ? host_load_trace_clock(CLOCK_MONOTONIC) : -1.0;
-	began = seconds_now();
-	check(vkWaitSemaphores(vk.device, &info, UINT64_MAX), "vkWaitSemaphores");
+	began = progressed = seconds_now();
+	progress = vk.completed;
+	/* (in steps, the GPU's progress looked at between them: a GPU that
+	finishes nothing for hang_seconds() is reported as lost) */
+	while ((result = vkWaitSemaphores(vk.device, &info, hang_seconds() > 0.0 ? HANG_WAIT_NANOSECONDS : UINT64_MAX)) ==
+		VK_TIMEOUT)
+	{
+		double now = seconds_now();
+
+		if (completed_serial() >= serial)
+			break;
+		if (vk.completed != progress)
+		{
+			progress = vk.completed;
+			progressed = now;
+		}
+		else if (now - progressed >= hang_seconds())
+		{
+			host_logf(HOST_LOG_ERROR, "vulkan: the GPU finished nothing for %.1f s: submission %llu waited for (%s:%d), "
+				"%llu done; taken as a lost device", now - progressed, (unsigned long long)serial, where, line,
+				(unsigned long long)vk.completed);
+			device_lost_report();
+		}
+	}
+	check(result, "vkWaitSemaphores");
 	{
 		double spent = seconds_now() - began;
 
@@ -2621,6 +2771,8 @@ static void recording_begin(void)
 	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	check(vkBeginCommandBuffer(slot->main, &begin), "vkBeginCommandBuffer");
+	if (vk.lost.markers_mapped || vk.lost.set_checkpoint)
+		breadcrumb_write(slot->main, SUBMISSION_BEGUN, "the submission's first commands");
 	/* A submission can have no early uploads. Its draws still need to
 	wait for prior reads, notably the previous frame's presentation blit
 	from the same color target. The timeline tracks completion for the
@@ -9158,6 +9310,10 @@ static int skin_dispatch(struct xgpu_vulkan_mesh_buffer *rest, uint32_t first, u
 	commands = early_commands();
 	barrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+	/* (a lost device's step: the submission's first skinning alone, the
+	models' many dispatches one step) */
+	if (vk.lost.serials[SKIN_STEP] != vk.serial || !vk.lost.names[SKIN_STEP])
+		xgpu_vulkan_breadcrumb(commands, SKIN_STEP, "the models' skinning");
 	vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.pipeline);
 	vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, skin.layout, 0, 1, &rest->set, 0, NULL);
 	push.first = first;
@@ -9518,6 +9674,8 @@ static uint64_t submit(VkSemaphore wait_semaphore, VkSemaphore signal_semaphore)
 		check(vkEndCommandBuffer(vk.slot->early), "vkEndCommandBuffer");
 		buffers[count++] = vk.slot->early;
 	}
+	if (vk.lost.markers_mapped || vk.lost.set_checkpoint)
+		breadcrumb_write(vk.slot->main, SUBMISSION_DONE, "the submission's last commands");
 	check(vkEndCommandBuffer(vk.slot->main), "vkEndCommandBuffer");
 	buffers[count++] = vk.slot->main;
 	/* (a barrier no pass came after, a transfer with no number: the next
@@ -11951,14 +12109,19 @@ static int device_make(const struct xgpu_vulkan_options *options)
 	VkPhysicalDeviceRayQueryFeaturesKHR available_queries, queries;
 	VkPhysicalDeviceBufferDeviceAddressFeatures addresses;
 	/* (a lost device's diagnosis, device_lost_report: its fault's
-	description and AMD's markers where the device has them, NVIDIA's
-	checkpoints with HALO_VULKAN_CHECKPOINTS=1 (they cost a little);
-	HALO_VULKAN_NO_DIAGNOSIS none of them) */
+	description where the device has it, and one vendor's record of the
+	steps begun and finished: NVIDIA's checkpoints on NVIDIA's cards, AMD's
+	buffer markers on the others' (NVIDIA's driver has AMD's markers too,
+	but its own checkpoints are what it keeps through its faults);
+	HALO_VULKAN_CHECKPOINTS=1 the checkpoints wherever the device has them,
+	0 AMD's markers on NVIDIA too; HALO_VULKAN_NO_DIAGNOSIS none of them) */
 	int diagnosis = !getenv("HALO_VULKAN_NO_DIAGNOSIS");
 	int fault = diagnosis && device_has_extension(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
-	int markers = diagnosis && device_has_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
-	int checkpoints = diagnosis && getenv("HALO_VULKAN_CHECKPOINTS") && atoi(getenv("HALO_VULKAN_CHECKPOINTS")) != 0 &&
-		device_has_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+	const char *checkpoints_wanted = getenv("HALO_VULKAN_CHECKPOINTS");
+	int checkpoints = diagnosis && device_has_extension(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME) &&
+		(checkpoints_wanted && *checkpoints_wanted ? atoi(checkpoints_wanted) != 0 :
+		vk.properties.vendorID == 0x10de);
+	int markers = diagnosis && !checkpoints && device_has_extension(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
 	VkPhysicalDeviceFaultFeaturesEXT available_fault, fault_features;
 	void **chain;
 	/* (the renderer plugins': their first extension, where the chain was
@@ -12363,9 +12526,24 @@ static int device_make(const struct xgpu_vulkan_options *options)
 		else
 			vk.lost.write_marker = NULL;
 	}
-	if (vk.lost.fault_info || vk.lost.write_marker || vk.lost.set_checkpoint)
-		host_logf(HOST_LOG_INFO, "vulkan: a lost device's diagnosis:%s%s%s", vk.lost.fault_info ? " its fault" : "",
-			vk.lost.write_marker ? " AMD's markers" : "", vk.lost.set_checkpoint ? " NVIDIA's checkpoints" : "");
+	/* (what a lost device would log, named by the extensions: a line read
+	at the start, before any device is lost) */
+	{
+		char kept[192];
+
+		kept[0] = 0;
+		if (vk.lost.set_checkpoint)
+			snprintf(kept + strlen(kept), sizeof(kept) - strlen(kept), "%sNVIDIA's checkpoints "
+				"(VK_NV_device_diagnostic_checkpoints)", kept[0] ? ", " : "");
+		if (vk.lost.write_marker)
+			snprintf(kept + strlen(kept), sizeof(kept) - strlen(kept), "%sAMD's buffer markers (VK_AMD_buffer_marker)",
+				kept[0] ? ", " : "");
+		if (vk.lost.fault_info)
+			snprintf(kept + strlen(kept), sizeof(kept) - strlen(kept), "%sthe fault's description (VK_EXT_device_fault)",
+				kept[0] ? ", " : "");
+		host_logf(HOST_LOG_INFO, "vulkan: should the device be lost, halo.log gets the last step recorded%s%s",
+			kept[0] ? " and " : " (no device's record of its steps)", kept);
+	}
 	if (vk.capabilities.ray_queries)
 	{
 		VkPhysicalDeviceAccelerationStructurePropertiesKHR structure_properties;

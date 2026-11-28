@@ -3,8 +3,9 @@
 PRISM v4's milestone M3 (`overhaul_research/prism_v4_renderer/design.md`, sections 1.5, 2.1, 3.8 and 7): with
 `display.lighting` `"pathtraced"`, every CE light is off and the deferred core's opaque pixels are lit by the path
 tracer, from the G-buffer (raster primary visibility) and the scene the bake makes of the level (`docs/prism_bake.md`),
-never its baked light (below, "No baked light"; the sections after it that speak of the bake's light at a pixel or a
-hit describe the path tracer before 2026-11-27).
+never its baked light at a pixel (below, "No baked light"; the sections after it that speak of the bake's light at a
+pixel or a hit describe the path tracer before 2026-11-27), only, with `display.prism_pt_bake`, the drawn world's own
+whole bake's irradiance volume where the traced light has nothing yet ("The bake's guide").
 This document says what the path tracer traces, what it reads from the bake, which light each term carries (so that
 nothing is counted twice), the denoiser, the reference it is judged against, and what is not done yet. The gates'
 figures are in `docs/prism_gates.md` ("M3: Path Traced").
@@ -38,7 +39,11 @@ too).
 
 ## No baked light
 
-Adam's rule (2026-11-27): Path Traced's geometry and lighting do not depend on bakes. Its geometry is the selected one
+Adam's rule (2026-11-27): Path Traced's geometry and lighting do not depend on bakes. He relaxed it the same day ("we
+can use the enhanced bakes as much as needed to improve Path Traced lighting quality and performance"): the bake of
+the drawn world's own geometry set, never another set's, may guide and fill in the traced light ("The bake's guide",
+below), the traced light staying the light shown. What follows is the path tracer without it, as it still is with
+`display.prism_pt_bake` off or no whole bake of the set drawn. Its geometry is the selected one
 whatever the bakes (`docs/prism_geometry.md`); its light is the same whether or not a pack or a bake of this machine is
 installed. The path tracer still traces the scene the bake's code makes for the BSP (`SCENE_STATIC`'s level, the
 static scenery, the materials, the lamps, the fixtures and the rig: the geometry and the lights, made with or without a
@@ -91,6 +96,75 @@ it before, 18.3 (13.9) after; hall 22.1 (18.3) and 19.3 (15.4) before, 24.3 (20.
 before, 19.3 after; hall 18.2 and 15.3 before, 19.3 after. So about the cost of the old no-pack frame plus up to 10%,
 and up to 26% over a frame that read a whole bake in the hall. Lighting every hit at every pixel (every pixel feeding)
 cost 36 and 84 ms; one scattered pixel in 16, 22 and 46.
+
+## The bake's guide
+
+`display.prism_pt_bake` (Settings > Video > PRISM > Path Tracing, Bake Guide; on by default): where the drawn world's
+own whole bake is loaded (`xgpu_vulkan_bake_lookup_light`: the bake of the set drawn now, whole, its key checked, never
+another geometry's, never a bake not yet whole), the path tracer reads its irradiance volume where its own light has
+nothing yet. The traced light stays the light shown: the bake only starts what the traced samples then replace.
+
+- **What is read**: the volume's two cascades (the probes' SH L1 of the light from every direction less the sun's,
+  the floor in it, and the sun's visibility: `cascade_at`, `volume_at`, the same lookup Raster's objects take), by
+  their device addresses, only while they are on the card (none while `xgpu_vulkan_bake_park` has put them in the
+  host's: every empty cell's lookup would cross the bus). No lightmap page,
+  sun mask, reflection probe or triangle's lightmap coordinates (a whole bake no longer makes the last on the card,
+  bd471385f). The light-importance grid (in the scene's block) is read only with `HALO_PT_BAKE_GRID=1`, off by
+  default: its lamp picks are by the cell's lists where the live candidates are the light tree's anyway, and its
+  lookups cost the light pass time for nothing the frames showed.
+- **Where**: only where the traced light has nothing yet. A hit (a bounce's, its next bounce's) whose radiance cache
+  cell holds no sample takes the bake's light there in place of its glow alone (`bake_hit_light`: its glow and its
+  albedo by the volume's light less the floor, never passed on, and the sun's by the volume's visibility); a cell made
+  by a feeding block's hit takes `BAKE_SEED` (4) samples of that light beside its own first, and a pixels' cell
+  ("The pixels' cells", below) 4 samples of the volume's light less the floor. The running mean (at most
+  `job.cache_settings.w`, 256, samples) lets go of a seed as the cell's own samples come (`tools/test_prism_pt.py`:
+  under 3% of it after 400 frames, under 0.1% after 1500). So a place the eye has just come to (a turn, a door, the
+  view's edge) has its bounced light at once, not its hits' glow alone until the feeding blocks have lit them, and the
+  volume is read only for the empty cells met and the cells made each frame. Seeding the
+  cells in the cache pass instead (each empty cell a hit met made and asked of it, so that the light pass held none of
+  the volume's code) filled the cache's table with cells no sample came to: a10's turn went darker than with no bake
+  (`work/openh1_eval/v4_playtest3/ptnoise`, g8).
+- **What it does**: below ("The dark interiors' third round"); with "The pixels' cells" it is what makes a turn's
+  first frames right. The pixels' cells without the guide (`HALO_PT_BAKE=0`) changed nothing measurable: a place just
+  turned to has no cell yet.
+- With it off, or no whole bake of the set drawn, the path tracer is as "No baked light" says (the log: "the bake's
+  guide off" or "wanted, no whole bake of the drawn world's own").
+
+### The dark interiors' third round (2026-11-28)
+
+Adam: the Path Traced noise in darkly lit interiors "still absolutely needs some work"; the bake of the drawn world's
+own set may be used. Measured at eleven poses in a10's corridors (G5's first and a second), c10's Forerunner halls
+(four, two BSPs), c20's library and d40's corridors (four, two BSPs), World Geometry Enhanced with the release's
+shipped packs, 3440 × 1440 with the kit's DLSS (quality: the light at 2305 × 965), the quality profile, a fixed
+exposure and the filmic curve (`work/openh1_eval/v4_playtest3/ptnoise`: its `scripts/gen.py` paths, `scripts/job.py`
+runs on Atlas's RTX 3090s, 8-bit luma at 860 × 360):
+
+- **Still** (400 frames held, the last 16): each pixel's frame-to-frame standard deviation was already 0.1 of a level
+  in 255 everywhere; the error against a 4096-path reference (1720 × 720, upsampled) is the denoiser's spatial bias,
+  as before. The mean luma against the reference's: 0.883 to 0.997 before, the same or closer after at every pose
+  (c10's darkest hall 0.937 to 0.959), never further: the guide does not change the traced light's look.
+- **Moving** (a 1.5-unit walk turning 25 degrees over 90 frames, its frames 30, 60 and 90 against the same poses held
+  300 frames): the specular view (`pt_specular`) carried most of the error (c10: 41% of its light against 9% for the
+  diffuse) and the moving frames were darker than held still (c10 2.6, c20 2.1, a10 1.9 levels of 57.8, 25.1 and 62.1),
+  the specular hold's 3 × 3 and the short history's cap taking sparse bright samples away. After (the 13-sample hold,
+  the pixels' cells, the guide): RMS error c10 12.35 to 12.31, d40 7.08 to 6.82, c20 8.25 to 7.83, a10 7.32 to 7.13;
+  the darkening c10 2.64 to 1.41, c20 2.10 to 1.25, a10 1.89 to 1.23, d40 -0.34 to +0.15.
+- **A turn** (the eye turned 180 degrees onto a place unseen for 600 frames; its frames 1 to 64 against it held 400):
+  a10's corridor RMS 18.3, 15.3, 13.4, 11.1 at 1, 4, 8 and 16 frames before, 14.4, 12.7, 11.2, 9.4 after, its mean
+  6.7 levels dark before, 2.2 after; c10 2.2 to 1.5 levels dark, d40 1.3 to 0.65, c20 1.5 to 1.3, their RMS within
+  0.3 either way (c10's 0.1 to 0.3 above: the feeding blocks' quarter; with one in 32 the same as before).
+- **The frame time** (the RTX 3070 Ti, c10's four poses held 600 frames and walked to and fro, `HALO_PT_TIMES_FILE`,
+  the median of each run's frames past its first 600): before 19.57, 19.58, 19.65 and 19.74 ms (the light pass 13.84
+  to 13.97), after 19.82, 19.83 and 19.94 (the light pass 13.89 to 13.95, the temporal pass 2.15 to 2.23 against 2.00
+  to 2.02): the light pass as before, the temporal pass's hold and cells about 0.2 ms, 1% of the frame. The way there: the guide's volume
+  lookups in three places of the light pass (an empty cell met at the bounce's hit and at its next bounce, and a
+  feeding hit's new cell) cost 1.0 ms of its registers whether or not they ran; at the bounce's hit alone, the pixels'
+  cells fed by the temporal pass and one feeding block in 64 rather than 16 (half and a quarter as many pixels lighting
+  their hits fully) brought it back.
+- Tried and not kept: the pixels' cells' mean as history where a pixel had none (its blocks), the guide's seeds made in
+  the cache pass (above), the grid's lamp picks (`HALO_PT_BAKE_GRID`: its lookups' cost, no gain the live candidates,
+  all the light tree's, showed), a looser hold (half the history at most a frame: no change) and the whole 5 × 5, the
+  fast history's hold at twice its width and the histories' anti-firefly off (neither moved the moving error).
 
 ## Which light each term carries
 
@@ -576,6 +650,22 @@ cells once (2^19 cells of 12 words, 24 MB) and empties them for each bake's scen
   path tracer reads no bake ("No baked light"), and the cache holds each hit's own light and carries the bounces past
   the first: on by default.
 - `HALO_PT_CACHE=0` turns it off (one bounce, its hit lit directly; `1`, the default, on).
+- **The feeding blocks** (the dark interiors' third round): one 8 × 8 block in 64 (`HALO_PT_CACHE_FEED`, a power of
+  two; 16 before) lights its hits and feeds their cells. With the bake's guide an empty cell met has the bake's light
+  rather than its glow alone, so a quarter as many feeding pixels pay for the guide's and the pixels' cells' cost (the
+  turns' and moves' error a few percent above 32's, below 16 with no guide: "The dark interiors' third round").
+- **The pixels' cells** (the dark interiors' third round; `HALO_PT_PRIOR_CAP`, in hundredths, 800 by default, 0 none):
+  a cell also holds the diffuse light the pixels whose surface lies in it took (its words 10 to 17: the light pass's
+  noisy diffuse light, the signal the denoiser filters, fed by the temporal pass for the feeding blocks' pixels, so
+  that the light pass holds none of its code; folded as the hits' light is), seeded where it is made with 4 samples of
+  the bake's light there less the floor where the bake's guide is on. Where a pixel's history is short (under 16
+  frames: a disocclusion, the view's edge as the eye turns, a place just come to) the temporal pass's cap of its new
+  sample is, for its first 8 frames, never under 8 times its cell's mean: the cap by its neighbours' brightest samples (4 times, as sparse as
+  its own) took most of a dark room's rare bright samples away (a lamp few candidates find, a bounce off a lit
+  patch), so a moving eye's frames there were darker than a still one's, and a turned-to view's first frames darker
+  still. The place's light, the world over, says how bright a sample there may be; a firefly far past it is still
+  held. Taking the cell's mean itself as frames of history where a pixel had none (tried: as 3 frames, as 1) gave a
+  new pixel the cell's blocks (its cube is 0.03 units by the distance's power of two) and the turns' error rose.
 
 **The indirect light's clamp** (`HALO_PT_INDIRECT_CLAMP=<luminance>`, off by default): a bounce's light past that
 luminance (the bake's unit, a white surface's radiance) is scaled down to it, its hue kept. It takes energy away
@@ -617,9 +707,10 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   moments there (2 × 2 taps, each this surface's), mixed with the surface's by `1 − smoothstep(0.1, 0.45, roughness)`;
   where the image's place holds no history of this surface, the specular's history is shortened in that proportion.
   Round 3's glossy floors in motion streaked toward the point the eye moved to: their history went with the surface.
-  **The specular hold** (round 8, `HALO_PT_SPEC_HOLD`, on by default): while the eye moves, a glossy surface's
-  (roughness under 0.6) specular history is held no brighter than the brightest of this frame's samples over the
-  pixel's 3 × 3 on the same surface, as a TAA's clamp: a glint the history carries where nothing about it reflects one
+  **The specular hold** (round 8, `HALO_PT_SPEC_HOLD`, on by default; since the dark interiors' third round over the
+  pixel's 3 × 3 and the 5 × 5's four along the axes, 13 samples; `HALO_PT_SPEC_HOLD=1` the 3 × 3): while the eye moves, a
+  glossy surface's (roughness under 0.6) specular history is held no brighter than the brightest of this frame's
+  samples over the pixel's 3 × 3 on the same surface, as a TAA's clamp: a glint the history carries where nothing about it reflects one
   now is a reflection that has moved on, and the reprojection's taps smear it into a radial streak along a forward move
   (round 7's G4). A lamp's highlight that is still there is among the frame's samples (ReSTIR finds the lamp most
   frames) and is kept; a still eye is never held. It costs nothing measurable (the temporal pass 1.81 ms either way).
@@ -627,6 +718,11 @@ published methods (ReLAX's and SVGF's; no NVIDIA SDK code):
   surface's history moves with the surface and is never smeared that way. With the hold the gate's moving frames
   are no longer exactly repeatable from run to run (whether a frame's camera moved depends on the frame pacing): two
   runs of the same build gave G4 0.1508 / 0.0745 / 0.115 / 1.30 and 0.1546 / 0.0725 / 0.116 / 1.30.
+  The 3 × 3's 9 samples of a lamp's pool on a semi-glossy floor, a few rays in many meeting the lamp, held the pool
+  below itself most frames: the specular view of c10's halls was 10% darker while the eye moved than held still (the
+  hold off: as bright, but the streaks back, its moving error 18% up); with the whole 5 × 5 the darkening was a
+  third of it and the streaks stayed held; its four along the axes keep most of that for a third of the 5 × 5's
+  taps (the dark interiors' third round, below).
   A slow history (up to 32 frames; the specular's shorter on glossy surfaces where the eye moves: its length at least
   the reflection lobe's width (twice alpha, the roughness squared) over the parallax, the angle the eye turned about the point
   since the last frame, as ReLAX's specular accumulation, and 4 frames for a mirror under a moving eye, the whole 32
@@ -812,6 +908,7 @@ scene changes.
 | `display.pt_profile` | `"quality"`, `"performance"` | The indirect light: a bounce at every pixel, or the bake's where the level has it |
 | `display.pt_light_scale` | `0`, `0.25` to `1` | The traced light's upscaling: the light pass and the denoiser at that share of the G-buffer's pixels each way, the denoised light brought to the G-buffer's pixels by its depth and normals (the pass `upsample`), each pixel lit with its own albedo, normal and emission; `0` every pixel. With `display.upscaler` at 1.0 or 0.67 |
 | `display.pt_clarity` | `"auto"`, `"max"`, `"off"` | Under an upscaler with this denoiser: `"auto"` the G-buffer at 0.5 each way at least, the light at `display.upscaler_scale`'s share of the screen below it; `"max"` the G-buffer at every pixel, the light at half; `"off"` the G-buffer at `display.upscaler_scale` (`prism_upscale.c`). The default `"auto"` costs a config at DLSS 0.33 (the play kit's) about 0.9 ms more on an RTX 3070 Ti and 1.6 on an RTX 2060 (b30's beach, 1080p), with no menu row: Settings still shows 0.33 |
+| `display.prism_pt_bake` | `true`, `false` | The bake's guide: the drawn world's own whole bake's irradiance volume read where the traced light has nothing yet (above); on by default |
 | `display.denoiser` | `"prism"`, `"dlss_rr"`, `"off"` | The in-tree denoiser; NVIDIA DLSS Ray Reconstruction (the plugin `dlss`, built by the player: `docs/prism_plugin.md`, "PRISM Path Traced and a plugin"), which takes the traced light raw with the tracer's guides and replaces the denoiser and the upscaler; or the light as traced |
 | `debug.gbuffer_view` | `"pt_diffuse"`, `"pt_specular"`, `"pt_sun"`, `"pt_direct"`, `"pt_indirect"`, `"pt_history"`, `"pt_noisy"` | The diffuse light (denoised), the specular, the sun's visibility, the direct or indirect light alone (each denoised), the history's length, the diffuse light as traced |
 | `debug.pt_reference` | frames | The reference, at most that many frames |
@@ -1012,8 +1109,24 @@ coarsest is tried again every 120 frames. `tools/test_prism_pt_fit.py`.
 
 Path Traced was made on NVIDIA's cards. Should the driver lose the device while it draws (its timeout on a pass that
 does not end, a page fault), halo.log says where the GPU was: the last step recorded (each pass is named as it is
-recorded, the traced objects' skinning and builds too), and where the device can say, the last step it began and the
-last before which every command had finished (AMD's buffer markers) and the device's fault (`VK_EXT_device_fault`).
+recorded: Path Traced's, Enhanced's traced light and its sun and occlusion, Rebaked's light pass and exposure, the
+traced objects' skinning and builds, the upscaler's and the denoiser's frames), the steps of the last three
+submissions (the mode and passes then drawn), the map and BSP the bake was told of, and where the device can say, the
+last step it began and the last before which every command had finished and the device's fault
+(`VK_EXT_device_fault`). That record is the vendor's own: NVIDIA's checkpoints
+(`VK_NV_device_diagnostic_checkpoints`) on NVIDIA's cards, AMD's buffer markers (`VK_AMD_buffer_marker`, which
+NVIDIA's driver has too) on the others'; `HALO_VULKAN_CHECKPOINTS` chooses otherwise. Every submission's main commands
+begin and end with a step of their own, so Classic's frames say whether the GPU finished one. The start's line says
+what a lost device would log (`vulkan: should the device be lost, halo.log gets the last step recorded and NVIDIA's
+checkpoints (VK_NV_device_diagnostic_checkpoints), the fault's description (VK_EXT_device_fault)`); it is not a lost
+device. Before, it read `vulkan: a lost device's diagnosis: its fault AMD's markers`, which a playtest's log on the
+RTX 3070 Ti was taken to report a lost device by (2026-11-27; no device was lost, and NVIDIA's cards then logged
+AMD's markers, not their checkpoints). `HALO_VULKAN_TEST_FAULT=<n>` faults the device for real (an address no buffer
+has, from the `n`th submission) to test the report on a card. On NVIDIA's cards such a fault (Xid 109, the context
+switch's timeout, on Atlas's RTX 3090s and the RTX 2060) never came back as a lost device: the render thread waited
+for the GPU for ever and the game hung with nothing logged. A GPU that finishes nothing for 15 s while the render
+thread waits for it (`HALO_VULKAN_HANG_SECONDS`) is now reported as lost (`vulkan: the GPU finished nothing for
+15.0 s: ...`), and a poll of its progress that is told the device is lost reports it too. `tools/test_prism_device_lost.py`.
 The message says the device was lost in PRISM Path Traced, and the next start sets `display.lighting` to `"raster"`
 (PRISM Rebaked) and tells the player, once for that crash (report.c's `report_path_traced_fallback`); Settings can
 choose Path Traced again. Every ray is checked before it is traced: a NaN or infinite origin or direction, or a NaN
@@ -1021,6 +1134,12 @@ reach, is a miss (undefined for ray queries, and a traversal loop that never end
 query tests at most 1024 candidates.
 
 ## What is not done yet
+
+- **The interiors' specular in motion** (the dark interiors' third round): the specular light still carries most of a
+  moving eye's error in c10's halls (its glossy floors' reflections of the lamp strips, a few rays in many each);
+  the reflection probes of the drawn world's bake, a prior for the hold, would need the probes on the card (they are
+  put aside under Path Traced: `xgpu_vulkan_bake_park`). a30's Forerunner interior was not among the poses (its
+  BSP's seeds found none inside).
 
 - **The interiors in motion** (round 7, above): small clusters of bright pixels about a lucky lamp sample where
   the spatial neighbours took it, and the specular history's radial streaks of the walls' glints along a forward move.

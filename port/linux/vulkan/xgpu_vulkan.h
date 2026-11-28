@@ -1252,9 +1252,15 @@ into commands (id 1 to 255; name a string that lives as long as the
 program), the last one recorded and, where the device has its markers or
 checkpoints, the last it began and finished, logged if the device is lost;
 note, what a user of the device adds to the lost device's message (" in
-PRISM Path Traced": xgpu_vulkan_pt.c) */
+PRISM Path Traced": xgpu_vulkan_pt.c); context, what one logs of its own
+state then (the bake's map and BSP: xgpu_vulkan_bake.c; four at most).
+Ids: 1-21 Path Traced's, 30-39 the renderer's own (the submissions'
+first and last commands, the models' skinning), 40-59 the traced objects'
+and Enhanced's traced light, 60-69 the bake's and Rebaked's, 70-79 the
+upscaler's and denoiser's, 89-90 the water layer's */
 void xgpu_vulkan_breadcrumb(VkCommandBuffer commands, uint32_t id, const char *name);
 void xgpu_vulkan_device_lost_note(void (*note)(char *text, size_t size));
+void xgpu_vulkan_device_lost_context(void (*context)(void));
 VkCommandBuffer xgpu_vulkan_compute_commands(void);
 void xgpu_vulkan_image_compute_use(struct xgpu_vulkan_image *image, int written);
 VkImage xgpu_vulkan_image_handle(const struct xgpu_vulkan_image *image);
