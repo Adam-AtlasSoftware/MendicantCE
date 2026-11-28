@@ -386,11 +386,13 @@ def test_no_lighting_draws_another_sets_bake():
     baker = _code("port/linux/vulkan/xgpu_vulkan_bake.c")
     assert "held_generation" not in baker and "XGPU_BAKE_FLAG_PATH_TRACED" not in baker
     begin = _function(baker, "static struct bake_state *bake_begin(")
-    branch = begin[begin.index("if (in_play)"):begin.index("b->started = now_seconds();")]
-    # (the one way out of the branch before the plan: the bake drawn already of this key)
-    assert branch.count("return NULL;") == 1 and branch.count("*held = 1;") == 1
-    kept = branch[:branch.index("return NULL;")]
-    assert "!prism_bake_key_compare(drawn, &asked)" in kept
+    # (the one way out before the plan: the bake drawn already of this key, the asked quality's or a better one's,
+    # checked before any file is opened; prism-v4-drops)
+    drawn = begin[begin.index("if (drawn)"):begin.index("file_choose(b);")]
+    assert drawn.count("return NULL;") == 1 and drawn.count("*held = 1;") == 1
+    assert "!prism_bake_key_compare(drawn, &asked)" in drawn
+    branch = begin[begin.index("if (in_play)", begin.index("file_choose(b);")):begin.index("b->started = now_seconds();")]
+    assert "return NULL" not in branch and "bake_free" not in branch
     own = branch[branch.index("if (!b->chosen)"):]
     assert "return NULL" not in own and "bake_free" not in own
     assert "lighting" not in branch and "flags" not in branch

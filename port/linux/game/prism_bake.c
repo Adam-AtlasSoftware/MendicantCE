@@ -58,6 +58,7 @@ the settings. Nothing crosses the network.
 #include "shaders/shaders.h"
 #include "prism_deferred.h"
 #include "prism_bake_menu.h"
+#include "mendicant/mendicant.h"
 #include "../src/xgpu_coverage.h"
 
 #include <xtl.h>
@@ -384,7 +385,14 @@ static void seeds_find(
 				seed_add(input, list + entry * 0x1C, PRISM_BAKE_SEED_WALK);
 			}
 		}
+		/* (the level's own firing positions: MENDICANT AI's maneuver slots,
+		48 an encounter of the loaded part after them during its tick, at its
+		first position's place, are not the level's. Taken, they moved the walk
+		and so the key's settings: b30's shipped bake refused after a lighting
+		change in play, 5415 seeds against the farm's 4983, the reach walked
+		here for 16 s and the BSP drawn with CE's light) */
 		list = (char const *)block_of(encounter, 0x98, 0x18, 4096, &entries);
+		entries = mendicant_encounter_own_firing_position_count(index, entries);
 		for (entry = 0; list && entry < entries; entry++)
 		{
 			seed_add(input, list + entry * 0x18, PRISM_BAKE_SEED_VIEW);
@@ -1762,13 +1770,18 @@ void prism_bake_frame(
 	xgpu_backend_prism_bake(&bake, NULL, 0);
 	/* (v4 geopatch: the enhanced geometry's bake not loaded whole, its
 	pack not this geometry's or damaged: a player bakes nothing, so it is
-	paused there, or it failed; the map falls back to its classic geometry,
-	prism_world_source.c) */
+	paused there, or it failed before any of its light was drawn; the map
+	falls back to its classic geometry, prism_world_source.c. A whole bake
+	that failed after its tiles were drawn (out of memory for its volume:
+	b30's enhanced first BSP on a 3070 Ti) still lights the geometry, and
+	dropping the map to its classic world then was the jump to other light
+	a player saw) */
 	if (prism_world_source_bsp_enhanced(global_structure_bsp_index_get()) && !prism_deferred_pathtraced())
 	{
 		unsigned long state = prism_bake_status(XGPU_BAKE_STATUS_STATE);
 
-		if ((state == XGPU_BAKE_STATE_PAUSED || state == XGPU_BAKE_STATE_FAILED) &&
+		if ((state == XGPU_BAKE_STATE_PAUSED || (state == XGPU_BAKE_STATE_FAILED &&
+			prism_bake_status(XGPU_BAKE_STATUS_SHOWN) == XGPU_BAKE_SHOWN_NONE)) &&
 			(long)prism_bake_status(XGPU_BAKE_STATUS_BSP) == (long)global_structure_bsp_index_get() &&
 			prism_bake_status(XGPU_BAKE_STATUS_GENERATION) == (unsigned long)prism_scene_static_generation())
 		{

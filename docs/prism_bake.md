@@ -460,6 +460,49 @@ Not yet (the plan's other steps): the farm's MAX bake of every level and both wo
 build (its geometry hash checked in the manifest), the BC6H/BC4/BC7 release encoding (about 4.5 bytes a texel against
 about 18), the baked sun masks and rebaked pages of Classic's PRISM shipped alongside, and the installer's download.
 
+## A BSP switch under Enhanced (prism-v4-drops)
+
+Adam's play test of the 58449a4a9 kit (Enhanced lighting): "occasionally the entire lighting jumps back to classic",
+and "light has to reload when the game loads new level areas". What made Enhanced draw CE's light, and what does now:
+
+- **A whole bake's card memory.** Every bake state made the baking's buffers, a shipped bake too, though a player's
+  game only loads and draws it: on b30's enhanced first BSP about 1.6 GB (Path Traced's indirect pool, unread since
+  Path Traced takes no baked light; masks for a quarter of the tiles where its file has 6,440; the atlas's triangles,
+  the tiles' lists, the final gather's tables, the batch's buffers, the volume's probe places and batch). On a 3070
+  Ti with the enhanced geometry its volume found no room, the bake failed, and the game dropped the map to its
+  classic geometry (Adam's log: "no memory for the irradiance volume", then rung 2). `b->bakes` (the farm's run with
+  no whole bake chosen) now decides what is made: a whole bake makes the frame's tables, the pool, the masks its file
+  has, the volume's probes and the reflection probes, and its steps after the load bake nothing its file lacks.
+- **The verdict on a failed bake.** A whole bake that failed after its tiles were drawn still lights the geometry:
+  only a failure before any of its light was drawn (the status's `SHOWN` none) drops the map to rung 2.
+- **MENDICANT AI's maneuver slots in the reach's seeds.** The AI gives each encounter of the loaded part 48 slots
+  after its firing positions while the game ticks; the reach took them for the level's, so a set begun again in play
+  (a lighting change) sent other inputs than the shipped reach's (b30: 5415 seeds against the farm's 4983), the
+  reach was walked again (16 s), its bricks and the key's settings moved, and the shipped bake was refused (0xa0):
+  CE's light for the rest of the map. The seeds are the level's own firing positions now
+  (`mendicant_encounter_own_firing_position_count`).
+- **The light let go at every switch.** A BSP's bake was freed when the game drew another, and the next one made from
+  its set: until its set, reach and plan were in and its file opened, CE's frame; then its tiles read and decoded on
+  the render thread, 2,048 a frame, the volume after every tile, so that its objects and every texel not yet loaded
+  were lit by CE or the open sky. Now:
+  - **kept bakes** (`bake_keep`, `kept_take`): a whole bake loaded in full is kept on the card when the game draws
+    another BSP of the map (the kept bakes at most a third of the card's budget, a quarter of it free; the longest
+    kept let go of first, and before a new bake's upload where the card lacks room). When the game draws its BSP
+    again (a load zone back, a checkpoint loaded, a cinematic's BSP and back) it is drawn at once, and once the BSP's
+    set is in, its key is checked against the set's (`bake_begin` compares the bake drawn before it opens any file):
+    kept where it is the set's, else let go of for the set's own;
+  - **the loader** (`load_main`): a whole bake's file is read and decoded on a thread of its own, the volume's bricks
+    first, then the tiles; the frame draws 16 MB of them at a time (`LOAD_FRAME_BYTES`);
+  - **opened ahead** (`prefetch_main`): as a map is drawn its other BSPs' shipped bakes of the world drawn are opened
+    on a thread (the log read, the records' index made) and read once for the disk's cache, the nearest BSPs first;
+    `file_whole` takes the opened file.
+
+A BSP drawn for the first time still waits for its set, its reach and its plan before any of its light can be drawn:
+the plan is made from the player's own map (the shipped pack holds no geometry), so it cannot be made before the
+game draws the BSP. `HALO_RASTER_FRAME_LOG` logs what lit each frame where it changes (the bake whole or in part, or
+CE's frame and why), with the window's G-buffer; `HALO_BAKE_KEEP_NONE`, `HALO_BAKE_LOAD_INLINE` and
+`HALO_BAKE_PREFETCH_NONE` turn the three off (diagnostics).
+
 ## The frozen bake: BAKE_VERSION 20 (v4 geopatch M4)
 
 `XGPU_BAKE_VERSION` 20 is the first frozen baker: the farm bakes every level for both worlds with it (geopatch M6), and
@@ -525,10 +568,11 @@ archives' files; b30's first BSP, whose static scenery has 46,099 cutout triangl
 shades 3.0% (classic) and 2.1% (enhanced) of the foliage layer's mask points, and 2.2% and 1.9% of the valid probes;
 the interior BSP, with no cutouts, differs by the masks' noise alone (0.01% of the points, no probe). The player's run
 loaded both worlds' packs from their release archives (`prism_bake_ship.py install`), keyed by the map's
-classic_world_id and the sidecar's world_ids, and wrote no bake file. A shipped pack streams in at 2,048 tiles a frame:
-on a 3090 the whole bake (tiles, then the volume) took 25 s from its start for the enhanced first BSP (646,021 tiles),
-11 s for the classic one, 7 and 3 s for the interior's, and Raster lights a texel not yet loaded from the volume or
-the sky (`docs/prism_geometry.md`).
+classic_world_id and the sidecar's world_ids, and wrote no bake file. A shipped pack then streamed in at 2,048 tiles a
+frame: on a 3090 the whole bake (tiles, then the volume) took 25 s from its start for the enhanced first BSP (646,021
+tiles), 11 s for the classic one, 7 and 3 s for the interior's, and Raster lit a texel not yet loaded from the volume
+or the sky (`docs/prism_geometry.md`); it is loaded off the render thread now, its volume first ("A BSP switch under
+Enhanced").
 
 **Bakes are not bit-identical run to run** (the GPU's float order and the converge rule's batch timing:
 `work/openh1_eval/v4_ship_bake_runs/cap/numbers.txt`), and need not be: a pack's key is its world_id (the geometry and
